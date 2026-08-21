@@ -1,0 +1,139 @@
+// Package persistence stores run state on the local filesystem under
+// <baseDir>/<run-id>/{run.json,classification.json,workflow.json,artifacts/,logs/} so a
+// completed or failed run can later be inspected. No database is required (MVP.md §21).
+package persistence
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"orchestrator/internal/domain"
+)
+
+type Store struct {
+	baseDir string
+}
+
+func NewStore(baseDir string) *Store {
+	return &Store{baseDir: baseDir}
+}
+
+func (s *Store) runDir(runID string) string {
+	return filepath.Join(s.baseDir, runID)
+}
+
+// NewRun allocates a fresh run ID, creates its directory structure, writes the initial
+// run.json, and returns the pending Run.
+func (s *Store) NewRun(task domain.Task) (*domain.Run, error) {
+	id, err := newUUIDv4()
+	if err != nil {
+		return nil, err
+	}
+
+	dir := s.runDir(id)
+	for _, sub := range []string{"artifacts", "logs"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			return nil, fmt.Errorf("create run directory: %w", err)
+		}
+	}
+
+	now := time.Now()
+	run := &domain.Run{
+		ID:         id,
+		Task:       task,
+		Status:     domain.RunPending,
+		Executions: []domain.StepExecution{},
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	if err := s.SaveRun(run); err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// SaveRun rewrites run.json, plus classification.json/workflow.json once those fields are
+// set on run. All writes are write-tmp-then-rename so a crash mid-write never leaves a
+// truncated file behind.
+func (s *Store) SaveRun(run *domain.Run) error {
+	run.UpdatedAt = time.Now()
+
+	if err := s.writeJSON(run.ID, "run.json", run); err != nil {
+		return fmt.Errorf("save run: %w", err)
+	}
+	if run.Classification != nil {
+		if err := s.writeJSON(run.ID, "classification.json", run.Classification); err != nil {
+			return fmt.Errorf("save classification: %w", err)
+		}
+	}
+	if run.Workflow != nil {
+		if err := s.writeJSON(run.ID, "workflow.json", run.Workflow); err != nil {
+			return fmt.Errorf("save workflow: %w", err)
+		}
+	}
+	return nil
+}
+
+// SaveArtifact writes one action's structured output and returns its path relative to the
+// run directory, satisfying action.ArtifactWriter.
+func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any) (string, error) {
+	relPath := filepath.Join("artifacts", fmt.Sprintf("%03d-%s.json", stepIndex, actionType))
+	if err := s.writeJSON(runID, relPath, artifact); err != nil {
+		return "", fmt.Errorf("save artifact: %w", err)
+	}
+	return relPath, nil
+}
+
+// AppendLog appends raw process output (stream is "stdout" or "stderr") to the log file
+// for one step, creating it on first write.
+func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionType, stream, content string) error {
+	relPath := filepath.Join("logs", fmt.Sprintf("%03d-%s.%s.log", stepIndex, actionType, stream))
+	full := filepath.Join(s.runDir(runID), relPath)
+
+	f, err := os.OpenFile(full, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return fmt.Errorf("append log: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) writeJSON(runID, relPath string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	return writeFileAtomic(filepath.Join(s.runDir(runID), relPath), data, 0o644)
+}
+
+// writeFileAtomic writes data to a temp file in the same directory as path, then renames
+// it into place, so readers never observe a partially-written file.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}

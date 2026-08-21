@@ -1,0 +1,36 @@
+version: 1
+
+classifier:
+  provider: claude
+  model: sonnet
+
+actions:
+  analyze:
+    provider: claude
+    model: sonnet
+
+  plan:
+    provider: claude
+    model: sonnet
+
+  implement:
+    provider: claude
+    model: opus
+
+  review:
+    provider: codex
+    model: gpt
+
+  answer:
+    provider: gemini
+    model: pro
+
+test:
+  command: "go test ./..."
+
+limits:
+  max_steps: 12
+  max_fix_iterations: 2
+
+execution:
+  timeout: 15m

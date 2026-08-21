@@ -1,0 +1,57 @@
+// Package exitcode centralizes the mapping from returned errors to process exit codes.
+// main.go is the only call site for os.Exit in the codebase.
+package exitcode
+
+import (
+	"context"
+	"errors"
+
+	"orchestrator/internal/apperr"
+)
+
+const (
+	OK                 = 0
+	GenericError       = 1
+	ConfigOrDependency = 2
+	ProviderExecution  = 3
+	WorkflowOrLimit    = 4
+	UserCancellation   = 5
+)
+
+// FromError maps a returned error to a process exit code. nil maps to OK.
+func FromError(err error) int {
+	if err == nil {
+		return OK
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return UserCancellation
+	}
+
+	var configErr *apperr.ConfigError
+	if errors.As(err, &configErr) {
+		return ConfigOrDependency
+	}
+
+	var depErr *apperr.DependencyError
+	if errors.As(err, &depErr) {
+		return ConfigOrDependency
+	}
+
+	var providerErr *apperr.ProviderError
+	if errors.As(err, &providerErr) {
+		return ProviderExecution
+	}
+
+	var limitErr *apperr.LimitExceededError
+	if errors.As(err, &limitErr) {
+		return WorkflowOrLimit
+	}
+
+	var workflowErr *apperr.WorkflowError
+	if errors.As(err, &workflowErr) {
+		return WorkflowOrLimit
+	}
+
+	return GenericError
+}

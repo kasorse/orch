@@ -1,0 +1,98 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func writeTempConfig(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "orchestrator.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write temp config: %v", err)
+	}
+	return path
+}
+
+func TestLoad_ValidConfig(t *testing.T) {
+	path := writeTempConfig(t, `
+version: 1
+
+classifier:
+  provider: claude
+  model: sonnet
+
+actions:
+  analyze:
+    provider: claude
+    model: sonnet
+  plan:
+    provider: claude
+    model: sonnet
+  implement:
+    provider: claude
+    model: opus
+  review:
+    provider: codex
+    model: gpt
+  answer:
+    provider: gemini
+    model: pro
+
+test:
+  command: "go test ./..."
+
+limits:
+  max_steps: 12
+  max_fix_iterations: 2
+
+execution:
+  timeout: 15m
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Version != 1 {
+		t.Errorf("expected version 1, got %d", cfg.Version)
+	}
+	if cfg.Actions.Implement.Model != "opus" {
+		t.Errorf("expected implement model opus, got %q", cfg.Actions.Implement.Model)
+	}
+	if cfg.Execution.Timeout != 15*time.Minute {
+		t.Errorf("expected timeout 15m, got %v", cfg.Execution.Timeout)
+	}
+}
+
+func TestLoad_MalformedYAML(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\nactions: [this is not, valid: yaml structure\n")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+func TestLoad_MissingFile(t *testing.T) {
+	_, err := Load("/nonexistent/path/orchestrator.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !strings.Contains(err.Error(), "failed to read config file") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestLoad_InvalidTimeout(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\nexecution:\n  timeout: \"not-a-duration\"\n")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid timeout")
+	}
+}
