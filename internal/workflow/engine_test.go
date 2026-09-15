@@ -236,6 +236,100 @@ func TestEngine_HardErrorEndsRunImmediately(t *testing.T) {
 	}
 }
 
+// fakeGate returns decisions[action] in order, one per call, defaulting to
+// GateProceed once its scripted decisions for an action are exhausted.
+type fakeGate struct {
+	decisions map[domain.ActionType][]GateDecision
+	callIdx   map[domain.ActionType]int
+	calls     []domain.ActionType
+}
+
+func newFakeGate() *fakeGate {
+	return &fakeGate{decisions: make(map[domain.ActionType][]GateDecision), callIdx: make(map[domain.ActionType]int)}
+}
+
+func (g *fakeGate) script(action domain.ActionType, decision GateDecision) {
+	g.decisions[action] = append(g.decisions[action], decision)
+}
+
+func (g *fakeGate) BeforeStep(ctx context.Context, run *domain.Run, index int, action domain.ActionType) (GateDecision, error) {
+	g.calls = append(g.calls, action)
+	idx := g.callIdx[action]
+	g.callIdx[action]++
+
+	decisions := g.decisions[action]
+	if idx >= len(decisions) {
+		return GateProceed, nil
+	}
+	return decisions[idx], nil
+}
+
+func TestEngine_NilGateBehavesLikeToday(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+}
+
+func TestEngine_GateProceedIsNoOpPassthrough(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	gate := newFakeGate()
+	gate.script(domain.ActionImplement, GateProceed)
+	gate.script(domain.ActionTest, GateProceed)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Gate: gate, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionImplement, domain.ActionTest})
+	assertActions(t, gate.calls, []domain.ActionType{domain.ActionImplement, domain.ActionTest})
+}
+
+func TestEngine_GateAbortStopsRun(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	gate := newFakeGate()
+	gate.script(domain.ActionImplement, GateProceed)
+	gate.script(domain.ActionTest, GateAbort)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Gate: gate, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	err := engine.Run(context.Background(), run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected error to satisfy errors.Is(err, context.Canceled), got %v", err)
+	}
+	if run.Status != domain.RunStopped {
+		t.Errorf("expected stopped, got %s", run.Status)
+	}
+	// the aborted step must never reach the executor.
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionImplement})
+}
+
 func assertActions(t *testing.T, got, want []domain.ActionType) {
 	t.Helper()
 	if len(got) != len(want) {

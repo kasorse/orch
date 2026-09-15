@@ -1,2 +1,4 @@
 /orchestrator
 .orchestrator/
+orchestrator.yaml
+/bin

@@ -18,6 +18,7 @@ import (
 	"orchestrator/internal/config"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
+	"orchestrator/internal/interaction"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/provider"
@@ -38,13 +39,13 @@ const runsBaseDir = ".orchestrator/runs"
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
 // exitcode.FromError.
-func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	configPath, rest, err := parseArgs(args)
+func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	configPath, mode, rest, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
 	if len(rest) == 0 {
-		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] <version|validate|run "<task>">`}
+		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] <version|validate|run "<task>">`}
 	}
 
 	switch rest[0] {
@@ -57,32 +58,46 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		if len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"`}
 		}
-		return runTask(ctx, configPath, strings.Join(rest[1:], " "), stdout, stderr)
+		return runTask(ctx, configPath, strings.Join(rest[1:], " "), mode, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
 }
 
-// parseArgs pulls --config/--config=X out of args (in any position) and returns the
-// resolved config path plus the remaining positional arguments.
-func parseArgs(args []string) (configPath string, rest []string, err error) {
+// parseArgs pulls --config/--config=X and --mode/--mode=X out of args (in any
+// position) and returns the resolved config path, resolved mode (empty if --mode was
+// not given - the caller then runs the interactive mode-select prompt), and the
+// remaining positional arguments.
+func parseArgs(args []string) (configPath string, mode domain.RunMode, rest []string, err error) {
 	configPath = defaultConfigPath
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--config":
 			if i+1 >= len(args) {
-				return "", nil, fmt.Errorf("--config requires a value")
+				return "", "", nil, fmt.Errorf("--config requires a value")
 			}
 			configPath = args[i+1]
 			i++
 		case strings.HasPrefix(arg, "--config="):
 			configPath = strings.TrimPrefix(arg, "--config=")
+		case arg == "--mode":
+			if i+1 >= len(args) {
+				return "", "", nil, fmt.Errorf("--mode requires a value")
+			}
+			if mode, err = domain.ParseRunMode(args[i+1]); err != nil {
+				return "", "", nil, err
+			}
+			i++
+		case strings.HasPrefix(arg, "--mode="):
+			if mode, err = domain.ParseRunMode(strings.TrimPrefix(arg, "--mode=")); err != nil {
+				return "", "", nil, err
+			}
 		default:
 			rest = append(rest, arg)
 		}
 	}
-	return configPath, rest, nil
+	return configPath, mode, rest, nil
 }
 
 func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter) (config.Config, error) {
@@ -108,7 +123,7 @@ func runValidate(configPath string, stdout io.Writer) error {
 	return err
 }
 
-func runTask(ctx context.Context, configPath, taskDescription string, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, taskDescription string, mode domain.RunMode, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := logging.NewConsoleReporter(stdout)
 
 	cfg, err := loadAndValidateConfig(configPath, reporter)
@@ -179,6 +194,39 @@ func runTask(ctx context.Context, configPath, taskDescription string, stdout, st
 		return err
 	}
 
+	var prompter interaction.Prompter
+	if mode != domain.ModeAuto {
+		termPrompter := interaction.NewTerminalPrompter(stdin, stdout)
+		prompter = termPrompter
+
+		resolvedMode, approved, err := interaction.ReviewAndSelectMode(termPrompter, stdout, run, mode)
+		if err != nil {
+			run.Status = domain.RunFailed
+			run.FailureReason = err.Error()
+			_ = store.SaveRun(run)
+			return err
+		}
+		if !approved {
+			run.Status = domain.RunStopped
+			run.FailureReason = "cancelled by user"
+			_ = store.SaveRun(run)
+			return fmt.Errorf("run cancelled by user: %w", context.Canceled)
+		}
+
+		mode = resolvedMode
+		run.Mode = mode
+		if err := store.SaveRun(run); err != nil {
+			return err
+		}
+
+		if mode == domain.ModePlan {
+			fmt.Fprintln(stdout, "\nPlan approved. Not executing (plan mode).")
+			return nil
+		}
+	} else {
+		run.Mode = domain.ModeAuto
+	}
+
 	dispatcher := action.New(&cfg, registry, repo, testexec.New(osExec))
 	dispatcher.Artifacts = store
 
@@ -189,6 +237,10 @@ func runTask(ctx context.Context, configPath, taskDescription string, stdout, st
 		Observer: &runObserver{reporter: reporter, store: store},
 		Persist:  store.SaveRun,
 		Limits:   domain.LimitsView{MaxSteps: cfg.Limits.MaxSteps, MaxFixIterations: cfg.Limits.MaxFixIterations},
+	}
+
+	if mode == domain.ModeManual {
+		engine.Gate = interaction.NewTerminalGate(prompter, stdout)
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, cfg.Execution.Timeout)

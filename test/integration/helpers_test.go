@@ -114,10 +114,10 @@ func runOrchestrator(t *testing.T, repoDir, configPath string, args ...string) (
 		}
 	}()
 
-	fullArgs := append([]string{"--config", configPath}, args...)
+	fullArgs := append([]string{"--config", configPath, "--mode", "auto"}, args...)
 
 	var outBuf, errBuf bytes.Buffer
-	err = app.Run(context.Background(), fullArgs, &outBuf, &errBuf)
+	err = app.Run(context.Background(), fullArgs, strings.NewReader(""), &outBuf, &errBuf)
 	return outBuf.String(), errBuf.String(), err
 }
 

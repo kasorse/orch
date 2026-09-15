@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"orchestrator/internal/apperr"
@@ -39,9 +40,27 @@ type Observer interface {
 // can be inspected mid-flight or after the fact.
 type PersistFunc func(run *domain.Run) error
 
+// GateDecision is Gate.BeforeStep's verdict on whether the engine may proceed.
+type GateDecision string
+
+const (
+	GateProceed GateDecision = "proceed"
+	GateAbort   GateDecision = "abort"
+)
+
+// Gate optionally pauses the engine before each step, e.g. for manual-mode
+// per-step confirmation. Engine tolerates a nil Gate, which reproduces today's
+// fully-automatic behavior exactly. A Gate implementation may mutate
+// run.Classification and run.Workflow before returning GateProceed - such a mutation
+// only affects future Next() lookups, never the step about to execute.
+type Gate interface {
+	BeforeStep(ctx context.Context, run *domain.Run, index int, action domain.ActionType) (GateDecision, error)
+}
+
 type Engine struct {
 	Executor StepExecutor
 	Observer Observer
+	Gate     Gate
 	Persist  PersistFunc
 	Limits   domain.LimitsView
 }
@@ -90,6 +109,25 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 		action := domain.ActionType(current)
 		index := len(run.Executions)
+
+		if e.Gate != nil {
+			decision, err := e.Gate.BeforeStep(ctx, run, index, action)
+			if err != nil {
+				run.Status = domain.RunFailed
+				run.FailureReason = err.Error()
+				e.persist(run)
+				e.runFinished(run)
+				return err
+			}
+			if decision == GateAbort {
+				run.Status = domain.RunStopped
+				run.FailureReason = "aborted by user"
+				e.persist(run)
+				e.runFinished(run)
+				return fmt.Errorf("run aborted by user: %w", context.Canceled)
+			}
+		}
+
 		e.stepStarted(run, index, action)
 
 		stepExec := domain.StepExecution{

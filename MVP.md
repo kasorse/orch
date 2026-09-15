@@ -67,6 +67,14 @@ review FAIL
 → review
 ```
 
+By default `orchestrator run` is interactive: after classification and workflow
+construction it prints the classification and derived workflow, lets the user approve
+it, edit `type`/`complexity`/`requires_tests`/`requires_review` and rebuild the plan, or
+cancel, then lets the user choose an execution mode (`plan`, `manual`, `accept-edits`, or
+`auto`) before anything runs. Passing `--mode auto` skips all of that and reproduces the
+original fully-unattended behavior described above exactly - this is the escape hatch for
+scripts and CI. See §4 for the flag and §27 for example transcripts of both.
+
 ---
 
 # 2. Technology
@@ -144,6 +152,18 @@ orchestrator --config orchestrator.yaml run "..."
 ```
 
 A sensible default config path may be used when `--config` is omitted.
+
+Support an execution-mode flag on `run`:
+
+```bash
+orchestrator run "..." --mode plan            # preview the plan, don't execute
+orchestrator run "..." --mode manual           # confirm every step
+orchestrator run "..." --mode accept-edits     # approve once, then hands-off
+orchestrator run "..." --mode auto             # fully unattended (no prompts at all)
+```
+
+Omitting `--mode` runs the approve/edit loop and then interactively asks the user to
+choose one of the four modes above (see §1 and §27).
 
 ---
 
@@ -472,6 +492,22 @@ review
 if tests are required.
 
 Maintain execution history rather than overwriting previous step runs.
+
+Support an optional `Gate` hook the engine consults immediately before each step
+executes:
+
+```text
+Gate.BeforeStep(ctx, run, index, action) -> proceed | abort
+```
+
+A nil `Gate` reproduces fully-automatic execution exactly (today's behavior, and
+`--mode auto`/`accept-edits`). A `Gate` implementation may mutate `run`'s classification
+and workflow before returning `proceed` (e.g. manual mode's decline → edit path); such a
+mutation only affects future transition lookups, never the step about to execute. An
+`abort` decision stops the run (status `stopped`, exit code 5 - the same "user
+cancellation" path as `errors.Is(err, context.Canceled)`) without ever invoking the step
+executor for that step. The engine itself stays unaware of *why* a step was declined - it
+only sees `proceed`/`abort`, keeping the state machine free of interactive concerns.
 
 ---
 
@@ -899,7 +935,12 @@ At minimum save:
 * test result;
 * review result;
 * final run status;
-* failure reason if any.
+* failure reason if any;
+* execution mode the run actually ran under (`mode`);
+* the classifier's original, unedited classification, if the user edited it during the
+  approve/edit loop or a manual-mode step gate (`original_classification`) - the
+  `classification` field always holds the effective classification that was actually
+  built into the workflow.
 
 No database is required.
 
@@ -922,6 +963,7 @@ Artifact
 ProviderRef
 ReviewResult
 TestResult
+RunMode
 ```
 
 Suggested statuses:
@@ -935,6 +977,19 @@ completed
 failed
 stopped
 ```
+
+`RunMode` (§1/§4/§27) is one of:
+
+```text
+plan
+manual
+accept-edits
+auto
+```
+
+It selects how much user interaction happens before and during a run, and is orthogonal
+to `Classification`/`Workflow` - the same classification always produces the same
+workflow regardless of mode.
 
 Step execution:
 
@@ -1105,10 +1160,11 @@ You may adjust the structure if there is a clearly better Go design, but preserv
 
 Provide readable progress.
 
-Example:
+Example (`--mode auto` - no prompts, identical output shape to before execution modes
+existed):
 
 ```text
-$ orchestrator run "Fix retry logic. 404 must not be retried"
+$ orchestrator run "Fix retry logic. 404 must not be retried" --mode auto
 
 Validating configuration...
 ✓ configuration valid
@@ -1150,6 +1206,53 @@ Returning to implementation (iteration 1/2).
 
 [7] REVIEW
 ✓ PASS
+
+Run completed successfully.
+```
+
+Example (no `--mode` flag - the interactive default: approve/edit the plan, choose a
+mode, then confirm each step under `manual`):
+
+```text
+$ orchestrator run "Fix retry logic. 404 must not be retried"
+
+Validating configuration...
+✓ configuration valid
+
+Classifying task...
+✓ type: bugfix
+✓ complexity: medium
+
+Workflow:
+analyze → implement → test → review
+
+Approve this plan? [a]pprove / [e]dit / [c]ancel: e
+Edit which field? [t]ype / [c]omplexity / [1] requires_tests / [2] requires_review / [d]one: c
+New complexity (low/medium/high): low
+
+Workflow:
+implement → test → review
+
+Approve this plan? [a]pprove / [e]dit / [c]ancel: a
+
+Choose execution mode: [1] plan  [2] manual  [3] accept-edits  [4] auto: 2
+
+[1] IMPLEMENT
+Provider: claude
+Model: opus
+Run this step? [y]es / [n]o / [A]ll remaining: y
+✓ completed
+
+[2] TEST
+Command: go test ./...
+Run this step? [y]es / [n]o / [A]ll remaining: n
+[r]etry / [e]dit plan / [a]bort: e
+Edit which field? [1] requires_tests / [2] requires_review / [d]one: 2
+requires_review (y/n): n
+
+Workflow (remaining): test
+[r]etry / [e]dit plan / [a]bort: r
+✓ passed
 
 Run completed successfully.
 ```
