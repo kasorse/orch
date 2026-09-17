@@ -25,6 +25,24 @@ func (s *Store) runDir(runID string) string {
 	return filepath.Join(s.baseDir, runID)
 }
 
+// RunDir returns the run directory's path (relative to the working directory the
+// orchestrator was invoked from), for CLI progress output (the run header).
+func (s *Store) RunDir(runID string) string {
+	return s.runDir(runID)
+}
+
+// LogPath returns the path AppendLog writes stream to for one step, without writing
+// anything - used to populate apperr.ProviderError.LogPath so a failure message can point
+// at the file AppendLog (separately) persists.
+func (s *Store) LogPath(runID string, stepIndex int, actionType domain.ActionType, stream string) string {
+	return filepath.Join(s.runDir(runID), "logs", fmt.Sprintf("%03d-%s.%s.log", stepIndex, actionType, stream))
+}
+
+// ClassifierLogPath is LogPath's counterpart for AppendClassifierLog's unindexed path.
+func (s *Store) ClassifierLogPath(runID, stream string) string {
+	return filepath.Join(s.runDir(runID), "logs", fmt.Sprintf("classify.%s.log", stream))
+}
+
 // NewRun allocates a fresh run ID, creates its directory structure, writes the initial
 // run.json, and returns the pending Run.
 func (s *Store) NewRun(task domain.Task) (*domain.Run, error) {
@@ -92,6 +110,26 @@ func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.Acti
 // for one step, creating it on first write.
 func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionType, stream, content string) error {
 	relPath := filepath.Join("logs", fmt.Sprintf("%03d-%s.%s.log", stepIndex, actionType, stream))
+	full := filepath.Join(s.runDir(runID), relPath)
+
+	f, err := os.OpenFile(full, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := f.WriteString(content); err != nil {
+		return fmt.Errorf("append log: %w", err)
+	}
+	return nil
+}
+
+// AppendClassifierLog appends raw process output (stream is "stdout" or "stderr") to the
+// classification call's log file, creating it on first write. Unindexed (logs/classify.*)
+// since classification happens once, outside the workflow's step index sequence, so it
+// can never collide with AppendLog's logs/<NNN>-<action>.*.log paths.
+func (s *Store) AppendClassifierLog(runID string, stream, content string) error {
+	relPath := filepath.Join("logs", fmt.Sprintf("classify.%s.log", stream))
 	full := filepath.Join(s.runDir(runID), relPath)
 
 	f, err := os.OpenFile(full, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)

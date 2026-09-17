@@ -11,9 +11,9 @@ import (
 func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	prompt := BuildAnalyzePrompt(AnalyzePromptInput{Task: run.Task.Description})
 
-	result, ref, err := d.call(ctx, d.Config.Actions.Analyze, domain.ActionAnalyze, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Analyze, domain.ActionAnalyze, prompt)
 	if err != nil {
-		return workflow.StepOutcome{}, err
+		return d.failureOutcome(ref, result), err
 	}
 
 	artifact := parseAnalysis(result.Output)

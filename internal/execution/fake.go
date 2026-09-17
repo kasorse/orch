@@ -12,7 +12,9 @@ type RecordedCall struct {
 }
 
 // FakeProcessExecutor is a test double: each call to Run consumes the next scripted
-// Result/Err pair (or returns a zero ProcessResult if the script is exhausted).
+// Result/Err pair (or returns a zero ProcessResult if the script is exhausted). If the
+// spec provides sinks, the scripted result's stdout/stderr is written to them so
+// --verbose streaming is exercisable without spawning a real process.
 type FakeProcessExecutor struct {
 	Results []ProcessResult
 	Errs    []error
@@ -20,8 +22,13 @@ type FakeProcessExecutor struct {
 	callNum int
 }
 
-func (f *FakeProcessExecutor) Run(ctx context.Context, executable string, args []string, stdin string, workingDir string) (ProcessResult, error) {
-	f.Calls = append(f.Calls, RecordedCall{Executable: executable, Args: args, Stdin: stdin, WorkingDir: workingDir})
+func (f *FakeProcessExecutor) Run(ctx context.Context, spec Spec) (ProcessResult, error) {
+	f.Calls = append(f.Calls, RecordedCall{
+		Executable: spec.Executable,
+		Args:       spec.Args,
+		Stdin:      spec.Stdin,
+		WorkingDir: spec.WorkingDir,
+	})
 
 	idx := f.callNum
 	f.callNum++
@@ -29,6 +36,13 @@ func (f *FakeProcessExecutor) Run(ctx context.Context, executable string, args [
 	var result ProcessResult
 	if idx < len(f.Results) {
 		result = f.Results[idx]
+	}
+
+	if spec.StdoutSink != nil && result.Stdout != "" {
+		_, _ = spec.StdoutSink.Write([]byte(result.Stdout))
+	}
+	if spec.StderrSink != nil && result.Stderr != "" {
+		_, _ = spec.StderrSink.Write([]byte(result.Stderr))
 	}
 
 	var err error

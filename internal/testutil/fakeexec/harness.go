@@ -40,10 +40,17 @@ func PrependPath(t *testing.T, dir string) {
 //     "review_<N>.json" (N = 1-based review call count) is preferred over the
 //     unnumbered "review.json" when present, so a test can script review
 //     fail-then-pass.
-//   - FAKE_FAIL_ACTION / FAKE_FAIL_EXIT_CODE / FAKE_FAIL_STDERR: if
+//   - FAKE_FAIL_ACTION / FAKE_FAIL_EXIT_CODE / FAKE_FAIL_STDERR / FAKE_FAIL_STDOUT: if
 //     FAKE_FAIL_ACTION matches the resolved action, the script exits with
-//     FAKE_FAIL_EXIT_CODE (default 1) after writing FAKE_FAIL_STDERR to stderr,
-//     instead of serving a canned response - simulates a provider runtime failure.
+//     FAKE_FAIL_EXIT_CODE (default 1) after writing FAKE_FAIL_STDERR to stderr and/or
+//     FAKE_FAIL_STDOUT to stdout (either or both may be set independently - real
+//     `claude --print` writes backend/API errors to stdout, not stderr, which
+//     FAKE_FAIL_STDOUT alone reproduces), instead of serving a canned response -
+//     simulates a provider runtime failure.
+//   - FAKE_SLEEP_ACTION / FAKE_SLEEP_SECONDS: if FAKE_SLEEP_ACTION matches the
+//     resolved action (including "classify"), the script sleeps for FAKE_SLEEP_SECONDS
+//     (default 1) before doing anything else - simulates a hung provider call for
+//     timeout scenarios.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
 //     (implement_calls, review_calls) across invocations of the same test.
 //   - FAKE_IMPLEMENT_FIX_ON_CALL: 1-based implement call number (default 1) on
@@ -81,9 +88,16 @@ if [ -n "${INVOCATIONS_LOG:-}" ]; then
   echo "$action" >> "$INVOCATIONS_LOG"
 fi
 
+if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
+  sleep "${FAKE_SLEEP_SECONDS:-1}"
+fi
+
 if [ -n "${FAKE_FAIL_ACTION:-}" ] && [ "$FAKE_FAIL_ACTION" = "$action" ]; then
   if [ -n "${FAKE_FAIL_STDERR:-}" ]; then
     printf '%s\n' "$FAKE_FAIL_STDERR" >&2
+  fi
+  if [ -n "${FAKE_FAIL_STDOUT:-}" ]; then
+    printf '%s\n' "$FAKE_FAIL_STDOUT"
   fi
   exit "${FAKE_FAIL_EXIT_CODE:-1}"
 fi

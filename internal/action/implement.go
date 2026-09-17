@@ -21,9 +21,9 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ReviewIssues:           d.pendingReviewIssues,
 	})
 
-	result, ref, err := d.call(ctx, d.Config.Actions.Implement, domain.ActionImplement, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement, domain.ActionImplement, prompt)
 	if err != nil {
-		return workflow.StepOutcome{}, err
+		return d.failureOutcome(ref, result), err
 	}
 
 	artifact := parseImplementation(result.Output)

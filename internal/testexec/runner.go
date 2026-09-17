@@ -22,7 +22,7 @@ func New(executor execution.ProcessExecutor) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, command string, workingDir string) (domain.TestResult, error) {
-	result, err := r.Executor.Run(ctx, "sh", []string{"-c", command}, "", workingDir)
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir})
 	if err != nil {
 		return domain.TestResult{}, &apperr.ExecutionError{Msg: "failed to run test command", Err: err}
 	}

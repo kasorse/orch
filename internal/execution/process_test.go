@@ -1,6 +1,7 @@
 package execution
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -8,7 +9,7 @@ import (
 
 func TestOSProcessExecutor_Success(t *testing.T) {
 	exec := NewOSProcessExecutor()
-	res, err := exec.Run(context.Background(), "echo", []string{"hello"}, "", "")
+	res, err := exec.Run(context.Background(), Spec{Executable: "echo", Args: []string{"hello"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -22,7 +23,7 @@ func TestOSProcessExecutor_Success(t *testing.T) {
 
 func TestOSProcessExecutor_NonZeroExit(t *testing.T) {
 	exec := NewOSProcessExecutor()
-	res, err := exec.Run(context.Background(), "sh", []string{"-c", "exit 7"}, "", "")
+	res, err := exec.Run(context.Background(), Spec{Executable: "sh", Args: []string{"-c", "exit 7"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,7 +34,7 @@ func TestOSProcessExecutor_NonZeroExit(t *testing.T) {
 
 func TestOSProcessExecutor_Stderr(t *testing.T) {
 	exec := NewOSProcessExecutor()
-	res, err := exec.Run(context.Background(), "sh", []string{"-c", "echo oops 1>&2"}, "", "")
+	res, err := exec.Run(context.Background(), Spec{Executable: "sh", Args: []string{"-c", "echo oops 1>&2"}})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,7 +51,7 @@ func TestOSProcessExecutor_Cancellation(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := exec.Run(ctx, "sleep", []string{"5"}, "", "")
+	_, err := exec.Run(ctx, Spec{Executable: "sleep", Args: []string{"5"}})
 	if err == nil {
 		t.Fatal("expected an error when the context is cancelled mid-execution")
 	}
@@ -58,11 +59,31 @@ func TestOSProcessExecutor_Cancellation(t *testing.T) {
 
 func TestOSProcessExecutor_Stdin(t *testing.T) {
 	exec := NewOSProcessExecutor()
-	res, err := exec.Run(context.Background(), "cat", []string{}, "piped input", "")
+	res, err := exec.Run(context.Background(), Spec{Executable: "cat", Stdin: "piped input"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if res.Stdout != "piped input" {
 		t.Errorf("expected stdout %q, got %q", "piped input", res.Stdout)
+	}
+}
+
+func TestOSProcessExecutor_StreamsToSinks(t *testing.T) {
+	exec := NewOSProcessExecutor()
+	var stdout, stderr bytes.Buffer
+	res, err := exec.Run(context.Background(), Spec{
+		Executable: "sh",
+		Args:       []string{"-c", "echo out; echo err 1>&2"},
+		StdoutSink: &stdout,
+		StderrSink: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stdout.String() != "out\n" || res.Stdout != "out\n" {
+		t.Errorf("expected stdout to reach both the sink and the result, got sink=%q result=%q", stdout.String(), res.Stdout)
+	}
+	if stderr.String() != "err\n" || res.Stderr != "err\n" {
+		t.Errorf("expected stderr to reach both the sink and the result, got sink=%q result=%q", stderr.String(), res.Stderr)
 	}
 }

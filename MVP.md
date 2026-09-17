@@ -1021,7 +1021,43 @@ LimitExceededError
 
 Preserve underlying errors.
 
-Provider execution errors should include useful context:
+Provider CLIs do not consistently report failures on stderr - e.g. `claude --print`
+writes backend/API errors (bad model, connectivity failure) to **stdout**. A
+`ProviderError` that only carried `Stderr` therefore renders an empty, useless message
+for exactly the failures users hit most. `ProviderError` carries both streams, a
+`FailureKind` describing *how* the call failed, and enough context to reproduce the
+call:
+
+```go
+type FailureKind string
+
+const (
+    FailureSpawn     FailureKind = "spawn"     // executable not found / not executable
+    FailureExit      FailureKind = "exit"      // ran, exited non-zero
+    FailureTimeout   FailureKind = "timeout"   // execution.timeout exceeded
+    FailureCancelled FailureKind = "cancelled" // SIGINT/SIGTERM
+)
+
+type ProviderError struct {
+    Provider   string
+    Action     string        // "classify" for the classifier call
+    Model      string
+    Kind       FailureKind
+    Executable string
+    Args       []string      // prompt argument redacted to a length marker
+    WorkingDir string
+    ExitCode   int
+    Duration   time.Duration
+    Stdout     string
+    Stderr     string
+    LogPath    string        // run-relative path to the raw logs, when persisted
+    Err        error
+}
+```
+
+Rendered message: each stream independently truncated to its last 4000 bytes (with an
+explicit truncation marker), and rendered as `(empty)` rather than a blank line when the
+stream produced nothing:
 
 ```text
 provider execution failed
@@ -1029,13 +1065,28 @@ provider execution failed
 provider: claude
 action: implement
 model: opus
+failure: exit (the CLI ran and exited non-zero)
+command: claude --print --permission-mode bypassPermissions --model opus <prompt: 1832 chars>
+working dir: /home/user/repo
 exit code: 1
+duration: 2.4s
+
+stdout:
+API Error: Connection error.
 
 stderr:
-...
+(empty)
+
+full output: .orchestrator/runs/2f3c.../logs/001-implement.stdout.log
 ```
 
-Do not dump secrets or complete environment variables.
+`command:` renders the real argv verbatim except the prompt element, which is always
+replaced with `<prompt: N chars>` - the prompt body itself is never echoed or logged
+anywhere. Do not dump secrets or complete environment variables.
+
+`full output:` is only present once the failing call's raw stdout/stderr has actually
+been persisted (see §21) - it points at the exact file to read for output longer than
+the message's 4000-byte tail.
 
 ---
 
@@ -1072,11 +1123,21 @@ execution:
   timeout: 15m
 ```
 
+`execution.timeout` bounds the entire run, not just workflow step execution: it wraps
+opening the repository, classification, and the full engine run (analyze/plan/implement/
+test/review). A provider call that hangs during classification is bounded by the same
+timeout as one that hangs during an implement step - there is no separate,
+un-timed phase.
+
 Use `context.Context` throughout the execution chain.
 
 SIGINT/SIGTERM must cancel an active execution.
 
 Provider processes and test processes must be terminated through context cancellation.
+Each child process runs in its own process group; on cancellation the whole group is
+killed, not just the direct child - a provider CLI that is (or wraps) a shell script may
+fork grandchildren that inherit its stdout/stderr pipes, and killing only the direct child
+would leave those running, holding the pipes open and defeating the timeout.
 
 ---
 
@@ -1168,8 +1229,10 @@ $ orchestrator run "Fix retry logic. 404 must not be retried" --mode auto
 
 Validating configuration...
 ✓ configuration valid
+Run: 2f3c1a8b  (.orchestrator/runs/2f3c1a8b)
 
 Classifying task...
+→ claude (model sonnet)
 ✓ type: bugfix
 ✓ complexity: medium
 
@@ -1179,12 +1242,14 @@ analyze → implement → test → review
 [1] ANALYZE
 Provider: claude
 Model: sonnet
-✓ completed
+→ running claude...
+✓ completed (12.8s)
 
 [2] IMPLEMENT
 Provider: claude
 Model: opus
-✓ completed
+→ running claude...
+✓ completed (68.1s)
 
 [3] TEST
 Command: go test ./...
@@ -1193,22 +1258,41 @@ Command: go test ./...
 [4] REVIEW
 Provider: codex
 Model: gpt
+→ running codex...
 ✗ review failed
 
 1 high severity issue found.
 Returning to implementation (iteration 1/2).
 
 [5] IMPLEMENT
-✓ completed
+Provider: claude
+Model: opus
+→ running claude...
+✓ completed (41.3s)
 
 [6] TEST
+Command: go test ./...
 ✓ passed
 
 [7] REVIEW
+Provider: codex
+Model: gpt
+→ running codex...
 ✓ PASS
 
 Run completed successfully.
 ```
+
+Every provider call - classification and each workflow step - prints its `→ running
+<provider>...` (or, for classification, `→ <provider> (model <model>)`) line immediately
+before the call, so a hang is visible in real time rather than as a silent pause; a
+`--verbose` run additionally prints redacted argv, working directory, prompt size, a 30s
+heartbeat, and the live child output prefixed with `  | ` (see §21, §6.4 of
+SPEC-diagnostics.md).
+
+On failure, the error rendering (§23) includes a `full output: <path>` line pointing at
+the persisted raw stdout/stderr for that call - there is no separate "read the logs at..."
+line printed by the CLI itself.
 
 Example (no `--mode` flag - the interactive default: approve/edit the plan, choose a
 mode, then confirm each step under `manual`):
@@ -1218,8 +1302,10 @@ $ orchestrator run "Fix retry logic. 404 must not be retried"
 
 Validating configuration...
 ✓ configuration valid
+Run: 2f3c1a8b  (.orchestrator/runs/2f3c1a8b)
 
 Classifying task...
+→ claude (model sonnet)
 ✓ type: bugfix
 ✓ complexity: medium
 
@@ -1241,7 +1327,8 @@ Choose execution mode: [1] plan  [2] manual  [3] accept-edits  [4] auto: 2
 Provider: claude
 Model: opus
 Run this step? [y]es / [n]o / [A]ll remaining: y
-✓ completed
+→ running claude...
+✓ completed (68.1s)
 
 [2] TEST
 Command: go test ./...

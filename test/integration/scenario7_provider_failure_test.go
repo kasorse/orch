@@ -2,6 +2,7 @@ package integration
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -51,6 +52,19 @@ func TestScenario7_ProviderRuntimeFailure(t *testing.T) {
 	}
 	if !strings.Contains(provErr.Stderr, "boom: simulated provider crash") {
 		t.Errorf("Stderr = %q, want it to contain the simulated crash message", provErr.Stderr)
+	}
+	if provErr.LogPath == "" {
+		t.Fatal("LogPath is empty, want it to point at the persisted stderr log")
+	}
+	logContent, readErr := os.ReadFile(filepath.Join(repoDir, provErr.LogPath))
+	if readErr != nil {
+		t.Fatalf("read LogPath %q: %v", provErr.LogPath, readErr)
+	}
+	if !strings.Contains(string(logContent), "boom: simulated provider crash") {
+		t.Errorf("log file %s = %q, want it to contain the simulated crash message", provErr.LogPath, logContent)
+	}
+	if !strings.Contains(err.Error(), "boom: simulated provider crash") {
+		t.Errorf("rendered error message does not contain the simulated crash message: %s", err.Error())
 	}
 
 	want := []string{"classify", "implement"}

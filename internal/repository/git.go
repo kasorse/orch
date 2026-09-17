@@ -20,7 +20,7 @@ type Repository struct {
 func Open(ctx context.Context, dir string, executor execution.ProcessExecutor) (*Repository, error) {
 	repo := &Repository{Dir: dir, Executor: executor}
 
-	result, err := executor.Run(ctx, "git", []string{"rev-parse", "--is-inside-work-tree"}, "", dir)
+	result, err := executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"rev-parse", "--is-inside-work-tree"}, WorkingDir: dir})
 	if err != nil {
 		return nil, &apperr.RepositoryError{Msg: "failed to run git", Err: err}
 	}
@@ -33,7 +33,7 @@ func Open(ctx context.Context, dir string, executor execution.ProcessExecutor) (
 // IsDirty reports whether the working tree has uncommitted changes (staged, unstaged, or
 // untracked).
 func (r *Repository) IsDirty(ctx context.Context) (bool, error) {
-	result, err := r.Executor.Run(ctx, "git", []string{"status", "--porcelain"}, "", r.Dir)
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"status", "--porcelain"}, WorkingDir: r.Dir})
 	if err != nil {
 		return false, &apperr.RepositoryError{Msg: "failed to run git status", Err: err}
 	}
@@ -46,7 +46,7 @@ func (r *Repository) IsDirty(ctx context.Context) (bool, error) {
 // Diff returns the diff of tracked changes against HEAD, plus a note listing any untracked
 // files (which "git diff" does not show).
 func (r *Repository) Diff(ctx context.Context) (string, error) {
-	diffResult, err := r.Executor.Run(ctx, "git", []string{"diff", "HEAD"}, "", r.Dir)
+	diffResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"diff", "HEAD"}, WorkingDir: r.Dir})
 	if err != nil {
 		return "", &apperr.RepositoryError{Msg: "failed to run git diff", Err: err}
 	}
@@ -54,7 +54,7 @@ func (r *Repository) Diff(ctx context.Context) (string, error) {
 		return "", &apperr.RepositoryError{Msg: "git diff failed: " + diffResult.Stderr}
 	}
 
-	statusResult, err := r.Executor.Run(ctx, "git", []string{"status", "--porcelain"}, "", r.Dir)
+	statusResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"status", "--porcelain"}, WorkingDir: r.Dir})
 	if err != nil {
 		return "", &apperr.RepositoryError{Msg: "failed to run git status", Err: err}
 	}

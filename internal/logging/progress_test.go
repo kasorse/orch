@@ -2,7 +2,9 @@ package logging
 
 import (
 	"bytes"
+	"errors"
 	"testing"
+	"time"
 
 	"orchestrator/internal/domain"
 	"orchestrator/internal/workflow"
@@ -20,17 +22,97 @@ func TestStepStarted_PrintsNumberedUppercaseHeader(t *testing.T) {
 	}
 }
 
-func TestStepFinished_AnalyzeSuccess_PrintsProviderAndCompleted(t *testing.T) {
+func TestProviderCallStarted_PrintsProviderModelAndRunningLine(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)
 
+	r.ProviderCallStarted("claude", "sonnet")
+
+	want := "Provider: claude\nModel: sonnet\n→ running claude...\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestStepFinished_AnalyzeSuccess_PrintsCompletedWithDuration(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	start := time.Now()
 	exec := domain.StepExecution{
-		Action:   domain.ActionAnalyze,
-		Provider: &domain.ProviderRef{Provider: "claude", Model: "sonnet"},
+		Action:    domain.ActionAnalyze,
+		Provider:  &domain.ProviderRef{Provider: "claude", Model: "sonnet"},
+		StartedAt: start,
+		// 12.8s, exactly representable after Round(100ms) so the rendered text is exact.
+		FinishedAt: start.Add(12*time.Second + 800*time.Millisecond),
 	}
 	r.StepFinished(&domain.Run{}, 0, exec, workflow.StepOutcome{Outcome: workflow.OutcomeSuccess})
 
-	want := "Provider: claude\nModel: sonnet\n✓ completed\n"
+	want := "✓ completed (12.8s)\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestProviderCallHeartbeat_SilentByDefault_PrintsInVerbose(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.ProviderCallHeartbeat(30 * time.Second)
+	if buf.String() != "" {
+		t.Errorf("expected no heartbeat output outside --verbose, got %q", buf.String())
+	}
+
+	r.Verbose = true
+	r.ProviderCallHeartbeat(30 * time.Second)
+
+	want := "   … still running (30s)\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestProviderCallFinished_SilentByDefault_PrintsInVerboseOnSuccessOnly(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.ProviderCallFinished("claude", "sonnet", 72400*time.Millisecond, nil)
+	if buf.String() != "" {
+		t.Errorf("expected no completion output outside --verbose, got %q", buf.String())
+	}
+
+	r.Verbose = true
+	r.ProviderCallFinished("claude", "sonnet", 72400*time.Millisecond, errors.New("boom"))
+	if buf.String() != "" {
+		t.Errorf("expected no completion output on failure, got %q", buf.String())
+	}
+
+	r.ProviderCallFinished("claude", "sonnet", 72400*time.Millisecond, nil)
+	want := "✓ completed (72.4s)\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestRunHeader_PrintsIDAndDir(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.RunHeader("2f3c8b41-abc", "/home/user/src/orch/.orchestrator/runs/2f3c8b41-abc")
+
+	want := "Run: 2f3c8b41-abc  (/home/user/src/orch/.orchestrator/runs/2f3c8b41-abc)\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestClassifyReporter_ProviderCallStarted_PrintsClassifyShapedLine(t *testing.T) {
+	var buf bytes.Buffer
+	c := ClassifyReporter{ConsoleReporter: NewConsoleReporter(&buf)}
+
+	c.ProviderCallStarted("claude", "sonnet")
+
+	want := "→ claude (model sonnet)\n"
 	if buf.String() != want {
 		t.Errorf("got %q, want %q", buf.String(), want)
 	}

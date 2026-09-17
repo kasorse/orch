@@ -40,6 +40,9 @@ func FromError(err error) int {
 
 	var providerErr *apperr.ProviderError
 	if errors.As(err, &providerErr) {
+		if providerErr.Kind == apperr.FailureCancelled {
+			return UserCancellation
+		}
 		return ProviderExecution
 	}
 

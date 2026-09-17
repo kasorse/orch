@@ -168,3 +168,29 @@ func TestAppendLog_CreatesAndAppendsAcrossCalls(t *testing.T) {
 		t.Errorf("expected log contents %q, got %q", want, string(data))
 	}
 }
+
+func TestAppendClassifierLog_CreatesAndAppendsAcrossCalls_UnindexedPath(t *testing.T) {
+	store := NewStore(t.TempDir())
+
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := store.AppendClassifierLog(run.ID, "stdout", "chunk one\n"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := store.AppendClassifierLog(run.ID, "stdout", "chunk two\n"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	relPath := filepath.Join("logs", "classify.stdout.log")
+	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), relPath))
+	if err != nil {
+		t.Fatalf("expected log file to exist: %v", err)
+	}
+	want := "chunk one\nchunk two\n"
+	if string(data) != want {
+		t.Errorf("expected log contents %q, got %q", want, string(data))
+	}
+}

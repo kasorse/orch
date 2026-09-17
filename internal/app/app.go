@@ -40,12 +40,12 @@ const runsBaseDir = ".orchestrator/runs"
 // os.Exit - main.go is the sole exit point, mapping the returned error via
 // exitcode.FromError.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	configPath, mode, rest, err := parseArgs(args)
+	configPath, mode, verbose, rest, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
 	if len(rest) == 0 {
-		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] <version|validate|run "<task>">`}
+		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] <version|validate|run "<task>">`}
 	}
 
 	switch rest[0] {
@@ -58,24 +58,25 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"`}
 		}
-		return runTask(ctx, configPath, strings.Join(rest[1:], " "), mode, stdin, stdout, stderr)
+		return runTask(ctx, configPath, strings.Join(rest[1:], " "), mode, verbose, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
 }
 
-// parseArgs pulls --config/--config=X and --mode/--mode=X out of args (in any
-// position) and returns the resolved config path, resolved mode (empty if --mode was
-// not given - the caller then runs the interactive mode-select prompt), and the
+// parseArgs pulls --config/--config=X, --mode/--mode=X, and --verbose/-v out of args (in
+// any position) and returns the resolved config path, resolved mode (empty if --mode was
+// not given - the caller then runs the interactive mode-select prompt), whether --verbose
+// was given (spec §11 Q5: the sole verbosity switch - no config key or env var), and the
 // remaining positional arguments.
-func parseArgs(args []string) (configPath string, mode domain.RunMode, rest []string, err error) {
+func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose bool, rest []string, err error) {
 	configPath = defaultConfigPath
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--config":
 			if i+1 >= len(args) {
-				return "", "", nil, fmt.Errorf("--config requires a value")
+				return "", "", false, nil, fmt.Errorf("--config requires a value")
 			}
 			configPath = args[i+1]
 			i++
@@ -83,21 +84,23 @@ func parseArgs(args []string) (configPath string, mode domain.RunMode, rest []st
 			configPath = strings.TrimPrefix(arg, "--config=")
 		case arg == "--mode":
 			if i+1 >= len(args) {
-				return "", "", nil, fmt.Errorf("--mode requires a value")
+				return "", "", false, nil, fmt.Errorf("--mode requires a value")
 			}
 			if mode, err = domain.ParseRunMode(args[i+1]); err != nil {
-				return "", "", nil, err
+				return "", "", false, nil, err
 			}
 			i++
 		case strings.HasPrefix(arg, "--mode="):
 			if mode, err = domain.ParseRunMode(strings.TrimPrefix(arg, "--mode=")); err != nil {
-				return "", "", nil, err
+				return "", "", false, nil, err
 			}
+		case arg == "--verbose" || arg == "-v":
+			verbose = true
 		default:
 			rest = append(rest, arg)
 		}
 	}
-	return configPath, mode, rest, nil
+	return configPath, mode, verbose, rest, nil
 }
 
 func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter) (config.Config, error) {
@@ -123,13 +126,20 @@ func runValidate(configPath string, stdout io.Writer) error {
 	return err
 }
 
-func runTask(ctx context.Context, configPath, taskDescription string, mode domain.RunMode, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, taskDescription string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := logging.NewConsoleReporter(stdout)
+	reporter.Verbose = verbose
 
 	cfg, err := loadAndValidateConfig(configPath, reporter)
 	if err != nil {
 		return err
 	}
+
+	// The run-wide timeout starts here, right after config validation, so it covers
+	// classification and the engine run, not just the workflow (spec §11 Q7: a hung
+	// connection during classification would otherwise never time out).
+	runCtx, cancel := context.WithTimeout(ctx, cfg.Execution.Timeout)
+	defer cancel()
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -138,11 +148,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 
 	osExec := execution.NewOSProcessExecutor()
 
-	repo, err := repository.Open(ctx, cwd, osExec)
+	repo, err := repository.Open(runCtx, cwd, osExec)
 	if err != nil {
 		return err
 	}
-	if dirty, err := repo.IsDirty(ctx); err != nil {
+	if dirty, err := repo.IsDirty(runCtx); err != nil {
 		return err
 	} else if dirty {
 		logging.DirtyRepoWarning(stderr)
@@ -157,18 +167,22 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return &apperr.WorkflowError{Msg: "failed to resolve classifier provider", Err: err}
 	}
-	clf := classifier.New(classifierClient, cfg.Classifier.Model)
-
 	store := persistence.NewStore(runsBaseDir)
+	clf := classifier.New(classifierClient, cfg.Classifier.Provider, cfg.Classifier.Model, store)
+	clf.Observer = logging.ClassifyReporter{ConsoleReporter: reporter}
+	if verbose {
+		clf.Stream = logging.NewPrefixWriter(stdout, "  | ")
+	}
 
 	task := domain.Task{Description: taskDescription, CreatedAt: time.Now()}
 	run, err := store.NewRun(task)
 	if err != nil {
 		return err
 	}
+	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
 	reporter.ClassifyingTask()
-	classification, err := clf.Classify(ctx, task.Description)
+	classification, err := clf.Classify(runCtx, run.ID, task.Description)
 	if err != nil {
 		run.Status = domain.RunFailed
 		run.FailureReason = err.Error()
@@ -229,6 +243,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 
 	dispatcher := action.New(&cfg, registry, repo, testexec.New(osExec))
 	dispatcher.Artifacts = store
+	dispatcher.Logs = store
+	dispatcher.Observer = reporter
+	if verbose {
+		dispatcher.Stream = logging.NewPrefixWriter(stdout, "  | ")
+	}
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -242,9 +261,6 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if mode == domain.ModeManual {
 		engine.Gate = interaction.NewTerminalGate(prompter, stdout)
 	}
-
-	runCtx, cancel := context.WithTimeout(ctx, cfg.Execution.Timeout)
-	defer cancel()
 
 	return engine.Run(runCtx, run)
 }

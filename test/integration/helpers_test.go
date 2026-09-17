@@ -36,6 +36,10 @@ type configOptions struct {
 	maxSteps         int
 	maxFixIterations int
 	testCommand      string
+	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
+	// via defaultConfigOptions - tests only override it to exercise the run-wide
+	// timeout (SPEC-diagnostics.md §6.6) with a short deadline.
+	timeout string
 }
 
 func defaultConfigOptions() configOptions {
@@ -44,6 +48,7 @@ func defaultConfigOptions() configOptions {
 		maxSteps:         12,
 		maxFixIterations: 2,
 		testCommand:      "go test ./...",
+		timeout:          "30s",
 	}
 }
 
@@ -84,9 +89,9 @@ limits:
   max_fix_iterations: %d
 
 execution:
-  timeout: 30s
+  timeout: %s
 `, p.Classifier, p.Analyze, p.Plan, p.Implement, p.Review, p.Answer,
-		opts.testCommand, opts.maxSteps, opts.maxFixIterations)
+		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout)
 
 	path := filepath.Join(dir, "orchestrator.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

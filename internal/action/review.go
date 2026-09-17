@@ -28,9 +28,9 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		GitDiff:        diff,
 	})
 
-	result, ref, err := d.call(ctx, d.Config.Actions.Review, domain.ActionReview, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Review, domain.ActionReview, prompt)
 	if err != nil {
-		return workflow.StepOutcome{}, err
+		return d.failureOutcome(ref, result), err
 	}
 
 	review, err := parseReviewStrict(result.Output)

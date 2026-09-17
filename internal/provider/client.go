@@ -5,6 +5,7 @@ package provider
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -12,10 +13,14 @@ type Request struct {
 	Prompt     string
 	Model      string
 	WorkingDir string
+	// Stream is an optional live sink for the CLI's combined output as it arrives
+	// (--verbose only). Nil means capture-only - no behavior change.
+	Stream io.Writer
 }
 
 type Result struct {
 	Output   string
+	Stderr   string
 	ExitCode int
 	Duration time.Duration
 }

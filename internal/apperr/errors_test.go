@@ -32,11 +32,39 @@ func TestProviderError_Message(t *testing.T) {
 }
 
 func TestProviderError_TruncatesLongStderr(t *testing.T) {
-	longStderr := strings.Repeat("x", maxStderrInError+1000)
+	longStderr := strings.Repeat("x", maxStreamInError+1000)
 	err := &ProviderError{Stderr: longStderr}
 	msg := err.Error()
-	if len(msg) > maxStderrInError+500 {
+	if len(msg) > maxStreamInError+1000 {
 		t.Errorf("expected stderr to be truncated, message length was %d", len(msg))
+	}
+}
+
+func TestProviderError_RendersFailureKindAndCommand(t *testing.T) {
+	err := &ProviderError{
+		Provider:   "claude",
+		Action:     "implement",
+		Model:      "opus",
+		Kind:       FailureExit,
+		Executable: "claude",
+		Args:       []string{"--print", "<prompt: 42 chars>"},
+		WorkingDir: "/repo",
+		ExitCode:   1,
+		Stdout:     "API Error: Connection error.",
+		LogPath:    ".orchestrator/runs/abc/logs/000-implement.stdout.log",
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"failure: exit (the CLI ran and exited non-zero)",
+		"command: claude --print <prompt: 42 chars>",
+		"working dir: /repo",
+		"stdout:\nAPI Error: Connection error.",
+		"stderr:\n(empty)",
+		"full output: .orchestrator/runs/abc/logs/000-implement.stdout.log",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected error message to contain %q, got: %s", want, msg)
+		}
 	}
 }
 

@@ -82,7 +82,7 @@ execution:
 ```
 orchestrator [--config path] version
 orchestrator [--config path] validate
-orchestrator [--config path] run "<task description>"
+orchestrator [--config path] run [--verbose|-v] "<task description>"
 ```
 
 - `version` — prints the build version.
@@ -92,11 +92,23 @@ orchestrator [--config path] run "<task description>"
 - `run "<task>"` — classifies the task, builds the workflow deterministically from that
   classification, and executes it step by step against the repository in the current working
   directory, printing progress as it goes.
+- `--verbose` / `-v` — the sole verbosity switch (no config key or environment variable
+  equivalent). Adds, for every provider call including classification: the redacted command
+  line actually run (the prompt argument is always replaced with `<prompt: N chars>` — the
+  prompt body itself is never printed or logged, anywhere), the working directory, a heartbeat
+  line every 30s while the call is in flight, the child process's live stdout/stderr prefixed
+  with `  | `, and a completion line with byte counts and the log path. Without `--verbose` you
+  only see a `→ running <provider>...` line before each call and a `✓ completed (Ns)` line
+  after it.
 
 Config loading, structural validation, and dependency (executable-on-`PATH`) validation always
 run to completion, in that order, *before* any AI provider or the classifier is ever invoked —
 a missing executable for an action used later in the workflow (e.g. `codex` for `review`) fails
 `run` immediately, before `claude` is even called for classification.
+
+`execution.timeout` bounds the entire run, including classification — not just workflow step
+execution. Each provider/test child process runs in its own process group, so a timeout or
+Ctrl-C kills the whole process tree it spawned, not just the direct child.
 
 If the target repository has uncommitted changes when `run` starts, the orchestrator prints a
 warning and continues — it never stashes, resets, or otherwise touches your working tree on
@@ -114,10 +126,52 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   artifacts/<NNN>-<action>.json          # structured output per step
   logs/<NNN>-<action>.stdout.log         # raw provider/test stdout per step
   logs/<NNN>-<action>.stderr.log         # raw provider/test stderr per step
+  logs/classify.stdout.log               # raw classifier-call stdout (if any)
+  logs/classify.stderr.log               # raw classifier-call stderr (if any)
 ```
+
+Every provider call's raw stdout/stderr is persisted this way, whether it succeeds or fails —
+not just failures. The classifier call's logs live under `logs/classify.*.log` since
+classification happens outside the workflow's per-step numbering.
 
 Add `.orchestrator/` to the target repository's own `.gitignore` if you don't want this
 bookkeeping tracked there.
+
+## Reading a failure
+
+When a provider call fails, `run` exits non-zero (see `MVP.md` §24 for the exact codes) and
+prints a self-contained error, e.g.:
+
+```
+provider execution failed
+
+provider: claude
+action: implement
+model: opus
+failure: exit (the CLI ran and exited non-zero)
+command: claude --print --permission-mode bypassPermissions --model opus <prompt: 1832 chars>
+working dir: /home/user/repo
+exit code: 1
+duration: 2.4s
+
+stdout:
+API Error: Connection error.
+
+stderr:
+(empty)
+
+full output: .orchestrator/runs/2f3c.../logs/002-implement.stdout.log
+```
+
+- `failure:` says *how* the call failed: `spawn` (couldn't start the executable at all),
+  `exit` (ran and returned non-zero), `timeout` (exceeded `execution.timeout`), or `cancelled`
+  (SIGINT/SIGTERM). Some provider CLIs — notably `claude --print` — write backend/API errors to
+  stdout rather than stderr, so both streams are always shown; a blank stream renders as
+  `(empty)` rather than nothing, so you can tell "no output" from "output not captured".
+- `stdout:`/`stderr:` are each truncated to their last 4000 bytes in this message. The
+  `full output:` line, when present, points at the untruncated file on disk.
+- `command:` is the real argv that ran, except the prompt argument, which always renders as
+  `<prompt: N chars>` — the prompt text itself is never printed or written to any log file.
 
 ## Testing
 

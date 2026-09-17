@@ -3,7 +3,11 @@
 // against wrapped causes.
 package apperr
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 type ConfigError struct {
 	Msg string
@@ -39,30 +43,103 @@ func NewDependencyError(msg string, cause error) *DependencyError {
 	return &DependencyError{Msg: msg, Err: cause}
 }
 
-// ProviderError carries the actionable context spelled out in the spec: provider,
-// action, model, exit code, and stderr - never secrets or full environment variables.
-type ProviderError struct {
-	Provider string
-	Action   string
-	Model    string
-	ExitCode int
-	Stderr   string
-	Err      error
+// FailureKind classifies how a provider CLI invocation failed, so the rendered message
+// can say something more actionable than "exit code: 1".
+type FailureKind string
+
+const (
+	FailureSpawn     FailureKind = "spawn"     // executable not found / not executable
+	FailureExit      FailureKind = "exit"      // ran, exited non-zero
+	FailureTimeout   FailureKind = "timeout"   // execution.timeout exceeded
+	FailureCancelled FailureKind = "cancelled" // SIGINT/SIGTERM
+)
+
+var failureDescriptions = map[FailureKind]string{
+	FailureSpawn:     "spawn (the CLI could not be started)",
+	FailureExit:      "exit (the CLI ran and exited non-zero)",
+	FailureTimeout:   "timeout (exceeded execution.timeout)",
+	FailureCancelled: "cancelled (interrupted)",
 }
 
-const maxStderrInError = 4000
+// ProviderError carries the actionable context spelled out in the spec: provider,
+// action, model, how it failed, the redacted command line, and both output streams -
+// never secrets or full environment variables. Args must already have any prompt
+// argument redacted by the caller (the provider adapter, which alone knows argv shape);
+// this package only renders whatever it is given.
+type ProviderError struct {
+	Provider   string
+	Action     string
+	Model      string
+	Kind       FailureKind
+	Executable string
+	Args       []string
+	WorkingDir string
+	ExitCode   int
+	Duration   time.Duration
+	Stdout     string
+	Stderr     string
+	LogPath    string // run-relative path to the raw logs, when persisted
+	Err        error
+}
+
+const maxStreamInError = 4000
 
 func (e *ProviderError) Error() string {
-	stderr := e.Stderr
-	if len(stderr) > maxStderrInError {
-		stderr = stderr[len(stderr)-maxStderrInError:]
+	var b strings.Builder
+	b.WriteString("provider execution failed\n\n")
+	fmt.Fprintf(&b, "provider: %s\n", e.Provider)
+	fmt.Fprintf(&b, "action: %s\n", e.Action)
+	fmt.Fprintf(&b, "model: %s\n", e.Model)
+	if e.Kind != "" {
+		fmt.Fprintf(&b, "failure: %s\n", failureDescription(e.Kind))
 	}
-	return fmt.Sprintf(
-		"provider execution failed\n\nprovider: %s\naction: %s\nmodel: %s\nexit code: %d\n\nstderr:\n%s",
-		e.Provider, e.Action, e.Model, e.ExitCode, stderr,
-	)
+	if e.Executable != "" {
+		fmt.Fprintf(&b, "command: %s\n", commandLine(e.Executable, e.Args))
+	}
+	if e.WorkingDir != "" {
+		fmt.Fprintf(&b, "working dir: %s\n", e.WorkingDir)
+	}
+	fmt.Fprintf(&b, "exit code: %d\n", e.ExitCode)
+	if e.Duration > 0 {
+		fmt.Fprintf(&b, "duration: %s\n", e.Duration.Round(time.Millisecond*100))
+	}
+	b.WriteString("\nstdout:\n")
+	b.WriteString(truncateTail(e.Stdout))
+	b.WriteString("\n\nstderr:\n")
+	b.WriteString(truncateTail(e.Stderr))
+	if e.LogPath != "" {
+		fmt.Fprintf(&b, "\n\nfull output: %s\n", e.LogPath)
+	}
+	return b.String()
 }
 func (e *ProviderError) Unwrap() error { return e.Err }
+
+func failureDescription(kind FailureKind) string {
+	if desc, ok := failureDescriptions[kind]; ok {
+		return desc
+	}
+	return string(kind)
+}
+
+func commandLine(executable string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, executable)
+	parts = append(parts, args...)
+	return strings.Join(parts, " ")
+}
+
+// truncateTail renders an empty stream explicitly (rather than a blank, easily-missed
+// line) and keeps only the last maxStreamInError bytes of a long one, since the failing
+// line in a provider's output is almost always near the end.
+func truncateTail(s string) string {
+	if s == "" {
+		return "(empty)"
+	}
+	if len(s) <= maxStreamInError {
+		return s
+	}
+	return fmt.Sprintf("... [truncated, showing last %d bytes]\n%s", maxStreamInError, s[len(s)-maxStreamInError:])
+}
 
 type ClassificationError struct {
 	Raw string

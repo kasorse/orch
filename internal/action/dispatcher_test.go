@@ -17,6 +17,7 @@ import (
 
 type fakeClient struct {
 	output  string
+	stderr  string
 	err     error
 	lastReq provider.Request
 }
@@ -24,7 +25,9 @@ type fakeClient struct {
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.lastReq = req
 	if f.err != nil {
-		return provider.Result{}, f.err
+		// Mirrors the real provider adapters: the process's stdout/stderr are still
+		// returned alongside a failure, not discarded (this is the F3 fix under test).
+		return provider.Result{Output: f.output, Stderr: f.stderr}, f.err
 	}
 	return provider.Result{Output: f.output, ExitCode: 0}, nil
 }
@@ -321,6 +324,124 @@ func TestExecute_ProviderError_ActionFieldFilledIn(t *testing.T) {
 	}
 	if providerErr.Action != "analyze" {
 		t.Errorf("expected Action to be filled in as analyze, got %q", providerErr.Action)
+	}
+}
+
+type fakeLogPathBuilder struct{}
+
+func (fakeLogPathBuilder) LogPath(runID string, stepIndex int, actionType domain.ActionType, stream string) string {
+	return runID + "/logs/" + stream
+}
+
+func TestExecute_ProviderError_LogPathFilledIn(t *testing.T) {
+	client := &fakeClient{
+		output: "backend error",
+		err:    &apperr.ProviderError{Provider: "claude", Model: "m", ExitCode: 1},
+	}
+	d := newDispatcher(client)
+	d.Logs = fakeLogPathBuilder{}
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(context.Background(), domain.ActionAnalyze, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var providerErr *apperr.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if providerErr.LogPath != "run-1/logs/stdout" {
+		t.Errorf("expected LogPath to point at the stdout log (since stdout was non-empty), got %q", providerErr.LogPath)
+	}
+}
+
+// TestExecuteAnalyze_ProviderFailure_PopulatesRawOutput is the direct regression test for
+// the reported bug (F3): a failing provider call must not be discarded as an empty
+// StepOutcome{} - the CLI's stdout (where claude --print writes backend/API errors) has to
+// survive into the outcome so the engine's stepFinished wiring can log it.
+func TestExecuteAnalyze_ProviderFailure_PopulatesRawOutput(t *testing.T) {
+	client := &fakeClient{
+		output: "backend error: rate limited",
+		err:    &apperr.ProviderError{Provider: "claude", Model: "m", ExitCode: 1},
+	}
+	d := newDispatcher(client)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	outcome, err := d.Execute(context.Background(), domain.ActionAnalyze, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if outcome.RawStdout != "backend error: rate limited" {
+		t.Errorf("expected RawStdout to carry the provider's stdout, got %q", outcome.RawStdout)
+	}
+	if outcome.Provider == nil || outcome.Provider.Provider != "claude" || outcome.Provider.Model != "m" {
+		t.Errorf("expected Provider to be set on failure outcome, got %+v", outcome.Provider)
+	}
+}
+
+func TestExecuteImplement_ProviderFailure_PopulatesRawOutput(t *testing.T) {
+	client := &fakeClient{
+		stderr: "connection reset",
+		err:    &apperr.ProviderError{Provider: "claude", Model: "m", ExitCode: 1},
+	}
+	d := newDispatcher(client)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if outcome.RawStderr != "connection reset" {
+		t.Errorf("expected RawStderr to carry the provider's stderr, got %q", outcome.RawStderr)
+	}
+	if outcome.Provider == nil {
+		t.Error("expected Provider to be set on failure outcome")
+	}
+}
+
+func TestExecuteReview_ProviderFailure_PopulatesRawOutput(t *testing.T) {
+	client := &fakeClient{
+		output: "boom on review",
+		err:    &apperr.ProviderError{Provider: "claude", Model: "m", ExitCode: 1},
+	}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	d := New(testConfig(), registry, reviewRepo(t, "diff content", ""), nil)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	outcome, err := d.Execute(context.Background(), domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if outcome.RawStdout != "boom on review" {
+		t.Errorf("expected RawStdout to carry the provider's stdout, got %q", outcome.RawStdout)
+	}
+	if outcome.Provider == nil {
+		t.Error("expected Provider to be set on failure outcome")
+	}
+}
+
+// TestExecuteReview_DiffFailure_NotAProviderCall confirms the deliberate asymmetry: a
+// repository.Diff error happens before any provider call, so there is no ref/result to
+// build a failureOutcome from - it stays the zero-value StepOutcome{}, matching
+// testaction.go's pattern for non-provider errors.
+func TestExecuteReview_DiffFailure_NotAProviderCall(t *testing.T) {
+	client := &fakeClient{}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	exec := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{ExitCode: 1, Stderr: "not a git repo"}},
+	}
+	repo := &repository.Repository{Dir: "/repo", Executor: exec}
+	d := New(testConfig(), registry, repo, nil)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	outcome, err := d.Execute(context.Background(), domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if outcome.Provider != nil || outcome.RawStdout != "" || outcome.RawStderr != "" {
+		t.Errorf("expected zero-value outcome for a non-provider error, got %+v", outcome)
 	}
 }
 
