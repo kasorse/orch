@@ -86,6 +86,31 @@ func TestClient_PropagatesRunError(t *testing.T) {
 	}
 }
 
+// TestClient_TimeoutPreservesExitCode guards against a real bug: the executor reports
+// -1 (Go's ExitCode() value for "terminated by signal") for a process SIGKILLed on
+// timeout, but that used to get dropped on the floor - the ProviderError literal for
+// this error path never copied res.ExitCode across, so it always rendered as "exit
+// code: 0", indistinguishable from a clean success.
+func TestClient_TimeoutPreservesExitCode(t *testing.T) {
+	fake := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{ExitCode: -1}},
+		Errs:    []error{context.DeadlineExceeded},
+	}
+	c := New(fake)
+
+	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "gpt"})
+	var provErr *apperr.ProviderError
+	if !errors.As(err, &provErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if provErr.Kind != apperr.FailureTimeout {
+		t.Errorf("expected Kind FailureTimeout, got %q", provErr.Kind)
+	}
+	if provErr.ExitCode != -1 {
+		t.Errorf("expected ExitCode -1 to propagate from the executor, got %d", provErr.ExitCode)
+	}
+}
+
 func TestClient_SpawnFailure(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{
 		Errs: []error{&exec.Error{Name: "codex", Err: exec.ErrNotFound}},

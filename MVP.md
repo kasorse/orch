@@ -1139,6 +1139,35 @@ killed, not just the direct child - a provider CLI that is (or wraps) a shell sc
 fork grandchildren that inherit its stdout/stderr pipes, and killing only the direct child
 would leave those running, holding the pipes open and defeating the timeout.
 
+## 25.1 Per-Action Timeout Override
+
+Support an optional `timeout` alongside `provider`/`model` on each of the five fixed
+actions (`classifier` is excluded - it has no override):
+
+```yaml
+actions:
+  review:
+    provider: codex
+    model: gpt
+    timeout: 20m
+```
+
+Without an override, an action's behavior is unchanged: it runs under whatever remains of
+`execution.timeout`. With an override, the action's context is wrapped in its own
+`context.WithTimeout`, nested inside the run-wide context - by ordinary
+`context.WithTimeout` semantics this can only tighten the effective deadline, never extend
+it past `execution.timeout`. This does not create a second un-timed phase or contradict
+§25's "no separate, un-timed phase" invariant: the run-wide bound still applies to
+everything, including an overridden action; the override only lets a specific action (most
+usefully `review`, which inspects the full git diff and can be the slowest step) claim a
+dedicated slice of that budget instead of being at the mercy of how much earlier steps
+happened to leave behind.
+
+A negative override fails config validation (`actions.<name>.timeout must not be
+negative`). A resulting timeout failure's error message names which limit fired -
+`actions.review.timeout = 20m` vs. the run-wide `execution.timeout` - so a report of
+"context deadline exceeded" is attributable to a specific, tunable cause.
+
 ---
 
 # 26. Suggested Project Structure
@@ -1797,4 +1826,78 @@ clear architecture
 >
 CLI polish
 ```
+
+---
+
+# 37. Planned Feature — Resume by Run ID (not in initial MVP delivery)
+
+Not required for the milestone in §33/§35, but in scope for the next implementation
+pass after it. Recorded now so the persistence/workflow layers aren't accidentally
+built in a way that forecloses it.
+
+## Problem
+
+Today every `orchestrator run "<task>"` invocation starts a brand-new run: it always
+classifies from scratch and always calls `store.NewRun` (fresh `run.json`, empty
+`Executions`). A run that failed, was stopped (`ctrl-c`, manual-mode rejection), or was
+interrupted by a crash has no way to continue - the only option is to start over,
+which re-runs classification and loses the fact that steps 1..N already succeeded.
+
+## CLI
+
+Add a fourth command, parallel to `run`/`validate`/`version`:
+
+```bash
+orchestrator resume <run-id>
+```
+
+`--config`, `--mode`, and `--verbose` all apply exactly as they do to `run` (§4). If
+`--mode` is omitted, resuming still runs the interactive mode-select prompt (§1/§27)
+unless the persisted run already has a `mode` other than `plan` recorded, in which case
+that becomes the default offered choice.
+
+## Behavior
+
+* Fail-fast validation (`config.Load` → `config.Validate` →
+  `config.ValidateDependencies`, §7) always runs first, exactly as for `run` - resuming
+  does not bypass dependency checks, since the operator's environment or config may
+  have changed since the original run.
+* Load the persisted `Run` for `<run-id>` from `.orchestrator/runs/<run-id>/run.json`
+  (§21). Unknown run ID is a distinct error (new `RunNotFoundError` category, §23),
+  exit code 1 (§24) - not confused with a config/dependency failure (exit code 2).
+* Do **not** re-run classification and do **not** rebuild the workflow. The persisted
+  `Classification` and `Workflow` are reused as-is (§8/§9) - resume continues the exact
+  workflow that was already committed to, even if the classifier would answer
+  differently today. Re-classifying on resume would let the same task silently diverge
+  into a different workflow between attempts, defeating the point of resuming.
+* Resumable statuses: `failed`, `stopped`. A `running` status found on load means the
+  previous process died mid-step (crash, killed, machine restart) without updating
+  `run.json` past that point; treat it the same as `failed` and resume from the last
+  persisted `Executions` entry.
+* `completed` is not resumable: report it as already done and exit 0 without invoking
+  any provider.
+* Re-entry point is derived the same way the engine already decides "what's next"
+  after any step finishes (§11's transition table) - resume is not a special code path
+  through `workflow.Engine`, it is `Engine.Run` given a `Run` whose `Executions` is
+  non-empty instead of empty. `max_steps`/`max_fix_iterations` (§12) are evaluated
+  against the full historical `Executions` length, including the executions from
+  before the interruption - resuming a run does not reset either limit.
+* `Executions` remains append-only (§11): resuming never edits or removes prior
+  entries, it only appends new ones.
+* If `mode` was `manual` on the original run, the manual-mode gate (§11) applies again
+  on resume for every remaining step, same as a fresh manual run.
+
+## Persistence additions
+
+* `persistence.Store` needs a `LoadRun(runID string) (*domain.Run, error)` to pair with
+  the existing `SaveRun` (§21) - reads and unmarshals `run.json`, returns
+  `RunNotFoundError` if the directory/file doesn't exist.
+
+## Out of scope for this feature
+
+* No schema/version migration for `run.json` written by an older binary - resuming a
+  run produced by an incompatible orchestrator version is undefined behavior, not a
+  case this feature needs to detect or handle.
+* No editing the task description, classification, or workflow on resume - if any of
+  those need to change, that is a new `run`, not a resume.
 

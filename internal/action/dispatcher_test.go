@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/config"
@@ -32,6 +33,19 @@ func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provide
 	return provider.Result{Output: f.output, ExitCode: 0}, nil
 }
 
+// ctxCapturingClient blocks until the context it's given is done, then reports what
+// killed it - the real provider adapters do the equivalent via exec.CommandContext,
+// which this fake stands in for without needing a real subprocess.
+type ctxCapturingClient struct {
+	observedErr error
+}
+
+func (c *ctxCapturingClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
+	<-ctx.Done()
+	c.observedErr = ctx.Err()
+	return provider.Result{}, ctx.Err()
+}
+
 type savedArtifact struct {
 	runID      string
 	stepIndex  int
@@ -55,11 +69,11 @@ func (f *fakeArtifactWriter) SaveArtifact(runID string, stepIndex int, actionTyp
 func testConfig() *config.Config {
 	return &config.Config{
 		Actions: config.ActionsConfig{
-			Analyze:   config.ProviderModel{Provider: "claude", Model: "m"},
-			Plan:      config.ProviderModel{Provider: "claude", Model: "m"},
-			Implement: config.ProviderModel{Provider: "claude", Model: "m"},
-			Review:    config.ProviderModel{Provider: "claude", Model: "m"},
-			Answer:    config.ProviderModel{Provider: "claude", Model: "m"},
+			Analyze:   config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Plan:      config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Implement: config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Review:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Answer:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 		},
 		Test: config.TestConfig{Command: "go test ./..."},
 	}
@@ -324,6 +338,129 @@ func TestExecute_ProviderError_ActionFieldFilledIn(t *testing.T) {
 	}
 	if providerErr.Action != "analyze" {
 		t.Errorf("expected Action to be filled in as analyze, got %q", providerErr.Action)
+	}
+}
+
+// TestExecuteReview_ActionTimeout_FiresIndependentlyOfParentContext is the direct
+// regression test for the reported bug: previously review shared one deadline with
+// every earlier step, so a slow-but-legitimate review call could be killed mid-work
+// purely because analyze/implement/test had already spent most of the run-wide
+// execution.timeout. actions.review.timeout now gives review its own, dedicated
+// deadline, independent of whether the parent context has a deadline at all.
+func TestExecuteReview_ActionTimeout_FiresIndependentlyOfParentContext(t *testing.T) {
+	client := &ctxCapturingClient{}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	cfg := testConfig()
+	cfg.Actions.Review.Timeout = 10 * time.Millisecond
+	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	// context.Background() has no deadline of its own - if the action's own timeout
+	// did not fire, this call would block forever and the test would time out instead
+	// of failing cleanly.
+	_, err := d.Execute(context.Background(), domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(client.observedErr, context.DeadlineExceeded) {
+		t.Errorf("expected the action's own context to hit actions.review.timeout, got %v", client.observedErr)
+	}
+}
+
+// TestExecute_ActionTimeout_NeverExceedsParentDeadline confirms the nested-context
+// invariant (MVP.md §25): an action's own timeout can only tighten the bound inherited
+// from ctx, never extend the run past it, so a generous per-action override does not
+// let review outlive whatever remains of execution.timeout.
+func TestExecute_ActionTimeout_NeverExceedsParentDeadline(t *testing.T) {
+	client := &ctxCapturingClient{}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	cfg := testConfig()
+	cfg.Actions.Review.Timeout = time.Hour // far longer than the parent's deadline below
+
+	parentCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(parentCtx, domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(client.observedErr, context.DeadlineExceeded) {
+		t.Errorf("expected the parent's deadline to still fire despite the 1h override, got %v", client.observedErr)
+	}
+}
+
+func TestExecute_ProviderError_ConfiguredTimeoutFilledInFromActionOverride(t *testing.T) {
+	client := &fakeClient{err: &apperr.ProviderError{Provider: "claude", Model: "m", Kind: apperr.FailureTimeout}}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	cfg := testConfig()
+	cfg.Actions.Review.Timeout = 5 * time.Minute
+	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(context.Background(), domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var providerErr *apperr.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if providerErr.ConfiguredTimeout != 5*time.Minute {
+		t.Errorf("expected ConfiguredTimeout to be filled in from actions.review.timeout, got %v", providerErr.ConfiguredTimeout)
+	}
+}
+
+// TestExecute_ProviderError_ConfiguredTimeoutUnsetWhenParentDeadlineIsTighter guards
+// against a real bug: when the run-wide execution.timeout budget left in ctx is tighter
+// than the action's own override, that leftover run-wide budget is what actually fires
+// (context.WithTimeout can only tighten the parent deadline, never extend past it - see
+// TestExecute_ActionTimeout_NeverExceedsParentDeadline) - so the resulting error must
+// blame execution.timeout, not an override that never had the chance to fire on its own.
+func TestExecute_ProviderError_ConfiguredTimeoutUnsetWhenParentDeadlineIsTighter(t *testing.T) {
+	client := &fakeClient{err: &apperr.ProviderError{Provider: "claude", Model: "m", Kind: apperr.FailureTimeout}}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	cfg := testConfig()
+	cfg.Actions.Review.Timeout = time.Hour // far longer than the parent's deadline below
+
+	parentCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(parentCtx, domain.ActionReview, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var providerErr *apperr.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if providerErr.ConfiguredTimeout != 0 {
+		t.Errorf("expected ConfiguredTimeout to stay zero when the parent deadline is the binding constraint, got %v", providerErr.ConfiguredTimeout)
+	}
+}
+
+func TestExecute_ProviderError_ConfiguredTimeoutUnsetWithoutActionOverride(t *testing.T) {
+	client := &fakeClient{err: &apperr.ProviderError{Provider: "claude", Model: "m", Kind: apperr.FailureTimeout}}
+	d := newDispatcher(client)
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(context.Background(), domain.ActionAnalyze, run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var providerErr *apperr.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if providerErr.ConfiguredTimeout != 0 {
+		t.Errorf("expected ConfiguredTimeout to stay zero with no actions.analyze.timeout set, got %v", providerErr.ConfiguredTimeout)
 	}
 }
 

@@ -21,7 +21,7 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ReviewIssues:           d.pendingReviewIssues,
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement, domain.ActionImplement, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt)
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

@@ -11,7 +11,7 @@ import (
 func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	prompt := BuildPlanPrompt(PlanPromptInput{Task: run.Task.Description})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Plan, domain.ActionPlan, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Plan.ProviderModel, domain.ActionPlan, prompt)
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

@@ -11,11 +11,11 @@ func validConfig() Config {
 		Version:    1,
 		Classifier: ProviderModel{Provider: "claude", Model: "sonnet"},
 		Actions: ActionsConfig{
-			Analyze:   ProviderModel{Provider: "claude", Model: "sonnet"},
-			Plan:      ProviderModel{Provider: "claude", Model: "sonnet"},
-			Implement: ProviderModel{Provider: "claude", Model: "opus"},
-			Review:    ProviderModel{Provider: "codex", Model: "gpt"},
-			Answer:    ProviderModel{Provider: "gemini", Model: "pro"},
+			Analyze:   ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
+			Plan:      ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
+			Implement: ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "opus"}},
+			Review:    ActionConfig{ProviderModel: ProviderModel{Provider: "codex", Model: "gpt"}},
+			Answer:    ActionConfig{ProviderModel: ProviderModel{Provider: "gemini", Model: "pro"}},
 		},
 		Test:      TestConfig{Command: "go test ./..."},
 		Limits:    LimitsConfig{MaxSteps: 12, MaxFixIterations: 2},
@@ -71,6 +71,19 @@ func TestValidate_InvalidLimits(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "max_steps must be positive") || !strings.Contains(msg, "max_fix_iterations must be positive") {
 		t.Errorf("unexpected error message: %s", msg)
+	}
+}
+
+func TestValidate_NegativeActionTimeout(t *testing.T) {
+	cfg := validConfig()
+	cfg.Actions.Review.Timeout = -1 * time.Minute
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "actions.review.timeout must not be negative, got -1m0s") {
+		t.Errorf("unexpected error message: %s", err.Error())
 	}
 }
 

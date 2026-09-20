@@ -28,7 +28,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		GitDiff:        diff,
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Review, domain.ActionReview, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Review.ProviderModel, domain.ActionReview, prompt)
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

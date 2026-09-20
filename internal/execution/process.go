@@ -85,6 +85,14 @@ func (e *OSProcessExecutor) Run(ctx context.Context, spec Spec) (ProcessResult, 
 		Stderr:   stderr.String(),
 		Duration: duration,
 	}
+	// ProcessState is populated by Wait() whenever the process was actually started and
+	// reaped - including when it was SIGKILLed via cmd.Cancel on timeout/cancellation, in
+	// which case ExitCode() correctly reports -1 ("terminated by signal") rather than the
+	// zero-value that would otherwise look identical to a clean exit. It stays nil only
+	// on a spawn failure, where the process never started.
+	if cmd.ProcessState != nil {
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
 
 	// Context cancellation/timeout takes precedence even if the killed process's exit
 	// status also looks like a normal *exec.ExitError - the caller must be able to
@@ -94,13 +102,11 @@ func (e *OSProcessExecutor) Run(ctx context.Context, spec Spec) (ProcessResult, 
 	}
 
 	if err == nil {
-		result.ExitCode = 0
 		return result, nil
 	}
 
 	var exitErr *exec.ExitError
 	if ok := isExitError(err, &exitErr); ok {
-		result.ExitCode = exitErr.ExitCode()
 		return result, nil
 	}
 

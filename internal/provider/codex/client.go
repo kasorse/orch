@@ -73,6 +73,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			Executable: executable,
 			Args:       redactedArgs(req.Model, len(req.Prompt)),
 			WorkingDir: req.WorkingDir,
+			ExitCode:   res.ExitCode,
 			Duration:   res.Duration,
 			Stdout:     res.Stdout,
 			Stderr:     res.Stderr,

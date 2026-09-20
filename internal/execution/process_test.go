@@ -51,9 +51,14 @@ func TestOSProcessExecutor_Cancellation(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := exec.Run(ctx, Spec{Executable: "sleep", Args: []string{"5"}})
+	res, err := exec.Run(ctx, Spec{Executable: "sleep", Args: []string{"5"}})
 	if err == nil {
 		t.Fatal("expected an error when the context is cancelled mid-execution")
+	}
+	// -1 is Go's documented ExitCode() value for "terminated by signal" - it must not be
+	// left at the zero-value, which would look identical to a clean, successful exit.
+	if res.ExitCode != -1 {
+		t.Errorf("expected ExitCode -1 for a signal-killed process, got %d", res.ExitCode)
 	}
 }
 

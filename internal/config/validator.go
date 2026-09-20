@@ -24,6 +24,12 @@ func Validate(cfg Config) error {
 		problems = append(problems, validateProviderModel(pm.Action, pm.ProviderModel)...)
 	}
 
+	for _, a := range cfg.actionTimeouts() {
+		if a.Timeout < 0 {
+			problems = append(problems, fmt.Sprintf("actions.%s.timeout must not be negative, got %s", a.Action, a.Timeout))
+		}
+	}
+
 	if strings.TrimSpace(cfg.Test.Command) == "" {
 		problems = append(problems, "test.command is required")
 	}

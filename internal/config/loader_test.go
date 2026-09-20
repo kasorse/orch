@@ -96,3 +96,50 @@ func TestLoad_InvalidTimeout(t *testing.T) {
 		t.Fatal("expected error for invalid timeout")
 	}
 }
+
+func TestLoad_PerActionTimeout(t *testing.T) {
+	path := writeTempConfig(t, `
+version: 1
+
+actions:
+  analyze:
+    provider: claude
+    model: sonnet
+  plan:
+    provider: claude
+    model: sonnet
+  implement:
+    provider: claude
+    model: opus
+  review:
+    provider: codex
+    model: gpt
+    timeout: 20m
+  answer:
+    provider: gemini
+    model: pro
+
+execution:
+  timeout: 15m
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Actions.Review.Timeout != 20*time.Minute {
+		t.Errorf("expected review timeout 20m, got %v", cfg.Actions.Review.Timeout)
+	}
+	if cfg.Actions.Analyze.Timeout != 0 {
+		t.Errorf("expected analyze timeout to stay unset, got %v", cfg.Actions.Analyze.Timeout)
+	}
+}
+
+func TestLoad_InvalidActionTimeout(t *testing.T) {
+	path := writeTempConfig(t, "version: 1\nactions:\n  review:\n    provider: codex\n    model: gpt\n    timeout: \"not-a-duration\"\n")
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for invalid actions.review.timeout")
+	}
+}

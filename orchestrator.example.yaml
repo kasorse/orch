@@ -20,6 +20,11 @@ actions:
   review:
     provider: codex
     model: gpt
+    # Optional per-action timeout override. Review can be the slowest step (it inspects
+    # the full git diff), so it's the most likely to need more than its share of
+    # execution.timeout below. Still bounded by whatever's left of execution.timeout for
+    # the run as a whole - this can only tighten that bound, never extend past it.
+    timeout: 20m
 
   answer:
     provider: gemini

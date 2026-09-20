@@ -119,6 +119,11 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 			if providerErr.Action == "" {
 				providerErr.Action = string(actionName)
 			}
+			if providerErr.Kind == apperr.FailureTimeout {
+				if t, ok := ctx.Value(actionTimeoutKey{}).(time.Duration); ok {
+					providerErr.ConfiguredTimeout = t
+				}
+			}
 			if d.Logs != nil && providerErr.LogPath == "" {
 				stream := "stderr"
 				if result.Output != "" {

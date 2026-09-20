@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestProviderError_Message(t *testing.T) {
@@ -65,6 +66,33 @@ func TestProviderError_RendersFailureKindAndCommand(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("expected error message to contain %q, got: %s", want, msg)
 		}
+	}
+}
+
+func TestProviderError_TimeoutMentionsActionOverrideWhenSet(t *testing.T) {
+	err := &ProviderError{
+		Provider:          "codex",
+		Action:            "review",
+		Model:             "gpt",
+		Kind:              FailureTimeout,
+		ConfiguredTimeout: 10 * time.Minute,
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "failure: timeout (exceeded actions.review.timeout = 10m0s)") {
+		t.Errorf("expected message to name the action-specific override, got: %s", msg)
+	}
+}
+
+func TestProviderError_TimeoutFallsBackToExecutionTimeoutMessageWhenNoOverride(t *testing.T) {
+	err := &ProviderError{
+		Provider: "codex",
+		Action:   "review",
+		Model:    "gpt",
+		Kind:     FailureTimeout,
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "failure: timeout (exceeded execution.timeout)") {
+		t.Errorf("expected message to fall back to the run-wide timeout wording, got: %s", msg)
 	}
 }
 
