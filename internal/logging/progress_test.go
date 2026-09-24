@@ -230,7 +230,7 @@ func TestAnnouncementHelpers(t *testing.T) {
 	r.ValidatingConfig()
 	r.ConfigValid()
 	r.ClassifyingTask()
-	r.Classified(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow})
+	r.Classified(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow})
 	r.WorkflowBuilt(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}})
 
 	want := "Validating configuration...\n" +

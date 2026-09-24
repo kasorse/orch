@@ -22,33 +22,36 @@ var validTaskTypes = map[TaskType]bool{
 	TaskReview:   true,
 }
 
-type Complexity string
+// LegacyComplexity is the pre-Jev classifier's complexity scale. It is kept only
+// until the old classifier flow is removed (specs/JEV integration/TASKS.md T12);
+// new code uses Complexity (simple/medium/complex).
+type LegacyComplexity string
 
 const (
-	ComplexityLow    Complexity = "low"
-	ComplexityMedium Complexity = "medium"
-	ComplexityHigh   Complexity = "high"
+	LegacyComplexityLow    LegacyComplexity = "low"
+	LegacyComplexityMedium LegacyComplexity = "medium"
+	LegacyComplexityHigh   LegacyComplexity = "high"
 )
 
-var validComplexities = map[Complexity]bool{
-	ComplexityLow:    true,
-	ComplexityMedium: true,
-	ComplexityHigh:   true,
+var validLegacyComplexities = map[LegacyComplexity]bool{
+	LegacyComplexityLow:    true,
+	LegacyComplexityMedium: true,
+	LegacyComplexityHigh:   true,
 }
 
 type Classification struct {
-	Type               TaskType   `json:"type"`
-	Complexity         Complexity `json:"complexity"`
-	RequiresCodeChange bool       `json:"requires_code_change"`
-	RequiresTests      bool       `json:"requires_tests"`
-	RequiresReview     bool       `json:"requires_review"`
+	Type               TaskType         `json:"type"`
+	Complexity         LegacyComplexity `json:"complexity"`
+	RequiresCodeChange bool             `json:"requires_code_change"`
+	RequiresTests      bool             `json:"requires_tests"`
+	RequiresReview     bool             `json:"requires_review"`
 }
 
 func (c Classification) Validate() error {
 	if !validTaskTypes[c.Type] {
 		return fmt.Errorf("unsupported task type %q", c.Type)
 	}
-	if !validComplexities[c.Complexity] {
+	if !validLegacyComplexities[c.Complexity] {
 		return fmt.Errorf("unsupported complexity %q", c.Complexity)
 	}
 	return nil

@@ -82,7 +82,7 @@ func editComplexity(p Prompter, out io.Writer, run *domain.Run) error {
 		return err
 	}
 	return applyEdit(out, run, func(c domain.Classification) domain.Classification {
-		c.Complexity = domain.Complexity(ans)
+		c.Complexity = domain.LegacyComplexity(ans)
 		return c
 	})
 }

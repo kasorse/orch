@@ -292,6 +292,18 @@ T01 ─┬─ T02 ── T15 ─────────────────
 **Acceptance:** table-тесты маппинга и порядка; `Validate` отвергает значения 1.01, −0.01,
 NaN, лишний и отсутствующий вариант.
 
+**Сделано.** Отличия от плана:
+- `ClassificationInput` дополнительно несёт `ContextDepth` и `ContextLimited`. Это факты
+  orchestrator'а, провайдер копирует их в результат без изменений, поэтому
+  `TaskClassification.Validate()` может требовать валидный depth.
+- `Latency` вынесен из `TaskClassification` в тайминги Classification Service (T09) и
+  trace (T11): время измеряет сервис, не провайдер.
+- Старый `Complexity` (low/medium/high) переименован в `LegacyComplexity` и удаляется в
+  T12. Каждая задача при этом остаётся зелёной.
+- Константа `ActionResearch` добавлена уже здесь, её executor появится в T10.
+- В `ProjectContext` добавлено поле `Module`, в `RelevantFile.Purpose` — фиксированный
+  словарь ролей.
+
 ### T02 — Config v2 и offline-валидация
 
 **Файлы:** `internal/config/{config,validator,dependencies}.go` и тесты.

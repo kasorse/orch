@@ -36,7 +36,7 @@ func newRun(c domain.Classification) *domain.Run {
 }
 
 func TestReviewAndSelectMode_ImmediateApproveWithPinnedMode(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"a"}}
 	var out bytes.Buffer
 
@@ -56,7 +56,7 @@ func TestReviewAndSelectMode_ImmediateApproveWithPinnedMode(t *testing.T) {
 }
 
 func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"a", "2"}}
 	var out bytes.Buffer
 
@@ -73,7 +73,7 @@ func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
 }
 
 func TestReviewAndSelectMode_EditFieldsThenApprove(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{
 		"e",
 		"t", "feature",
@@ -100,14 +100,14 @@ func TestReviewAndSelectMode_EditFieldsThenApprove(t *testing.T) {
 	if run.OriginalClassification == nil {
 		t.Fatal("expected OriginalClassification to be preserved after an edit")
 	}
-	if run.OriginalClassification.Type != domain.TaskBugfix || run.OriginalClassification.Complexity != domain.ComplexityLow {
+	if run.OriginalClassification.Type != domain.TaskBugfix || run.OriginalClassification.Complexity != domain.LegacyComplexityLow {
 		t.Errorf("OriginalClassification not preserved correctly: %+v", run.OriginalClassification)
 	}
 
 	if run.Classification.Type != domain.TaskFeature {
 		t.Errorf("expected edited type feature, got %s", run.Classification.Type)
 	}
-	if run.Classification.Complexity != domain.ComplexityHigh {
+	if run.Classification.Complexity != domain.LegacyComplexityHigh {
 		t.Errorf("expected edited complexity high, got %s", run.Classification.Complexity)
 	}
 	if run.Classification.RequiresTests {
@@ -130,7 +130,7 @@ func TestReviewAndSelectMode_EditFieldsThenApprove(t *testing.T) {
 }
 
 func TestReviewAndSelectMode_RejectsInvalidEditThenSucceeds(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{
 		"e",
 		"c", "not-a-real-complexity", // rejected by Validate(), classification untouched
@@ -150,13 +150,13 @@ func TestReviewAndSelectMode_RejectsInvalidEditThenSucceeds(t *testing.T) {
 	if run.OriginalClassification != nil {
 		t.Error("expected no OriginalClassification since the only edit attempt was invalid")
 	}
-	if run.Classification.Complexity != domain.ComplexityLow {
+	if run.Classification.Complexity != domain.LegacyComplexityLow {
 		t.Errorf("expected complexity unchanged, got %s", run.Classification.Complexity)
 	}
 }
 
 func TestReviewAndSelectMode_Cancel(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"c"}}
 	var out bytes.Buffer
 
@@ -170,7 +170,7 @@ func TestReviewAndSelectMode_Cancel(t *testing.T) {
 }
 
 func TestTerminalGate_DeclineThenRetry(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"n", "r"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)
@@ -185,7 +185,7 @@ func TestTerminalGate_DeclineThenRetry(t *testing.T) {
 }
 
 func TestTerminalGate_DeclineEditThenRetryProceeds(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"n", "e", "1", "n", "d", "r"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)
@@ -206,7 +206,7 @@ func TestTerminalGate_DeclineEditThenRetryProceeds(t *testing.T) {
 }
 
 func TestTerminalGate_DeclineThenAbort(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"n", "a"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)
@@ -221,7 +221,7 @@ func TestTerminalGate_DeclineThenAbort(t *testing.T) {
 }
 
 func TestTerminalGate_AllRemainingSkipsFuturePrompts(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.ComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"A"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)

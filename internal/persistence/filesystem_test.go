@@ -80,7 +80,7 @@ func TestSaveRun_WritesClassificationAndWorkflowOnceSet(t *testing.T) {
 	assertMissing("classification.json")
 	assertMissing("workflow.json")
 
-	run.Classification = &domain.Classification{Type: domain.TaskFeature, Complexity: domain.ComplexityLow}
+	run.Classification = &domain.Classification{Type: domain.TaskFeature, Complexity: domain.LegacyComplexityLow}
 	run.Workflow = &domain.Workflow{Steps: []domain.Step{{Action: domain.ActionPlan}, {Action: domain.ActionImplement}}}
 
 	if err := store.SaveRun(run); err != nil {

@@ -27,7 +27,7 @@ func Build(c domain.Classification) (domain.Workflow, error) {
 
 	case domain.TaskBugfix:
 		steps := []domain.Step{}
-		if c.Complexity == domain.ComplexityMedium || c.Complexity == domain.ComplexityHigh {
+		if c.Complexity == domain.LegacyComplexityMedium || c.Complexity == domain.LegacyComplexityHigh {
 			steps = append(steps, domain.Step{Action: domain.ActionAnalyze})
 		}
 		steps = append(steps, domain.Step{Action: domain.ActionImplement})

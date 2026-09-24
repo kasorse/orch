@@ -73,7 +73,7 @@ func TestClassify_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Type != domain.TaskBugfix || got.Complexity != domain.ComplexityMedium {
+	if got.Type != domain.TaskBugfix || got.Complexity != domain.LegacyComplexityMedium {
 		t.Errorf("unexpected classification: %+v", got)
 	}
 }

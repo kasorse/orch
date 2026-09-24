@@ -9,6 +9,9 @@ const (
 	ActionTest      ActionType = "test"
 	ActionReview    ActionType = "review"
 	ActionAnswer    ActionType = "answer"
+	// ActionResearch executes StageResearch. No executor or workflow produces it yet -
+	// that lands with the research action (specs/JEV integration/TASKS.md T10).
+	ActionResearch ActionType = "research"
 )
 
 type Step struct {
