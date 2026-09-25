@@ -9,7 +9,12 @@ import (
 )
 
 func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
-	prompt := BuildPlanPrompt(PlanPromptInput{Task: run.Task.Description})
+	prompt := BuildPlanPrompt(PlanPromptInput{
+		Task:        run.Task.Description,
+		Research:    d.lastResearch,
+		Analysis:    d.lastAnalysis,
+		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionPlan),
+	})
 
 	result, ref, err := d.call(ctx, run, d.Config.Actions.Plan.ProviderModel, domain.ActionPlan, prompt)
 	if err != nil {

@@ -70,6 +70,7 @@ type Dispatcher struct {
 	// as a live tee of the CLI's combined output. Nil means capture-only.
 	Stream io.Writer
 
+	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
 	lastPlan     *domain.PlanArtifact
 	lastImpl     *domain.ImplementationArtifact

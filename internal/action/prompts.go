@@ -10,50 +10,93 @@ import (
 // Every Build*Prompt function starts with a literal "ACTION: <name>" first line, which
 // doubles as the routing marker fake executables grep on in integration tests.
 
+// readOnlyRule is shared by every read-only stage prompt: research, analysis and
+// planning inspect, they never change the repository.
+const readOnlyRule = "This is a read-only step: do not create, modify or delete any files in the repository."
+
+// finalAnswerRule is appended when the step is the workflow's last read-only step and
+// no development follows (TASKS.md В4): its answer is what the user gets back.
+const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
+	`write the complete reply to the user's request, in the language the request is written in.`
+
+type ResearchPromptInput struct {
+	Task        string
+	FinalAnswer bool
+}
+
+func BuildResearchPrompt(in ResearchPromptInput) string {
+	var b strings.Builder
+	b.WriteString("ACTION: research\n\n")
+	b.WriteString("Research the external knowledge the following software engineering task needs: approaches, libraries, tools, alternatives and their trade-offs. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	writeFinalAnswerRule(&b, in.FinalAnswer)
+	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	return b.String()
+}
+
 type AnalyzePromptInput struct {
-	Task string
+	Task        string
+	Research    *domain.ResearchArtifact
+	FinalAnswer bool
 }
 
 func BuildAnalyzePrompt(in AnalyzePromptInput) string {
-	return fmt.Sprintf(`ACTION: analyze
-
-Analyze the following software engineering task. Respond with a single JSON object, no
-markdown fences, no prose before or after it, matching exactly this shape:
-
-{
-  "summary": "...",
-  "root_cause": "...",
-  "affected_files": ["..."],
-  "recommendation": "...",
-  "risks": ["..."]
-}
-
-Task:
-%s
-`, in.Task)
+	var b strings.Builder
+	b.WriteString("ACTION: analyze\n\n")
+	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	writeFinalAnswerRule(&b, in.FinalAnswer)
+	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	writeResearch(&b, in.Research)
+	return b.String()
 }
 
 type PlanPromptInput struct {
-	Task string
+	Task        string
+	Research    *domain.ResearchArtifact
+	Analysis    *domain.AnalysisArtifact
+	FinalAnswer bool
 }
 
 func BuildPlanPrompt(in PlanPromptInput) string {
-	return fmt.Sprintf(`ACTION: plan
-
-Create an implementation plan for the following software engineering task. Respond with a
-single JSON object, no markdown fences, no prose before or after it, matching exactly this
-shape:
-
-{
-  "summary": "...",
-  "steps": ["..."],
-  "affected_files": ["..."],
-  "risks": ["..."]
+	var b strings.Builder
+	b.WriteString("ACTION: plan\n\n")
+	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	writeFinalAnswerRule(&b, in.FinalAnswer)
+	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	writeResearch(&b, in.Research)
+	if in.Analysis != nil {
+		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
+			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
+	}
+	return b.String()
 }
 
-Task:
-%s
-`, in.Task)
+func answerField(final bool) string {
+	if !final {
+		return ""
+	}
+	return ",\n  \"answer\": \"...\""
+}
+
+func writeFinalAnswerRule(b *strings.Builder, final bool) {
+	if final {
+		b.WriteString(finalAnswerRule + "\n\n")
+	}
+}
+
+func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
+	if r == nil {
+		return
+	}
+	fmt.Fprintf(b, "\nResearch:\n%s\n", r.Summary)
+	if len(r.Findings) > 0 {
+		fmt.Fprintf(b, "Findings:\n- %s\n", strings.Join(r.Findings, "\n- "))
+	}
+	if r.Recommendation != "" {
+		fmt.Fprintf(b, "Recommendation: %s\n", r.Recommendation)
+	}
 }
 
 // ImplementPromptInput carries whichever prior context is available. On the first

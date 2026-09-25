@@ -69,6 +69,7 @@ func (f *fakeArtifactWriter) SaveArtifact(runID string, stepIndex int, actionTyp
 func testConfig() *config.Config {
 	return &config.Config{
 		Actions: config.ActionsConfig{
+			Research:  config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "research-model"}},
 			Analyze:   config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 			Plan:      config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 			Implement: config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},

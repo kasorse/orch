@@ -75,12 +75,27 @@ func (r ReviewResult) Validate() error {
 	return nil
 }
 
+// ResearchArtifact is the output of the read-only research stage: external knowledge
+// (approaches, libraries, alternatives) gathered before touching the code.
+type ResearchArtifact struct {
+	Summary        string   `json:"summary"`
+	Findings       []string `json:"findings"`
+	Options        []string `json:"options"`
+	Recommendation string   `json:"recommendation"`
+	References     []string `json:"references"`
+	// Answer is set when research is the workflow's final read-only step and no
+	// development follows: it is the reply to the user's request (TASKS.md В4).
+	Answer string `json:"answer,omitempty"`
+}
+
 type AnalysisArtifact struct {
 	Summary        string   `json:"summary"`
 	RootCause      string   `json:"root_cause"`
 	AffectedFiles  []string `json:"affected_files"`
 	Recommendation string   `json:"recommendation"`
 	Risks          []string `json:"risks"`
+	// Answer: see ResearchArtifact.Answer.
+	Answer string `json:"answer,omitempty"`
 }
 
 type PlanArtifact struct {
@@ -88,6 +103,8 @@ type PlanArtifact struct {
 	Steps         []string `json:"steps"`
 	AffectedFiles []string `json:"affected_files"`
 	Risks         []string `json:"risks"`
+	// Answer: see ResearchArtifact.Answer.
+	Answer string `json:"answer,omitempty"`
 }
 
 type ImplementationArtifact struct {

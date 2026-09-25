@@ -782,6 +782,25 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 **Acceptance:** unit-тесты prompt'ов; сценарий research → analysis не оставляет изменений
 в git.
 
+**Сделано.** Отличия от плана:
+- **`answer` не удалён — переносится в T12**, как и в T02–T05. Его ещё использует
+  старый flow (`BuildLegacy`, `app`, `actions.answer` в config). Удалять его до того, как
+  T12 заменит flow целиком, значит сломать то, что сейчас работает.
+- **Research:** `ResearchArtifact{summary, findings, options, recommendation,
+  references}`, routing и timeout — `actions.research`.
+- **Контекст дальше по цепочке:** research передаётся в analyze и plan (по плану), а
+  analysis — ещё и в plan. Раньше analyze и plan не встречались в одном workflow; теперь
+  stages research → analysis → planning идут подряд, и план без результатов анализа
+  потерял бы их.
+- **Итоговый ответ (В4).** Если в workflow нет implement, последний read-only шаг
+  (research, analyze или plan) просит в своём JSON поле `answer` — полный ответ
+  пользователю на языке запроса. Поле `answer` появилось во всех трёх артефактах
+  (`omitempty`). Показ ответа в консоли — T11/T12.
+- **Read-only prompts.** Все три read-only prompt'а явно запрещают менять файлы. Гарантия
+  на уровне orchestrator'а проверяется тестом: research → analysis на настоящем
+  git-репозитории оставляет его чистым. Помешать CLI самому изменить файлы orchestrator
+  не может — так было и раньше с analyze.
+
 ### T11 — Decision trace и вывод в консоль
 
 **Файлы:** `internal/persistence/filesystem.go`, `internal/domain/run.go`,

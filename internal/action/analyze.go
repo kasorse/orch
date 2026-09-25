@@ -9,7 +9,11 @@ import (
 )
 
 func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
-	prompt := BuildAnalyzePrompt(AnalyzePromptInput{Task: run.Task.Description})
+	prompt := BuildAnalyzePrompt(AnalyzePromptInput{
+		Task:        run.Task.Description,
+		Research:    d.lastResearch,
+		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionAnalyze),
+	})
 
 	result, ref, err := d.call(ctx, run, d.Config.Actions.Analyze.ProviderModel, domain.ActionAnalyze, prompt)
 	if err != nil {
