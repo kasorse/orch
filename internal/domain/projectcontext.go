@@ -9,6 +9,7 @@ type ProjectContext struct {
 	ProjectType   string         `json:"project_type,omitempty"`
 	Module        string         `json:"module,omitempty"`
 	Rules         []string       `json:"rules,omitempty"`
+	Docs          []DocExcerpt   `json:"docs,omitempty"`
 	RelevantFiles []RelevantFile `json:"relevant_files,omitempty"`
 	Dependencies  []string       `json:"dependencies,omitempty"`
 	TestInfo      TestInfo       `json:"test_info"`
@@ -16,6 +17,23 @@ type ProjectContext struct {
 	// Truncated is set when the context budget forced content to be dropped.
 	Truncated bool `json:"truncated,omitempty"`
 }
+
+// DocExcerpt is the opening of one documentation section that mentions the request's
+// terms (README.md, docs/*.md). Whole documents are never sent.
+type DocExcerpt struct {
+	Path    string `json:"path"`
+	Section string `json:"section,omitempty"`
+	Text    string `json:"text"`
+}
+
+// Purpose values for RelevantFile. Path-based matching (T08) can only tell tests apart;
+// the symbol-based roles are filled in by T17.
+const (
+	PurposeTest           = "test"
+	PurposeInterface      = "interface"
+	PurposeImplementation = "implementation"
+	PurposeDependent      = "dependent"
+)
 
 // RelevantFile is a repository file judged related to the request.
 type RelevantFile struct {

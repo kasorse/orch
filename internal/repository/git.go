@@ -75,3 +75,69 @@ func (r *Repository) Diff(ctx context.Context) (string, error) {
 	}
 	return diff, nil
 }
+
+// ListFiles returns every file git would consider part of the project: tracked files
+// plus untracked ones not excluded by .gitignore, as slash-separated paths relative to
+// Dir. Ignored files never appear, so callers get .gitignore handling for free.
+func (r *Repository) ListFiles(ctx context.Context) ([]string, error) {
+	out, err := r.git(ctx, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool)
+	var files []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" && !seen[p] { // a file both cached and modified is listed once per stage
+			seen[p] = true
+			files = append(files, p)
+		}
+	}
+	return files, nil
+}
+
+// Branch returns the current branch name, or "" when HEAD is detached. It works in a
+// repository without commits too.
+func (r *Repository) Branch(ctx context.Context) (string, error) {
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"symbolic-ref", "--quiet", "--short", "HEAD"}, WorkingDir: r.Dir})
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to run git symbolic-ref", Err: err}
+	}
+	if result.ExitCode != 0 { // detached HEAD
+		return "", nil
+	}
+	return strings.TrimSpace(result.Stdout), nil
+}
+
+// ChangedFiles returns the paths with uncommitted changes (staged, unstaged, or
+// untracked), relative to Dir. A rename is reported under its new path, and an
+// untracked directory as the directory itself rather than every file in it.
+func (r *Repository) ChangedFiles(ctx context.Context) ([]string, error) {
+	out, err := r.git(ctx, "status", "--porcelain=v1", "-z", "--untracked-files=normal")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		files = append(files, e[3:])
+		if e[0] == 'R' || e[0] == 'C' { // -z puts the original path in the next entry
+			i++
+		}
+	}
+	return files, nil
+}
+
+func (r *Repository) git(ctx context.Context, args ...string) (string, error) {
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: args, WorkingDir: r.Dir})
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to run git " + args[0], Err: err}
+	}
+	if result.ExitCode != 0 {
+		return "", &apperr.RepositoryError{Msg: "git " + args[0] + " failed: " + result.Stderr}
+	}
+	return result.Stdout, nil
+}

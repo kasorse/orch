@@ -123,3 +123,49 @@ func TestDiff_GitDiffFailure(t *testing.T) {
 		t.Fatalf("expected *apperr.RepositoryError, got %T", err)
 	}
 }
+
+func TestListFiles_SplitsNULAndDedupes(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{Stdout: "a.go\x00dir/with space.go\x00a.go\x00", ExitCode: 0}},
+	}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	files, err := repo.ListFiles(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(files, "|") != "a.go|dir/with space.go" {
+		t.Errorf("files = %q", files)
+	}
+	if got := strings.Join(exec.Calls[0].Args, " "); got != "ls-files -z --cached --others --exclude-standard" {
+		t.Errorf("args = %q", got)
+	}
+}
+
+func TestBranch_DetachedIsEmpty(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{ExitCode: 1}},
+	}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	branch, err := repo.Branch(context.Background())
+	if err != nil || branch != "" {
+		t.Errorf("Branch = %q, %v; want empty for detached HEAD", branch, err)
+	}
+}
+
+func TestChangedFiles_ParsesPorcelainZ(t *testing.T) {
+	out := " M internal/a.go\x00R  new.go\x00old.go\x00?? notes/todo.md\x00"
+	exec := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{Stdout: out, ExitCode: 0}},
+	}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	files, err := repo.ChangedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Join(files, "|") != "internal/a.go|new.go|notes/todo.md" {
+		t.Errorf("files = %q", files)
+	}
+}
