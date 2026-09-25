@@ -1,0 +1,29 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "complexity": {
+      "type": "choice",
+      "choice": "complex",
+      "probabilities": {"simple": 0.1, "medium": 0.6, "complex": 0.3},
+      "confidence": 0.7
+    },
+    "complexity_score": {
+      "type": "score",
+      "score": 1.2,
+      "legend": {
+        "0": "Simple: small local change, few components, known implementation path, no architecture change, low regression risk.",
+        "1": "Medium: several files/components, requires understanding existing code, introduces a dependency or behaviour, moderate regression risk.",
+        "2": "Complex: cross-component or architectural change, uncertain strategy, significant data-flow change, high regression risk."
+      },
+      "probabilities": {"0": 0.1, "1": 0.6, "2": 0.3},
+      "confidence": 0.55
+    },
+    "stage_research": {"type": "noul", "noul": 0.05},
+    "stage_analysis": {"type": "noul", "noul": 0.92},
+    "stage_planning": {"type": "noul", "noul": 0.71},
+    "stage_development": {"type": "noul", "noul": 0.99},
+    "stage_testing": {"type": "noul", "noul": 0.95},
+    "stage_review": {"type": "noul", "noul": 0.74}
+  },
+  "usage": {"input_tokens": 1450, "output_tokens": 8}
+}

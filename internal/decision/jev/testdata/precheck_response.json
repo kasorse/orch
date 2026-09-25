@@ -1,0 +1,12 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "context_depth": {
+      "type": "choice",
+      "choice": "project",
+      "probabilities": {"none": 0.09, "project": 0.91},
+      "confidence": 0.82
+    }
+  },
+  "usage": {"input_tokens": 120, "output_tokens": 1}
+}

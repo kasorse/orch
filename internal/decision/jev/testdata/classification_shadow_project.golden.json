@@ -1,0 +1,104 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "request": "Add a cache to ProductRepository",
+    "project_context_available": true,
+    "context_truncated": true,
+    "project": {
+      "language": "go",
+      "project_type": "cli",
+      "module": "orchestrator",
+      "rules": [
+        "Provider CLI invocation is argv-only, never sh -c."
+      ],
+      "relevant_files": [
+        {
+          "path": "internal/repository/product.go",
+          "purpose": "implementation",
+          "summary": "ProductRepository backed by PostgreSQL."
+        }
+      ],
+      "dependencies": [
+        "gopkg.in/yaml.v3"
+      ],
+      "test_info": {
+        "exists": true,
+        "unit_tests": true,
+        "integration_tests": false
+      },
+      "git": {
+        "branch": "main",
+        "dirty": false
+      },
+      "truncated": true
+    }
+  },
+  "questions": {
+    "complexity": {
+      "type": "choice",
+      "instructions": "How complex is it to fulfil `request` in this project?",
+      "criteria": {
+        "simple": "Small local change, few components, known implementation path, no architecture change, low regression risk.",
+        "medium": "Several files/components, requires understanding existing code, introduces a dependency or behaviour, moderate regression risk.",
+        "complex": "Cross-component or architectural change, uncertain strategy, significant data-flow change, high regression risk."
+      }
+    },
+    "complexity_score": {
+      "type": "score",
+      "instructions": "Rate how complex it is to fulfil `request` in this project.",
+      "criteria": [
+        "Simple: small local change, few components, known implementation path, no architecture change, low regression risk.",
+        "Medium: several files/components, requires understanding existing code, introduces a dependency or behaviour, moderate regression risk.",
+        "Complex: cross-component or architectural change, uncertain strategy, significant data-flow change, high regression risk."
+      ]
+    },
+    "stage_analysis": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require analysing existing code or the problem before acting?",
+      "criteria": {
+        "false": "What to do and where is already clear from the request.",
+        "true": "The cause, the affected code, or the right place to change is not yet known and must be found by reading code, logs or behaviour."
+      }
+    },
+    "stage_development": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require changing code in the repository?",
+      "criteria": {
+        "false": "The request is answered or fulfilled without modifying repository files.",
+        "true": "Files in the repository must be created, modified or deleted."
+      }
+    },
+    "stage_planning": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require an explicit implementation plan before changing code?",
+      "criteria": {
+        "false": "The change is direct enough to implement without a separate plan, or no code is changed at all.",
+        "true": "The work spans several steps, files or components, or involves design choices that should be settled before writing code."
+      }
+    },
+    "stage_research": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require researching external knowledge (approaches, libraries, alternatives) before working?",
+      "criteria": {
+        "false": "Everything needed is in the request, the repository, or common engineering knowledge.",
+        "true": "The request needs information that is not in the repository: comparing approaches, choosing or evaluating libraries or tools, or looking up external standards or APIs."
+      }
+    },
+    "stage_review": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require reviewing the resulting code changes?",
+      "criteria": {
+        "false": "There is no diff, or it is trivial enough not to need a review.",
+        "true": "The change is non-trivial or risky enough that its diff should be checked for correctness, or the request itself asks for a review."
+      }
+    },
+    "stage_testing": {
+      "type": "noul",
+      "instructions": "Does fulfilling `request` require running the project's tests to verify the result?",
+      "criteria": {
+        "false": "No code behaviour changes: a question, a pure analysis, or a documentation-only edit.",
+        "true": "Code behaviour changes, or the request explicitly asks for tests to be run or written."
+      }
+    }
+  }
+}

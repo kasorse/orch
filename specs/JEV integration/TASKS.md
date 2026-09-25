@@ -636,6 +636,35 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 маппятся в доменные типы; каждый вид невалидного ответа даёт `InvalidResponse`, в том
 числе score с неожиданной `legend`.
 
+**Сделано.** Отличия от плана:
+- **Интерфейс называется `decision.Provider`**, а не `DecisionProvider`: иначе получится
+  `decision.DecisionProvider`. Методы — как в плане.
+- **Вопросы — типизированные значения, а не JSON-константы.** `internal/decision/questions.go`
+  отдаёт `ChoiceQuestion`, `ScoreQuestion` и `YesNoQuestion` (каждый раз свежую копию). В
+  transport-форму их переводит `jev`, LLM (T22) соберёт из них prompt. Тексты
+  planning/testing/review и критерии true/false для всех stages в разделе 2 были
+  многоточиями — дописаны. Их нужно вычитать: они влияют на калибровку порогов.
+- **Провайдер получает список вопросов complexity, а не флаг `shadow`**:
+  `NewProvider(client, model, sources)`. Так работает и `primary: score` без shadow (в
+  запросе только `complexity_score`). Какой вопрос основной, провайдер по-прежнему не
+  знает. Список собирает `app` из `primary` и `shadow`.
+- **Порядок вариантов choice сохраняется.** Go сериализует map по алфавиту (complex,
+  medium, simple). Criteria кодируются в порядке вопросов, потому что модель читает текст
+  последовательно.
+- **Mapper строже плана.** Ошибкой считаются ещё: лишний ответ (id, о котором не
+  спрашивали), пустой `response.model`, отсутствующие `confidence` или `score`. После
+  разбора результат проверяется `TaskClassification.Validate()` (сумма распределения,
+  диапазоны).
+- **Проверка `legend` — допущение.** Документация не говорит, что именно лежит в
+  `legend`. Mapper требует точного совпадения с текстами наших уровней (mock так и
+  отвечает). Проверить на настоящем API, когда появится доступ. Если Jev кладёт туда
+  что-то другое, правится одна функция `complexityFromScore`.
+- **`context_truncated: true` в state дублирует `project.truncated`**: поле
+  `ProjectContext.Truncated` сериализуется как есть. Лишнее поле безвредно, отдельно
+  прятать его не стал.
+- Golden-файлы обновляются командой `go test ./internal/decision/jev -update`. Есть
+  end-to-end тест провайдера с mock-клиентом из T06.
+
 ### T08 — Context Manager (базовый)
 
 **Файлы:** `internal/projectctx/{manager,secrets,docs,metadata,git,tests,relevant}.go`.

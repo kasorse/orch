@@ -1,0 +1,16 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "request": "Add a cache to ProductRepository"
+  },
+  "questions": {
+    "context_depth": {
+      "type": "choice",
+      "instructions": "To estimate the complexity and required workflow stages of `request`, is it necessary to inspect the current code repository?",
+      "criteria": {
+        "none": "The request can be classified from its text alone: general knowledge, concepts, comparisons; it does not refer to this repository's code, files or behaviour.",
+        "project": "The request refers to code, components, files, bugs, tests or behaviour of the current repository, so its complexity depends on that code."
+      }
+    }
+  }
+}
