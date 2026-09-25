@@ -109,11 +109,3 @@ func TestConfigError_Unwrap(t *testing.T) {
 		t.Error("expected errors.As to match *ConfigError")
 	}
 }
-
-func TestClassificationError_Message(t *testing.T) {
-	err := &ClassificationError{Raw: "not json", Err: errors.New("invalid character")}
-	msg := err.Error()
-	if !strings.Contains(msg, "not json") || !strings.Contains(msg, "invalid character") {
-		t.Errorf("unexpected message: %s", msg)
-	}
-}

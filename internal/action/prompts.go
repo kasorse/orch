@@ -185,22 +185,3 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 
 	return b.String()
 }
-
-type AnswerPromptInput struct {
-	Task string
-}
-
-func BuildAnswerPrompt(in AnswerPromptInput) string {
-	return fmt.Sprintf(`ACTION: answer
-
-Answer the following question about the current repository. Respond with a single JSON
-object, no markdown fences, no prose before or after it, matching exactly this shape:
-
-{
-  "answer": "..."
-}
-
-Question:
-%s
-`, in.Task)
-}

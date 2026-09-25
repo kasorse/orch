@@ -1,5 +1,6 @@
-// Package app wires config, provider, classifier, repository, testexec, action,
-// persistence, and workflow together into the orchestrator's three CLI commands
+// Package app wires config, provider, translation, the decision provider, context
+// collection, classification, repository, testexec, action, persistence, and workflow
+// together into the orchestrator's three CLI commands
 // (version, validate, run). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
@@ -14,19 +15,24 @@ import (
 
 	"orchestrator/internal/action"
 	"orchestrator/internal/apperr"
-	"orchestrator/internal/classifier"
+	"orchestrator/internal/classification"
 	"orchestrator/internal/config"
+	"orchestrator/internal/decision"
+	"orchestrator/internal/decision/jev"
+	"orchestrator/internal/decision/llm"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/interaction"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
+	"orchestrator/internal/projectctx"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/claude"
 	"orchestrator/internal/provider/codex"
 	"orchestrator/internal/provider/gemini"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
+	"orchestrator/internal/translate"
 	"orchestrator/internal/workflow"
 )
 
@@ -130,16 +136,19 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	reporter := logging.NewConsoleReporter(stdout)
 	reporter.Verbose = verbose
 
+	// Fail fast (MVP.md §7): Load -> Validate -> ValidateDependencies run in full before
+	// any provider, decision client or translator exists.
 	cfg, err := loadAndValidateConfig(configPath, reporter)
 	if err != nil {
 		return err
 	}
 
-	// The run-wide timeout starts here, right after config validation, so it covers
-	// classification and the engine run, not just the workflow (spec §11 Q7: a hung
-	// connection during classification would otherwise never time out).
-	runCtx, cancel := context.WithTimeout(ctx, cfg.Execution.Timeout)
-	defer cancel()
+	// execution.timeout starts here and covers translation, the pre-check, context
+	// collection, classification and the workflow - but not the time the user spends on
+	// a manual choice (see engineContext).
+	started := time.Now()
+	decideCtx, cancelDecide := context.WithTimeout(ctx, cfg.Execution.Timeout)
+	defer cancelDecide()
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -148,11 +157,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 
 	osExec := execution.NewOSProcessExecutor()
 
-	repo, err := repository.Open(runCtx, cwd, osExec)
+	repo, err := repository.Open(decideCtx, cwd, osExec)
 	if err != nil {
 		return err
 	}
-	if dirty, err := repo.IsDirty(runCtx); err != nil {
+	if dirty, err := repo.IsDirty(decideCtx); err != nil {
 		return err
 	} else if dirty {
 		logging.DirtyRepoWarning(stderr)
@@ -163,17 +172,12 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	registry.Register(provider.Codex, codex.New(osExec))
 	registry.Register(provider.Gemini, gemini.New(osExec))
 
-	classifierClient, err := registry.Resolve(cfg.Classifier.Provider)
-	if err != nil {
-		return &apperr.WorkflowError{Msg: "failed to resolve classifier provider", Err: err}
-	}
-	store := persistence.NewStore(runsBaseDir)
-	clf := classifier.New(classifierClient, cfg.Classifier.Provider, cfg.Classifier.Model, store)
-	clf.Observer = logging.ClassifyReporter{ConsoleReporter: reporter}
+	var stream io.Writer
 	if verbose {
-		clf.Stream = logging.NewPrefixWriter(stdout, "  | ")
+		stream = logging.NewPrefixWriter(stdout, "  | ")
 	}
 
+	store := persistence.NewStore(runsBaseDir)
 	task := domain.Task{Description: taskDescription, CreatedAt: time.Now()}
 	run, err := store.NewRun(task)
 	if err != nil {
@@ -181,44 +185,65 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	}
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
-	reporter.ClassifyingTask()
-	classification, err := clf.Classify(runCtx, run.ID, task.Description)
+	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)
 	if err != nil {
-		run.Status = domain.RunFailed
-		run.FailureReason = err.Error()
-		_ = store.SaveRun(run)
-		return err
+		return failRun(store, run, err)
 	}
-	run.Classification = &classification
-	reporter.Classified(classification)
-	if err := store.SaveRun(run); err != nil {
-		return err
+	translatorClient, err := registry.Resolve(cfg.Translation.Provider)
+	if err != nil {
+		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to resolve translation provider", Err: err})
 	}
 
-	wf, err := workflow.BuildLegacy(classification)
-	if err != nil {
-		run.Status = domain.RunFailed
-		run.FailureReason = err.Error()
-		_ = store.SaveRun(run)
-		return err
+	// One prompter for every question on stdin: it buffers input, so a second reader
+	// would swallow answers meant for the first.
+	prompter := interaction.NewTerminalPrompter(stdin, stdout)
+	interactive := mode != domain.ModeAuto && isTerminal(stdin)
+
+	svc := &classification.Service{
+		Translator: &translate.Translator{
+			Client: translatorClient, ProviderID: cfg.Translation.Provider, Model: cfg.Translation.Model,
+			Timeout: cfg.Translation.Timeout, Logger: store,
+			Observer: logging.CallReporter{ConsoleReporter: reporter}, Stream: stream,
+		},
+		Decisions: decisions,
+		Context: projectctx.NewManager(repo, cwd, projectctx.Options{
+			MaxFiles: cfg.Context.MaxFiles, MaxBytes: cfg.Context.MaxBytes, ExtraDeny: cfg.Context.ExtraDeny,
+		}),
+		Chooser:      interaction.NewChooser(prompter, stdout, interactive),
+		Policy:       cfg.DecisionPolicy(),
+		Primary:      domain.ComplexitySource(cfg.Decision.Complexity.Primary),
+		AskOnFailure: cfg.Decision.OnFailure == config.OnFailureAsk,
 	}
+
+	reporter.Deciding()
+	// The manual choice waits on ctx: Ctrl-C still cancels it, execution.timeout does not.
+	res, err := svc.Classify(decideCtx, classification.Request{RunID: run.ID, Text: task.Description, UserCtx: ctx})
+	if err != nil {
+		return failRun(store, run, err)
+	}
+
+	wf, err := workflow.Build(res.Decision.Stages)
+	if err != nil {
+		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the workflow", Err: err})
+	}
+	run.Decision = &res.Decision
 	run.Workflow = &wf
-	reporter.WorkflowBuilt(wf)
+
+	if err := store.SaveDecision(run.ID, res.Trace(wf)); err != nil {
+		return err
+	}
+	if err := store.SaveProjectContext(run.ID, res.Project); err != nil {
+		return err
+	}
+	reporter.Decided(res.Trace(wf))
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
 
-	var prompter interaction.Prompter
 	if mode != domain.ModeAuto {
-		termPrompter := interaction.NewTerminalPrompter(stdin, stdout)
-		prompter = termPrompter
-
-		resolvedMode, approved, err := interaction.ReviewAndSelectMode(termPrompter, stdout, run, mode)
+		resolvedMode, approved, err := interaction.ReviewAndSelectMode(prompter, stdout, mode)
 		if err != nil {
-			run.Status = domain.RunFailed
-			run.FailureReason = err.Error()
-			_ = store.SaveRun(run)
-			return err
+			return failRun(store, run, err)
 		}
 		if !approved {
 			run.Status = domain.RunStopped
@@ -241,13 +266,14 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		run.Mode = domain.ModeAuto
 	}
 
+	runCtx, cancelRun := engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
+	defer cancelRun()
+
 	dispatcher := action.New(&cfg, registry, repo, testexec.New(osExec))
 	dispatcher.Artifacts = store
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
-	if verbose {
-		dispatcher.Stream = logging.NewPrefixWriter(stdout, "  | ")
-	}
+	dispatcher.Stream = stream
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -262,7 +288,76 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		engine.Gate = interaction.NewTerminalGate(prompter, stdout)
 	}
 
-	return engine.Run(runCtx, run)
+	if err := engine.Run(runCtx, run); err != nil {
+		return err
+	}
+	if answer := dispatcher.FinalAnswer(run); answer != "" {
+		fmt.Fprintf(stdout, "\nAnswer:\n%s\n", answer)
+	}
+	return nil
+}
+
+// newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over
+// HTTP, its offline mock, or a CLI provider. The Jev API key is read from the
+// environment here and handed only to the client's constructor.
+func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, stream, stderr io.Writer) (decision.Provider, error) {
+	d := cfg.Decision
+	sources := d.Complexity.Sources()
+
+	if d.UsesJev() {
+		var client jev.Client
+		if d.Jev.Mock {
+			fmt.Fprintln(stderr, "Warning: decision.jev.mock is on - decisions come from an offline keyword heuristic, not from Jev.")
+			client = jev.NewMockClient()
+		} else {
+			client = jev.NewHTTPClient(jev.Options{BaseURL: d.Jev.BaseURL, Timeout: d.Timeout, MaxRetries: d.Jev.MaxRetries}, os.Getenv(d.Jev.APIKeyEnv))
+		}
+		p, err := jev.NewProvider(client, d.Model, sources)
+		if err != nil {
+			return nil, &apperr.WorkflowError{Msg: "failed to build the jev decision provider", Err: err}
+		}
+		return p, nil
+	}
+
+	client, err := registry.Resolve(d.Provider)
+	if err != nil {
+		return nil, &apperr.WorkflowError{Msg: "failed to resolve the decision provider", Err: err}
+	}
+	return &llm.Provider{
+		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
+		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter}, Stream: stream,
+	}, nil
+}
+
+// engineContext is the workflow's share of execution.timeout. Without a manual choice
+// it is just the deciding context, deadline unchanged. When the user chose by hand,
+// their thinking time is given back: the workflow gets execution.timeout minus the time
+// the decision phase itself took.
+func engineContext(ctx, decideCtx context.Context, timeout, elapsed, userTime time.Duration) (context.Context, context.CancelFunc) {
+	if userTime <= 0 {
+		return decideCtx, func() {}
+	}
+	return context.WithTimeout(ctx, timeout-(elapsed-userTime))
+}
+
+// isTerminal reports whether stdin can answer questions. A real stdin that is not a
+// terminal (a pipe, /dev/null, a CI runner) cannot - then the manual choice fails at
+// once instead of reading EOF. Any other reader is a caller-scripted input (tests).
+func isTerminal(stdin io.Reader) bool {
+	f, ok := stdin.(*os.File)
+	if !ok {
+		return true
+	}
+	info, err := f.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// failRun records a failure that ended the run before the workflow started.
+func failRun(store *persistence.Store, run *domain.Run, err error) error {
+	run.Status = domain.RunFailed
+	run.FailureReason = err.Error()
+	_ = store.SaveRun(run)
+	return err
 }
 
 // runObserver renders CLI progress via ConsoleReporter and, alongside that, persists

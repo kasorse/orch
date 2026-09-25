@@ -67,3 +67,33 @@ func isFinalReadOnlyStep(run *domain.Run, action domain.ActionType) bool {
 	}
 	return last == action
 }
+
+// FinalAnswer returns the reply of a workflow without development (TASKS.md В4): the
+// answer of its last read-only step, or "" when there is none.
+func (d *Dispatcher) FinalAnswer(run *domain.Run) string {
+	if run.Workflow == nil {
+		return ""
+	}
+	for i := len(run.Workflow.Steps) - 1; i >= 0; i-- {
+		switch run.Workflow.Steps[i].Action {
+		case domain.ActionImplement:
+			return ""
+		case domain.ActionPlan:
+			if d.lastPlan != nil {
+				return d.lastPlan.Answer
+			}
+			return ""
+		case domain.ActionAnalyze:
+			if d.lastAnalysis != nil {
+				return d.lastAnalysis.Answer
+			}
+			return ""
+		case domain.ActionResearch:
+			if d.lastResearch != nil {
+				return d.lastResearch.Answer
+			}
+			return ""
+		}
+	}
+	return ""
+}

@@ -57,7 +57,7 @@ func readRunJSON(t *testing.T, repoDir string) map[string]any {
 	return run
 }
 
-// Scenario 10: default interactive flow (no --mode flag) - approve the plan as-is,
+// Scenario 10: default interactive flow (no --mode flag) - approve the workflow as-is,
 // choose manual mode, then confirm every step. Asserts the persisted run.json records
 // mode "manual" and status "completed".
 func TestScenario10_InteractiveManualRun(t *testing.T) {
@@ -69,7 +69,6 @@ func TestScenario10_InteractiveManualRun(t *testing.T) {
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 	fixedContent := writeFixedFixtureFile(t)
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixLow)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
 
@@ -81,9 +80,11 @@ func TestScenario10_InteractiveManualRun(t *testing.T) {
 	t.Setenv("FAKE_FIX_CONTENT_FILE", fixedContent)
 
 	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixLow()).URL()
+	configPath := writeConfig(t, configDir, opts)
 
-	// approve the plan, pick manual mode, then confirm implement/test/review in turn.
+	// approve the workflow, pick manual mode, then confirm implement/test/review in turn.
 	stdin := "a\n2\ny\ny\ny\n"
 
 	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, configPath, stdin, "run", "fix Add() to add instead of subtract")
@@ -91,8 +92,8 @@ func TestScenario10_InteractiveManualRun(t *testing.T) {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"classify", "implement", "review"}) {
-		t.Errorf("invocations = %v, want [classify implement review]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement", "review"}) {
+		t.Errorf("invocations = %v, want [implement review]", got)
 	}
 
 	if !strings.Contains(stdout, "Run completed successfully.") {
@@ -106,7 +107,8 @@ func TestScenario10_InteractiveManualRun(t *testing.T) {
 	if run["status"] != "completed" {
 		t.Errorf("run.json status = %v, want completed", run["status"])
 	}
-	if run["original_classification"] != nil {
-		t.Errorf("expected no original_classification since the plan was approved unedited, got %v", run["original_classification"])
+	decision, ok := run["decision"].(map[string]any)
+	if !ok || decision["source"] != "jev" {
+		t.Errorf("run.json decision = %v, want the Jev decision recorded", run["decision"])
 	}
 }

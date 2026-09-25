@@ -15,11 +15,8 @@ const (
 	StateImplement State = State(domain.ActionImplement)
 	StateTest      State = State(domain.ActionTest)
 	StateReview    State = State(domain.ActionReview)
-	// StateAnswer exists only for the pre-Jev classifier flow (workflow.BuildLegacy) -
-	// specs/JEV integration/TASKS.md T12 removes it along with that flow.
-	StateAnswer State = State(domain.ActionAnswer)
-	StateDone   State = "done"
-	StateFailed State = "failed"
+	StateDone      State = "done"
+	StateFailed    State = "failed"
 )
 
 type Outcome string

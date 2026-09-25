@@ -17,17 +17,19 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// providerSet names which provider each action/classifier is configured to use.
-// Every field defaults to "claude" via newProviderSet - tests override only what they
-// need to exercise a specific missing-executable scenario.
+// providerSet names which provider each action, the translator and the decision
+// provider are configured to use. Every field defaults to "claude" (Decision to "jev")
+// via defaultProviderSet - tests override only what they need.
 type providerSet struct {
-	Classifier, Analyze, Plan, Implement, Review, Answer string
+	Research, Analyze, Plan, Implement, Review, Translation string
+	// Decision is "jev" or a CLI provider (TASKS.md T22).
+	Decision string
 }
 
 func defaultProviderSet() providerSet {
 	return providerSet{
-		Classifier: "claude", Analyze: "claude", Plan: "claude",
-		Implement: "claude", Review: "claude", Answer: "claude",
+		Research: "claude", Analyze: "claude", Plan: "claude", Implement: "claude", Review: "claude",
+		Translation: "claude", Decision: "jev",
 	}
 }
 
@@ -40,6 +42,10 @@ type configOptions struct {
 	// via defaultConfigOptions - tests only override it to exercise the run-wide
 	// timeout (SPEC-diagnostics.md §6.6) with a short deadline.
 	timeout string
+	// jevURL is decision.jev.base_url - the fake Jev server's URL.
+	jevURL string
+	// onFailure is decision.on_failure: "ask" or "fail".
+	onFailure string
 }
 
 func defaultConfigOptions() configOptions {
@@ -49,22 +55,60 @@ func defaultConfigOptions() configOptions {
 		maxFixIterations: 2,
 		testCommand:      "go test ./...",
 		timeout:          "30s",
+		jevURL:           "http://127.0.0.1:1", // tests using Jev replace it with their server's
+		onFailure:        "fail",
 	}
 }
 
-// writeConfig renders a minimal orchestrator.yaml matching internal/config's schema
+// writeConfig renders a version 2 orchestrator.yaml matching internal/config's schema
 // and returns its absolute path. It deliberately does not import internal/config, to
 // keep these as true black-box tests driven only through app.Run's public surface.
 func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	t.Helper()
 	p := opts.providers
-	content := fmt.Sprintf(`version: 1
+	decisionModel := "jev-1.13.0"
+	if p.Decision != "jev" {
+		decisionModel = "fake"
+	}
+	content := fmt.Sprintf(`version: 2
 
-classifier:
+decision:
+  provider: %s
+  model: %s
+  timeout: 10s
+  complexity:
+    primary: choice
+    shadow: true
+  on_failure: %s
+  jev:
+    base_url: %s
+    api_key_env: JEV_API_KEY
+    max_retries: 1
+
+translation:
   provider: %s
   model: fake
+  timeout: 10s
+
+policy:
+  context_depth:
+    project_threshold: 0.5
+  complexity:
+    complex: 0.40
+    medium: 0.50
+  stages:
+    thresholds: {research: 0.60, analysis: 0.60, planning: 0.60, development: 0.60, testing: 0.60, review: 0.60}
+    force:
+      complex: [analysis, planning, review]
+
+context:
+  max_files: 20
+  max_bytes: 24576
 
 actions:
+  research:
+    provider: %s
+    model: fake
   analyze:
     provider: %s
     model: fake
@@ -77,9 +121,6 @@ actions:
   review:
     provider: %s
     model: fake
-  answer:
-    provider: %s
-    model: fake
 
 test:
   command: %q
@@ -90,7 +131,8 @@ limits:
 
 execution:
   timeout: %s
-`, p.Classifier, p.Analyze, p.Plan, p.Implement, p.Review, p.Answer,
+`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
+		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
 		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout)
 
 	path := filepath.Join(dir, "orchestrator.yaml")
@@ -246,22 +288,6 @@ func bytesSplitLines(data []byte) []string {
 	}
 	return lines
 }
-
-const classifyBugfixMedium = `{
-  "type": "bugfix",
-  "complexity": "medium",
-  "requires_code_change": true,
-  "requires_tests": true,
-  "requires_review": true
-}`
-
-const classifyBugfixLow = `{
-  "type": "bugfix",
-  "complexity": "low",
-  "requires_code_change": true,
-  "requires_tests": true,
-  "requires_review": true
-}`
 
 const analyzeResponse = `{
   "summary": "Add() subtracts instead of adding.",

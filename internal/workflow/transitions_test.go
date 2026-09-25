@@ -52,7 +52,7 @@ func TestNext_LastStepSuccessGoesToDone(t *testing.T) {
 func TestNext_NonRetryableFailureAlwaysFails(t *testing.T) {
 	// Every state except Test and Review fails the run outright on outcome=failure,
 	// regardless of what else is in the workflow.
-	for _, current := range []State{StateResearch, StateAnalyze, StatePlan, StateImplement, StateAnswer} {
+	for _, current := range []State{StateResearch, StateAnalyze, StatePlan, StateImplement} {
 		wf := wfOf(domain.ActionType(current), domain.ActionTest, domain.ActionReview)
 		got, reason := Next(current, OutcomeFailure, wf)
 		if got != StateFailed {

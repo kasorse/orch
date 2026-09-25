@@ -161,3 +161,25 @@ func TestResearchThenAnalysis_LeavesGitClean(t *testing.T) {
 		t.Errorf("repository dirty=%v err=%v after read-only stages", dirty, err)
 	}
 }
+
+func TestFinalAnswer(t *testing.T) {
+	d := newDispatcher(&fakeClient{})
+	d.lastResearch = &domain.ResearchArtifact{Answer: "from research"}
+	d.lastAnalysis = &domain.AnalysisArtifact{Answer: "from analysis"}
+
+	cases := []struct {
+		wf   *domain.Workflow
+		want string
+	}{
+		{workflowOf(domain.ActionResearch, domain.ActionAnalyze), "from analysis"},
+		{workflowOf(domain.ActionResearch, domain.ActionReview), "from research"},
+		{workflowOf(domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest), ""},
+		{workflowOf(domain.ActionTest), ""},
+		{nil, ""},
+	}
+	for i, tc := range cases {
+		if got := d.FinalAnswer(&domain.Run{Workflow: tc.wf}); got != tc.want {
+			t.Errorf("case %d: FinalAnswer = %q, want %q", i, got, tc.want)
+		}
+	}
+}

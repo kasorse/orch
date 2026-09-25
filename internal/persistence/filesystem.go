@@ -1,5 +1,5 @@
 // Package persistence stores run state on the local filesystem under
-// <baseDir>/<run-id>/{run.json,classification.json,workflow.json,artifacts/,logs/} so a
+// <baseDir>/<run-id>/{run.json,decision.json,project_context.json,workflow.json,artifacts/,logs/} so a
 // completed or failed run can later be inspected. No database is required (MVP.md §21).
 package persistence
 
@@ -38,11 +38,6 @@ func (s *Store) LogPath(runID string, stepIndex int, actionType domain.ActionTyp
 	return filepath.Join(s.runDir(runID), "logs", fmt.Sprintf("%03d-%s.%s.log", stepIndex, actionType, stream))
 }
 
-// ClassifierLogPath is LogPath's counterpart for AppendClassifierLog's unindexed path.
-func (s *Store) ClassifierLogPath(runID, stream string) string {
-	return s.CallLogPath(runID, "classify", stream)
-}
-
 // NewRun allocates a fresh run ID, creates its directory structure, writes the initial
 // run.json, and returns the pending Run.
 func (s *Store) NewRun(task domain.Task) (*domain.Run, error) {
@@ -74,7 +69,7 @@ func (s *Store) NewRun(task domain.Task) (*domain.Run, error) {
 	return run, nil
 }
 
-// SaveRun rewrites run.json, plus classification.json/workflow.json once those fields are
+// SaveRun rewrites run.json, plus workflow.json once that field is
 // set on run. All writes are write-tmp-then-rename so a crash mid-write never leaves a
 // truncated file behind.
 func (s *Store) SaveRun(run *domain.Run) error {
@@ -82,11 +77,6 @@ func (s *Store) SaveRun(run *domain.Run) error {
 
 	if err := s.writeJSON(run.ID, "run.json", run); err != nil {
 		return fmt.Errorf("save run: %w", err)
-	}
-	if run.Classification != nil {
-		if err := s.writeJSON(run.ID, "classification.json", run.Classification); err != nil {
-			return fmt.Errorf("save classification: %w", err)
-		}
 	}
 	if run.Workflow != nil {
 		if err := s.writeJSON(run.ID, "workflow.json", run.Workflow); err != nil {
@@ -96,8 +86,7 @@ func (s *Store) SaveRun(run *domain.Run) error {
 	return nil
 }
 
-// SaveDecision writes decision.json: the full decision trace (TASKS.md T11). It replaces
-// classification.json for the new flow; the old flow keeps writing that until T12.
+// SaveDecision writes decision.json: the full decision trace (TASKS.md T11).
 func (s *Store) SaveDecision(runID string, trace domain.DecisionTrace) error {
 	if err := s.writeJSON(runID, "decision.json", trace); err != nil {
 		return fmt.Errorf("save decision: %w", err)
@@ -144,12 +133,6 @@ func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionT
 		return fmt.Errorf("append log: %w", err)
 	}
 	return nil
-}
-
-// AppendClassifierLog appends raw process output (stream is "stdout" or "stderr") to the
-// classification call's log file (logs/classify.*), creating it on first write.
-func (s *Store) AppendClassifierLog(runID string, stream, content string) error {
-	return s.AppendCallLog(runID, "classify", stream, content)
 }
 
 // CallLogPath returns where AppendCallLog writes stream for the named call, without

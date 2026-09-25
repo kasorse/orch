@@ -11,7 +11,7 @@ import (
 )
 
 // TerminalGate implements workflow.Gate for manual mode: it confirms before every
-// step, and on decline offers retry/edit-plan/abort. Once the user picks "all
+// step, and on decline offers retry/abort (stage editing returns in T19). Once the user picks "all
 // remaining", every later BeforeStep call proceeds without prompting.
 type TerminalGate struct {
 	prompter    Prompter
@@ -43,7 +43,7 @@ func (g *TerminalGate) BeforeStep(ctx context.Context, run *domain.Run, index in
 			return workflow.GateProceed, nil
 
 		case "n", "no":
-			decision, err := g.declineMenu(run, action)
+			decision, err := g.declineMenu()
 			if err != nil {
 				return "", err
 			}
@@ -55,9 +55,9 @@ func (g *TerminalGate) BeforeStep(ctx context.Context, run *domain.Run, index in
 	}
 }
 
-func (g *TerminalGate) declineMenu(run *domain.Run, action domain.ActionType) (workflow.GateDecision, error) {
+func (g *TerminalGate) declineMenu() (workflow.GateDecision, error) {
 	for {
-		ans, err := g.prompter.Ask("[r]etry / [e]dit plan / [a]bort: ")
+		ans, err := g.prompter.Ask("[r]etry / [a]bort: ")
 		if err != nil {
 			return "", err
 		}
@@ -66,12 +66,6 @@ func (g *TerminalGate) declineMenu(run *domain.Run, action domain.ActionType) (w
 		case "r", "retry":
 			return workflow.GateProceed, nil
 
-		case "e", "edit":
-			if err := editLoop(g.prompter, g.out, run, false); err != nil {
-				return "", err
-			}
-			printRemainingWorkflow(g.out, run.Workflow, action)
-
 		case "a", "abort":
 			return workflow.GateAbort, nil
 
@@ -79,25 +73,4 @@ func (g *TerminalGate) declineMenu(run *domain.Run, action domain.ActionType) (w
 			fmt.Fprintln(g.out, "unrecognized option")
 		}
 	}
-}
-
-// printRemainingWorkflow prints the actions from fromAction onward in wf, after a
-// mid-run edit. If fromAction can't be located (e.g. it was edited out), it prints the
-// full remaining workflow.
-func printRemainingWorkflow(out io.Writer, wf *domain.Workflow, fromAction domain.ActionType) {
-	if wf == nil {
-		return
-	}
-	start := 0
-	for i, s := range wf.Steps {
-		if s.Action == fromAction {
-			start = i
-			break
-		}
-	}
-	names := make([]string, 0, len(wf.Steps)-start)
-	for _, s := range wf.Steps[start:] {
-		names = append(names, string(s.Action))
-	}
-	fmt.Fprintf(out, "\nWorkflow (remaining): %s\n", strings.Join(names, " → "))
 }

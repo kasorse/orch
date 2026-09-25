@@ -112,7 +112,3 @@ type ImplementationArtifact struct {
 	ChangedFiles []string `json:"changed_files"`
 	TestsAdded   []string `json:"tests_added"`
 }
-
-type AnswerArtifact struct {
-	Answer string `json:"answer"`
-}

@@ -82,33 +82,29 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1fs", secs)
 }
 
-// ClassifyReporter adapts a *ConsoleReporter to classifier.CallObserver's shape.
-// classifier.CallObserver and action.CallObserver share the exact same method set
-// structurally, but the classification call's "started" line reads differently from a
-// workflow step's ("-> claude (model sonnet)" vs "Provider: .../-> running claude..."),
-// so it cannot be the same method on *ConsoleReporter - this wrapper exists purely to
-// give it a second, independent implementation. Construct with
-// ClassifyReporter{ConsoleReporter: reporter} and assign to Classifier.Observer.
-type ClassifyReporter struct {
+// CallReporter adapts a *ConsoleReporter to the CallObserver shape for provider calls
+// made outside workflow steps - translation and the LLM decision rounds. They share
+// action.CallObserver's method set, but their "started" line reads differently from a
+// workflow step's ("-> claude (model haiku)" vs "Provider: .../-> running claude..."),
+// so it cannot be the same method on *ConsoleReporter.
+type CallReporter struct {
 	*ConsoleReporter
 }
 
-func (c ClassifyReporter) ProviderCallStarted(providerID, model string) {
+func (c CallReporter) ProviderCallStarted(providerID, model string) {
 	fmt.Fprintf(c.Out, "→ %s (model %s)\n", providerID, model)
 }
 
-func (c ClassifyReporter) ProviderCallHeartbeat(elapsed time.Duration) {
+func (c CallReporter) ProviderCallHeartbeat(elapsed time.Duration) {
 	if !c.Verbose {
 		return
 	}
 	fmt.Fprintf(c.Out, "   … still running (%s)\n", formatDuration(elapsed))
 }
 
-// ProviderCallFinished is a no-op: the default example shows no explicit completion line
-// for classification (it's immediately followed by "✓ type:/✓ complexity:"), and a
-// verbose rendering isn't specified distinctly from the step case, so it is intentionally
-// left unrendered here rather than guessed at.
-func (c ClassifyReporter) ProviderCallFinished(providerID, model string, duration time.Duration, err error) {
+// ProviderCallFinished is a no-op: the decision summary printed right after these calls
+// says what came of them.
+func (c CallReporter) ProviderCallFinished(providerID, model string, duration time.Duration, err error) {
 }
 
 // PrefixWriter tees a provider CLI's live combined output to Out, one line at a time, each
@@ -148,20 +144,8 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
-func (r *ConsoleReporter) ClassifyingTask() {
-	fmt.Fprintln(r.Out, "\nClassifying task...")
-}
-
-func (r *ConsoleReporter) Classified(c domain.Classification) {
-	fmt.Fprintf(r.Out, "✓ type: %s\n✓ complexity: %s\n", c.Type, c.Complexity)
-}
-
-func (r *ConsoleReporter) WorkflowBuilt(wf domain.Workflow) {
-	names := make([]string, len(wf.Steps))
-	for i, s := range wf.Steps {
-		names[i] = string(s.Action)
-	}
-	fmt.Fprintf(r.Out, "\nWorkflow:\n%s\n", strings.Join(names, " → "))
+func (r *ConsoleReporter) Deciding() {
+	fmt.Fprintln(r.Out, "\nDeciding the workflow...")
 }
 
 // DirtyRepoWarning prints the exact warning text from MVP.md §16 - the orchestrator never

@@ -64,7 +64,7 @@ func TestNewRun_UniqueIDs(t *testing.T) {
 	}
 }
 
-func TestSaveRun_WritesClassificationAndWorkflowOnceSet(t *testing.T) {
+func TestSaveRun_WritesWorkflowOnceSet(t *testing.T) {
 	store := NewStore(t.TempDir())
 
 	run, err := store.NewRun(domain.Task{Description: "add feature"})
@@ -78,30 +78,16 @@ func TestSaveRun_WritesClassificationAndWorkflowOnceSet(t *testing.T) {
 			t.Errorf("expected %s not to exist yet", name)
 		}
 	}
-	assertMissing("classification.json")
 	assertMissing("workflow.json")
 
-	run.Classification = &domain.Classification{Type: domain.TaskFeature, Complexity: domain.LegacyComplexityLow}
 	run.Workflow = &domain.Workflow{Steps: []domain.Step{{Action: domain.ActionPlan}, {Action: domain.ActionImplement}}}
 
 	if err := store.SaveRun(run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	var classification domain.Classification
-	data, err := os.ReadFile(filepath.Join(dir, "classification.json"))
-	if err != nil {
-		t.Fatalf("expected classification.json to exist: %v", err)
-	}
-	if err := json.Unmarshal(data, &classification); err != nil {
-		t.Fatalf("classification.json is not valid JSON: %v", err)
-	}
-	if classification.Type != domain.TaskFeature {
-		t.Errorf("expected type feature, got %s", classification.Type)
-	}
-
 	var workflow domain.Workflow
-	data, err = os.ReadFile(filepath.Join(dir, "workflow.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "workflow.json"))
 	if err != nil {
 		t.Fatalf("expected workflow.json to exist: %v", err)
 	}
@@ -165,32 +151,6 @@ func TestAppendLog_CreatesAndAppendsAcrossCalls(t *testing.T) {
 		t.Fatalf("expected log file to exist: %v", err)
 	}
 	want := "line one\nline two\n"
-	if string(data) != want {
-		t.Errorf("expected log contents %q, got %q", want, string(data))
-	}
-}
-
-func TestAppendClassifierLog_CreatesAndAppendsAcrossCalls_UnindexedPath(t *testing.T) {
-	store := NewStore(t.TempDir())
-
-	run, err := store.NewRun(domain.Task{Description: "fix"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if err := store.AppendClassifierLog(run.ID, "stdout", "chunk one\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := store.AppendClassifierLog(run.ID, "stdout", "chunk two\n"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	relPath := filepath.Join("logs", "classify.stdout.log")
-	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), relPath))
-	if err != nil {
-		t.Fatalf("expected log file to exist: %v", err)
-	}
-	want := "chunk one\nchunk two\n"
 	if string(data) != want {
 		t.Errorf("expected log contents %q, got %q", want, string(data))
 	}

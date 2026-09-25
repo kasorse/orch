@@ -106,9 +106,9 @@ func TestRunHeader_PrintsIDAndDir(t *testing.T) {
 	}
 }
 
-func TestClassifyReporter_ProviderCallStarted_PrintsClassifyShapedLine(t *testing.T) {
+func TestCallReporter_ProviderCallStarted_PrintsShortLine(t *testing.T) {
 	var buf bytes.Buffer
-	c := ClassifyReporter{ConsoleReporter: NewConsoleReporter(&buf)}
+	c := CallReporter{ConsoleReporter: NewConsoleReporter(&buf)}
 
 	c.ProviderCallStarted("claude", "sonnet")
 
@@ -229,15 +229,11 @@ func TestAnnouncementHelpers(t *testing.T) {
 
 	r.ValidatingConfig()
 	r.ConfigValid()
-	r.ClassifyingTask()
-	r.Classified(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow})
-	r.WorkflowBuilt(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}})
+	r.Deciding()
 
 	want := "Validating configuration...\n" +
 		"✓ configuration valid\n" +
-		"\nClassifying task...\n" +
-		"✓ type: bugfix\n✓ complexity: low\n" +
-		"\nWorkflow:\nimplement → test\n"
+		"\nDeciding the workflow...\n"
 	if buf.String() != want {
 		t.Errorf("got %q, want %q", buf.String(), want)
 	}

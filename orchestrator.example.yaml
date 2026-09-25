@@ -1,10 +1,48 @@
-version: 1
+version: 2
 
-classifier:
+# Who decides the workflow: jev (the Jev HTTP API) or a CLI provider (claude, codex,
+# gemini) answering the same questions. The flow is the same either way.
+decision:
+  provider: jev
+  model: jev-1.13.0          # jev: a version, not an alias; CLI provider: its model
+  timeout: 5s                # jev: one HTTP request; CLI provider: one call
+  complexity:
+    primary: choice          # choice | score - the question the policy decides on
+    shadow: true             # also ask the other one, for comparison in the trace
+  on_failure: ask            # ask: choose complexity and stages by hand; fail: stop
+  jev:                       # read only when provider is jev
+    base_url: https://api.typesafe.ai
+    api_key_env: JEV_API_KEY # the key itself never goes in this file
+    max_retries: 1
+    mock: false              # true: offline keyword heuristic instead of the API
+
+# A request that is mostly Russian is translated to English before the decision.
+translation:
   provider: claude
-  model: sonnet
+  model: haiku
+  timeout: 60s
+
+policy:
+  context_depth:
+    project_threshold: 0.5   # P(project) >= threshold -> collect project context
+  complexity:
+    complex: 0.40            # P(complex) >= 0.40             -> complex
+    medium: 0.50             # P(medium) + P(complex) >= 0.50 -> medium, else simple
+  stages:
+    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    force:
+      complex: [analysis, planning, review]
+
+context:
+  max_files: 20
+  max_bytes: 24576           # the JSON sent to the decision provider
+  extra_deny: []             # glob patterns never read, on top of .env*, *.pem, *.key, ...
 
 actions:
+  research:
+    provider: claude
+    model: sonnet
+
   analyze:
     provider: claude
     model: sonnet
@@ -25,10 +63,6 @@ actions:
     # execution.timeout below. Still bounded by whatever's left of execution.timeout for
     # the run as a whole - this can only tighten that bound, never extend past it.
     timeout: 20m
-
-  answer:
-    provider: gemini
-    model: pro
 
 test:
   command: "go test ./..."

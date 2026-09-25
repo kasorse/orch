@@ -7,40 +7,49 @@ import (
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/exitcode"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 8 (MVP.md §29): invalid classifier response. The run must fail before any
-// repository-changing action - i.e. classify is the only AI call, and the fixture
-// repository is left exactly as committed.
-func TestScenario8_InvalidClassifierResponse(t *testing.T) {
+// Scenario 8 (MVP.md §29): the decision provider answers with something that is not a
+// decision. With an LLM decision provider (TASKS.md T22) and on_failure: fail, that is
+// an InvalidResponse decision error (exit 3) - the pre-check is the only AI call, and
+// the fixture repository is left untouched.
+func TestScenario8_InvalidDecisionResponse(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	installFakeProviders(t, "claude", "codex", "gemini")
 
 	responsesDir := t.TempDir()
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 
-	writeResponse(t, responsesDir, "classify", `this is not JSON at all`)
+	writeResponse(t, responsesDir, "decide-context", `this is not JSON at all`)
 
 	t.Setenv("FAKE_RESPONSES_DIR", responsesDir)
 	t.Setenv("INVOCATIONS_LOG", invocationsLog)
 
-	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.providers.Decision = "claude"
+	configPath := writeConfig(t, t.TempDir(), opts)
 
 	_, _, err := runOrchestrator(t, repoDir, configPath, "run", "fix Add() to add instead of subtract")
 	if err == nil {
 		t.Fatal("expected the run to fail, got nil error")
 	}
 
-	var classErr *apperr.ClassificationError
-	if !errors.As(err, &classErr) {
-		t.Fatalf("expected *apperr.ClassificationError, got %T: %v", err, err)
+	var decErr *apperr.DecisionError
+	if !errors.As(err, &decErr) || decErr.Kind != apperr.DecisionInvalidResponse || decErr.Provider != "claude" {
+		t.Fatalf("expected a claude invalid_response DecisionError, got %T: %v", err, err)
+	}
+	if !strings.Contains(decErr.Body, "this is not JSON at all") {
+		t.Errorf("Body = %q, want the model's output kept for diagnosis", decErr.Body)
+	}
+	if code := exitcode.FromError(err); code != exitcode.ProviderExecution {
+		t.Errorf("exit code = %d, want %d", code, exitcode.ProviderExecution)
 	}
 
-	want := []string{"classify"}
+	want := []string{"decide-context"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
-		t.Errorf("invocations = %v, want %v (no action beyond classify)", got, want)
+		t.Errorf("invocations = %v, want %v (nothing beyond the pre-check)", got, want)
 	}
 
 	assertRepoUnchanged(t, repoDir)

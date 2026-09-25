@@ -22,8 +22,6 @@ func TestScenario11_ProviderFailureWritesToStdoutNotStderr(t *testing.T) {
 	responsesDir := t.TempDir()
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixLow)
-
 	t.Setenv("FAKE_RESPONSES_DIR", responsesDir)
 	t.Setenv("INVOCATIONS_LOG", invocationsLog)
 	t.Setenv("FAKE_FAIL_ACTION", "implement")
@@ -31,7 +29,9 @@ func TestScenario11_ProviderFailureWritesToStdoutNotStderr(t *testing.T) {
 	t.Setenv("FAKE_FAIL_STDOUT", "API Error: overloaded_error - the backend is temporarily overloaded")
 
 	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixLow()).URL()
+	configPath := writeConfig(t, configDir, opts)
 
 	_, _, err := runOrchestrator(t, repoDir, configPath, "run", "fix Add() to add instead of subtract")
 	if err == nil {

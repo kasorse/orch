@@ -8,16 +8,22 @@ import (
 	"orchestrator/internal/provider"
 )
 
-// Validate checks structural correctness of the config: version, classifier and
-// action provider/model presence, supported provider names, test command presence,
-// and positive limits/timeout. It aggregates every problem found into a single
-// *apperr.ConfigError rather than failing on the first issue, so a user sees the full
-// list of what to fix in one pass.
+// Validate checks structural correctness of the config: version, action provider/model
+// presence, supported provider names, test command presence, positive limits/timeout,
+// and the decision surface (decision, translation, policy, context - see decision.go).
+// It aggregates every problem found into a single *apperr.ConfigError rather than
+// failing on the first issue, so a user sees the full list of what to fix in one pass.
 func Validate(cfg Config) error {
 	var problems []string
 
-	if cfg.Version != 1 {
-		problems = append(problems, fmt.Sprintf("unsupported config version %d (expected 1)", cfg.Version))
+	switch cfg.Version {
+	case CurrentVersion:
+	case 1:
+		problems = append(problems, "unsupported config version 1 (expected 2): version 2 replaces classifier "+
+			"with decision (provider, model, timeout, complexity, on_failure, jev), adds translation, policy "+
+			"and context, adds actions.research, and removes actions.answer - see orchestrator.example.yaml")
+	default:
+		problems = append(problems, fmt.Sprintf("unsupported config version %d (expected %d)", cfg.Version, CurrentVersion))
 	}
 
 	for _, pm := range cfg.actionProviderModels() {
@@ -44,6 +50,8 @@ func Validate(cfg Config) error {
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
 	}
+
+	problems = append(problems, decisionProblems(cfg)...)
 
 	if len(problems) == 0 {
 		return nil

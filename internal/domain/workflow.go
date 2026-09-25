@@ -8,19 +8,14 @@ const (
 	ActionImplement ActionType = "implement"
 	ActionTest      ActionType = "test"
 	ActionReview    ActionType = "review"
-	ActionAnswer    ActionType = "answer"
-	// ActionResearch executes StageResearch. No executor or workflow produces it yet -
-	// that lands with the research action (specs/JEV integration/TASKS.md T10).
-	ActionResearch ActionType = "research"
+	ActionResearch  ActionType = "research"
 )
 
 type Step struct {
 	Action ActionType `json:"action"`
 	// Stage names the decision stage this step executes (specs/JEV integration/
-	// TASKS.md T04). Empty for a step built by the pre-Jev classifier flow
-	// (workflow.BuildLegacy) - T12 removes that flow entirely, at which point every
-	// Step will have a Stage.
-	Stage Stage `json:"stage,omitempty"`
+	// TASKS.md T04).
+	Stage Stage `json:"stage"`
 }
 
 // Workflow is the deterministic linear pipeline built by workflow.Build (or, for the

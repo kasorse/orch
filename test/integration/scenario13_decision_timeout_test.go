@@ -10,22 +10,22 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 13 (SPEC-diagnostics.md §6.6): execution.timeout must wrap classification, not
-// just the workflow engine - before this spec's fix, a hung classification call could hang
-// forever. A short timeout plus a classifier CLI that sleeps well past it must produce a
-// *apperr.ProviderError{Kind: FailureTimeout} promptly, not hang until the test itself times
-// out.
-func TestScenario13_ClassificationTimeout(t *testing.T) {
+// Scenario 13 (SPEC-diagnostics.md §6.6): execution.timeout must wrap the decision
+// phase, not just the workflow engine. A short timeout plus an LLM decision provider CLI
+// that sleeps well past it must produce a *apperr.ProviderError{Kind: FailureTimeout}
+// promptly, not hang until the test itself times out.
+func TestScenario13_DecisionTimeout(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	installFakeProviders(t, "claude", "codex", "gemini")
 
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 
 	t.Setenv("INVOCATIONS_LOG", invocationsLog)
-	t.Setenv("FAKE_SLEEP_ACTION", "classify")
+	t.Setenv("FAKE_SLEEP_ACTION", "decide-context")
 	t.Setenv("FAKE_SLEEP_SECONDS", "5")
 
 	opts := defaultConfigOptions()
+	opts.providers.Decision = "claude"
 	opts.timeout = "500ms"
 
 	configDir := t.TempDir()
@@ -53,7 +53,7 @@ func TestScenario13_ClassificationTimeout(t *testing.T) {
 	if provErr.Kind != apperr.FailureTimeout {
 		t.Errorf("Kind = %q, want %q", provErr.Kind, apperr.FailureTimeout)
 	}
-	if provErr.Action != "classify" {
-		t.Errorf("Action = %q, want classify", provErr.Action)
+	if provErr.Action != "decide-context" {
+		t.Errorf("Action = %q, want decide-context", provErr.Action)
 	}
 }

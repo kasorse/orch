@@ -8,13 +8,16 @@ import (
 	"orchestrator/internal/domain"
 )
 
-// ReviewAndSelectMode runs the approve/edit/cancel loop over run.Classification and
-// run.Workflow, then resolves the execution mode - pinnedMode if the user passed
-// --mode, otherwise an interactive 4-way choice. approved is false only when the user
-// cancels, in which case mode is meaningless and the run must not proceed.
-func ReviewAndSelectMode(p Prompter, out io.Writer, run *domain.Run, pinnedMode domain.RunMode) (mode domain.RunMode, approved bool, err error) {
+// ReviewAndSelectMode asks the user to approve the decided workflow (already printed by
+// the caller), then resolves the execution mode - pinnedMode if the user passed --mode,
+// otherwise an interactive 4-way choice. approved is false only when the user cancels,
+// in which case mode is meaningless and the run must not proceed.
+//
+// There is no editing here until T19 brings stage editing back on top of the stage
+// decision (the old type/complexity editor went with the classifier in T12).
+func ReviewAndSelectMode(p Prompter, out io.Writer, pinnedMode domain.RunMode) (mode domain.RunMode, approved bool, err error) {
 	for {
-		ans, err := p.Ask("\nApprove this plan? [a]pprove / [e]dit / [c]ancel: ")
+		ans, err := p.Ask("\nApprove this workflow? [a]pprove / [c]ancel: ")
 		if err != nil {
 			return "", false, err
 		}
@@ -26,11 +29,6 @@ func ReviewAndSelectMode(p Prompter, out io.Writer, run *domain.Run, pinnedMode 
 				return "", false, err
 			}
 			return mode, true, nil
-
-		case "e", "edit":
-			if err := editLoop(p, out, run, true); err != nil {
-				return "", false, err
-			}
 
 		case "c", "cancel":
 			return "", false, nil

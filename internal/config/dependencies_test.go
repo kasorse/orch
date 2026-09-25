@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidateDependencies_AllInstalled(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
 	if err := ValidateDependencies(validConfig(), checker); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -51,7 +52,7 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Review.Provider = "claude"
 	cfg.Actions.Review.Model = "sonnet"
-	// claude now backs classifier, analyze, plan, implement, and review.
+	// claude now backs analyze, plan, implement, review, and translation.
 
 	checker := FakeDependencyChecker{Missing: map[string]bool{"claude": true}}
 	err := ValidateDependencies(cfg, checker)
@@ -67,31 +68,15 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 	}
 }
 
-func TestValidateDependencies_ClassifierProviderMissing(t *testing.T) {
-	cfg := validConfig()
-	cfg.Classifier.Provider = "gemini"
-	cfg.Classifier.Model = "pro"
-	// gemini now backs classifier and answer; make it missing.
-
-	checker := FakeDependencyChecker{Missing: map[string]bool{"gemini": true}}
-	err := ValidateDependencies(cfg, checker)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "classifier") {
-		t.Errorf("expected classifier to be flagged as a using action, got: %s", err.Error())
-	}
-}
-
-func TestValidateDecisionConfigDependencies_Valid(t *testing.T) {
+func TestValidateDependencies_DecisionValid(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "test-key")
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
-	if err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker); err != nil {
+	if err := ValidateDependencies(validConfig(), checker); err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
-func TestValidateDecisionConfigDependencies_APIKeyEnvNotSet(t *testing.T) {
+func TestValidateDependencies_DecisionAPIKeyEnvNotSet(t *testing.T) {
 	// t.Setenv registers cleanup that restores whatever the variable held before this
 	// test; os.Unsetenv then removes it for the duration of the test so LookupEnv
 	// reports ok=false, which a value of "" would not.
@@ -99,7 +84,7 @@ func TestValidateDecisionConfigDependencies_APIKeyEnvNotSet(t *testing.T) {
 	os.Unsetenv("JEV_API_KEY")
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
 
-	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	err := ValidateDependencies(validConfig(), checker)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -108,11 +93,11 @@ func TestValidateDecisionConfigDependencies_APIKeyEnvNotSet(t *testing.T) {
 	}
 }
 
-func TestValidateDecisionConfigDependencies_APIKeyEnvBlank(t *testing.T) {
+func TestValidateDependencies_DecisionAPIKeyEnvBlank(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "   ")
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
 
-	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	err := ValidateDependencies(validConfig(), checker)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -121,62 +106,61 @@ func TestValidateDecisionConfigDependencies_APIKeyEnvBlank(t *testing.T) {
 	}
 }
 
-func TestValidateDecisionConfigDependencies_TranslationExecutableMissing(t *testing.T) {
+func TestValidateDependencies_DecisionTranslationExecutableMissing(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "test-key")
-	checker := FakeDependencyChecker{Missing: map[string]bool{"claude": true}}
+	cfg := validConfig()
+	cfg.Translation.Provider = "gemini"
+	checker := FakeDependencyChecker{Missing: map[string]bool{"gemini": true}}
 
-	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	err := ValidateDependencies(cfg, checker)
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	// translation and research both use claude in validDecisionConfig(), so they are
-	// reported together as one aggregated "required by actions" message.
-	if !strings.Contains(err.Error(), `provider "claude" is required by actions [`) {
+	// research and translation both use gemini, so they are reported together - the
+	// translator is checked even though an English request would never call it.
+	if !strings.Contains(err.Error(), `provider "gemini" is required by actions [research, translation]`) {
 		t.Errorf("expected aggregated message, got: %s", err.Error())
-	}
-	if !strings.Contains(err.Error(), "translation") || !strings.Contains(err.Error(), "research") {
-		t.Errorf("expected both translation and research to be named, got: %s", err.Error())
 	}
 }
 
-func TestValidateDecisionConfigDependencies_DoesNotCheckAPIKeyWhenEnvNameIsBlank(t *testing.T) {
+func TestValidateDependencies_DecisionDoesNotCheckAPIKeyWhenEnvNameIsBlank(t *testing.T) {
 	// ValidateDecisionConfig (structural) is responsible for flagging a blank
 	// api_key_env; ValidateDecisionConfigDependencies must not also report a
 	// confusing "" is not configured message for it.
-	cfg := validDecisionConfig()
+	cfg := validConfig()
 	cfg.Decision.Jev.APIKeyEnv = ""
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
 
-	err := ValidateDecisionConfigDependencies(cfg, checker)
+	err := ValidateDependencies(cfg, checker)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
 
-func TestValidateDecisionConfigDependencies_MockNeedsNoAPIKey(t *testing.T) {
+func TestValidateDependencies_DecisionMockNeedsNoAPIKey(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "sentinel")
 	os.Unsetenv("JEV_API_KEY")
-	cfg := validDecisionConfig()
+	cfg := validConfig()
 	cfg.Decision.Jev.Mock = true
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}
 
-	if err := ValidateDecisionConfigDependencies(cfg, checker); err != nil {
+	if err := ValidateDependencies(cfg, checker); err != nil {
 		t.Fatalf("expected mock mode to pass without an API key, got: %v", err)
 	}
 }
 
-func TestValidateDecisionConfigDependencies_LLMProvider(t *testing.T) {
+func TestValidateDependencies_DecisionLLMProvider(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "sentinel")
 	os.Unsetenv("JEV_API_KEY")
-	cfg := validDecisionConfig()
+	cfg := validConfig()
 	cfg.Decision.Provider = "codex"
 	cfg.Decision.Model = "gpt"
 
-	if err := ValidateDecisionConfigDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{}}); err != nil {
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{}}); err != nil {
 		t.Fatalf("an LLM provider needs no JEV_API_KEY: %v", err)
 	}
 
-	err := ValidateDecisionConfigDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"codex": true}})
+	err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"codex": true}})
 	if err == nil || !strings.Contains(err.Error(), "decision") || !strings.Contains(err.Error(), "codex") {
 		t.Errorf("a missing decision executable must fail before any AI call: %v", err)
 	}

@@ -20,7 +20,6 @@ func TestScenario3_TestLoop(t *testing.T) {
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 	fixedContent := writeFixedFixtureFile(t)
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixMedium)
 	writeResponse(t, responsesDir, "analyze", analyzeResponse)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
@@ -33,14 +32,16 @@ func TestScenario3_TestLoop(t *testing.T) {
 	t.Setenv("FAKE_FIX_CONTENT_FILE", fixedContent)
 
 	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixMedium()).URL()
+	configPath := writeConfig(t, configDir, opts)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, configPath, "run", "fix Add() to add instead of subtract")
 	if err != nil {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	want := []string{"classify", "analyze", "implement", "implement", "review"}
+	want := []string{"analyze", "implement", "implement", "review"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
 		t.Errorf("invocations = %v, want %v", got, want)
 	}

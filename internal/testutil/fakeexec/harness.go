@@ -35,8 +35,9 @@ func PrependPath(t *testing.T, dir string) {
 //     every invocation, so tests can assert exactly how many AI calls happened (and of
 //     which kind), including "no further AI call happened after X".
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
-//     action ("classify.json", "analyze.json", "plan.json", "implement.json",
-//     "review.json", "answer.json"). For "review", a numbered override
+//     action ("translate.json", "decide-context.json", "decide-classify.json",
+//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json").
+//     For "review", a numbered override
 //     "review_<N>.json" (N = 1-based review call count) is preferred over the
 //     unnumbered "review.json" when present, so a test can script review
 //     fail-then-pass.
@@ -48,7 +49,7 @@ func PrependPath(t *testing.T, dir string) {
 //     FAKE_FAIL_STDOUT alone reproduces), instead of serving a canned response -
 //     simulates a provider runtime failure.
 //   - FAKE_SLEEP_ACTION / FAKE_SLEEP_SECONDS: if FAKE_SLEEP_ACTION matches the
-//     resolved action (including "classify"), the script sleeps for FAKE_SLEEP_SECONDS
+//     resolved action (including "translate" and "decide-*"), the script sleeps for FAKE_SLEEP_SECONDS
 //     (default 1) before doing anything else - simulates a hung provider call for
 //     timeout scenarios.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
@@ -67,12 +68,14 @@ const ProviderScript = `#!/bin/sh
 action=""
 for arg in "$@"; do
   case "$arg" in
-    "ACTION: classify"*)  action="classify" ;;
-    "ACTION: analyze"*)   action="analyze" ;;
-    "ACTION: plan"*)      action="plan" ;;
-    "ACTION: implement"*) action="implement" ;;
-    "ACTION: review"*)    action="review" ;;
-    "ACTION: answer"*)    action="answer" ;;
+    "ACTION: translate"*)       action="translate" ;;
+    "ACTION: decide-context"*)  action="decide-context" ;;
+    "ACTION: decide-classify"*) action="decide-classify" ;;
+    "ACTION: research"*)        action="research" ;;
+    "ACTION: analyze"*)         action="analyze" ;;
+    "ACTION: plan"*)            action="plan" ;;
+    "ACTION: implement"*)       action="implement" ;;
+    "ACTION: review"*)          action="review" ;;
   esac
   if [ -n "$action" ]; then
     break

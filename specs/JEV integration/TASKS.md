@@ -862,6 +862,42 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 - **Ключ.** API key читается из env в `app` и уходит только в конструктор Jev client.
   При `decision.provider` ≠ `jev` ключ не читается и не требуется.
 
+**Сделано.** Отличия от плана:
+- **Fail-fast — внутри `Validate` и `ValidateDependencies`,** а не отдельными шагами.
+  Проверки decision/translation/policy/context из T02/T22 теперь часть `Validate`, а
+  ключ Jev и executables переводчика и LLM decision provider — часть
+  `ValidateDependencies`. Отдельные `ValidateDecisionConfig*` удалены. Цепочка в `app`
+  та же: `Load → Validate → ValidateDependencies`, до создания любого провайдера.
+- **`version: 2` обязателен.** Для `version: 1` ошибка перечисляет, что поменялось, и
+  отсылает к `orchestrator.example.yaml`. Пример переведён на v2, и тест проверяет, что
+  он проходит `Validate`.
+- **`domain.Run.Decision`** заменил `Classification`/`OriginalClassification`. Полный
+  trace — в `decision.json`.
+- **Таймаут.** `execution.timeout` отсчитывается от начала решения. Если был ручной
+  выбор, workflow получает новый дедлайн: время пользователя возвращается в бюджет
+  (`engineContext`). Сам выбор ждёт на signal-context без дедлайна.
+- **Интерактивность для ручного выбора:** не `--mode auto` и stdin — терминал. Если
+  stdin — настоящий файл, но не терминал (pipe, `/dev/null`, CI), выбор сразу падает с
+  ошибкой, а не читает EOF. Любой другой `io.Reader` считается скриптованным вводом
+  (так работают integration-тесты).
+- **Подтверждение без редактирования** (до T19): `[a]pprove / [c]ancel`. В `manual`
+  отказ от шага даёт `[r]etry / [a]bort`.
+- **`decision.jev.mock: true`** печатает в stderr предупреждение, что решения идут от
+  офлайн-эвристики, а не от Jev.
+- **Итоговый ответ (В4)** выводится после успешного run без development: `Answer:` и
+  поле `answer` последнего read-only шага.
+- **Удалены** `internal/classifier`, `domain.Classification`/`TaskType`/`LegacyComplexity`,
+  `workflow.BuildLegacy`, action `answer` (+ `actions.answer`, `AnswerArtifact`),
+  `interaction/editplan.go`, `apperr.ClassificationError`, `classification.json` и
+  `logs/classify.*`. `ClassifyReporter` переименован в `CallReporter` — им пользуются
+  перевод и LLM decision provider.
+- **T13 п. 10 сделан здесь:** без него T12 не была бы зелёной. Существующие сценарии
+  переведены на новый flow. Решение по умолчанию даёт фейковый Jev на `httptest.Server`
+  (`test/integration/jev_test.go`, отвечает по id вопросов). Сценарии 8/12/13 (невалидный
+  ответ, сбой и таймаут решения) — на LLM decision provider через fake CLI.
+- `CLAUDE.md`, `README.md` и корневой `MVP.md` пока описывают старый flow. Их обновление
+  — T20.
+
 ### T13 — Integration tests с mock Jev
 
 Mock Jev — `httptest.Server`, отвечает по id вопросов. Провайдеры (в том числе

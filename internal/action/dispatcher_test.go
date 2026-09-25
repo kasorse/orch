@@ -74,7 +74,6 @@ func testConfig() *config.Config {
 			Plan:      config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 			Implement: config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 			Review:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
-			Answer:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 		},
 		Test: config.TestConfig{Command: "go test ./..."},
 	}
@@ -142,20 +141,6 @@ func TestExecutePlan_Success(t *testing.T) {
 	}
 	if d.lastPlan == nil || d.lastPlan.Summary != "s" {
 		t.Errorf("expected plan to be stored, got %+v", d.lastPlan)
-	}
-}
-
-func TestExecuteAnswer_Success(t *testing.T) {
-	client := &fakeClient{output: `{"answer":"42"}`}
-	d := newDispatcher(client)
-
-	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "what is the answer"}}
-	outcome, err := d.Execute(context.Background(), domain.ActionAnswer, run)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if outcome.Outcome != workflow.OutcomeSuccess {
-		t.Errorf("expected success, got %s", outcome.Outcome)
 	}
 }
 

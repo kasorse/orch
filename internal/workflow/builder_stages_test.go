@@ -167,3 +167,11 @@ func TestBuild_FromPolicySelection(t *testing.T) {
 		t.Errorf("got %v, want %v", actions(w), want)
 	}
 }
+
+func actions(w domain.Workflow) []domain.ActionType {
+	out := make([]domain.ActionType, len(w.Steps))
+	for i, s := range w.Steps {
+		out[i] = s.Action
+	}
+	return out
+}

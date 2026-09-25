@@ -62,17 +62,11 @@ func parseDurationField(name, raw string) (time.Duration, error) {
 }
 
 type ActionsConfig struct {
+	Research  ActionConfig `yaml:"research"`
 	Analyze   ActionConfig `yaml:"analyze"`
 	Plan      ActionConfig `yaml:"plan"`
 	Implement ActionConfig `yaml:"implement"`
 	Review    ActionConfig `yaml:"review"`
-	Answer    ActionConfig `yaml:"answer"`
-	// Research backs the "research" workflow action added by the Jev integration
-	// (specs/JEV integration/TASKS.md T10). It is defined and independently validated
-	// (see decision.go) starting with T02, but is not yet wired into
-	// actionProviderModels/actionTimeouts or into any real workflow - that happens in
-	// T10/T12, alongside the answer action's removal.
-	Research ActionConfig `yaml:"research"`
 }
 
 type TestConfig struct {
@@ -105,24 +99,18 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 	return nil
 }
 
-type Config struct {
-	Version    int             `yaml:"version"`
-	Classifier ProviderModel   `yaml:"classifier"`
-	Actions    ActionsConfig   `yaml:"actions"`
-	Test       TestConfig      `yaml:"test"`
-	Limits     LimitsConfig    `yaml:"limits"`
-	Execution  ExecutionConfig `yaml:"execution"`
+// CurrentVersion is the only config version this build accepts.
+const CurrentVersion = 2
 
-	// Decision, Translation, Policy, and Context are the Jev integration's config
-	// surface (specs/JEV integration/TASKS.md T02). They are fully defined and
-	// validated by ValidateDecisionConfig/ValidateDecisionConfigDependencies in
-	// decision.go starting now, but that validation is not yet part of Validate's or
-	// ValidateDependencies' fail-fast chain, and cfg.Version is still required to be 1:
-	// the old classifier flow these run alongside is still what app.go wires up until
-	// T12 replaces it. Wiring these into the real fail-fast chain, bumping Version to
-	// 2, and rejecting v1 configs all happen together in T12, when the old fields
-	// (Classifier, Actions.Answer) are actually removed - cutting over piecemeal would
-	// leave a run that fails validation but has nothing yet to execute it.
+type Config struct {
+	Version   int             `yaml:"version"`
+	Actions   ActionsConfig   `yaml:"actions"`
+	Test      TestConfig      `yaml:"test"`
+	Limits    LimitsConfig    `yaml:"limits"`
+	Execution ExecutionConfig `yaml:"execution"`
+
+	// Decision, Translation, Policy, and Context configure how the workflow is decided
+	// (specs/JEV integration/TASKS.md T02, T22); see decision.go.
 	Decision    DecisionConfig    `yaml:"decision"`
 	Translation TranslationConfig `yaml:"translation"`
 	Policy      PolicyConfig      `yaml:"policy"`
@@ -133,12 +121,11 @@ type Config struct {
 // name, in a fixed order, for validation/dependency-checking iteration.
 func (c Config) actionProviderModels() []namedProviderModel {
 	return []namedProviderModel{
-		{Action: "classifier", ProviderModel: c.Classifier},
+		{Action: "research", ProviderModel: c.Actions.Research.ProviderModel},
 		{Action: "analyze", ProviderModel: c.Actions.Analyze.ProviderModel},
 		{Action: "plan", ProviderModel: c.Actions.Plan.ProviderModel},
 		{Action: "implement", ProviderModel: c.Actions.Implement.ProviderModel},
 		{Action: "review", ProviderModel: c.Actions.Review.ProviderModel},
-		{Action: "answer", ProviderModel: c.Actions.Answer.ProviderModel},
 	}
 }
 
@@ -148,15 +135,14 @@ type namedProviderModel struct {
 }
 
 // actionTimeouts returns each action's configured timeout override alongside its
-// pseudo-action name, for validation. classifier is excluded: it has no override,
-// per MVP.md §25.
+// pseudo-action name, for validation.
 func (c Config) actionTimeouts() []namedTimeout {
 	return []namedTimeout{
+		{Action: "research", Timeout: c.Actions.Research.Timeout},
 		{Action: "analyze", Timeout: c.Actions.Analyze.Timeout},
 		{Action: "plan", Timeout: c.Actions.Plan.Timeout},
 		{Action: "implement", Timeout: c.Actions.Implement.Timeout},
 		{Action: "review", Timeout: c.Actions.Review.Timeout},
-		{Action: "answer", Timeout: c.Actions.Answer.Timeout},
 	}
 }
 

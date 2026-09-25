@@ -1,7 +1,7 @@
-// Package interaction implements the interactive approve/edit/mode-select flow and the
-// manual-mode per-step gate (MVP.md §1/§27). It depends only on domain and workflow (for
-// workflow.Build/Gate/GateDecision) and reuses internal/logging for rendering, so it stays
-// a leaf composition point just like internal/action - never imported by internal/workflow.
+// Package interaction implements the terminal conversations with the user: the
+// approve/mode-select flow, the manual-mode per-step gate (MVP.md §1/§27), and the
+// manual choice of complexity and stages when the decision provider fails (T16). It
+// depends only on domain and workflow, and is never imported by internal/workflow.
 package interaction
 
 import (

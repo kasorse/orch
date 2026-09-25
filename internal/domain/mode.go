@@ -3,8 +3,8 @@ package domain
 import "fmt"
 
 // RunMode selects how much user interaction happens before and during a run
-// (MVP.md §1/§27). It is orthogonal to Classification/Workflow - the same
-// classification always produces the same workflow regardless of mode.
+// (MVP.md §1/§27). It is orthogonal to the decision and the workflow - the same
+// decision always produces the same workflow regardless of mode.
 type RunMode string
 
 const (

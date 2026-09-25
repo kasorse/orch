@@ -35,12 +35,16 @@ func (f FakeDependencyChecker) LookPath(file string) (string, error) {
 	return "/fake/bin/" + file, nil
 }
 
-// ValidateDependencies verifies, for every provider referenced by cfg (including the
-// classifier's provider), that the corresponding CLI executable is present in PATH.
-// It must run after Validate and before any provider/classifier object is constructed,
-// so a missing dependency is caught before any AI call is made.
+// ValidateDependencies verifies, for every provider referenced by cfg - every action,
+// translation, and an LLM decision provider - that the corresponding CLI executable is
+// present in PATH, and for the Jev decision provider that its API key is set. It must
+// run after Validate and before any provider or decision object is constructed, so a
+// missing dependency is caught before any AI call is made - even one only needed by a
+// later step (MVP.md §7).
 func ValidateDependencies(cfg Config, checker DependencyChecker) error {
-	problems := checkExecutablesPresent(cfg.actionProviderModels(), checker)
+	problems := jevKeyProblems(cfg.Decision)
+	pms := append(cfg.actionProviderModels(), decisionProviderModels(cfg)...)
+	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 	if len(problems) == 0 {
 		return nil
 	}

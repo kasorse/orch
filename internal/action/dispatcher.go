@@ -30,8 +30,6 @@ func (d *Dispatcher) Execute(ctx context.Context, actionType domain.ActionType, 
 		return d.executeTest(ctx, run)
 	case domain.ActionReview:
 		return d.executeReview(ctx, run)
-	case domain.ActionAnswer:
-		return d.executeAnswer(ctx, run)
 	default:
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "no action handler for " + string(actionType)}
 	}
@@ -79,8 +77,6 @@ func (d *Dispatcher) actionTimeout(actionType domain.ActionType) time.Duration {
 		return d.Config.Actions.Implement.Timeout
 	case domain.ActionReview:
 		return d.Config.Actions.Review.Timeout
-	case domain.ActionAnswer:
-		return d.Config.Actions.Answer.Timeout
 	default:
 		return 0
 	}

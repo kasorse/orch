@@ -20,13 +20,45 @@ func writeTempConfig(t *testing.T, content string) string {
 
 func TestLoad_ValidConfig(t *testing.T) {
 	path := writeTempConfig(t, `
-version: 1
+version: 2
 
-classifier:
+decision:
+  provider: jev
+  model: jev-1.13.0
+  timeout: 5s
+  complexity:
+    primary: choice
+    shadow: true
+  on_failure: ask
+  jev:
+    base_url: https://api.typesafe.ai
+    api_key_env: JEV_API_KEY
+    max_retries: 1
+
+translation:
   provider: claude
-  model: sonnet
+  model: haiku
+  timeout: 60s
+
+policy:
+  context_depth:
+    project_threshold: 0.5
+  complexity:
+    complex: 0.40
+    medium: 0.50
+  stages:
+    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    force:
+      complex: [analysis, planning, review]
+
+context:
+  max_files: 20
+  max_bytes: 24576
 
 actions:
+  research:
+    provider: claude
+    model: sonnet
   analyze:
     provider: claude
     model: sonnet
@@ -39,9 +71,6 @@ actions:
   review:
     provider: codex
     model: gpt
-  answer:
-    provider: gemini
-    model: pro
 
 test:
   command: "go test ./..."
@@ -58,14 +87,20 @@ execution:
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Version != 1 {
-		t.Errorf("expected version 1, got %d", cfg.Version)
+	if cfg.Version != 2 {
+		t.Errorf("expected version 2, got %d", cfg.Version)
 	}
 	if cfg.Actions.Implement.Model != "opus" {
 		t.Errorf("expected implement model opus, got %q", cfg.Actions.Implement.Model)
 	}
 	if cfg.Execution.Timeout != 15*time.Minute {
 		t.Errorf("expected timeout 15m, got %v", cfg.Execution.Timeout)
+	}
+	if cfg.Decision.Timeout != 5*time.Second || !cfg.Decision.UsesJev() {
+		t.Errorf("decision = %+v", cfg.Decision)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("the loaded example must be valid: %v", err)
 	}
 }
 
@@ -141,5 +176,15 @@ func TestLoad_InvalidActionTimeout(t *testing.T) {
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for invalid actions.review.timeout")
+	}
+}
+
+func TestLoad_ExampleConfigIsValid(t *testing.T) {
+	cfg, err := Load("../../orchestrator.example.yaml")
+	if err != nil {
+		t.Fatalf("load example: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("orchestrator.example.yaml must pass Validate: %v", err)
 	}
 }

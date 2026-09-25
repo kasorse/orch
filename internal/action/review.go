@@ -10,7 +10,7 @@ import (
 )
 
 // executeReview requires strict, well-formed structured output - unlike
-// analyze/plan/implement/answer, a malformed review has no actionable severity to safely
+// research/analyze/plan/implement, a malformed review has no actionable severity to safely
 // resume on, so it ends the run as a hard error rather than being treated as a
 // retryable "fail" (MVP.md §19, mirroring the classifier's strictness).
 func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {

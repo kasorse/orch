@@ -1,8 +1,6 @@
-// This file defines and validates the Jev integration's config surface
-// (specs/JEV integration/TASKS.md T02): the decision provider, translation, policy
-// thresholds, and context-collection budget. See the Config.Decision/Translation/
-// Policy/Context doc comment in config.go for why this validation is not yet part of
-// Validate/ValidateDependencies' fail-fast chain.
+// This file defines and validates the decision config surface (specs/JEV
+// integration/TASKS.md T02, T22): the decision provider, translation, policy thresholds,
+// and context-collection budget. Validate and ValidateDependencies include these checks.
 package config
 
 import (
@@ -12,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 )
@@ -261,11 +258,9 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 	}
 }
 
-// ValidateDecisionConfig checks structural correctness of the Jev integration's config
-// surface: decision.jev, decision.on_failure, translation, policy thresholds, context
-// budget, and actions.research. It mirrors Validate's aggregate-every-problem style but
-// is a separate function - see the Config.Decision doc comment in config.go for why.
-func ValidateDecisionConfig(cfg Config) error {
+// decisionProblems validates the decision surface: decision, decision.on_failure,
+// translation, policy thresholds, and context budget. It is part of Validate.
+func decisionProblems(cfg Config) []string {
 	var problems []string
 
 	problems = append(problems, validateDecision(cfg.Decision)...)
@@ -294,21 +289,7 @@ func ValidateDecisionConfig(cfg Config) error {
 			problems = append(problems, fmt.Sprintf("context.extra_deny[%d] must not be empty", i))
 		}
 	}
-
-	problems = append(problems, validateProviderModel("research", cfg.Actions.Research.ProviderModel)...)
-	if cfg.Actions.Research.Timeout < 0 {
-		problems = append(problems, fmt.Sprintf(
-			"actions.research.timeout must not be negative, got %s", cfg.Actions.Research.Timeout,
-		))
-	}
-
-	if len(problems) == 0 {
-		return nil
-	}
-	return apperr.NewConfigError(
-		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n")),
-		nil,
-	)
+	return problems
 }
 
 // validateDecision checks the provider-neutral decision settings, then the Jev block
@@ -418,36 +399,26 @@ func validatePolicyConfig(p PolicyConfig) []string {
 	return problems
 }
 
-// ValidateDecisionConfigDependencies checks the parts of the Jev integration's config
-// that require touching the environment: the executables backing translation, research
-// and - for an LLM decision provider - the decisions themselves, and, for Jev, that
-// decision.jev.api_key_env names a set environment variable (unless decision.jev.mock
-// is set: the mock needs no key). It must run after ValidateDecisionConfig, for the
-// same reason ValidateDependencies must run after Validate.
-func ValidateDecisionConfigDependencies(cfg Config, checker DependencyChecker) error {
-	var problems []string
-
-	d := cfg.Decision
-	if env := strings.TrimSpace(d.Jev.APIKeyEnv); d.UsesJev() && env != "" && !d.Jev.Mock {
-		if v, ok := os.LookupEnv(env); !ok || strings.TrimSpace(v) == "" {
-			problems = append(problems, fmt.Sprintf("jev decision provider: %s is not configured", env))
-		}
-	}
-
-	pms := []namedProviderModel{
-		{Action: "translation", ProviderModel: cfg.Translation.ProviderModel},
-		{Action: "research", ProviderModel: cfg.Actions.Research.ProviderModel},
-	}
-	if !d.UsesJev() {
-		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: d.Provider, Model: d.Model}})
-	}
-	problems = append(problems, checkExecutablesPresent(pms, checker)...)
-
-	if len(problems) == 0 {
+// jevKeyProblems reports a missing Jev API key: api_key_env must name a set
+// environment variable, unless the provider is not Jev or the mock is used.
+func jevKeyProblems(d DecisionConfig) []string {
+	env := strings.TrimSpace(d.Jev.APIKeyEnv)
+	if !d.UsesJev() || d.Jev.Mock || env == "" {
 		return nil
 	}
-	return apperr.NewDependencyError(
-		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n\n")),
-		nil,
-	)
+	if v, ok := os.LookupEnv(env); !ok || strings.TrimSpace(v) == "" {
+		return []string{fmt.Sprintf("jev decision provider: %s is not configured", env)}
+	}
+	return nil
+}
+
+// decisionProviderModels lists the CLIs the decision flow calls: translation always
+// (fail-fast must not depend on the request's language), and the decision provider
+// when it is an LLM.
+func decisionProviderModels(cfg Config) []namedProviderModel {
+	pms := []namedProviderModel{{Action: "translation", ProviderModel: cfg.Translation.ProviderModel}}
+	if !cfg.Decision.UsesJev() {
+		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: cfg.Decision.Provider, Model: cfg.Decision.Model}})
+	}
+	return pms
 }

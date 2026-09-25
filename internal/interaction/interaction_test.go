@@ -27,20 +27,18 @@ func (f *fakePrompter) Ask(prompt string) (string, error) {
 	return a, nil
 }
 
-func newRun(c domain.Classification) *domain.Run {
-	wf, err := workflow.BuildLegacy(c)
-	if err != nil {
-		panic(err)
-	}
-	return &domain.Run{Classification: &c, Workflow: &wf}
+func newRun() *domain.Run {
+	return &domain.Run{Workflow: &domain.Workflow{Steps: []domain.Step{
+		{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
+		{Action: domain.ActionTest, Stage: domain.StageTesting},
+	}}}
 }
 
 func TestReviewAndSelectMode_ImmediateApproveWithPinnedMode(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"a"}}
 	var out bytes.Buffer
 
-	mode, approved, err := ReviewAndSelectMode(p, &out, run, domain.ModeManual)
+	mode, approved, err := ReviewAndSelectMode(p, &out, domain.ModeManual)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,11 +54,10 @@ func TestReviewAndSelectMode_ImmediateApproveWithPinnedMode(t *testing.T) {
 }
 
 func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"a", "2"}}
 	var out bytes.Buffer
 
-	mode, approved, err := ReviewAndSelectMode(p, &out, run, "")
+	mode, approved, err := ReviewAndSelectMode(p, &out, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,95 +69,11 @@ func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
 	}
 }
 
-func TestReviewAndSelectMode_EditFieldsThenApprove(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
-	p := &fakePrompter{answers: []string{
-		"e",
-		"t", "feature",
-		"c", "high",
-		"1", "n", // requires_tests -> false
-		"2", "y", // requires_review -> true
-		"d",
-		"a",
-		"4", // auto
-	}}
-	var out bytes.Buffer
-
-	mode, approved, err := ReviewAndSelectMode(p, &out, run, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !approved {
-		t.Fatal("expected approved")
-	}
-	if mode != domain.ModeAuto {
-		t.Errorf("expected auto, got %s", mode)
-	}
-
-	if run.OriginalClassification == nil {
-		t.Fatal("expected OriginalClassification to be preserved after an edit")
-	}
-	if run.OriginalClassification.Type != domain.TaskBugfix || run.OriginalClassification.Complexity != domain.LegacyComplexityLow {
-		t.Errorf("OriginalClassification not preserved correctly: %+v", run.OriginalClassification)
-	}
-
-	if run.Classification.Type != domain.TaskFeature {
-		t.Errorf("expected edited type feature, got %s", run.Classification.Type)
-	}
-	if run.Classification.Complexity != domain.LegacyComplexityHigh {
-		t.Errorf("expected edited complexity high, got %s", run.Classification.Complexity)
-	}
-	if run.Classification.RequiresTests {
-		t.Error("expected requires_tests to be false after edit")
-	}
-	if !run.Classification.RequiresReview {
-		t.Error("expected requires_review to be true after edit")
-	}
-
-	// feature -> plan, implement, +review (tests disabled).
-	wantActions := []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionReview}
-	if len(run.Workflow.Steps) != len(wantActions) {
-		t.Fatalf("workflow not rebuilt as expected: %+v", run.Workflow.Steps)
-	}
-	for i, a := range wantActions {
-		if run.Workflow.Steps[i].Action != a {
-			t.Errorf("step %d: got %s, want %s", i, run.Workflow.Steps[i].Action, a)
-		}
-	}
-}
-
-func TestReviewAndSelectMode_RejectsInvalidEditThenSucceeds(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
-	p := &fakePrompter{answers: []string{
-		"e",
-		"c", "not-a-real-complexity", // rejected by Validate(), classification untouched
-		"d",
-		"a",
-		"1", // plan
-	}}
-	var out bytes.Buffer
-
-	mode, approved, err := ReviewAndSelectMode(p, &out, run, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !approved || mode != domain.ModePlan {
-		t.Fatalf("expected approved plan mode, got approved=%v mode=%s", approved, mode)
-	}
-	if run.OriginalClassification != nil {
-		t.Error("expected no OriginalClassification since the only edit attempt was invalid")
-	}
-	if run.Classification.Complexity != domain.LegacyComplexityLow {
-		t.Errorf("expected complexity unchanged, got %s", run.Classification.Complexity)
-	}
-}
-
 func TestReviewAndSelectMode_Cancel(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
 	p := &fakePrompter{answers: []string{"c"}}
 	var out bytes.Buffer
 
-	_, approved, err := ReviewAndSelectMode(p, &out, run, "")
+	_, approved, err := ReviewAndSelectMode(p, &out, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +83,7 @@ func TestReviewAndSelectMode_Cancel(t *testing.T) {
 }
 
 func TestTerminalGate_DeclineThenRetry(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun()
 	p := &fakePrompter{answers: []string{"n", "r"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)
@@ -184,29 +97,8 @@ func TestTerminalGate_DeclineThenRetry(t *testing.T) {
 	}
 }
 
-func TestTerminalGate_DeclineEditThenRetryProceeds(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
-	p := &fakePrompter{answers: []string{"n", "e", "1", "n", "d", "r"}}
-	var out bytes.Buffer
-	gate := NewTerminalGate(p, &out)
-
-	decision, err := gate.BeforeStep(context.Background(), run, 0, domain.ActionTest)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if decision != workflow.GateProceed {
-		t.Errorf("expected proceed, got %s", decision)
-	}
-	if run.Classification.RequiresTests {
-		t.Error("expected requires_tests edited to false")
-	}
-	if !strings.Contains(out.String(), "Workflow (remaining)") {
-		t.Errorf("expected remaining-workflow line after edit, got: %s", out.String())
-	}
-}
-
 func TestTerminalGate_DeclineThenAbort(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun()
 	p := &fakePrompter{answers: []string{"n", "a"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)
@@ -221,7 +113,7 @@ func TestTerminalGate_DeclineThenAbort(t *testing.T) {
 }
 
 func TestTerminalGate_AllRemainingSkipsFuturePrompts(t *testing.T) {
-	run := newRun(domain.Classification{Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow, RequiresTests: true, RequiresReview: true})
+	run := newRun()
 	p := &fakePrompter{answers: []string{"A"}}
 	var out bytes.Buffer
 	gate := NewTerminalGate(p, &out)

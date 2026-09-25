@@ -21,8 +21,6 @@ func TestScenario7_ProviderRuntimeFailure(t *testing.T) {
 	responsesDir := t.TempDir()
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixLow)
-
 	t.Setenv("FAKE_RESPONSES_DIR", responsesDir)
 	t.Setenv("INVOCATIONS_LOG", invocationsLog)
 	t.Setenv("FAKE_FAIL_ACTION", "implement")
@@ -30,7 +28,9 @@ func TestScenario7_ProviderRuntimeFailure(t *testing.T) {
 	t.Setenv("FAKE_FAIL_STDERR", "boom: simulated provider crash")
 
 	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixLow()).URL()
+	configPath := writeConfig(t, configDir, opts)
 
 	_, _, err := runOrchestrator(t, repoDir, configPath, "run", "fix Add() to add instead of subtract")
 	if err == nil {
@@ -67,7 +67,7 @@ func TestScenario7_ProviderRuntimeFailure(t *testing.T) {
 		t.Errorf("rendered error message does not contain the simulated crash message: %s", err.Error())
 	}
 
-	want := []string{"classify", "implement"}
+	want := []string{"implement"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
 		t.Errorf("invocations = %v, want %v (no further AI call after the failing one)", got, want)
 	}

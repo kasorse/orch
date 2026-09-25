@@ -20,7 +20,6 @@ func TestScenario9_MaxFixIterationsReached(t *testing.T) {
 	stateDir := t.TempDir()
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixLow)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 
 	t.Setenv("FAKE_RESPONSES_DIR", responsesDir)
@@ -29,6 +28,7 @@ func TestScenario9_MaxFixIterationsReached(t *testing.T) {
 	t.Setenv("FAKE_IMPLEMENT_FIX_ON_CALL", "999")
 
 	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixLow()).URL()
 	opts.maxFixIterations = 1
 
 	configDir := t.TempDir()
@@ -44,7 +44,7 @@ func TestScenario9_MaxFixIterationsReached(t *testing.T) {
 		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
 	}
 
-	want := []string{"classify", "implement", "implement"}
+	want := []string{"implement", "implement"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
 		t.Errorf("invocations = %v, want %v (review must never be invoked)", got, want)
 	}

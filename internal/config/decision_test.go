@@ -10,53 +10,13 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
-// validDecisionConfig returns a fully valid Jev integration config surface, matching
-// the example in specs/JEV integration/TASKS.md T02. It is deliberately independent
-// from validConfig() (validator_test.go): the two surfaces are validated by separate
-// functions until T12 merges them.
-func validDecisionConfig() Config {
-	return Config{
-		Decision: DecisionConfig{
-			Provider:   DecisionProviderJev,
-			Model:      "jev-1.13.0",
-			Timeout:    5 * time.Second,
-			Complexity: ComplexityQuestionsConfig{Primary: "choice", Shadow: true},
-			OnFailure:  OnFailureAsk,
-			Jev: JevConfig{
-				BaseURL:    "https://api.typesafe.ai",
-				APIKeyEnv:  "JEV_API_KEY",
-				MaxRetries: 1,
-			},
-		},
-		Translation: TranslationConfig{
-			ProviderModel: ProviderModel{Provider: "claude", Model: "haiku"},
-			Timeout:       60 * time.Second,
-		},
-		Policy: PolicyConfig{
-			ContextDepth: ContextDepthPolicyConfig{ProjectThreshold: float64Ptr(0.5)},
-			Complexity:   ComplexityPolicyConfig{Complex: float64Ptr(0.40), Medium: float64Ptr(0.50)},
-			Stages: StagePolicyConfig{
-				Thresholds: map[string]float64{
-					"research": 0.70, "analysis": 0.60, "planning": 0.65,
-					"development": 0.60, "testing": 0.60, "review": 0.70,
-				},
-				Force: map[string][]string{"complex": {"analysis", "planning", "review"}},
-			},
-		},
-		Context: ContextConfig{MaxFiles: 20, MaxBytes: 24576},
-		Actions: ActionsConfig{
-			Research: ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
-		},
-	}
-}
-
-func TestValidateDecisionConfig_Valid(t *testing.T) {
-	if err := ValidateDecisionConfig(validDecisionConfig()); err != nil {
+func TestValidateDecision_Valid(t *testing.T) {
+	if err := Validate(validConfig()); err != nil {
 		t.Fatalf("expected valid config to pass, got: %v", err)
 	}
 }
 
-func TestValidateDecisionConfig_Jev(t *testing.T) {
+func TestValidateDecision_Jev(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(cfg *Config)
@@ -81,9 +41,9 @@ func TestValidateDecisionConfig_Jev(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := validDecisionConfig()
+			cfg := validConfig()
 			tt.mutate(&cfg)
-			err := ValidateDecisionConfig(cfg)
+			err := Validate(cfg)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -95,19 +55,19 @@ func TestValidateDecisionConfig_Jev(t *testing.T) {
 
 	// max_retries at the edges of [0, 3] must both be accepted.
 	for _, n := range []int{0, 3} {
-		cfg := validDecisionConfig()
+		cfg := validConfig()
 		cfg.Decision.Jev.MaxRetries = n
-		if err := ValidateDecisionConfig(cfg); err != nil {
+		if err := Validate(cfg); err != nil {
 			t.Errorf("max_retries=%d rejected: %v", n, err)
 		}
 	}
 }
 
-func TestValidateDecisionConfig_APIKeyMustNotBeLiteral(t *testing.T) {
-	cfg := validDecisionConfig()
+func TestValidateDecision_APIKeyMustNotBeLiteral(t *testing.T) {
+	cfg := validConfig()
 	cfg.Decision.Jev.apiKeyLiteralSet = true
 
-	err := ValidateDecisionConfig(cfg)
+	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -180,22 +140,22 @@ func TestComplexityQuestionsConfig_Sources(t *testing.T) {
 	}
 }
 
-func TestValidateDecisionConfig_LLMProviderIgnoresJevBlock(t *testing.T) {
-	cfg := validDecisionConfig()
+func TestValidateDecision_LLMProviderIgnoresJevBlock(t *testing.T) {
+	cfg := validConfig()
 	cfg.Decision.Provider = "claude"
 	cfg.Decision.Model = "sonnet"
 	cfg.Decision.Jev = JevConfig{} // absent entirely
-	if err := ValidateDecisionConfig(cfg); err != nil {
+	if err := Validate(cfg); err != nil {
 		t.Fatalf("an LLM provider needs no jev block: %v", err)
 	}
 
 	cfg.Decision.Jev = JevConfig{BaseURL: "not a url", MaxRetries: 9} // present but invalid
-	if err := ValidateDecisionConfig(cfg); err != nil {
+	if err := Validate(cfg); err != nil {
 		t.Fatalf("the jev block is not validated for an LLM provider: %v", err)
 	}
 
 	cfg.Decision.Jev.apiKeyLiteralSet = true
-	if err := ValidateDecisionConfig(cfg); err == nil || !strings.Contains(err.Error(), "api_key must not be set") {
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "api_key must not be set") {
 		t.Errorf("a literal api_key is rejected whichever provider is used: %v", err)
 	}
 }
@@ -226,7 +186,7 @@ func TestTranslationConfig_UnmarshalYAML(t *testing.T) {
 	}
 }
 
-func TestValidateDecisionConfig_Translation(t *testing.T) {
+func TestValidateDecision_Translation(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(cfg *Config)
@@ -240,16 +200,16 @@ func TestValidateDecisionConfig_Translation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := validDecisionConfig()
+			cfg := validConfig()
 			tt.mutate(&cfg)
-			if err := ValidateDecisionConfig(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("ValidateDecisionConfig() = %v, want error containing %q", err, tt.wantErr)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want error containing %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestValidateDecisionConfig_Policy(t *testing.T) {
+func TestValidateDecision_Policy(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(cfg *Config)
@@ -279,25 +239,25 @@ func TestValidateDecisionConfig_Policy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := validDecisionConfig()
+			cfg := validConfig()
 			tt.mutate(&cfg)
-			if err := ValidateDecisionConfig(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("ValidateDecisionConfig() = %v, want error containing %q", err, tt.wantErr)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want error containing %q", err, tt.wantErr)
 			}
 		})
 	}
 
 	// A threshold of exactly 0 must be accepted as a deliberate (if extreme) choice,
 	// distinct from an omitted one.
-	cfg := validDecisionConfig()
+	cfg := validConfig()
 	cfg.Policy.ContextDepth.ProjectThreshold = float64Ptr(0)
 	cfg.Policy.Stages.Thresholds["review"] = 0
-	if err := ValidateDecisionConfig(cfg); err != nil {
+	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
 	}
 }
 
-func TestValidateDecisionConfig_Context(t *testing.T) {
+func TestValidateDecision_Context(t *testing.T) {
 	tests := []struct {
 		name    string
 		mutate  func(cfg *Config)
@@ -310,31 +270,31 @@ func TestValidateDecisionConfig_Context(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := validDecisionConfig()
+			cfg := validConfig()
 			tt.mutate(&cfg)
-			if err := ValidateDecisionConfig(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Errorf("ValidateDecisionConfig() = %v, want error containing %q", err, tt.wantErr)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want error containing %q", err, tt.wantErr)
 			}
 		})
 	}
 }
 
-func TestValidateDecisionConfig_Research(t *testing.T) {
-	cfg := validDecisionConfig()
+func TestValidateDecision_Research(t *testing.T) {
+	cfg := validConfig()
 	cfg.Actions.Research.Provider = ""
-	err := ValidateDecisionConfig(cfg)
+	err := Validate(cfg)
 	if err == nil || !strings.Contains(err.Error(), "research.provider is required") {
-		t.Errorf("ValidateDecisionConfig() = %v, want error containing research.provider is required", err)
+		t.Errorf("Validate() = %v, want error containing research.provider is required", err)
 	}
 }
 
-func TestValidateDecisionConfig_AggregatesAllProblems(t *testing.T) {
-	cfg := validDecisionConfig()
+func TestValidateDecision_AggregatesAllProblems(t *testing.T) {
+	cfg := validConfig()
 	cfg.Decision.Jev.BaseURL = ""
 	cfg.Translation.Provider = ""
 	cfg.Context.MaxFiles = 0
 
-	err := ValidateDecisionConfig(cfg)
+	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -347,7 +307,7 @@ func TestValidateDecisionConfig_AggregatesAllProblems(t *testing.T) {
 }
 
 func TestConfig_DecisionPolicy(t *testing.T) {
-	cfg := validDecisionConfig()
+	cfg := validConfig()
 	p := cfg.DecisionPolicy()
 
 	if p.ProjectContextThreshold != 0.5 {

@@ -50,9 +50,9 @@ const (
 
 // Gate optionally pauses the engine before each step, e.g. for manual-mode
 // per-step confirmation. Engine tolerates a nil Gate, which reproduces today's
-// fully-automatic behavior exactly. A Gate implementation may mutate
-// run.Classification and run.Workflow before returning GateProceed - such a mutation
-// only affects future Next() lookups, never the step about to execute.
+// fully-automatic behavior exactly. A Gate implementation may mutate run.Workflow
+// before returning GateProceed - such a mutation only affects future Next() lookups,
+// never the step about to execute.
 type Gate interface {
 	BeforeStep(ctx context.Context, run *domain.Run, index int, action domain.ActionType) (GateDecision, error)
 }

@@ -19,7 +19,6 @@ func TestScenario1_SuccessfulBugfix(t *testing.T) {
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 	fixedContent := writeFixedFixtureFile(t)
 
-	writeResponse(t, responsesDir, "classify", classifyBugfixMedium)
 	writeResponse(t, responsesDir, "analyze", analyzeResponse)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
@@ -32,15 +31,17 @@ func TestScenario1_SuccessfulBugfix(t *testing.T) {
 	t.Setenv("FAKE_FIX_CONTENT_FILE", fixedContent)
 
 	configDir := t.TempDir()
-	configPath := writeConfig(t, configDir, defaultConfigOptions())
+	opts := defaultConfigOptions()
+	opts.jevURL = startJev(t, scriptBugfixMedium()).URL()
+	configPath := writeConfig(t, configDir, opts)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, configPath, "run", "fix Add() to add instead of subtract")
 	if err != nil {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"classify", "analyze", "implement", "review"}) {
-		t.Errorf("invocations = %v, want [classify analyze implement review]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+		t.Errorf("invocations = %v, want [analyze implement review]", got)
 	}
 
 	if !strings.Contains(stdout, "Run completed successfully.") {

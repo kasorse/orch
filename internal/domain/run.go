@@ -42,14 +42,12 @@ type StepExecution struct {
 }
 
 type Run struct {
-	ID             string          `json:"id"`
-	Task           Task            `json:"task"`
-	Classification *Classification `json:"classification,omitempty"`
-	// OriginalClassification preserves the classifier's raw output for audit, and is
-	// only set once the user edits Classification during the approve/edit loop or a
-	// manual-mode step gate.
-	OriginalClassification *Classification `json:"original_classification,omitempty"`
-	Workflow               *Workflow       `json:"workflow,omitempty"`
+	ID   string `json:"id"`
+	Task Task   `json:"task"`
+	// Decision is the policy's verdict the workflow was built from; decision.json holds
+	// the full trace behind it (TASKS.md T11).
+	Decision *Decision `json:"decision,omitempty"`
+	Workflow *Workflow `json:"workflow,omitempty"`
 	// Mode is the execution mode this run actually ran under (MVP.md §1/§27).
 	Mode          RunMode         `json:"mode,omitempty"`
 	Executions    []StepExecution `json:"executions"`

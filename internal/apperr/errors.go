@@ -148,16 +148,6 @@ func truncateTail(s string) string {
 	return fmt.Sprintf("... [truncated, showing last %d bytes]\n%s", maxStreamInError, s[len(s)-maxStreamInError:])
 }
 
-type ClassificationError struct {
-	Raw string
-	Err error
-}
-
-func (e *ClassificationError) Error() string {
-	return fmt.Sprintf("classification failed: %v\n\nraw output:\n%s", e.Err, e.Raw)
-}
-func (e *ClassificationError) Unwrap() error { return e.Err }
-
 type WorkflowError struct {
 	Msg string
 	Err error
