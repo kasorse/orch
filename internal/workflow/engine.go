@@ -166,7 +166,10 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		e.stepFinished(run, index, stepExec, outcome)
 		e.persist(run)
 
-		next := Next(current, outcome.Outcome, *run.Workflow)
+		next, reason := Next(current, outcome.Outcome, *run.Workflow)
+		if next == StateFailed {
+			run.FailureReason = reason
+		}
 
 		if isBackwardEntryToImplement(current, next) {
 			run.FixIterations++

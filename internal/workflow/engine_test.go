@@ -341,3 +341,160 @@ func assertActions(t *testing.T, got, want []domain.ActionType) {
 		}
 	}
 }
+
+// --- TASKS.md T05: generalized transitions ---------------------------------------
+
+func TestEngine_ResearchThenAnalysisCompletes(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{
+		{Action: domain.ActionResearch, Stage: domain.StageResearch},
+		{Action: domain.ActionAnalyze, Stage: domain.StageAnalysis},
+	}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionResearch, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionAnalyze, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionAnalyze})
+}
+
+// TestEngine_StandaloneTestingFailureFailsRun is TASKS.md В5: a workflow with no
+// implement has nothing to retry into, so a failing test ends the run rather than
+// trying to execute an implement step that was never part of the workflow.
+func TestEngine_StandaloneTestingFailureFailsRun(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionTest, Stage: domain.StageTesting}}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeFailure}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	err := engine.Run(context.Background(), run)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if run.Status != domain.RunFailed {
+		t.Errorf("expected failed, got %s", run.Status)
+	}
+	if run.FailureReason != "tests failed" {
+		t.Errorf(`FailureReason = %q, want "tests failed"`, run.FailureReason)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionTest})
+}
+
+// TestEngine_StandaloneReviewFailureStillCompletes is TASKS.md В5's asymmetric half:
+// a workflow with no implement completes even when review reports a failing verdict
+// - reviewing a diff and reporting it has problems fulfils a review-only task, it
+// does not fail the run. The verdict itself is carried on the step's ReviewResult.
+func TestEngine_StandaloneReviewFailureStillCompletes(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionReview, Stage: domain.StageReview}}}
+	exec := newScriptedExecutor()
+	failing := &domain.ReviewResult{Status: domain.ReviewFail}
+	exec.script(domain.ActionReview, StepOutcome{Outcome: OutcomeFailure, ReviewResult: failing}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	if run.FailureReason != "" {
+		t.Errorf("expected no failure reason on a completed run, got %q", run.FailureReason)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionReview})
+	if got := run.Executions[len(run.Executions)-1].ReviewResult; got == nil || got.Status != domain.ReviewFail {
+		t.Errorf("expected the failing verdict to still be recorded, got %+v", got)
+	}
+}
+
+// TestEngine_ReviewFailureCascadesFromFullWorkflow re-covers
+// TestEngine_ReviewFailureLoopsThroughTestThenReview's scenario explicitly as a T05
+// acceptance case: with implement present, a failing review still loops all the way
+// back through implement -> test -> review, purely as a consequence of forward
+// progress following wf.Steps' order - no special-casing needed.
+func TestEngine_ReviewFailureCascadesFromFullWorkflow(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{
+		{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
+		{Action: domain.ActionTest, Stage: domain.StageTesting},
+		{Action: domain.ActionReview, Stage: domain.StageReview},
+	}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionReview, StepOutcome{Outcome: OutcomeFailure}, nil)
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionReview, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	want := []domain.ActionType{
+		domain.ActionImplement, domain.ActionTest, domain.ActionReview,
+		domain.ActionImplement, domain.ActionTest, domain.ActionReview,
+	}
+	assertActions(t, exec.calls, want)
+	if run.FixIterations != 1 {
+		t.Errorf("expected 1 fix iteration, got %d", run.FixIterations)
+	}
+}
+
+// TestEngine_TestingOnlyWorkflowCompletesOnSuccess checks the success half of a
+// no-implement testing-only workflow, complementing
+// TestEngine_StandaloneTestingFailureFailsRun's failure half.
+func TestEngine_TestingOnlyWorkflowCompletesOnSuccess(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionTest, Stage: domain.StageTesting}}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionTest, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+}
+
+// TestEngine_DevelopmentWithoutTestOrReviewCompletesAfterImplement checks a
+// development-only workflow (analysis probability enabled it, but neither testing nor
+// review cleared their thresholds): implement's success has nowhere forward to go but
+// Done, purely from wf.Steps' order, without any RequiresTest/RequiresReview check.
+func TestEngine_DevelopmentWithoutTestOrReviewCompletesAfterImplement(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{
+		{Action: domain.ActionAnalyze, Stage: domain.StageAnalysis},
+		{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
+	}}
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionAnalyze, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
+
+	run := newRun(wf)
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionAnalyze, domain.ActionImplement})
+}
