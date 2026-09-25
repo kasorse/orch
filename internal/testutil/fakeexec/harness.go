@@ -52,6 +52,9 @@ func PrependPath(t *testing.T, dir string) {
 //     resolved action (including "translate" and "decide-*"), the script sleeps for FAKE_SLEEP_SECONDS
 //     (default 1) before doing anything else - simulates a hung provider call for
 //     timeout scenarios.
+//   - FAKE_PROMPTS_DIR: if set, the prompt of each call is saved to
+//     <dir>/<action>.txt (the last call of an action wins), so tests can assert what
+//     text a step was given.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
 //     (implement_calls, review_calls) across invocations of the same test.
 //   - FAKE_IMPLEMENT_FIX_ON_CALL: 1-based implement call number (default 1) on
@@ -89,6 +92,14 @@ fi
 
 if [ -n "${INVOCATIONS_LOG:-}" ]; then
   echo "$action" >> "$INVOCATIONS_LOG"
+fi
+
+if [ -n "${FAKE_PROMPTS_DIR:-}" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      "ACTION: "*) printf '%s' "$arg" > "$FAKE_PROMPTS_DIR/$action.txt" ;;
+    esac
+  done
 fi
 
 if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
