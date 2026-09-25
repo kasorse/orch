@@ -41,6 +41,8 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Name() string { return "jev" }
 
+func (f *fakeProvider) Source() domain.DecisionSource { return domain.DecisionSourceJev }
+
 func (f *fakeProvider) ContextDepth(_ context.Context, request string) (domain.ContextDepthDecision, error) {
 	f.depthRequest = request
 	return f.depth, f.depthErr

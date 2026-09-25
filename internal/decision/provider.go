@@ -16,8 +16,10 @@ import (
 // Failures are *apperr.DecisionError, so the caller can tell a provider outage (manual
 // choice, TASKS.md В9) from a cancelled run without knowing which adapter it talks to.
 type Provider interface {
-	// Name identifies the provider in traces and errors, e.g. "jev".
+	// Name identifies the provider in traces and errors, e.g. "jev" or "claude".
 	Name() string
+	// Source is what the decision trace records as having decided.
+	Source() domain.DecisionSource
 	// ContextDepth is the pre-check: does classifying request need repository context?
 	ContextDepth(ctx context.Context, request string) (domain.ContextDepthDecision, error)
 	// Classify returns the complexity distribution(s) and every stage's probability.

@@ -26,13 +26,14 @@ type DecisionPolicy struct {
 	ForceStages map[Complexity][]Stage
 }
 
-// DecisionSource records whether a Decision came from the Jev API or, when Jev
-// failed, from a human (TASKS.md В9: this project asks the user by hand rather than
-// falling back to an LLM decision provider).
+// DecisionSource records who decided: the Jev API, an LLM configured as the decision
+// provider (T22), or - when the provider failed - a human (TASKS.md В9: the user is
+// asked by hand; there is no automatic fallback from one provider to another).
 type DecisionSource string
 
 const (
 	DecisionSourceJev  DecisionSource = "jev"
+	DecisionSourceLLM  DecisionSource = "llm"
 	DecisionSourceUser DecisionSource = "user"
 )
 

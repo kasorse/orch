@@ -164,3 +164,20 @@ func TestValidateDecisionConfigDependencies_MockNeedsNoAPIKey(t *testing.T) {
 		t.Fatalf("expected mock mode to pass without an API key, got: %v", err)
 	}
 }
+
+func TestValidateDecisionConfigDependencies_LLMProvider(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "sentinel")
+	os.Unsetenv("JEV_API_KEY")
+	cfg := validDecisionConfig()
+	cfg.Decision.Provider = "codex"
+	cfg.Decision.Model = "gpt"
+
+	if err := ValidateDecisionConfigDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{}}); err != nil {
+		t.Fatalf("an LLM provider needs no JEV_API_KEY: %v", err)
+	}
+
+	err := ValidateDecisionConfigDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"codex": true}})
+	if err == nil || !strings.Contains(err.Error(), "decision") || !strings.Contains(err.Error(), "codex") {
+		t.Errorf("a missing decision executable must fail before any AI call: %v", err)
+	}
+}

@@ -1084,6 +1084,28 @@ decision:
 - один и тот же запрос с mock Jev и с fake LLM даёт `decision.json` одной формы. Отличаются
   только `source`, `provider`, `model` и числа.
 
+**Сделано.** Отличия от плана:
+- **`Source()` в интерфейсе `decision.Provider`.** Jev возвращает `jev`, LLM — `llm`, и
+  сервис записывает это в решение. Без метода пришлось бы сравнивать имя провайдера со
+  строкой `"jev"`.
+- **State вынесен в `internal/decision/state.go`** (`PreCheckState`,
+  `NewClassificationState`). Jev и LLM получают его из одного места. Golden-файлы
+  запросов Jev (T07) при этом не изменились.
+- **Config.** `JevComplexityConfig` переименован в `ComplexityQuestionsConfig`, у него
+  появился метод `Sources()` (основной вопрос плюс теневой), по которому `app` соберёт
+  список для провайдеров. Литеральный `decision.jev.api_key` отклоняется при любом
+  провайдере: секрет в файле опасен независимо от того, кто его читает.
+- **Prompt LLM.** Вопросы и критерии — из `internal/decision/questions.go`, state — тот
+  же JSON, что уходит в Jev, внутри `<state>…</state>`. `encoding/json` экранирует
+  `<`/`>`, поэтому запрос не может закрыть блок. Из JSON-ответа извлекается первый
+  объект (fences и проза вокруг допускаются). Неизвестные поля и ответ на незаданный
+  `complexity_score` — ошибка.
+- **Ошибки CLI.** Таймаут даёт `Timeout`, отмена — `DecisionCancelled`, любой другой сбой
+  — `Unavailable`. Исходный `ProviderError` лежит внутри, с `Action: decide-*` и путём
+  к логу. В `InvalidResponse` сохраняется вывод модели (до 2 KB).
+- **Сравнимость проверена тестом:** один запрос через mock Jev и через fake LLM даёт
+  `decision.json` с одинаковым набором полей.
+
 ---
 
 ## 6. Задачи — итерация 2

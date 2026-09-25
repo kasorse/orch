@@ -17,15 +17,16 @@ func float64Ptr(v float64) *float64 { return &v }
 func validDecisionConfig() Config {
 	return Config{
 		Decision: DecisionConfig{
+			Provider:   DecisionProviderJev,
+			Model:      "jev-1.13.0",
+			Timeout:    5 * time.Second,
+			Complexity: ComplexityQuestionsConfig{Primary: "choice", Shadow: true},
+			OnFailure:  OnFailureAsk,
 			Jev: JevConfig{
 				BaseURL:    "https://api.typesafe.ai",
 				APIKeyEnv:  "JEV_API_KEY",
-				Model:      "jev-1.13.0",
-				Timeout:    5 * time.Second,
 				MaxRetries: 1,
-				Complexity: JevComplexityConfig{Primary: "choice", Shadow: true},
 			},
-			OnFailure: OnFailureAsk,
 		},
 		Translation: TranslationConfig{
 			ProviderModel: ProviderModel{Provider: "claude", Model: "haiku"},
@@ -66,13 +67,15 @@ func TestValidateDecisionConfig_Jev(t *testing.T) {
 		{"base_url with unsupported scheme", func(c *Config) { c.Decision.Jev.BaseURL = "ftp://api.typesafe.ai" }, "must be a valid http(s) URL"},
 		{"base_url without host", func(c *Config) { c.Decision.Jev.BaseURL = "https://" }, "must be a valid http(s) URL"},
 		{"empty api_key_env", func(c *Config) { c.Decision.Jev.APIKeyEnv = "" }, "decision.jev.api_key_env is required"},
-		{"empty model", func(c *Config) { c.Decision.Jev.Model = "" }, "decision.jev.model is required"},
-		{"zero timeout", func(c *Config) { c.Decision.Jev.Timeout = 0 }, "decision.jev.timeout must be a positive duration"},
-		{"negative timeout", func(c *Config) { c.Decision.Jev.Timeout = -time.Second }, "decision.jev.timeout must be a positive duration"},
+		{"empty provider", func(c *Config) { c.Decision.Provider = "" }, "decision.provider is required"},
+		{"unknown provider", func(c *Config) { c.Decision.Provider = "openai" }, `decision.provider "openai" is not supported (supported: jev, claude, codex, gemini)`},
+		{"empty model", func(c *Config) { c.Decision.Model = "" }, "decision.model is required"},
+		{"zero timeout", func(c *Config) { c.Decision.Timeout = 0 }, "decision.timeout must be a positive duration"},
+		{"negative timeout", func(c *Config) { c.Decision.Timeout = -time.Second }, "decision.timeout must be a positive duration"},
 		{"max_retries too high", func(c *Config) { c.Decision.Jev.MaxRetries = 4 }, "decision.jev.max_retries must be between 0 and 3"},
 		{"max_retries negative", func(c *Config) { c.Decision.Jev.MaxRetries = -1 }, "decision.jev.max_retries must be between 0 and 3"},
-		{"unknown complexity.primary", func(c *Config) { c.Decision.Jev.Complexity.Primary = "vote" }, "decision.jev.complexity.primary"},
-		{"empty complexity.primary", func(c *Config) { c.Decision.Jev.Complexity.Primary = "" }, "decision.jev.complexity.primary"},
+		{"unknown complexity.primary", func(c *Config) { c.Decision.Complexity.Primary = "vote" }, "decision.complexity.primary"},
+		{"empty complexity.primary", func(c *Config) { c.Decision.Complexity.Primary = "" }, "decision.complexity.primary"},
 		{"unknown on_failure", func(c *Config) { c.Decision.OnFailure = "retry" }, `decision.on_failure must be "ask" or "fail"`},
 		{"empty on_failure", func(c *Config) { c.Decision.OnFailure = "" }, `decision.on_failure must be "ask" or "fail"`},
 	}
@@ -138,22 +141,62 @@ func TestJevConfig_UnmarshalYAML_DetectsLiteralAPIKey(t *testing.T) {
 	}
 }
 
-func TestJevConfig_UnmarshalYAML_Timeout(t *testing.T) {
-	var j JevConfig
-	src := "base_url: https://api.typesafe.ai\ntimeout: 5s\ncomplexity:\n  primary: choice\n  shadow: true\n"
-	if err := yaml.Unmarshal([]byte(src), &j); err != nil {
+func TestDecisionConfig_UnmarshalYAML(t *testing.T) {
+	var d DecisionConfig
+	src := "provider: claude\nmodel: sonnet\ntimeout: 60s\ncomplexity:\n  primary: score\n  shadow: true\non_failure: fail\njev:\n  base_url: https://api.typesafe.ai\n  mock: true\n"
+	if err := yaml.Unmarshal([]byte(src), &d); err != nil {
 		t.Fatal(err)
 	}
-	if j.Timeout != 5*time.Second {
-		t.Errorf("Timeout = %v, want 5s", j.Timeout)
+	if d.Provider != "claude" || d.Model != "sonnet" || d.Timeout != 60*time.Second || d.OnFailure != OnFailureFail {
+		t.Errorf("decision = %+v", d)
 	}
-	if j.Complexity.Primary != "choice" || !j.Complexity.Shadow {
-		t.Errorf("Complexity = %+v, want {choice true}", j.Complexity)
+	if d.Complexity.Primary != "score" || !d.Complexity.Shadow || d.Jev.BaseURL == "" || !d.Jev.Mock || d.UsesJev() {
+		t.Errorf("decision = %+v", d)
 	}
 
-	var bad JevConfig
+	var bad DecisionConfig
 	if err := yaml.Unmarshal([]byte("timeout: not-a-duration\n"), &bad); err == nil {
 		t.Fatal("expected an error parsing an invalid duration")
+	}
+}
+
+func TestComplexityQuestionsConfig_Sources(t *testing.T) {
+	cases := []struct {
+		cfg  ComplexityQuestionsConfig
+		want string
+	}{
+		{ComplexityQuestionsConfig{Primary: "choice"}, "choice"},
+		{ComplexityQuestionsConfig{Primary: "choice", Shadow: true}, "choice,score"},
+		{ComplexityQuestionsConfig{Primary: "score", Shadow: true}, "score,choice"},
+	}
+	for _, tc := range cases {
+		var got []string
+		for _, s := range tc.cfg.Sources() {
+			got = append(got, string(s))
+		}
+		if strings.Join(got, ",") != tc.want {
+			t.Errorf("%+v.Sources() = %v, want %s", tc.cfg, got, tc.want)
+		}
+	}
+}
+
+func TestValidateDecisionConfig_LLMProviderIgnoresJevBlock(t *testing.T) {
+	cfg := validDecisionConfig()
+	cfg.Decision.Provider = "claude"
+	cfg.Decision.Model = "sonnet"
+	cfg.Decision.Jev = JevConfig{} // absent entirely
+	if err := ValidateDecisionConfig(cfg); err != nil {
+		t.Fatalf("an LLM provider needs no jev block: %v", err)
+	}
+
+	cfg.Decision.Jev = JevConfig{BaseURL: "not a url", MaxRetries: 9} // present but invalid
+	if err := ValidateDecisionConfig(cfg); err != nil {
+		t.Fatalf("the jev block is not validated for an LLM provider: %v", err)
+	}
+
+	cfg.Decision.Jev.apiKeyLiteralSet = true
+	if err := ValidateDecisionConfig(cfg); err == nil || !strings.Contains(err.Error(), "api_key must not be set") {
+		t.Errorf("a literal api_key is rejected whichever provider is used: %v", err)
 	}
 }
 

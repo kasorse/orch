@@ -142,7 +142,8 @@ func ApplyForced(complexity domain.Complexity, userStages, excluded []domain.Sta
 // final classification have returned (classification.Service, T09): it selects
 // context depth, complexity - from primary, compared against shadow when the provider
 // was asked for both (TASKS.md В1) - and stages, and returns the complete
-// domain.Decision trace with Source set to the Jev API.
+// domain.Decision trace with Source set to the Jev API; a caller using another
+// decision provider overwrites Source with that provider's.
 //
 // It errors if primary is not among classification.Complexity's keys: that would mean
 // the decision provider was configured to prefer a question it never actually asked,

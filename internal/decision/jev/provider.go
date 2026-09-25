@@ -50,6 +50,8 @@ func NewProvider(client Client, model string, sources []domain.ComplexitySource)
 
 func (p *Provider) Name() string { return ProviderName }
 
+func (p *Provider) Source() domain.DecisionSource { return domain.DecisionSourceJev }
+
 func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.ContextDepthDecision, error) {
 	resp, err := p.client.decide(ctx, p.contextDepthRequest(request))
 	if err != nil {
@@ -66,27 +68,11 @@ func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInpu
 	return mapClassification(resp, input, p.sources)
 }
 
-// preCheckState is the pre-check's state: the request alone, since deciding whether
-// the repository is needed must not depend on the repository.
-type preCheckState struct {
-	Request string `json:"request"`
-}
-
-// classificationState is the final classification's state (MVP.md §40).
-// ProjectContextAvailable is false both for depth none and for a failed collection;
-// ContextTruncated tells Jev the context it sees is incomplete.
-type classificationState struct {
-	Request                 string                 `json:"request"`
-	ProjectContextAvailable bool                   `json:"project_context_available"`
-	ContextTruncated        bool                   `json:"context_truncated,omitempty"`
-	Project                 *domain.ProjectContext `json:"project,omitempty"`
-}
-
 func (p *Provider) contextDepthRequest(request string) systemOneRequest {
 	q := decision.ContextDepthQuestion()
 	return systemOneRequest{
 		Model:     p.model,
-		State:     preCheckState{Request: request},
+		State:     decision.PreCheckState{Request: request},
 		Questions: map[string]question{q.ID: choiceQuestion(q)},
 	}
 }
@@ -107,13 +93,7 @@ func (p *Provider) classificationRequest(input domain.ClassificationInput) syste
 		questions[q.ID] = yesNoQuestion(q)
 	}
 
-	state := classificationState{Request: input.Request}
-	if input.Project != nil {
-		state.ProjectContextAvailable = true
-		state.ContextTruncated = input.Project.Truncated
-		state.Project = input.Project
-	}
-	return systemOneRequest{Model: p.model, State: state, Questions: questions}
+	return systemOneRequest{Model: p.model, State: decision.NewClassificationState(input), Questions: questions}
 }
 
 func choiceQuestion(q decision.ChoiceQuestion) question {

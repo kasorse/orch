@@ -148,6 +148,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	dec.Source = s.Decisions.Source()
 	res.Decision = dec
 	return res, nil
 }

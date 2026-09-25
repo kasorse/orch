@@ -14,6 +14,7 @@ import (
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 )
 
 // OnFailure selects what happens when the Jev decision provider fails (SPEC.md §17,
@@ -30,22 +31,41 @@ const (
 
 var validOnFailure = map[OnFailure]bool{OnFailureAsk: true, OnFailureFail: true}
 
-// JevComplexityConfig selects which complexity question the Policy Engine decides on
-// (Primary) and whether to also ask the other one purely for comparison logging
-// (Shadow) - see TASKS.md В1.
-type JevComplexityConfig struct {
+// DecisionProviderJev is decision.provider's value for the Jev HTTP provider; any
+// other value names a CLI provider (claude, codex, gemini) answering the same
+// questions (T22).
+const DecisionProviderJev = "jev"
+
+// ComplexityQuestionsConfig selects which complexity question the Policy Engine
+// decides on (Primary) and whether to also ask the other one purely for comparison
+// logging (Shadow) - see TASKS.md В1.
+type ComplexityQuestionsConfig struct {
 	Primary string `yaml:"primary"`
 	Shadow  bool   `yaml:"shadow"`
 }
 
-// JevConfig configures the Jev HTTP decision provider (T06/T07).
+// Sources returns the complexity questions to ask: the primary one, plus the other
+// when Shadow is on. Call only after validation.
+func (c ComplexityQuestionsConfig) Sources() []domain.ComplexitySource {
+	primary := domain.ComplexitySource(c.Primary)
+	sources := []domain.ComplexitySource{primary}
+	if c.Shadow {
+		for _, src := range []domain.ComplexitySource{domain.ComplexitySourceChoice, domain.ComplexitySourceScore} {
+			if src != primary {
+				sources = append(sources, src)
+			}
+		}
+	}
+	return sources
+}
+
+// JevConfig holds the Jev HTTP transport settings (T06), used only when
+// decision.provider is jev. The model, timeout and questions are provider-neutral and
+// live on DecisionConfig.
 type JevConfig struct {
 	BaseURL    string `yaml:"base_url"`
 	APIKeyEnv  string `yaml:"api_key_env"`
-	Model      string `yaml:"model"`
-	Timeout    time.Duration
-	MaxRetries int                 `yaml:"max_retries"`
-	Complexity JevComplexityConfig `yaml:"complexity"`
+	MaxRetries int    `yaml:"max_retries"`
 	// Mock swaps the HTTP client for the offline mock (jev.NewMockClient): no network,
 	// no API key, deterministic keyword-based answers. It exists while Jev API access
 	// is unavailable; the rest of decision.jev is still validated as usual.
@@ -57,19 +77,15 @@ type JevConfig struct {
 	apiKeyLiteralSet bool
 }
 
-// UnmarshalYAML parses JevConfig's timeout through the same duration-string handling
-// as ActionConfig/ExecutionConfig, and separately captures whether a literal api_key
-// field was present, without ever exposing its value as a Go field.
+// UnmarshalYAML captures whether a literal api_key field was present, without ever
+// exposing its value as a Go field.
 func (j *JevConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		BaseURL    string              `yaml:"base_url"`
-		APIKeyEnv  string              `yaml:"api_key_env"`
-		APIKey     string              `yaml:"api_key"`
-		Model      string              `yaml:"model"`
-		Timeout    string              `yaml:"timeout"`
-		MaxRetries int                 `yaml:"max_retries"`
-		Complexity JevComplexityConfig `yaml:"complexity"`
-		Mock       bool                `yaml:"mock"`
+		BaseURL    string `yaml:"base_url"`
+		APIKeyEnv  string `yaml:"api_key_env"`
+		APIKey     string `yaml:"api_key"`
+		MaxRetries int    `yaml:"max_retries"`
+		Mock       bool   `yaml:"mock"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -77,22 +93,52 @@ func (j *JevConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	j.BaseURL = raw.BaseURL
 	j.APIKeyEnv = raw.APIKeyEnv
 	j.apiKeyLiteralSet = raw.APIKey != ""
-	j.Model = raw.Model
 	j.MaxRetries = raw.MaxRetries
-	j.Complexity = raw.Complexity
 	j.Mock = raw.Mock
-	d, err := parseDurationField("decision.jev.timeout", raw.Timeout)
-	if err != nil {
-		return err
-	}
-	j.Timeout = d
 	return nil
 }
 
-// DecisionConfig configures the decision provider (T06/T07/T09).
+// DecisionConfig configures the decision provider (T06/T07/T09/T22), selected like
+// the classifier: a provider and a model. Provider is jev or a CLI provider; the flow
+// is the same either way (TASKS.md T22).
 type DecisionConfig struct {
-	Jev       JevConfig `yaml:"jev"`
-	OnFailure OnFailure `yaml:"on_failure"`
+	Provider string `yaml:"provider"`
+	// Model is the Jev model version for jev, the CLI model otherwise.
+	Model string `yaml:"model"`
+	// Timeout bounds one HTTP request for jev, one CLI call otherwise.
+	Timeout    time.Duration
+	Complexity ComplexityQuestionsConfig `yaml:"complexity"`
+	OnFailure  OnFailure                 `yaml:"on_failure"`
+	// Jev is read only when Provider is jev.
+	Jev JevConfig `yaml:"jev"`
+}
+
+// UsesJev reports whether decisions go to the Jev HTTP API.
+func (d DecisionConfig) UsesJev() bool { return d.Provider == DecisionProviderJev }
+
+// UnmarshalYAML parses the timeout through the same duration-string handling as
+// ActionConfig/ExecutionConfig.
+func (d *DecisionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Provider   string                    `yaml:"provider"`
+		Model      string                    `yaml:"model"`
+		Timeout    string                    `yaml:"timeout"`
+		Complexity ComplexityQuestionsConfig `yaml:"complexity"`
+		OnFailure  OnFailure                 `yaml:"on_failure"`
+		Jev        JevConfig                 `yaml:"jev"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	timeout, err := parseDurationField("decision.timeout", raw.Timeout)
+	if err != nil {
+		return err
+	}
+	*d = DecisionConfig{
+		Provider: raw.Provider, Model: raw.Model, Timeout: timeout,
+		Complexity: raw.Complexity, OnFailure: raw.OnFailure, Jev: raw.Jev,
+	}
+	return nil
 }
 
 // TranslationConfig configures the request translation step (T15). Unlike
@@ -222,7 +268,7 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 func ValidateDecisionConfig(cfg Config) error {
 	var problems []string
 
-	problems = append(problems, validateJevConfig(cfg.Decision.Jev)...)
+	problems = append(problems, validateDecision(cfg.Decision)...)
 
 	if !validOnFailure[cfg.Decision.OnFailure] {
 		problems = append(problems, fmt.Sprintf(
@@ -265,6 +311,42 @@ func ValidateDecisionConfig(cfg Config) error {
 	)
 }
 
+// validateDecision checks the provider-neutral decision settings, then the Jev block
+// only when Jev is the provider: with an LLM provider the jev block may stay in the file
+// untouched, so switching providers is a one-line change. A literal api_key is rejected
+// either way - a secret in a config file is a problem whoever reads it.
+func validateDecision(d DecisionConfig) []string {
+	var problems []string
+
+	switch {
+	case strings.TrimSpace(d.Provider) == "":
+		problems = append(problems, "decision.provider is required")
+	case d.Provider != DecisionProviderJev && !provider.IsSupported(d.Provider):
+		problems = append(problems, fmt.Sprintf(
+			"decision.provider %q is not supported (supported: %s, %s)",
+			d.Provider, DecisionProviderJev, supportedProviderNames(),
+		))
+	}
+	if strings.TrimSpace(d.Model) == "" {
+		problems = append(problems, "decision.model is required")
+	}
+	if d.Timeout <= 0 {
+		problems = append(problems, "decision.timeout must be a positive duration")
+	}
+	if _, err := domain.ParseComplexitySource(d.Complexity.Primary); err != nil {
+		problems = append(problems, fmt.Sprintf("decision.complexity.primary: %v", err))
+	}
+
+	if d.Jev.apiKeyLiteralSet {
+		problems = append(problems, "decision.jev.api_key must not be set in the configuration file; "+
+			"name an environment variable via decision.jev.api_key_env instead")
+	}
+	if d.UsesJev() {
+		problems = append(problems, validateJevConfig(d.Jev)...)
+	}
+	return problems
+}
+
 func validateJevConfig(j JevConfig) []string {
 	var problems []string
 
@@ -277,25 +359,9 @@ func validateJevConfig(j JevConfig) []string {
 	if strings.TrimSpace(j.APIKeyEnv) == "" {
 		problems = append(problems, "decision.jev.api_key_env is required")
 	}
-	if j.apiKeyLiteralSet {
-		problems = append(problems, "decision.jev.api_key must not be set in the configuration file; "+
-			"name an environment variable via decision.jev.api_key_env instead")
-	}
-
-	if strings.TrimSpace(j.Model) == "" {
-		problems = append(problems, "decision.jev.model is required")
-	}
-
-	if j.Timeout <= 0 {
-		problems = append(problems, "decision.jev.timeout must be a positive duration")
-	}
 
 	if j.MaxRetries < 0 || j.MaxRetries > 3 {
 		problems = append(problems, fmt.Sprintf("decision.jev.max_retries must be between 0 and 3, got %d", j.MaxRetries))
-	}
-
-	if _, err := domain.ParseComplexitySource(j.Complexity.Primary); err != nil {
-		problems = append(problems, fmt.Sprintf("decision.jev.complexity.primary: %v", err))
 	}
 
 	return problems
@@ -353,23 +419,29 @@ func validatePolicyConfig(p PolicyConfig) []string {
 }
 
 // ValidateDecisionConfigDependencies checks the parts of the Jev integration's config
-// that require touching the environment: the executables backing translation and
-// research, and that decision.jev.api_key_env actually names a set environment
-// variable (unless decision.jev.mock is set: the mock needs no key). It must run after ValidateDecisionConfig, for the same reason
-// ValidateDependencies must run after Validate.
+// that require touching the environment: the executables backing translation, research
+// and - for an LLM decision provider - the decisions themselves, and, for Jev, that
+// decision.jev.api_key_env names a set environment variable (unless decision.jev.mock
+// is set: the mock needs no key). It must run after ValidateDecisionConfig, for the
+// same reason ValidateDependencies must run after Validate.
 func ValidateDecisionConfigDependencies(cfg Config, checker DependencyChecker) error {
 	var problems []string
 
-	if env := strings.TrimSpace(cfg.Decision.Jev.APIKeyEnv); env != "" && !cfg.Decision.Jev.Mock {
+	d := cfg.Decision
+	if env := strings.TrimSpace(d.Jev.APIKeyEnv); d.UsesJev() && env != "" && !d.Jev.Mock {
 		if v, ok := os.LookupEnv(env); !ok || strings.TrimSpace(v) == "" {
 			problems = append(problems, fmt.Sprintf("jev decision provider: %s is not configured", env))
 		}
 	}
 
-	problems = append(problems, checkExecutablesPresent([]namedProviderModel{
+	pms := []namedProviderModel{
 		{Action: "translation", ProviderModel: cfg.Translation.ProviderModel},
 		{Action: "research", ProviderModel: cfg.Actions.Research.ProviderModel},
-	}, checker)...)
+	}
+	if !d.UsesJev() {
+		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: d.Provider, Model: d.Model}})
+	}
+	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 
 	if len(problems) == 0 {
 		return nil
