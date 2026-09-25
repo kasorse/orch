@@ -87,17 +87,23 @@ func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p 
 // ApplyForced merges a user's manual stage selection (T16 and T19: chosen by hand,
 // either because the decision provider failed or via interactive editing) with
 // p.ForceStages[complexity]: a stage is enabled if the user picked it or if it is
-// forced by the selected complexity, regardless of the user's pick. Unlike
-// SelectStages, there is no provider probability to report, so every outcome's
-// Probability and Threshold are nil.
+// forced by the selected complexity. The one exception is excluded - forced stages the
+// user switched off explicitly, after a warning (T16) - which stay disabled and keep
+// Forced set, so the trace shows the policy was overridden rather than silently
+// missing. Unlike SelectStages, there is no provider probability to report, so every
+// outcome's Probability and Threshold are nil.
 //
 // Unlike SelectStages, this does not apply the В6 empty-selection fallback: T16's
 // interactive prompt already refuses an empty pick, so an empty result here would
 // mean a caller bug, not a real "nothing qualified" case worth silently patching over.
-func ApplyForced(complexity domain.Complexity, userStages []domain.Stage, p domain.DecisionPolicy) domain.StageSelection {
+func ApplyForced(complexity domain.Complexity, userStages, excluded []domain.Stage, p domain.DecisionPolicy) domain.StageSelection {
 	picked := make(map[domain.Stage]bool, len(userStages))
 	for _, s := range userStages {
 		picked[s] = true
+	}
+	switchedOff := make(map[domain.Stage]bool, len(excluded))
+	for _, s := range excluded {
+		switchedOff[s] = true
 	}
 	forced := forcedSet(p, complexity)
 
@@ -105,9 +111,13 @@ func ApplyForced(complexity domain.Complexity, userStages []domain.Stage, p doma
 	for _, st := range domain.StageOrder() {
 		isForced := forced[st]
 		isPicked := picked[st]
+		enabled := isPicked || isForced
 
 		var reason string
 		switch {
+		case isForced && switchedOff[st]:
+			reason = fmt.Sprintf("forced: complexity=%s, excluded by user", complexity)
+			enabled = false
 		case isForced && isPicked:
 			reason = fmt.Sprintf("selected by user, also forced: complexity=%s", complexity)
 		case isForced:
@@ -121,7 +131,7 @@ func ApplyForced(complexity domain.Complexity, userStages []domain.Stage, p doma
 		sel.Stages = append(sel.Stages, domain.StageOutcome{
 			Stage:   st,
 			Forced:  isForced,
-			Enabled: isPicked || isForced,
+			Enabled: enabled,
 			Reason:  reason,
 		})
 	}

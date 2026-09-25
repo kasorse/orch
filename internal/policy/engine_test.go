@@ -247,7 +247,7 @@ func TestSelectStages_MVPExamples(t *testing.T) {
 func TestApplyForced(t *testing.T) {
 	p := testPolicy()
 
-	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageDevelopment, domain.StageTesting}, p)
+	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageDevelopment, domain.StageTesting}, nil, p)
 
 	for _, st := range []domain.Stage{domain.StageAnalysis, domain.StagePlanning, domain.StageReview} {
 		out := outcomeFor(sel, st)
@@ -271,13 +271,28 @@ func TestApplyForced(t *testing.T) {
 
 func TestApplyForced_PickedAndForced(t *testing.T) {
 	p := testPolicy()
-	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageReview}, p)
+	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageReview}, nil, p)
 	out := outcomeFor(sel, domain.StageReview)
 	if !out.Enabled || !out.Forced {
 		t.Fatalf("review should be enabled and forced, got %+v", out)
 	}
 	if !strings.Contains(out.Reason, "selected by user") || !strings.Contains(out.Reason, "forced") {
 		t.Errorf("Reason = %q, want it to mention both", out.Reason)
+	}
+}
+
+func TestApplyForced_ExcludedForcedStage(t *testing.T) {
+	p := testPolicy()
+	// review is forced for complex; the user switched it off, and a non-forced stage in
+	// excluded (research) changes nothing.
+	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageDevelopment},
+		[]domain.Stage{domain.StageReview, domain.StageResearch}, p)
+	out := outcomeFor(sel, domain.StageReview)
+	if out.Enabled || !out.Forced || !strings.Contains(out.Reason, "excluded by user") {
+		t.Errorf("review = %+v, want forced but disabled by the user", out)
+	}
+	if !enabled(sel, domain.StageAnalysis) || !enabled(sel, domain.StageDevelopment) || enabled(sel, domain.StageResearch) {
+		t.Errorf("other stages changed: %+v", sel.EnabledStages())
 	}
 }
 

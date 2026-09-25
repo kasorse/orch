@@ -899,6 +899,27 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 **Acceptance:** scripted stdin — корректный выбор, невалидный ввод с повтором запроса,
 пустой выбор, EOF; режим auto отдаёт ошибку без попытки чтения stdin.
 
+**Сделано.** Отличия от плана:
+- **Сигнатура:** `Chooser.Choose(ctx, cause, project, policy) (ManualChoice, error)`.
+  `cause` — ошибка провайдера (выводится первой строкой), `project` — собранный контекст
+  или `nil`, если pre-check не прошёл. `ManualChoice{Complexity, Stages, Excluded}`.
+  Интерактивность (TTY и не `--mode auto`) передаётся в `NewChooser`: определять её —
+  дело `app`.
+- **`policy.ApplyForced` получил параметр `excluded`.** План разрешает выключить forced
+  stage после предупреждения, но `ApplyForced` из T03 добавлял forced обратно
+  безусловно. Теперь forced stage из `excluded` остаётся выключенным с `Forced: true` и
+  reason `forced: complexity=…, excluded by user`, так что в trace видно, что policy
+  переопределили. Правила forced по-прежнему живут только в policy.
+- **Ввод stages:** номера или имена через запятую или пробел, `-N` — исключить. Forced
+  stages отмечены `*` и входят в выбор без ввода, поэтому пустой ответ при наличии forced
+  допустим. Пустым считается итоговый набор: ни выбранных, ни оставшихся forced.
+  Исключение forced: предупреждение и вопрос `[y/N]`, по умолчанию «нет».
+- **Без TTY / в `--mode auto`** возвращается исходная ошибка провайдера, обёрнутая
+  инструкцией, а не новый `DecisionError`. Так exit code остаётся по T06: 3, а для `Auth`
+  — 2 (сценарий 7 в T13). stdin не читается.
+- **EOF и Ctrl-C** оборачивают `context.Canceled`, exit 5. Ctrl-C проверяется до и после
+  каждого вопроса: блокирующее чтение stdin прервать нельзя, как и у gate в `manual`.
+
 ### T22 — Выбор decision provider в config: Jev или LLM
 
 **Файлы:** `internal/config/decision.go` и тесты; `internal/decision/llm/{provider,prompt,parse}.go`
