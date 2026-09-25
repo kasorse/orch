@@ -25,3 +25,84 @@ type DecisionPolicy struct {
 	// complexity, regardless of their own probability (SPEC.md §12).
 	ForceStages map[Complexity][]Stage
 }
+
+// DecisionSource records whether a Decision came from the Jev API or, when Jev
+// failed, from a human (TASKS.md В9: this project asks the user by hand rather than
+// falling back to an LLM decision provider).
+type DecisionSource string
+
+const (
+	DecisionSourceJev  DecisionSource = "jev"
+	DecisionSourceUser DecisionSource = "user"
+)
+
+// ContextDepthOutcome is the Policy Engine's trace of the pre-check decision:
+// Probability is P(project) - the only value SelectContextDepth's rule compares
+// against Threshold, regardless of which depth was actually selected.
+type ContextDepthOutcome struct {
+	Selected    ContextDepth `json:"selected"`
+	Probability float64      `json:"probability"`
+	Threshold   float64      `json:"threshold"`
+}
+
+// ComplexitySourceOutcome is what one complexity question (choice or score) alone
+// contributed: its raw distribution and what SelectComplexity would pick from it by
+// itself.
+type ComplexitySourceOutcome struct {
+	Decision ComplexityDecision `json:"decision"`
+	Selected Complexity         `json:"selected"`
+}
+
+// ComplexityOutcome is the Policy Engine's full complexity trace. Sources holds one
+// entry per question actually asked (just Primary when the shadow question was not
+// asked - TASKS.md В1); Agree is true when every asked source selected the same
+// complexity, which is what T21 uses to compare choice against score.
+type ComplexityOutcome struct {
+	Primary  ComplexitySource                             `json:"primary"`
+	Sources  map[ComplexitySource]ComplexitySourceOutcome `json:"sources"`
+	Selected Complexity                                   `json:"selected"`
+	Agree    bool                                         `json:"agree"`
+}
+
+// StageOutcome is one stage's result from the Policy Engine: whether its probability
+// alone cleared the configured threshold, whether it was forced on by the selected
+// complexity, and the resulting Enabled bit workflow.Build (T04) acts on. Reason is a
+// short human-readable summary of the first three fields, e.g. "p=0.74 >= 0.70" or
+// "forced: complexity=complex" - exactly the trace line MVP.md §36 asks for.
+// Probability and Threshold are nil when there was no provider probability to report,
+// i.e. a stage selected by hand (ApplyForced, T16).
+type StageOutcome struct {
+	Stage       Stage    `json:"stage"`
+	Probability *float64 `json:"probability,omitempty"`
+	Threshold   *float64 `json:"threshold,omitempty"`
+	Forced      bool     `json:"forced"`
+	Enabled     bool     `json:"enabled"`
+	Reason      string   `json:"reason"`
+}
+
+// StageSelection is every stage's outcome, always in StageOrder.
+type StageSelection struct {
+	Stages []StageOutcome `json:"stages"`
+}
+
+// EnabledStages returns every enabled stage, in StageOrder. This is what
+// workflow.Build (T04) filters StageOrder by.
+func (s StageSelection) EnabledStages() []Stage {
+	out := make([]Stage, 0, len(s.Stages))
+	for _, so := range s.Stages {
+		if so.Enabled {
+			out = append(out, so.Stage)
+		}
+	}
+	return out
+}
+
+// Decision is the Policy Engine's complete output for one task: everything needed to
+// answer "why did the orchestrator run review?" (MVP.md §36), and what
+// classification.Service (T09) persists as decision.json (T11).
+type Decision struct {
+	Source       DecisionSource      `json:"source"`
+	ContextDepth ContextDepthOutcome `json:"context_depth"`
+	Complexity   ComplexityOutcome   `json:"complexity"`
+	Stages       StageSelection      `json:"stages"`
+}
