@@ -69,6 +69,8 @@ type Timings struct {
 
 // Result is everything the decision trace (T11) records.
 type Result struct {
+	// Provider is the decision provider's name, e.g. "jev".
+	Provider    string
 	Translation translate.Result
 	Decision    domain.Decision
 	// Depth and Classification are the provider's raw answers; nil when that round
@@ -90,7 +92,7 @@ type Result struct {
 // Classify runs the decision flow for req. Errors are a cancelled run, a provider
 // failure with on_failure: fail (or no terminal to ask on), and wiring bugs.
 func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
-	var res Result
+	res := Result{Provider: s.Decisions.Name()}
 
 	start := time.Now()
 	tr, err := s.Translator.Prepare(ctx, req.RunID, req.Text)
@@ -197,4 +199,55 @@ func isCancellation(ctx context.Context, err error) bool {
 	}
 	var derr *apperr.DecisionError
 	return errors.As(err, &derr) && derr.Kind == apperr.DecisionCancelled
+}
+
+// Trace builds decision.json from the result and the workflow built from it.
+func (r Result) Trace(wf domain.Workflow) domain.DecisionTrace {
+	tr := r.Translation
+	t := domain.DecisionTrace{
+		Request: tr.Original,
+		Translation: domain.TranslationTrace{
+			Detected:      tr.Detected.Language,
+			CyrillicShare: tr.Detected.CyrillicShare,
+			Translated:    tr.Translated,
+			Failed:        tr.Failed,
+			Reason:        tr.Reason,
+			Provider:      tr.Provider,
+			Model:         tr.Model,
+			LatencyMS:     tr.Latency.Milliseconds(),
+		},
+		Source:         r.Decision.Source,
+		Provider:       r.Provider,
+		ContextLimited: r.ContextLimited,
+		ContextError:   r.ContextError,
+		Complexity:     r.Decision.Complexity,
+		Stages:         r.Decision.Stages.Stages,
+		Latency: domain.DecisionLatency{
+			TranslationMS:    r.Timings.Translation.Milliseconds(),
+			PreCheckMS:       r.Timings.PreCheck.Milliseconds(),
+			ContextMS:        r.Timings.Context.Milliseconds(),
+			ClassificationMS: r.Timings.Classification.Milliseconds(),
+			ManualChoiceMS:   r.Timings.ManualChoice.Milliseconds(),
+		},
+	}
+	if tr.Translated {
+		t.RequestEN = tr.Text
+	}
+	if r.DecisionError != nil {
+		t.DecisionError = r.DecisionError.Error()
+	}
+	if r.Classification != nil {
+		t.Model = r.Classification.Model
+	}
+	if r.Depth != nil {
+		t.ContextDepth = &domain.ContextDepthTrace{
+			Probabilities:       r.Depth.Probabilities,
+			Confidence:          r.Depth.Confidence,
+			ContextDepthOutcome: r.Decision.ContextDepth,
+		}
+	}
+	for _, step := range wf.Steps {
+		t.Workflow = append(t.Workflow, step.Action)
+	}
+	return t
 }

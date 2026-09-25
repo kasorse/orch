@@ -827,6 +827,26 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 **Acceptance:** golden-тест формата. Из `decision.json` восстанавливается, почему включён
 каждый stage и как разошлись choice и score.
 
+**Сделано.** Отличия от плана:
+- **Тип trace — `domain.DecisionTrace`** в новом `internal/domain/trace.go`, а не в
+  `run.go`. Его собирает `classification.Result.Trace(workflow)`, пишет
+  `persistence.Store.SaveDecision`, выводит `logging.RenderDecision`. Так `persistence`
+  и `logging` не зависят от `classification`. `domain.Run` не менялся: замена
+  `Run.Classification` на решение нового flow — часть T12.
+- **Поля.** Как в плане, плюс `provider` (имя decision provider — понадобится с T22),
+  `context_error`, `translation.cyrillic_share`. `jev_error` называется `decision_error`:
+  провайдер не обязательно Jev. Latency хранятся в миллисекундах (`*_ms`), а не как
+  `time.Duration` в наносекундах. У `context_depth` есть и распределение провайдера,
+  и выбор policy. Если pre-check упал, этого поля нет.
+- **`project_context.json`** пишется только когда контекст реально ушёл в провайдера:
+  само наличие файла означает, что контекст использовался (сценарий 2 в T13).
+- **Консоль.** Формат зафиксирован golden-файлами `internal/logging/testdata/decision_*.golden`
+  (обновление: `go test ./internal/logging -update`). Расхождение choice и score
+  помечается `✗ disagrees`, совпадение — `✓`. Сбой перевода выводится как `Warning:`.
+  При ручном выборе вместо модели показывается первая строка ошибки провайдера.
+- `classification.json` старого flow остаётся до T12. Итоговый ответ read-only шага (T10)
+  в консоль пока не выводится — это делает T12 в конце run.
+
 ### T12 — Wiring в `app`
 
 **Файлы:** `internal/app/app.go`. Удаляются `internal/classifier`, `TaskType`, старый

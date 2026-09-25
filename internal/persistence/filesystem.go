@@ -96,6 +96,28 @@ func (s *Store) SaveRun(run *domain.Run) error {
 	return nil
 }
 
+// SaveDecision writes decision.json: the full decision trace (TASKS.md T11). It replaces
+// classification.json for the new flow; the old flow keeps writing that until T12.
+func (s *Store) SaveDecision(runID string, trace domain.DecisionTrace) error {
+	if err := s.writeJSON(runID, "decision.json", trace); err != nil {
+		return fmt.Errorf("save decision: %w", err)
+	}
+	return nil
+}
+
+// SaveProjectContext writes project_context.json: exactly the context sent to the
+// decision provider. Nothing is written when none was sent (depth none, or a failed
+// collection), so the file's presence alone says context was used.
+func (s *Store) SaveProjectContext(runID string, pc *domain.ProjectContext) error {
+	if pc == nil {
+		return nil
+	}
+	if err := s.writeJSON(runID, "project_context.json", pc); err != nil {
+		return fmt.Errorf("save project context: %w", err)
+	}
+	return nil
+}
+
 // SaveArtifact writes one action's structured output and returns its path relative to the
 // run directory, satisfying action.ArtifactWriter.
 func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any) (string, error) {

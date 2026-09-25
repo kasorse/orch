@@ -2,6 +2,7 @@ package classification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -305,3 +306,63 @@ func equalStages(a, b []domain.Stage) bool {
 	}
 	return true
 }
+
+func TestResultTrace_ReconstructsTheDecision(t *testing.T) {
+	f := newFixture(0.9)
+	f.svc.Translator = fakeTranslator{res: translate.Result{Text: "add a cache", Translated: true, Detected: translate.Detection{Language: "ru"}, Provider: "claude", Model: "haiku"}}
+	f.provider.tc.Complexity[domain.ComplexitySourceScore] = domain.ComplexityDecision{
+		Probabilities: map[domain.Complexity]float64{"simple": 0.05, "medium": 0.25, "complex": 0.7}, Confidence: 0.6, Score: ptrf(1.65),
+	}
+	res, err := f.svc.Classify(context.Background(), Request{Text: "добавь кэш"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := res.Trace(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionAnalyze}, {Action: domain.ActionImplement}}})
+
+	raw, err := json.Marshal(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back domain.DecisionTrace
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+
+	if back.Request != "добавь кэш" || back.RequestEN != "add a cache" || !back.Translation.Translated || back.Provider != "jev" || back.Model != "jev-1.13.0" {
+		t.Errorf("header = %+v", back)
+	}
+	if back.ContextDepth == nil || back.ContextDepth.Selected != domain.ContextDepthProject || back.ContextDepth.Probabilities[domain.ContextDepthProject] != 0.9 {
+		t.Errorf("context depth = %+v", back.ContextDepth)
+	}
+	// Why each stage is on or off.
+	for _, s := range back.Stages {
+		if s.Reason == "" || s.Probability == nil || s.Threshold == nil {
+			t.Errorf("stage %s cannot be explained: %+v", s.Stage, s)
+		}
+	}
+	// How choice and score diverged.
+	c := back.Complexity
+	if c.Agree || c.Sources[domain.ComplexitySourceChoice].Selected != domain.ComplexityMedium ||
+		c.Sources[domain.ComplexitySourceScore].Selected != domain.ComplexityComplex ||
+		*c.Sources[domain.ComplexitySourceScore].Decision.Score != 1.65 {
+		t.Errorf("complexity = %+v", c)
+	}
+	if len(back.Workflow) != 2 || back.Workflow[1] != domain.ActionImplement {
+		t.Errorf("workflow = %v", back.Workflow)
+	}
+}
+
+func TestResultTrace_ManualChoice(t *testing.T) {
+	f := newFixture(0.9)
+	f.provider.depthErr = jevDown
+	res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := res.Trace(domain.Workflow{})
+	if trace.Source != domain.DecisionSourceUser || trace.DecisionError == "" || trace.ContextDepth != nil || trace.Model != "" {
+		t.Errorf("trace = %+v", trace)
+	}
+}
+
+func ptrf(v float64) *float64 { return &v }

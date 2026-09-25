@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/domain"
@@ -214,5 +215,36 @@ func TestAppendCallLog_NamedUnindexedPath(t *testing.T) {
 	data, err := os.ReadFile(want)
 	if err != nil || string(data) != "warning\n" {
 		t.Errorf("log = %q, %v", data, err)
+	}
+}
+
+func TestSaveDecisionAndProjectContext(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Workflow: []domain.ActionType{domain.ActionAnalyze}}
+	if err := store.SaveDecision(run.ID, trace); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), "decision.json"))
+	if err != nil || !strings.Contains(string(data), `"source": "jev"`) {
+		t.Errorf("decision.json = %s, %v", data, err)
+	}
+
+	if err := store.SaveProjectContext(run.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store.runDir(run.ID), "project_context.json")); !os.IsNotExist(err) {
+		t.Error("no project_context.json may be written when no context was sent")
+	}
+	if err := store.SaveProjectContext(run.ID, &domain.ProjectContext{Language: "go"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err = os.ReadFile(filepath.Join(store.runDir(run.ID), "project_context.json"))
+	if err != nil || !strings.Contains(string(data), `"language": "go"`) {
+		t.Errorf("project_context.json = %s, %v", data, err)
 	}
 }
