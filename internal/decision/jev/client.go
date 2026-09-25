@@ -233,9 +233,14 @@ func (c *httpClient) attempt(ctx context.Context, method, path string, body []by
 		return 0, nil
 	}
 
-	kind := statusKind(resp.StatusCode)
+	// The status code is rendered by DecisionError itself; the text adds a cause only
+	// for statuses Go knows a name for (529 "overloaded" has none).
+	var cause error
+	if text := http.StatusText(resp.StatusCode); text != "" {
+		cause = errors.New(text)
+	}
 	return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-		c.fail(kind, resp.StatusCode, string(raw), errors.New(http.StatusText(resp.StatusCode)))
+		c.fail(statusKind(resp.StatusCode), resp.StatusCode, string(raw), cause)
 }
 
 func statusKind(status int) apperr.DecisionFailureKind {

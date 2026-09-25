@@ -471,3 +471,16 @@ func TestParseRetryAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestDecide_NonStandardStatusHasNoDanglingCause(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(529)
+	}))
+	defer srv.Close()
+
+	c, _ := testClient(t, srv.URL, 0)
+	_, err := c.decide(context.Background(), testRequest())
+	if msg := err.Error(); strings.HasSuffix(msg, ": ") || !strings.HasSuffix(msg, "HTTP 529") {
+		t.Errorf("message = %q", msg)
+	}
+}
