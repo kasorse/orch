@@ -4,7 +4,14 @@ Implement the MVP of a local CLI application called **AI Model Orchestrator**.
 
 The implementation language must be **Go**.
 
-The application is intended for software developers using AI coding assistants. A user provides one engineering task. The orchestrator classifies the task, selects a deterministic workflow, executes the required stages with configured AI providers, runs tests, performs review, and may return the workflow back to implementation when tests or review fail.
+The application is intended for software developers using AI coding assistants. A user provides one engineering task. A decision provider (the Jev decision API, or an LLM CLI) estimates how complex the task is and which workflow stages it needs; the orchestrator turns those estimates into a deterministic workflow, executes the stages with configured AI providers, runs tests, performs review, and may return the workflow back to implementation when tests or review fail.
+
+> **Revision note.** This document was revised for the Jev integration
+> (`specs/JEV integration/SPEC.md`, `specs/JEV integration/TASKS.md`): the original
+> single-call classifier (`type`/`complexity`/`requires_*` → fixed workflow table) was
+> replaced by the decision flow in §8–§9, the `answer` action by the `research` stage and
+> a final answer from the last read-only step (§10), and the config moved to version 2
+> (§5). §32–§35 describe the original delivery sequence and are kept as history.
 
 Do not over-engineer the solution. Build a clean MVP with explicit interfaces, deterministic workflow logic, good testability, and minimal external dependencies.
 
@@ -21,11 +28,16 @@ orchestrator run "Fix retry logic. HTTP 404 must not be retried"
 The application should:
 
 ```text
-validate configuration
+validate configuration (everything, before any AI call or HTTP request)
         ↓
-classify task
+decide the workflow (§8):
+  translate the request to English if needed
+  pre-check: does classifying it need repository context?
+  collect compact project context if so
+  classify: complexity + probability of every stage
+  policy: thresholds → complexity and enabled stages
         ↓
-build workflow
+build workflow (stages in fixed order)
         ↓
 execute workflow steps
         ↓
@@ -67,13 +79,13 @@ review FAIL
 → review
 ```
 
-By default `orchestrator run` is interactive: after classification and workflow
-construction it prints the classification and derived workflow, lets the user approve
-it, edit `type`/`complexity`/`requires_tests`/`requires_review` and rebuild the plan, or
-cancel, then lets the user choose an execution mode (`plan`, `manual`, `accept-edits`, or
-`auto`) before anything runs. Passing `--mode auto` skips all of that and reproduces the
-original fully-unattended behavior described above exactly - this is the escape hatch for
-scripts and CI. See §4 for the flag and §27 for example transcripts of both.
+By default `orchestrator run` is interactive: after the decision it prints the decision
+summary and the derived workflow, lets the user approve or cancel it, then lets the user
+choose an execution mode (`plan`, `manual`, `accept-edits`, or `auto`) before anything
+runs. Passing `--mode auto` skips all of that - this is the escape hatch for scripts and
+CI. If the decision provider fails and `decision.on_failure` is `ask`, an interactive run
+asks the user to choose the complexity and the stages by hand instead (§8.6). See §4 for
+the flag and §27 for example transcripts.
 
 ---
 
@@ -97,7 +109,9 @@ codex
 gemini
 ```
 
-Do not integrate directly with provider HTTP APIs.
+Do not integrate directly with provider HTTP APIs. The one exception is the decision
+provider: the Jev decision API (`POST /v1/systemone`) is called over HTTP with `net/http`
+(§8). It only returns probabilities; it never writes code or runs tools.
 
 Do not add LiteLLM, OpenRouter, a database, Web UI, IDE plugin, server mode, or distributed execution.
 
@@ -110,13 +124,19 @@ The responsibilities must be separated as follows:
 ```text
 LLM
 → task reasoning
-→ analysis
+→ research, analysis, planning
 → implementation
 → review
 
+Decision provider (Jev or an LLM CLI)
+→ bounded probabilities: does the task need project context,
+  how complex is it, how likely is each stage needed
+
 Orchestrator
-→ classification invocation
-→ workflow selection
+→ translation and decision-round invocation
+→ project context collection (secrets excluded)
+→ policy: thresholds turn probabilities into decisions
+→ workflow construction (fixed stage order)
 → provider routing
 → state transitions
 → limits
@@ -162,44 +182,72 @@ orchestrator run "..." --mode accept-edits     # approve once, then hands-off
 orchestrator run "..." --mode auto             # fully unattended (no prompts at all)
 ```
 
-Omitting `--mode` runs the approve/edit loop and then interactively asks the user to
-choose one of the four modes above (see §1 and §27).
+Omitting `--mode` shows the decided workflow for approval (approve/cancel) and then
+interactively asks the user to choose one of the four modes above (see §1 and §27).
 
 ---
 
 # 5. Configuration
 
-Use YAML.
+Use YAML. The current version is 2 (version 1 - `classifier` and `actions.answer` - is
+rejected with a message listing what changed).
 
-Example:
+Example (`orchestrator.example.yaml`):
 
 ```yaml
-version: 1
+version: 2
 
-classifier:
+decision:
+  provider: jev              # jev | claude | codex | gemini
+  model: jev-1.13.0          # jev: a version, not an alias; CLI provider: its model
+  timeout: 5s                # jev: one HTTP request; CLI provider: one call
+  complexity:
+    primary: choice          # choice | score - the question the policy decides on
+    shadow: true             # also ask the other one, for comparison in the trace
+  on_failure: ask            # ask: choose complexity and stages by hand; fail: stop
+  jev:                       # read only when provider is jev
+    base_url: https://api.typesafe.ai
+    api_key_env: JEV_API_KEY # the key itself never goes in this file
+    max_retries: 1           # 408/429/5xx/529 only, honours Retry-After
+    mock: false              # true: offline keyword heuristic instead of the API
+
+translation:
   provider: claude
-  model: sonnet
+  model: haiku
+  timeout: 60s
+
+policy:
+  context_depth:
+    project_threshold: 0.5
+  complexity:
+    complex: 0.40            # P(complex) >= 0.40             -> complex
+    medium: 0.50             # P(medium) + P(complex) >= 0.50 -> medium, else simple
+  stages:
+    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    force:
+      complex: [analysis, planning, review]
+
+context:
+  max_files: 20
+  max_bytes: 24576
+  extra_deny: []
 
 actions:
+  research:
+    provider: claude
+    model: sonnet
   analyze:
     provider: claude
     model: sonnet
-
   plan:
     provider: claude
     model: sonnet
-
   implement:
     provider: claude
     model: opus
-
   review:
     provider: codex
     model: gpt
-
-  answer:
-    provider: gemini
-    model: pro
 
 test:
   command: "go test ./..."
@@ -216,26 +264,40 @@ Model names must be treated as opaque provider-specific strings.
 
 Do not hardcode lists of allowed models.
 
+The decision provider is chosen statically, like any action's provider: `jev` or a CLI
+provider. Switching providers does not change the flow (§8). An LLM is never an
+automatic fallback for Jev.
+
 ---
 
 # 6. Configuration Validation
 
-Configuration validation must happen completely **before any AI call or repository modification**.
+Configuration validation must happen completely **before any AI call, HTTP request or
+repository modification**.
 
 Validate:
 
 * YAML syntax;
-* config version;
-* required classifier configuration;
-* required provider;
-* required model;
-* configured actions;
+* config version (2);
+* `decision`: supported provider (`jev` or a CLI provider), model, positive timeout,
+  `complexity.primary` in `choice|score`, `on_failure` in `ask|fail`;
+* `decision.jev` when the provider is `jev`: an `http(s)` `base_url`, `api_key_env`,
+  `max_retries` in 0–3; a literal `api_key` in the file is an error whatever the
+  provider;
+* `translation`: provider, model, positive timeout;
+* `policy`: every stage threshold present (absent is not 0) and in [0, 1], known stage
+  and complexity names only, `project_threshold` and complexity thresholds in [0, 1];
+* `context`: positive `max_files`/`max_bytes`, no empty `extra_deny` pattern;
+* every action's provider and model (`research`, `analyze`, `plan`, `implement`,
+  `review`), non-negative per-action timeouts;
 * supported provider names;
 * limits;
 * execution timeout;
-* test command when test execution may be required.
+* test command.
 
-Supported provider IDs are only:
+All problems are aggregated into one error.
+
+Supported CLI provider IDs are only:
 
 ```text
 claude
@@ -303,7 +365,11 @@ provider "codex" is required by actions [analyze, review],
 but executable "codex" was not found in PATH
 ```
 
-The classifier provider must also be checked.
+The translator's provider is always checked (even for an English request, so fail-fast
+does not depend on the request's language), and so is an LLM decision provider's. With
+the Jev decision provider, `decision.jev.api_key_env` must name a set, non-blank
+environment variable (`jev decision provider: JEV_API_KEY is not configured`), unless
+`decision.jev.mock` is on.
 
 ### Critical fail-fast requirement
 
@@ -314,109 +380,159 @@ claude installed
 codex missing
 ```
 
-and config uses Claude for classification and Codex for review:
+and config uses Claude for translation and Codex for review:
 
 ```bash
 orchestrator run "..."
 ```
 
-must fail before Claude is invoked.
+must fail before Jev is called or Claude is invoked.
 
 Do not partially execute the workflow and discover missing dependencies later.
 
 ---
 
-# 8. Task Classification
+# 8. Decision Flow
 
-The classifier is an AI call using:
-
-```yaml
-classifier:
-  provider: ...
-  model: ...
-```
-
-It must produce structured JSON.
-
-Expected model:
-
-```json
-{
-  "type": "bugfix",
-  "complexity": "medium",
-  "requires_code_change": true,
-  "requires_tests": true,
-  "requires_review": true
-}
-```
-
-Supported task types:
+The workflow is decided in two rounds by a **decision provider** that only returns
+probabilities; every choice made from them is Go code (§9). Details:
+`specs/JEV integration/SPEC.md` (normative) and `specs/JEV integration/TASKS.md`.
 
 ```text
-question
-bugfix
-feature
-refactor
-test
-review
+request
+  → language check (deterministic) → translation if needed (§8.1)
+  → pre-check: P(none), P(project)          -- decision round 1
+  → policy picks the context depth
+  → project → Context Manager → ProjectContext (§8.3)
+  → classification: complexity + 6 stages    -- decision round 2
+  → policy → complexity, enabled stages (§9)
+  → workflow
 ```
 
-Supported complexity values:
+## 8.1 Translation
 
-```text
-low
-medium
-high
-```
+The questions are asked in English. A request whose prose letters are at least 30%
+Cyrillic (identifiers, paths and backticked text are left out of the count) is
+translated by one CLI call (`translation.provider/model`, `translation.timeout`). The
+translation is sanity-checked: non-empty, 0.3×–3× the original length, under 10%
+Cyrillic, every identifier and path of the original preserved verbatim. Any failure sends
+the original instead, with `translation.failed` in the trace and a warning - it never
+fails the run. The translated text is used only for the decision provider and for
+relevant-file search; the stages always get the original.
 
-Parse and validate the response strictly.
+## 8.2 Questions
 
-Invalid JSON or unsupported enum values must return a classification error.
+Every provider answers the same questions (`internal/decision/questions.go`), over the
+same state:
 
-The classifier must not invent workflow steps.
+* `context_depth` (choice: `none` | `project`) - is repository context needed to classify
+  the request? Asked against the request alone.
+* `complexity` (choice: `simple` | `medium` | `complex`) and, when
+  `decision.complexity.shadow` is on, `complexity_score` (score over the same three
+  levels). The policy decides on `primary`; the other is recorded for comparison only.
+  Both are built from one criteria list, so their texts cannot drift apart.
+* `stage_<stage>` (yes/no) for each of the six stages (§9), each judged independently.
+
+Answers are strictly validated: the expected questions only, the right answer type,
+exactly our options, values in [0, 1], distributions summing to 1. Anything else is an
+`InvalidResponse` decision error. A provider's own pick (Jev's `choice` field) is ignored.
+
+## 8.3 Context Manager
+
+Runs only when the policy picks depth `project`. It builds a compact `ProjectContext` -
+never whole files:
+
+* metadata from the manifest (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`,
+  `pom.xml`): language, project type, module, direct dependencies;
+* test layout (unit/integration);
+* rules: bullet lines of `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`;
+* excerpts of the `README.md` / `docs/*.md` sections that mention the request's terms;
+* relevant files - path-word matches plus verbatim identifiers in sources - with a
+  one-line summary each, followed by their tests;
+* git branch, dirty flag, changed paths.
+
+Files come from `git ls-files --cached --others --exclude-standard`, so `.gitignore` is
+honoured. Before anything is read, a deny list (`.env`, `.env.*`, `*.pem`, `*.key`,
+`credentials*`, `secrets*`, plus `context.extra_deny`) is applied to every path segment;
+binaries, files over 256 KB, symlinks, `.git/` and `.orchestrator/` are never read. The
+`max_files`/`max_bytes` budget drops doc excerpts first, then the least relevant files,
+then rules, and marks the context `truncated`.
+
+A failed collection does not stop the run: classification continues without context and
+the trace records `context_limited` and why.
+
+## 8.4 Jev provider
+
+`POST {base_url}/v1/systemone` with `Authorization: Bearer <key>`; one request per round,
+all questions evaluated in parallel against one state. The key is read from
+`decision.jev.api_key_env` by the app and handed only to the client's constructor; it is
+redacted from every error. Failures map to `DecisionError` kinds: timeout/408,
+connection, 429 (rate limited), 5xx/529 (unavailable), 401/403 (auth), other 4xx (bad
+request), non-JSON (invalid response). Transient kinds are retried up to `max_retries`,
+honouring `Retry-After` within one request's `timeout`; cancellation is never retried.
+The model version Jev reports is recorded in the trace.
+
+`decision.jev.mock: true` swaps the HTTP client for an offline stand-in: it validates the
+request the way Jev does and answers deterministically from keywords in the request. It
+exists while there is no API access; its model is reported as `mock:<model>` and a
+warning is printed.
+
+## 8.5 LLM provider
+
+With `decision.provider: claude|codex|gemini` the same questions go to that CLI - one
+call per round (`ACTION: decide-context`, `ACTION: decide-classify`), the state embedded
+as JSON data. The answer is the same probability JSON, validated the same way (with a
+slightly wider sum tolerance, then normalised). CLI failures become `DecisionError`s, so
+everything downstream - including §8.6 - behaves exactly as with Jev. The trace records
+`source: llm`.
+
+## 8.6 Provider failure: manual choice
+
+If either round fails and `decision.on_failure` is `ask`, the user chooses by hand: the
+failure is shown (with the collected context, if any), then a complexity
+(`[1] simple [2] medium [3] complex`) and the stages in their fixed order. Stages forced
+by the chosen complexity are pre-selected; switching one off takes an explicit warning
+and confirmation. An empty selection is refused. The result goes through the same forced
+rules and is recorded as `source: user`. With `on_failure: fail`, in `--mode auto`, or
+without a terminal on stdin, the provider's error ends the run (exit code per §24).
+Cancellation never offers a choice.
 
 ---
 
-# 9. Deterministic Workflow Builder
+# 9. Policy and Deterministic Workflow Builder
 
-Workflow selection belongs to Go code.
-
-Start with this mapping:
-
-```text
-question
-→ answer
-
-bugfix + low
-→ implement → test → review
-
-bugfix + medium/high
-→ analyze → implement → test → review
-
-feature
-→ plan → implement → test → review
-
-refactor
-→ analyze → implement → test → review
-
-test
-→ test
-
-review
-→ review
-```
-
-Also respect:
+Workflow selection belongs to Go code. The policy (`internal/policy`) is a set of pure
+functions over the provider's probabilities and `policy` config:
 
 ```text
-requires_code_change
-requires_tests
-requires_review
+context depth  project if P(project) >= policy.context_depth.project_threshold
+
+complexity     complex if P(complex) >= policy.complexity.complex
+               else medium if P(medium) + P(complex) >= policy.complexity.medium
+               else simple
+               (applied to both questions; primary decides, agree = primary == shadow)
+
+stages         enabled if P(stage) >= policy.stages.thresholds[stage] (inclusive)
+               + policy.stages.force[complexity]
+               nothing enabled → analysis
 ```
 
-The same classification must always produce the same workflow.
+Stages run in a fixed order, and each maps to one action:
 
-Do not ask an LLM to generate arbitrary workflow graphs.
+```text
+research    → research
+analysis    → analyze
+planning    → plan
+development → implement
+testing     → test
+review      → review
+```
+
+The workflow builder filters that order by the enabled stages. The same decision always
+produces the same workflow.
+
+Do not ask an LLM to generate arbitrary workflow graphs, and do not let a decision
+provider choose stages or their order - it only estimates probabilities.
 
 ---
 
@@ -425,15 +541,23 @@ Do not ask an LLM to generate arbitrary workflow graphs.
 Define a fixed set:
 
 ```text
+research
 analyze
 plan
 implement
 test
 review
-answer
 ```
 
 No dynamically invented action types.
+
+`research`, `analyze` and `plan` are read-only: their prompts forbid changing files.
+Research gathers external knowledge (approaches, libraries, alternatives) and feeds
+analyze and plan; analysis feeds plan.
+
+There is no separate `answer` action. When a workflow has no `implement`, its last
+read-only step also writes the reply to the user's request (an `answer` field), which is
+printed when the run completes.
 
 Each AI-backed action uses the provider/model configured for that action.
 
@@ -452,35 +576,27 @@ actions:
 
 Implement workflow execution as a state machine, not just a `for` loop over immutable steps.
 
-Required transitions:
+Transitions:
 
 ```text
-analyze success
-→ implement
-
-plan success
-→ implement
-
-implement success
-→ test if required
-→ otherwise review if required
-→ otherwise done
-
-test success
-→ review if required
-→ otherwise done
+step success
+→ the next step of the workflow
+→ done after the last step
 
 test failure
-→ implement
-
-review pass
-→ done
+→ implement, if implement is in the workflow
+→ otherwise the run fails ("tests failed")
 
 review fail
-→ implement
+→ implement, if implement is in the workflow
+→ otherwise the run completes and the verdict is shown
+  (reviewing a diff and reporting problems fulfils a review-only task)
+
+any other step failure
+→ the run fails
 ```
 
-After a review failure, the normal flow should be:
+After a review failure, the normal flow is:
 
 ```text
 review
@@ -489,7 +605,7 @@ review
 → review
 ```
 
-if tests are required.
+when testing is in the workflow.
 
 Maintain execution history rather than overwriting previous step runs.
 
@@ -500,9 +616,8 @@ executes:
 Gate.BeforeStep(ctx, run, index, action) -> proceed | abort
 ```
 
-A nil `Gate` reproduces fully-automatic execution exactly (today's behavior, and
-`--mode auto`/`accept-edits`). A `Gate` implementation may mutate `run`'s classification
-and workflow before returning `proceed` (e.g. manual mode's decline → edit path); such a
+A nil `Gate` reproduces fully-automatic execution exactly (`--mode auto`/`accept-edits`).
+A `Gate` implementation may mutate `run.Workflow` before returning `proceed`; such a
 mutation only affects future transition lookups, never the step about to execute. An
 `abort` decision stops the run (status `stopped`, exit code 5 - the same "user
 cancellation" path as `errors.Is(err, context.Canceled)`) without ever invoking the step
@@ -699,12 +814,17 @@ Use structured artifacts plus repository state.
 Implement artifact types similar to:
 
 ```text
+ResearchArtifact
 AnalysisArtifact
 PlanArtifact
 ImplementationArtifact
 TestArtifact
 ReviewArtifact
 ```
+
+The read-only artifacts (research, analysis, plan) carry an optional `answer`: the reply
+to the user when that step is the last read-only step of a workflow without
+development (§10).
 
 Example analysis artifact:
 
@@ -860,17 +980,42 @@ The next implementation action must receive the review issues.
 Create explicit prompt builders for:
 
 ```text
-classifier
+translate          (§8.1)
+decide-context     (§8.5, LLM decision provider only)
+decide-classify    (§8.5, LLM decision provider only)
+research
 analyze
 plan
 implement
 review
-answer
 ```
+
+Every prompt starts with a literal `ACTION: <name>` line - the marker fake executables
+route on in the integration tests. User-supplied text (the request, project context) is
+embedded as delimited data that cannot close its own block.
 
 Do not assemble large prompts ad hoc inside workflow logic.
 
 Use typed input structures.
+
+Stage prompts always get the user's original request, never the translation.
+
+For research include:
+
+* original task.
+
+For analysis include:
+
+* original task;
+* research, where available.
+
+For planning include:
+
+* original task;
+* research and analysis, where available.
+
+A read-only step that is the last read-only step of a workflow without development
+also asks for the final `answer` (§10).
 
 For an initial implementation request include:
 
@@ -902,21 +1047,25 @@ For review include:
 
 Use local filesystem storage.
 
-Suggested location:
+Location:
 
 ```text
 .orchestrator/
   runs/
     <run-id>/
       run.json
-      classification.json
+      decision.json            # full decision trace
+      project_context.json     # exactly the context sent, only when one was sent
       workflow.json
 
       artifacts/
-        ...
+        <NNN>-<action>.json
 
       logs/
-        ...
+        <NNN>-<action>.{stdout,stderr}.log
+        translate.{stdout,stderr}.log
+        decide-context.{stdout,stderr}.log    # LLM decision provider
+        decide-classify.{stdout,stderr}.log
 ```
 
 Use UUID or equivalent unique Run ID.
@@ -927,7 +1076,12 @@ At minimum save:
 
 * original task;
 * run ID;
-* classification;
+* the decision (`run.json`'s `decision`) and its full trace (`decision.json`): the
+  request and its translation, who decided (`jev`, `llm` or `user`, with the provider
+  error in the last case), the model version that answered, the pre-check distribution
+  and depth, both complexity questions with their selections and agreement, each stage's
+  probability, threshold, forced flag, enabled flag and reason, the workflow, and the
+  latency of each decision step;
 * workflow;
 * executed steps;
 * provider/model for each AI step;
@@ -936,11 +1090,9 @@ At minimum save:
 * review result;
 * final run status;
 * failure reason if any;
-* execution mode the run actually ran under (`mode`);
-* the classifier's original, unedited classification, if the user edited it during the
-  approve/edit loop or a manual-mode step gate (`original_classification`) - the
-  `classification` field always holds the effective classification that was actually
-  built into the workflow.
+* execution mode the run actually ran under (`mode`).
+
+From `decision.json` alone it must be possible to tell why each stage ran.
 
 No database is required.
 
@@ -954,7 +1106,12 @@ Suggested concepts:
 
 ```text
 Task
-Classification
+Stage, Complexity, ContextDepth
+ContextDepthDecision, TaskClassification     (provider's raw probabilities)
+DecisionPolicy                               (thresholds, forced stages)
+Decision, StageSelection                     (the policy's verdict)
+DecisionTrace                                (decision.json)
+ProjectContext
 Run
 Workflow
 Step
@@ -988,8 +1145,8 @@ auto
 ```
 
 It selects how much user interaction happens before and during a run, and is orthogonal
-to `Classification`/`Workflow` - the same classification always produces the same
-workflow regardless of mode.
+to the decision and the workflow - the same decision always produces the same workflow
+regardless of mode.
 
 Step execution:
 
@@ -1012,7 +1169,7 @@ Use typed/sentinel categories or equivalent clean error wrapping for:
 ConfigError
 DependencyError
 ProviderError
-ClassificationError
+DecisionError
 WorkflowError
 RepositoryError
 ExecutionError
@@ -1020,6 +1177,13 @@ LimitExceededError
 ```
 
 Preserve underlying errors.
+
+`DecisionError{Provider, Kind, StatusCode, Attempts, Body, Err}` is every decision
+provider failure, Jev or LLM (§8.4, §8.5). `Kind` is one of `timeout`, `connection`,
+`rate_limited`, `unavailable`, `auth`, `bad_request`, `invalid_response`, `cancelled`;
+`Kind.Transient()` drives Jev's retries. `Body` is a bounded excerpt of the response (or
+of the model's output), never containing the API key. An LLM provider's CLI failure is
+wrapped, so the underlying `ProviderError` stays inspectable.
 
 Provider CLIs do not consistently report failures on stderr - e.g. `claude --print`
 writes backend/API errors (bad model, connectivity failure) to **stdout**. A
@@ -1040,7 +1204,7 @@ const (
 
 type ProviderError struct {
     Provider   string
-    Action     string        // "classify" for the classifier call
+    Action     string        // e.g. "implement"; "translate", "decide-context", "decide-classify" outside steps
     Model      string
     Kind       FailureKind
     Executable string
@@ -1112,6 +1276,9 @@ Suggested:
 
 Exact values may be encapsulated centrally.
 
+A `DecisionError` maps to 3, except `auth` (2 - a key problem is a configuration
+problem) and `cancelled` (5).
+
 ---
 
 # 25. Timeout and Cancellation
@@ -1124,10 +1291,13 @@ execution:
 ```
 
 `execution.timeout` bounds the entire run, not just workflow step execution: it wraps
-opening the repository, classification, and the full engine run (analyze/plan/implement/
-test/review). A provider call that hangs during classification is bounded by the same
-timeout as one that hangs during an implement step - there is no separate,
-un-timed phase.
+opening the repository, the decision phase (translation, both decision rounds, context
+collection), and the full engine run. A provider call that hangs while deciding is
+bounded by the same timeout as one that hangs during an implement step - there is no
+separate, un-timed phase. The one thing not counted is the time a user spends on a
+manual choice (§8.6): it waits on a context without the deadline, and the workflow gets
+that time back. `decision.timeout` and `translation.timeout` bound each of their calls
+within the run's deadline.
 
 Use `context.Context` throughout the execution chain.
 
@@ -1141,8 +1311,8 @@ would leave those running, holding the pipes open and defeating the timeout.
 
 ## 25.1 Per-Action Timeout Override
 
-Support an optional `timeout` alongside `provider`/`model` on each of the five fixed
-actions (`classifier` is excluded - it has no override):
+Support an optional `timeout` alongside `provider`/`model` on each of the six fixed
+actions:
 
 ```yaml
 actions:
@@ -1170,9 +1340,7 @@ negative`). A resulting timeout failure's error message names which limit fired 
 
 ---
 
-# 26. Suggested Project Structure
-
-Use a clean package structure similar to:
+# 26. Project Structure
 
 ```text
 cmd/
@@ -1180,69 +1348,29 @@ cmd/
     main.go
 
 internal/
-
-  app/
-    app.go
-
-  config/
-    config.go
-    loader.go
-    validator.go
-    dependencies.go
-
-  domain/
-    task.go
-    classification.go
-    run.go
-    workflow.go
-    artifact.go
-
-  classifier/
-    classifier.go
-    prompt.go
-
-  workflow/
-    builder.go
-    engine.go
-    transitions.go
-
-  provider/
-    client.go
-    registry.go
-
-    claude/
-      client.go
-
-    codex/
-      client.go
-
-    gemini/
-      client.go
-
-  execution/
-    process.go
-
-  repository/
-    git.go
-
-  action/
-    analyze.go
-    plan.go
-    implement.go
-    review.go
-    answer.go
-    prompts.go
-
-  testexec/
-    runner.go
-
-  persistence/
-    filesystem.go
-
-  logging/
+  app/              composition root: fail-fast, wiring, the run
+  config/           schema, loader, validation, dependency checks
+  domain/           plain data types (no I/O)
+  translate/        language detection and translation (§8.1)
+  decision/         Provider interface, shared questions and state (§8.2)
+    jev/            Jev HTTP client, offline mock, provider, response mapper (§8.4)
+    llm/            LLM decision provider over a CLI (§8.5)
+  projectctx/       Context Manager (§8.3)
+  policy/           thresholds → decisions (§9); imports only domain
+  classification/   the decision flow and the manual-choice fallback (§8)
+  workflow/         builder, engine, transitions; imports only domain
+  provider/         CLI provider abstraction, registry, claude/codex/gemini adapters
+  execution/        process executor
+  repository/       git (read-only helpers)
+  action/           step executors and prompt builders
+  testexec/         test runner
+  interaction/      approval, mode select, manual-mode gate, manual choice
+  persistence/      run directory
+  logging/          console output
+  apperr/, exitcode/
 ```
 
-You may adjust the structure if there is a clearly better Go design, but preserve separation of concerns.
+Jev's transport types stay unexported inside `internal/decision/jev`.
 
 ---
 
@@ -1250,8 +1378,7 @@ You may adjust the structure if there is a clearly better Go design, but preserv
 
 Provide readable progress.
 
-Example (`--mode auto` - no prompts, identical output shape to before execution modes
-existed):
+Example (`--mode auto` - no prompts):
 
 ```text
 $ orchestrator run "Fix retry logic. 404 must not be retried" --mode auto
@@ -1260,13 +1387,11 @@ Validating configuration...
 ✓ configuration valid
 Run: 2f3c1a8b  (.orchestrator/runs/2f3c1a8b)
 
-Classifying task...
-→ claude (model sonnet)
-✓ type: bugfix
-✓ complexity: medium
-
-Workflow:
-analyze → implement → test → review
+Deciding the workflow...
+context: project (p=0.91 ≥ 0.50)
+complexity: medium (choice p=0.63, score=1.20 → medium ✓)
+decision: jev (jev-1.13.0)
+workflow: analyze → implement → test → review
 
 [1] ANALYZE
 Provider: claude
@@ -1312,19 +1437,43 @@ Model: gpt
 Run completed successfully.
 ```
 
-Every provider call - classification and each workflow step - prints its `→ running
-<provider>...` (or, for classification, `→ <provider> (model <model>)`) line immediately
-before the call, so a hang is visible in real time rather than as a silent pause; a
-`--verbose` run additionally prints redacted argv, working directory, prompt size, a 30s
-heartbeat, and the live child output prefixed with `  | ` (see §21, §6.4 of
-SPEC-diagnostics.md).
+The decision summary shows, when they apply: a `translation: ru → en via <provider>/<model>`
+line (or a `Warning: translation failed (...)` line), the context depth with the
+probability and threshold (plus `limited: <reason>` when collection failed), the
+complexity with both questions' readings (a disagreement is flagged `✗ disagrees`), who
+decided, and the workflow. `--verbose` adds the per-stage table:
+
+```text
+stages:
+  research     off  p=0.05 < 0.70
+  analysis     on   p=0.92 >= 0.60
+  planning     off  p=0.40 < 0.65
+  development  on   p=0.99 >= 0.60
+  testing      on   p=0.95 >= 0.60
+  review       on   forced: complexity=complex
+```
+
+Every provider call prints a line immediately before it - `→ running <provider>...` for a
+workflow step, `→ <provider> (model <model>)` for translation and LLM decision rounds - so
+a hang is visible in real time rather than as a silent pause; a `--verbose` run
+additionally prints redacted argv, working directory, prompt size, a 30s heartbeat, and
+the live child output prefixed with `  | ` (see SPEC-diagnostics.md §6.4).
 
 On failure, the error rendering (§23) includes a `full output: <path>` line pointing at
 the persisted raw stdout/stderr for that call - there is no separate "read the logs at..."
 line printed by the CLI itself.
 
-Example (no `--mode` flag - the interactive default: approve/edit the plan, choose a
-mode, then confirm each step under `manual`):
+A workflow without development ends with the reply:
+
+```text
+Run completed successfully.
+
+Answer:
+Use a token bucket: ...
+```
+
+Example (no `--mode` flag - the interactive default: approve the workflow, choose a mode,
+then confirm each step under `manual`):
 
 ```text
 $ orchestrator run "Fix retry logic. 404 must not be retried"
@@ -1333,22 +1482,13 @@ Validating configuration...
 ✓ configuration valid
 Run: 2f3c1a8b  (.orchestrator/runs/2f3c1a8b)
 
-Classifying task...
-→ claude (model sonnet)
-✓ type: bugfix
-✓ complexity: medium
+Deciding the workflow...
+context: project (p=0.91 ≥ 0.50)
+complexity: simple (choice p=0.71, score=0.42 → simple ✓)
+decision: jev (jev-1.13.0)
+workflow: implement → test → review
 
-Workflow:
-analyze → implement → test → review
-
-Approve this plan? [a]pprove / [e]dit / [c]ancel: e
-Edit which field? [t]ype / [c]omplexity / [1] requires_tests / [2] requires_review / [d]one: c
-New complexity (low/medium/high): low
-
-Workflow:
-implement → test → review
-
-Approve this plan? [a]pprove / [e]dit / [c]ancel: a
+Approve this workflow? [a]pprove / [c]ancel: a
 
 Choose execution mode: [1] plan  [2] manual  [3] accept-edits  [4] auto: 2
 
@@ -1362,15 +1502,41 @@ Run this step? [y]es / [n]o / [A]ll remaining: y
 [2] TEST
 Command: go test ./...
 Run this step? [y]es / [n]o / [A]ll remaining: n
-[r]etry / [e]dit plan / [a]bort: e
-Edit which field? [1] requires_tests / [2] requires_review / [d]one: 2
-requires_review (y/n): n
-
-Workflow (remaining): test
-[r]etry / [e]dit plan / [a]bort: r
+[r]etry / [a]bort: r
 ✓ passed
 
-Run completed successfully.
+[3] REVIEW
+...
+```
+
+Example (the decision provider is down, `on_failure: ask`):
+
+```text
+Deciding the workflow...
+
+Decision provider failed: decision provider jev failed: unavailable (the service is overloaded or failing), HTTP 529, after 2 attempts
+Choose the task's complexity and workflow stages yourself.
+
+Project context: go (go-module), unit and integration tests, branch main
+Relevant files:
+  internal/http/client.go
+  internal/http/client_test.go
+
+Complexity:
+  [1] simple  [2] medium  [3] complex
+Complexity [1-3]: 3
+
+Stages (run in this order):
+  [1] research
+  [2] analysis  * forced for complexity=complex
+  [3] planning  * forced for complexity=complex
+  [4] development
+  [5] testing
+  [6] review  * forced for complexity=complex
+Stage numbers, comma-separated (* stages are included; -N excludes one): 4,5
+complexity: complex (chosen by user)
+decision: chosen by user (decision provider jev failed: unavailable ...)
+workflow: analyze → plan → implement → test → review
 ```
 
 Do not make terminal formatting a major dependency of the MVP.
@@ -1400,19 +1566,27 @@ At minimum cover:
 * Codex missing;
 * Gemini missing;
 * provider used by several actions;
-* classifier provider missing;
-* no AI execution happens after validation failure.
+* translation and LLM decision provider missing;
+* Jev API key missing (and not required with the mock or an LLM provider);
+* no AI execution or HTTP request happens after validation failure.
 
-### Classifier
+### Decision
 
-* valid classification;
-* malformed JSON;
-* invalid type;
-* invalid complexity.
+* Jev client: every status mapping, Bearer header, retries (529 retried once, 401
+  never), `Retry-After`, cancellation, the key never appearing in an error;
+* Jev requests pinned by golden files; responses mapped, every malformed shape an
+  `InvalidResponse`;
+* LLM provider: same questions and state as Jev, malformed answers rejected;
+* translation: detection, sanity checks, fallback to the original;
+* Context Manager: secrets, ignored and binary files never collected, budget respected;
+* manual choice: valid input, invalid input re-asked, empty selection, EOF, no reading
+  in `--mode auto`.
 
-### Workflow builder
+### Policy and workflow builder
 
-Cover every supported task type and relevant complexity.
+* stage thresholds are inclusive; forced stages; nothing enabled → analysis;
+* complexity rule on both questions, agreement flag;
+* fixed stage order regardless of input order.
 
 ### Workflow engine
 
@@ -1420,6 +1594,7 @@ Cover every supported task type and relevant complexity.
 * test failure → implementation;
 * review failure → implementation;
 * review failure → implementation → test → review;
+* workflows without implement (research → analysis; testing only; review only);
 * maximum fix iterations;
 * maximum steps.
 
@@ -1462,10 +1637,13 @@ This must allow testing full end-to-end scenarios locally and in CI.
 
 Required scenarios:
 
+The decision comes from a fake Jev (`httptest`, answering by question id) or, for an LLM
+decision provider, from the same fake executables.
+
 ### Scenario 1 — successful bugfix
 
 ```text
-classification
+decision
 → analyze
 → implement
 → tests pass
@@ -1508,13 +1686,20 @@ Config validation fails before workflow execution.
 
 Run ends as failed with provider context.
 
-### Scenario 8 — invalid classifier response
+### Scenario 8 — invalid decision response
 
 Run fails before repository-changing actions.
 
 ### Scenario 9 — max iterations reached
 
 Workflow stops and does not invoke additional agents.
+
+### Decision scenarios
+
+`specs/JEV integration/TASKS.md` T13: project context without secrets, depth none
+without context, forced stages, a failing Context Manager, translation and its failure,
+Jev down with a manual choice, Jev down in `--mode auto`, a rejected key, a missing key,
+choice and score disagreeing, and an LLM decision provider.
 
 ---
 
@@ -1523,7 +1708,7 @@ Workflow stops and does not invoke additional agents.
 Do not implement:
 
 ```text
-HTTP provider APIs
+HTTP provider APIs (except the Jev decision API, §2)
 OpenRouter
 LiteLLM
 model benchmarking
@@ -1563,15 +1748,17 @@ implement:
   model: opus
 ```
 
-Do not implement automatic "best model" routing.
+Do not implement automatic "best model" routing. The decision provider is chosen the same
+way (`decision.provider`); a failing provider leads to the manual choice (§8.6), never to
+another provider.
 
 ### 31.2 Deterministic workflows
 
-Classifier returns task properties.
+The decision provider returns probabilities.
 
-Go code builds workflow.
+Go code - the policy and the workflow builder - decides and builds the workflow.
 
-Do not let an LLM invent workflow stages.
+Do not let an LLM or a decision provider invent workflow stages or their order.
 
 ### 31.3 AI clients modify repository
 
@@ -1600,6 +1787,10 @@ Missing configured CLI executable is a configuration/dependency error and must p
 ---
 
 # 32. Implementation Sequence
+
+*Historical: the original delivery sequence. The classifier (step 11) and the fixed
+workflow table (step 12) were later replaced by the decision flow; its sequence is in
+`specs/JEV integration/TASKS.md`.*
 
 Implement in vertical slices.
 
@@ -1710,6 +1901,8 @@ Only after these flows work should you spend time improving secondary UX.
 ---
 
 # 34. Definition of Done
+
+*Historical: the original MVP checklist. The classifier items are superseded by §8–§9.*
 
 The MVP is complete when all of the following are true:
 
@@ -1838,10 +2031,10 @@ built in a way that forecloses it.
 ## Problem
 
 Today every `orchestrator run "<task>"` invocation starts a brand-new run: it always
-classifies from scratch and always calls `store.NewRun` (fresh `run.json`, empty
+decides from scratch and always calls `store.NewRun` (fresh `run.json`, empty
 `Executions`). A run that failed, was stopped (`ctrl-c`, manual-mode rejection), or was
 interrupted by a crash has no way to continue - the only option is to start over,
-which re-runs classification and loses the fact that steps 1..N already succeeded.
+which re-runs the decision and loses the fact that steps 1..N already succeeded.
 
 ## CLI
 
@@ -1865,10 +2058,10 @@ that becomes the default offered choice.
 * Load the persisted `Run` for `<run-id>` from `.orchestrator/runs/<run-id>/run.json`
   (§21). Unknown run ID is a distinct error (new `RunNotFoundError` category, §23),
   exit code 1 (§24) - not confused with a config/dependency failure (exit code 2).
-* Do **not** re-run classification and do **not** rebuild the workflow. The persisted
-  `Classification` and `Workflow` are reused as-is (§8/§9) - resume continues the exact
-  workflow that was already committed to, even if the classifier would answer
-  differently today. Re-classifying on resume would let the same task silently diverge
+* Do **not** re-run the decision and do **not** rebuild the workflow. The persisted
+  `Decision` and `Workflow` are reused as-is (§8/§9) - resume continues the exact
+  workflow that was already committed to, even if the decision provider would answer
+  differently today. Re-deciding on resume would let the same task silently diverge
   into a different workflow between attempts, defeating the point of resuming.
 * Resumable statuses: `failed`, `stopped`. A `running` status found on load means the
   previous process died mid-step (crash, killed, machine restart) without updating
@@ -1898,6 +2091,6 @@ that becomes the default offered choice.
 * No schema/version migration for `run.json` written by an older binary - resuming a
   run produced by an incompatible orchestrator version is undefined behavior, not a
   case this feature needs to detect or handle.
-* No editing the task description, classification, or workflow on resume - if any of
+* No editing the task description, decision, or workflow on resume - if any of
   those need to change, that is a new `run`, not a resume.
 
