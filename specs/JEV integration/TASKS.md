@@ -748,6 +748,26 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 - сбой Jev на pre-check и на classification → вызывается `Chooser` с причиной;
 - `on_failure: fail` → ошибка.
 
+**Сделано.** Отличия от плана:
+- **API:** `Service.Classify(ctx, Request{RunID, Text, UserCtx}) (Result, error)`. Зависимости
+  — узкие интерфейсы (`Translator`, `decision.Provider`, `ContextBuilder`, `Chooser`),
+  `on_failure` приходит как `AskOnFailure bool`: сервис не импортирует `config`.
+- **`UserCtx`** — context для ожидания ручного выбора: Ctrl-C его отменяет, а дедлайна
+  `execution.timeout` у него нет (требование T12). Его создаёт `app`.
+- **`Result`** содержит всё для trace T11: результат перевода, `domain.Decision`, сырые
+  ответы провайдера (`Depth`, `Classification`), отправленный `Project`,
+  `ContextLimited` и `ContextError` (событие `context_collection_failed` для T18),
+  `DecisionError` и `Timings` по шагам (перевод, pre-check, контекст, classification,
+  ручной выбор).
+- **Ручной выбор не предлагается** ни при отмене (Ctrl-C), ни при истёкшем
+  `execution.timeout`: запускать stages уже некогда.
+- **`Decision` при ручном выборе:** `source: user`, complexity — только `Selected`,
+  stages — через `policy.ApplyForced`. Depth заполнен, если pre-check успел ответить.
+- **Context Manager получает `requestEN` только при удавшемся переводе.** Иначе пустую
+  строку, чтобы не искать по одному тексту дважды.
+- `Source` для Jev ставит `policy.Evaluate` (`jev`). Для LLM-провайдера его выставит T22
+  по `Provider.Name()`.
+
 ### T10 — Action `research`, удаление `answer`
 
 **Файлы:** `internal/action/{research,prompts,dispatcher,context}.go`, `domain/artifact.go`.
