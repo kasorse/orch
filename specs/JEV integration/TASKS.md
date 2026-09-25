@@ -6,14 +6,16 @@
 classification при ошибке Context Manager, а SPEC §14 и MVP.md §40 требуют продолжить
 работу с `context_limited = true`. Принимаем второе.
 
-Статус: ред. 3. Работа разбита на две итерации. Решения по вопросам собраны в разделе 7.
+Статус: ред. 4. Работа разбита на две итерации. Решения по вопросам собраны в разделе 7.
 Оставшиеся вопросы не блокируют старт.
 
 **Отступления от SPEC, принятые осознанно:**
-- **Fallback (SPEC §17, AC12).** Вместо `LLMDecisionProvider` при сбое Jev пользователь сам
-  выбирает complexity и stages (решение В9).
-- **Перевод запроса.** Если запрос не на английском, перед отправкой в Jev его переводит
-  LLM (решение В7). В SPEC этого шага нет.
+- **Fallback (SPEC §17, AC12).** При сбое decision provider автоматического перехода на
+  `LLMDecisionProvider` нет: пользователь сам выбирает complexity и stages (решение В9).
+  LLM при этом можно выбрать основным decision provider в config (`decision.provider`,
+  T22). Это статический выбор, а не fallback.
+- **Перевод запроса.** Если запрос не на английском, перед отправкой в decision provider
+  его переводит LLM (решения В7, В13). В SPEC этого шага нет.
 - **Complexity.** В одном запросе задаются два вопроса: `choice` и `score`. Решение
   принимается по основному, оба пишутся в лог для сравнения (решение В1).
 
@@ -29,19 +31,19 @@ Language check (детерминированно)
   ├── английский ──────────────────────────────┐
   └── русский → перевод (LLM CLI) → request_en │   сбой перевода → оригинал + warning
                                                ▼
-Jev pre-check (1 HTTP-запрос, 1 вопрос)
+Decision pre-check: Jev (1 HTTP-запрос) или LLM (1 вызов CLI), 1 вопрос
   «нужен ли контекст проекта, чтобы оценить задачу?» → P(none), P(project)
   │  orchestrator выбирает depth по порогу
   ├── NONE ────────────────────────────┐
   └── PROJECT → Context Manager        │
                  → ProjectContext      │
                          ▼             ▼
-Jev classification (1 HTTP-запрос, 8 вопросов параллельно)
+Decision classification: Jev (1 HTTP-запрос, 8 вопросов параллельно) или LLM (1 вызов CLI)
   complexity (choice) + complexity_score (score) → распределения по simple/medium/complex
   6 stages: yes/no на каждый                      → вероятность каждого stage
   │
-  ├── сбой Jev на любом шаге ──► пользователь выбирает complexity и stages (терминал);
-  │                              в --mode auto или без TTY — ошибка
+  ├── сбой провайдера на любом шаге ──► пользователь выбирает complexity и stages (терминал);
+  │                                     в --mode auto или без TTY — ошибка
   ▼
 Policy Engine (детерминированно, конфигурируемо)
   1. complexity ← распределение основного вопроса + пороги (теневой вопрос → только в лог)
@@ -55,9 +57,13 @@ Workflow Builder: research → analysis → planning → development → testing
 существующий engine (state machine, лимиты, тесты по exit code, review по git diff)
 ```
 
-Jev не принимает решений: он возвращает распределения, а выбор делает orchestrator —
-для depth, complexity и stages. Переведённый запрос нужен только для Jev и для поиска
-relevant files. Stages получают оригинальный текст.
+Decision provider задаётся в config (`decision.provider`, T22): `jev` или CLI-провайдер
+(`claude`, `codex`, `gemini`). Flow от этого не меняется: те же два раунда, те же вопросы,
+те же доменные типы, policy и trace. Меняется только, кто отвечает на вопросы.
+
+Decision provider не принимает решений: он возвращает распределения, а выбор делает
+orchestrator — для depth, complexity и stages. Переведённый запрос нужен только для
+decision provider и для поиска relevant files. Stages получают оригинальный текст.
 
 ---
 
@@ -164,7 +170,7 @@ relevant files. Stages получают оригинальный текст.
 
 | сейчас | после |
 |---|---|
-| `internal/classifier`: 1 вызов Claude CLI → `{type, complexity, requires_*}` | перевод (при необходимости) + `DecisionProvider` (Jev): pre-check и classification |
+| `internal/classifier`: 1 вызов Claude CLI → `{type, complexity, requires_*}` | перевод (при необходимости) + `DecisionProvider` (Jev или LLM, по `decision.provider`): pre-check и classification |
 | `TaskType` + таблица в `workflow.Build` (корневой MVP.md §9) | вероятности → Policy Engine → фиксированный порядок stages |
 | `Complexity` `low/medium/high` | `simple/medium/complex`, выбирается policy по распределению |
 | actions `analyze, plan, implement, test, review, answer` | stages `research, analysis, planning, development, testing, review` → actions (В4) |
@@ -191,14 +197,19 @@ relevant files. Stages получают оригинальный текст.
    `source: user`.
 6. Перевод работает через существующий `provider.Client`. Специфика провайдеров
    остаётся в `buildArgs`.
+7. Decision provider выбирается один раз, в `app`, по `decision.provider` (T22).
+   Classification Service, policy и trace зависят только от интерфейса
+   `DecisionProvider`. LLM-провайдер работает через `provider.Client`, как переводчик.
+   Тексты вопросов общие для обоих провайдеров, чтобы их ответы были сравнимы.
 
 ---
 
 ## 4. Итерации
 
-**Итерация 1 — вертикальный срез.** Цепочка перевод → Jev → Policy → Workflow →
-исполнение работает end-to-end на реальном Jev и в integration-тестах с mock Jev. При сбое
-Jev пользователь выбирает вручную. Choice и score логируются для сравнения.
+**Итерация 1 — вертикальный срез.** Цепочка перевод → decision provider → Policy →
+Workflow → исполнение работает end-to-end: с Jev (реальным или mock) и с LLM в роли decision
+provider, в integration-тестах — с mock Jev и fake CLI. При сбое провайдера пользователь
+выбирает вручную. Choice и score логируются для сравнения.
 
 **Итерация 2 — полное соответствие SPEC и итоги эксперимента.** Проверка модели при старте,
 relevant files по символам, structured logs и metrics, редактирование stages в
@@ -217,10 +228,11 @@ relevant files по символам, structured logs и metrics, редакти
 | T09 | Classification Service | 1 | S | T03, T07, T08, T15, T16 | — |
 | T10 | Action `research`, удаление `answer` | 1 | M | T04 | В4 |
 | T11 | Decision trace и вывод в консоль | 1 | S–M | T09 | — |
-| T12 | Wiring в `app`, удаление старого classifier | 1 | M | T02–T11, T15, T16 | — |
+| T12 | Wiring в `app`, удаление старого classifier | 1 | M | T02–T11, T15, T16, T22 | — |
 | T13 | Integration tests с mock Jev | 1 | M | T12 | — |
 | T15 | Определение языка и перевод запроса | 1 | M | T02 | — |
 | T16 | Ручной выбор при сбое Jev | 1 | S–M | T03, T04 | — |
+| T22 | Выбор decision provider в config: Jev или LLM | 1 | M | T02, T07 | — |
 | T14 | Startup-проверка модели (`GET /v1/models`) | 2 | S | T06, T12 | — |
 | T17 | Relevant files по символам (Go) | 2 | M | T08 | — |
 | T18 | Structured logs и metrics, отчёт choice vs score | 2 | M | T11 | В10 |
@@ -229,7 +241,8 @@ relevant files по символам, structured logs и metrics, редакти
 | T21 | Итог эксперимента: оставить choice или score | 2 | S | T18 + данные | — |
 
 Номера задач сохранены с прошлой редакции. В итерацию 1 перенесены T15 и T16 (раньше это
-были LLM provider и fallback). Добавлена T21.
+были LLM provider и fallback). Добавлена T21. Ред. 4: добавлена T22 — LLM как основной
+decision provider, выбранный в config (не fallback).
 
 ```
 T01 ─┬─ T02 ── T15 ─────────────────────┐
@@ -238,14 +251,15 @@ T01 ─┬─ T02 ── T15 ─────────────────
      │       │       └─ T16 ─────────────┤
      │       └───────────────────────────┤
      ├─ T08 ─────────────────────────────┼─ T09 ── T11 ── T12 ── T13
-     └─ T07 ◄── T06 ─────────────────────┘
+     └─ T07 ◄── T06 ─────────────────────┘                 │
+        T07 + T02 ── T22 ──────────────────────────────────┘
 итерация 2: T14, T17, T18 → T21, T19, T20
 ```
 
 Порядок работы в итерации 1:
 1. Без сети, только unit-тесты: T01, T02, T03, T04, T05, T06.
 2. T07, T08, T15, T16.
-3. T09, T10, T11.
+3. T09, T10, T11, T22.
 4. Сборка: T12, T13.
 
 Правила для каждой задачи:
@@ -558,7 +572,7 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 - на `529` — ровно один повтор, на `401` — ни одного.
 
 **Сделано.** Отличия от плана:
-- **Mock-клиент вместо реального доступа.** Регистрация в Jev сейчас закрыта, ключа нет.
+- **Mock-клиент на время без доступа к API.** Регистрация в Jev сейчас закрыта, ключа нет.
   Поэтому `Client` — интерфейс с неэкспортируемыми методами `decide`/`listModels`
   (реализовать его можно только внутри `jev`, изоляция transport-типов сохраняется), и у
   него две реализации:
@@ -576,6 +590,8 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 - **`decision.jev.mock: true`** в config выбирает mock. При нём
   `ValidateDecisionConfigDependencies` не требует переменной с ключом. Остальная
   валидация `decision.jev` не меняется. Какой клиент создать, по флагу решает `app` (T12).
+  Mock — замена транспорта Jev для разработки и тестов. Настоящее решение без Jev даёт
+  `decision.provider: claude` (T22).
 - **`apperr.DecisionFailureKind` — отдельный тип**, а не расширение `FailureKind`
   CLI-провайдеров. У `FailureKind` описания привязаны к CLI («exceeded
   execution.timeout»), а `Transient()` для spawn/exit не имеет смысла. Отмена —
@@ -594,10 +610,12 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 
 ### T07 — `DecisionProvider` и Jev provider
 
-**Файлы:** `internal/decision/provider.go`, `internal/decision/jev/{provider,questions,mapper}.go`.
+**Файлы:** `internal/decision/{provider,questions}.go`, `internal/decision/jev/{provider,mapper}.go`.
 
 1. Интерфейс по SPEC §10: `ContextDepth(ctx, request)`, `Classify(ctx, input)`, `Name()`.
-2. `questions.go` — тексты вопросов и критериев из раздела 2 как константы. Критерии
+2. `internal/decision/questions.go` — тексты вопросов и критериев из раздела 2 как
+   константы. Они лежат вне `jev`, потому что их же использует LLM-провайдер (T22).
+   Transport-форму (`question`) из них собирает `jev`. Критерии
    complexity хранятся **одним** списком, из него строятся и map для `choice`, и массив
    для `score`, чтобы тексты не разошлись.
 3. Запрос classification содержит `complexity` (choice), а при `shadow: true` — ещё и
@@ -688,8 +706,8 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 - `decision.json` вместо `classification.json`. Поля:
   - `request`, `request_en`, `translation` — `{detected, translated, provider, model,
     failed, latency}`;
-  - `source` — `jev` или `user`, плюс `jev_error`, если был сбой;
-  - `model` — версия из ответа Jev;
+  - `source` — `jev`, `llm` или `user`, плюс `decision_error`, если был сбой;
+  - `provider` и `model` — `jev` и версия из ответа Jev либо CLI-провайдер и его модель (T22);
   - depth: вероятности, выбор, порог; `context_limited`;
   - complexity: `primary` и `shadow` — распределение, confidence, score, выбор;
     `agree`;
@@ -713,11 +731,13 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 `--mode plan|manual` показывают decision и просят подтверждения без редактирования.
 
 - **Fail-fast.** `Load → Validate → ValidateDependencies` (в итерации 2 — ещё T14).
-  Только после этого создаются Jev client, переводчик и провайдеры.
+  Только после этого создаются decision provider (Jev или LLM, T22), переводчик и
+  провайдеры.
 - **Таймаут.** `execution.timeout` покрывает перевод, pre-check, сбор контекста и
   classification. Время ожидания ручного выбора пользователя в него **не входит**:
   отдельный context без дедлайна, как для gate в `manual`.
 - **Ключ.** API key читается из env в `app` и уходит только в конструктор Jev client.
+  При `decision.provider` ≠ `jev` ключ не читается и не требуется.
 
 ### T13 — Integration tests с mock Jev
 
@@ -737,6 +757,9 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 8. Нет `JEV_API_KEY` → ошибка до любого HTTP-запроса и вызова CLI.
 9. choice и score расходятся → `agree: false`, решение по primary.
 10. Существующие сценарии 1–13 переведены на новый flow.
+11. `decision.provider: claude`: pre-check и classification идут через fake CLI, HTTP к Jev
+    нет, `JEV_API_KEY` не задан. Workflow и `decision.json` той же формы, что в сценарии 1,
+    `source: llm`.
 
 ### T15 — Определение языка и перевод запроса
 
@@ -788,11 +811,117 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 **Acceptance:** scripted stdin — корректный выбор, невалидный ввод с повтором запроса,
 пустой выбор, EOF; режим auto отдаёт ошибку без попытки чтения stdin.
 
+### T22 — Выбор decision provider в config: Jev или LLM
+
+**Файлы:** `internal/config/decision.go` и тесты; `internal/decision/llm/{provider,prompt,parse}.go`
+и тесты; `internal/decision/questions.go` (из T07).
+
+Decision provider задаётся в config так же, как `classifier` сейчас: провайдер и модель.
+Варианты — `jev` или CLI-провайдер (`claude`, `codex`, `gemini`). **Flow не меняется:**
+перевод → pre-check → Context Manager → classification → Policy Engine → Workflow Builder →
+engine. Меняется только, кто отвечает на вопросы. Classification Service, policy, ручной
+выбор при сбое и trace работают с `DecisionProvider` и не знают, какой он.
+
+```yaml
+decision:
+  provider: jev                # jev | claude | codex | gemini
+  model: jev-1.13.0            # jev — версия модели Jev; иначе — модель CLI
+  timeout: 5s                  # jev — на один HTTP-запрос; иначе — на один вызов CLI
+  complexity:
+    primary: choice
+    shadow: true
+  on_failure: ask
+  jev:                         # только для provider: jev
+    base_url: https://api.typesafe.ai
+    api_key_env: JEV_API_KEY
+    max_retries: 1
+    mock: false
+```
+
+То же с LLM:
+
+```yaml
+decision:
+  provider: claude
+  model: sonnet
+  timeout: 60s
+  complexity: { primary: choice, shadow: true }
+  on_failure: ask
+```
+
+1. **Config.** `model`, `timeout` и `complexity` переезжают из `decision.jev` на уровень
+   `decision`: они общие для всех провайдеров. В `decision.jev` остаются только транспортные
+   поля Jev.
+   - `provider` — `jev` или провайдер из того же списка, что у actions.
+   - `provider: jev` — блок `jev` валидируется как в T02, ключ в env обязателен (кроме `mock`).
+   - LLM — блок `jev` не обязателен. Если он задан, то не валидируется и не используется:
+     переключение провайдера — правка одной строки. Executable провайдера проверяется в
+     `ValidateDecisionConfigDependencies` через `checkExecutablesPresent`, до любого
+     AI-вызова. `JEV_API_KEY` не нужен.
+   - `timeout > 0` для всех. У LLM он, как у translation, внутри `execution.timeout`.
+2. **Вопросы.** Тексты и критерии из `internal/decision/questions.go` (T07) общие: Jev
+   собирает из них transport-запрос, LLM — prompt. Разные формулировки сделали бы ответы
+   несравнимыми.
+3. **`llm.Provider`** реализует `DecisionProvider` через `provider.Client`, как переводчик
+   (T15). Специфика CLI — только в `buildArgs`. Два вызова CLI вместо двух HTTP-запросов:
+   - `ContextDepth` — prompt с маркером `ACTION: decide-context`. Ответ:
+     `{"context_depth": {"none": p, "project": p}}`.
+   - `Classify` — `ACTION: decide-classify`. В prompt идёт state в том же виде, что и в
+     Jev: `request`, `project_context_available`, `context_truncated`, `project`. Ответ:
+     `{"complexity": {simple, medium, complex}, "complexity_score": {"0", "1", "2"},
+     "stages": {research … review}}`. `complexity_score` запрашивается только при
+     `shadow: true`.
+   - Запрос пользователя и ProjectContext изолированы в prompt как недоверенные данные.
+   - Prompt требует вероятности, а не итоговый выбор (SPEC §8): решает policy.
+   - Логи — `logs/decide-{context,classify}.{stdout,stderr}.log`, как у translate.
+4. **Разбор ответа** — по правилам mapper'а Jev (T07):
+   - JSON извлекается так же, как в `action/jsonextract.go`;
+   - ключи — ровно наши варианты и stages, значения в [0,1];
+   - сумма распределения 1 ± 0.05, затем нормализация до 1 (LLM округляет);
+   - любое нарушение → `InvalidResponse`.
+
+   Своего confidence у LLM нет: `Confidence` = максимальная вероятность распределения,
+   `Score` score-вопроса = Σ i·p(i). В `TaskClassification.Provider/Model` пишутся
+   CLI-провайдер и модель из config.
+5. **Ошибки** → `apperr.DecisionError{Provider: "<cli>", Kind}`:
+   - таймаут CLI → `Timeout`;
+   - spawn или ненулевой exit → `Unavailable`;
+   - неразбираемый или невалидный ответ → `InvalidResponse`;
+   - Ctrl-C → `DecisionCancelled`.
+
+   Исходный `ProviderError` сохраняется в `Err`. Retry нет. Поскольку это тот же
+   `DecisionError`, `on_failure: ask|fail` и ручной выбор (T16) работают без изменений.
+6. **Trace и консоль (T11).** `source: llm` (`domain.DecisionSource` получает третье
+   значение), `provider`/`model` — из `TaskClassification`. Консоль вместо версии Jev
+   показывает `decision: claude/sonnet`.
+7. **Wiring (T12).** `app` по `decision.provider` создаёт `jev.NewProvider(NewHTTPClient |
+   NewMockClient)` или `llm.NewProvider(client, model, timeout)`. Больше `decision.provider`
+   нигде не читается.
+
+**Не входит:** автоматический переход Jev → LLM при сбое и любой выбор провайдера по
+ситуации. Routing статический (MVP.md §31.1), сбой провайдера ведёт к ручному выбору (В9).
+
+**Acceptance:**
+- config:
+  - `provider: claude` без блока `jev` и без `JEV_API_KEY` проходит;
+  - `provider: jev` без ключа — ошибка;
+  - неизвестный провайдер — ошибка;
+  - отсутствующий executable — ошибка до любого AI-вызова;
+- fake CLI:
+  - prompt содержит те же тексты вопросов, что уходят в Jev;
+  - ответ маппится в те же доменные типы;
+  - каждый вид невалидного ответа даёт `InvalidResponse`;
+  - при `shadow: false` `complexity_score` нет ни в prompt, ни в результате;
+- сбой CLI: при `on_failure: ask` — ручной выбор, при `fail` — exit 3;
+- один и тот же запрос с mock Jev и с fake LLM даёт `decision.json` одной формы. Отличаются
+  только `source`, `provider`, `model` и числа.
+
 ---
 
 ## 6. Задачи — итерация 2
 
 ### T14 — Startup-проверка модели
+- Только при `decision.provider: jev` и без `mock`.
 - Выполняется после `ValidateDependencies`, в `validate` и в `run`: `GET /v1/models`.
 - Проверка пройдена, если модель есть в списке **или** совпадает с
   `^jev-\d+\.\d+\.\d+$`: версионные ID API принимает, но не перечисляет.
@@ -829,7 +958,7 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 ### T20 — Документация
 - Корневой `MVP.md`: новые §8–11, правка §30 (HTTP Jev), раздел про Jev, перевод и
   ручной выбор.
-- `README.md`: config, `JEV_API_KEY`, какие данные уходят на `api.typesafe.ai` (запрос —
+- `README.md`: config, `decision.provider` (Jev или LLM), `JEV_API_KEY`, какие данные уходят на `api.typesafe.ai` (запрос —
   переведённый — и ProjectContext); Jev не обучается на данных клиентов, ZDR есть только
   в enterprise.
 - `orchestrator.example.yaml` (v2), `CLAUDE.md`.
@@ -854,6 +983,8 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 | В2 | Как выбирать complexity | Кумулятивные пороги от самой сложной: `P(complex) ≥ 0.40` → complex; иначе `P(medium)+P(complex) ≥ 0.50` → medium; иначе simple |
 | В7 | Язык | Вопросы к Jev — на английском. Запрос на русском переводит LLM перед Jev (T15). Stages получают оригинал |
 | В9 | Сбой Jev | Пользователь сам выбирает complexity и stages (T16). Forced stages остаются в силе. Без TTY или в `--mode auto` — ошибка |
+| В13 | Переводить ли запрос, если decision provider — LLM? | Да, одинаково для всех провайдеров: flow один, ответы сравнимы |
+| В14 | Пороги policy для LLM: общие с Jev или свои? | Общие. Пересматриваются по данным T18 |
 
 ### Открыто (есть решение по умолчанию)
 
