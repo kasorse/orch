@@ -372,6 +372,41 @@ actions:
 **Acceptance:** на каждое правило — тест; fail-fast по-прежнему срабатывает до
 создания любого провайдера.
 
+**Сделано.** Отличия от плана:
+- **Version остаётся 1, старые поля не убраны.** `cfg.Classifier` и `cfg.Actions.Answer`
+  до сих пор используются реальным flow (`app.go`, `internal/classifier`,
+  `internal/action/answer.go`). Если сейчас потребовать `version: 2` и убрать эти поля,
+  сломается всё, что ещё работает по старому flow — а его заменяют только T03–T11. Поэтому
+  версия и удаление старых полей переносятся в T12 целиком, одним отрезанием: там же
+  старый flow заменяется новым, так что config, требующий новых секций, не окажется
+  раньше, чем появится код, который их использует.
+- **Валидация нового surface — в отдельных функциях**, не в `Validate`/`ValidateDependencies`.
+  Новый файл `internal/config/decision.go` содержит `ValidateDecisionConfig` (структурные
+  проверки) и `ValidateDecisionConfigDependencies` (переменная окружения ключа + executable
+  переводчика/research) — их вызов в `app.go` добавит T12. До этого момента ни один
+  существующий config (включая `orchestrator.example.yaml` и все integration-тесты)
+  не обязан заполнять `decision`/`translation`/`policy`/`context`.
+- **`actions.research` не участвует в `actionProviderModels()`/`actionTimeouts()`**
+  (используются старым `Validate`/`ValidateDependencies`) — только в новых функциях. Иначе
+  каждый существующий config должен был бы завести `actions.research`, хотя это действие
+  пока ничего не выполняет (executor появится в T10).
+- **`domain.DecisionPolicy`** добавлен в `internal/domain/policy.go` — в T01 его не было,
+  но T02 явно требует `config.DecisionPolicy()`, возвращающий этот тип. Структура зеркалит
+  `domain.LimitsView`: чистые данные, `internal/policy` (T03) не будет знать про config.
+- **`*float64` для `project_threshold`, `complexity.complex`, `complexity.medium`** — чтобы
+  отличить «не задано» от явного `0`. Для порогов stages это и так есть естественно (через
+  наличие ключа в map), для этих трёх скалярных полей понадобился отдельный приём.
+- **Обнаружение литерального `api_key` в YAML.** `yaml.Unmarshal` по умолчанию не считает
+  неизвестные поля ошибкой, поэтому `api_key: …` в конфиге просто тихо игнорировался бы.
+  `JevConfig.UnmarshalYAML` теперь отдельно ловит это поле (в неэкспортируемый флаг,
+  значение никуда не попадает) и `ValidateDecisionConfig` на нём падает. Глобально включать
+  строгий режим декодирования (`KnownFields(true)`) не стал — это отдельное, более широкое
+  изменение поведения для всего config, не входящее в T02.
+- **`ValidateDependencies` отрефакторен**: общий цикл проверки executable вынесен в
+  `checkExecutablesPresent`, чтобы `ValidateDecisionConfigDependencies` мог использовать ту
+  же логику и те же формулировки ошибок. Поведение `ValidateDependencies` не изменилось —
+  весь существующий набор тестов зелёный без правок.
+
 ### T03 — Policy Engine
 
 **Файлы:** `internal/policy/engine.go` и тесты; `domain.DecisionPolicy`, `domain.Decision`.

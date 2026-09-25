@@ -40,8 +40,24 @@ func (f FakeDependencyChecker) LookPath(file string) (string, error) {
 // It must run after Validate and before any provider/classifier object is constructed,
 // so a missing dependency is caught before any AI call is made.
 func ValidateDependencies(cfg Config, checker DependencyChecker) error {
+	problems := checkExecutablesPresent(cfg.actionProviderModels(), checker)
+	if len(problems) == 0 {
+		return nil
+	}
+
+	return apperr.NewDependencyError(
+		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n\n")),
+		nil,
+	)
+}
+
+// checkExecutablesPresent groups pms by provider and reports, for each provider whose
+// CLI is not on PATH, which pseudo-actions it would have backed. It is shared by
+// ValidateDependencies and ValidateDecisionConfigDependencies (decision.go) so both
+// produce the same message shape from the same logic.
+func checkExecutablesPresent(pms []namedProviderModel, checker DependencyChecker) []string {
 	usage := make(map[string][]string)
-	for _, pm := range cfg.actionProviderModels() {
+	for _, pm := range pms {
 		if pm.Provider == "" {
 			continue
 		}
@@ -80,14 +96,7 @@ func ValidateDependencies(cfg Config, checker DependencyChecker) error {
 		}
 	}
 
-	if len(problems) == 0 {
-		return nil
-	}
-
-	return apperr.NewDependencyError(
-		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n\n")),
-		nil,
-	)
+	return problems
 }
 
 func cliDisplayName(providerID string) string {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -79,5 +80,75 @@ func TestValidateDependencies_ClassifierProviderMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "classifier") {
 		t.Errorf("expected classifier to be flagged as a using action, got: %s", err.Error())
+	}
+}
+
+func TestValidateDecisionConfigDependencies_Valid(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+	if err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateDecisionConfigDependencies_APIKeyEnvNotSet(t *testing.T) {
+	// t.Setenv registers cleanup that restores whatever the variable held before this
+	// test; os.Unsetenv then removes it for the duration of the test so LookupEnv
+	// reports ok=false, which a value of "" would not.
+	t.Setenv("JEV_API_KEY", "sentinel")
+	os.Unsetenv("JEV_API_KEY")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "jev decision provider: JEV_API_KEY is not configured") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestValidateDecisionConfigDependencies_APIKeyEnvBlank(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "   ")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "JEV_API_KEY is not configured") {
+		t.Errorf("unexpected error message: %s", err.Error())
+	}
+}
+
+func TestValidateDecisionConfigDependencies_TranslationExecutableMissing(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{"claude": true}}
+
+	err := ValidateDecisionConfigDependencies(validDecisionConfig(), checker)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	// translation and research both use claude in validDecisionConfig(), so they are
+	// reported together as one aggregated "required by actions" message.
+	if !strings.Contains(err.Error(), `provider "claude" is required by actions [`) {
+		t.Errorf("expected aggregated message, got: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "translation") || !strings.Contains(err.Error(), "research") {
+		t.Errorf("expected both translation and research to be named, got: %s", err.Error())
+	}
+}
+
+func TestValidateDecisionConfigDependencies_DoesNotCheckAPIKeyWhenEnvNameIsBlank(t *testing.T) {
+	// ValidateDecisionConfig (structural) is responsible for flagging a blank
+	// api_key_env; ValidateDecisionConfigDependencies must not also report a
+	// confusing "" is not configured message for it.
+	cfg := validDecisionConfig()
+	cfg.Decision.Jev.APIKeyEnv = ""
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	err := ValidateDecisionConfigDependencies(cfg, checker)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
 	}
 }

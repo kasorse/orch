@@ -67,6 +67,12 @@ type ActionsConfig struct {
 	Implement ActionConfig `yaml:"implement"`
 	Review    ActionConfig `yaml:"review"`
 	Answer    ActionConfig `yaml:"answer"`
+	// Research backs the "research" workflow action added by the Jev integration
+	// (specs/JEV integration/TASKS.md T10). It is defined and independently validated
+	// (see decision.go) starting with T02, but is not yet wired into
+	// actionProviderModels/actionTimeouts or into any real workflow - that happens in
+	// T10/T12, alongside the answer action's removal.
+	Research ActionConfig `yaml:"research"`
 }
 
 type TestConfig struct {
@@ -106,6 +112,21 @@ type Config struct {
 	Test       TestConfig      `yaml:"test"`
 	Limits     LimitsConfig    `yaml:"limits"`
 	Execution  ExecutionConfig `yaml:"execution"`
+
+	// Decision, Translation, Policy, and Context are the Jev integration's config
+	// surface (specs/JEV integration/TASKS.md T02). They are fully defined and
+	// validated by ValidateDecisionConfig/ValidateDecisionConfigDependencies in
+	// decision.go starting now, but that validation is not yet part of Validate's or
+	// ValidateDependencies' fail-fast chain, and cfg.Version is still required to be 1:
+	// the old classifier flow these run alongside is still what app.go wires up until
+	// T12 replaces it. Wiring these into the real fail-fast chain, bumping Version to
+	// 2, and rejecting v1 configs all happen together in T12, when the old fields
+	// (Classifier, Actions.Answer) are actually removed - cutting over piecemeal would
+	// leave a run that fails validation but has nothing yet to execute it.
+	Decision    DecisionConfig    `yaml:"decision"`
+	Translation TranslationConfig `yaml:"translation"`
+	Policy      PolicyConfig      `yaml:"policy"`
+	Context     ContextConfig     `yaml:"context"`
 }
 
 // actionProviderModels returns every configured action alongside its pseudo-action
