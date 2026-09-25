@@ -152,3 +152,15 @@ func TestValidateDecisionConfigDependencies_DoesNotCheckAPIKeyWhenEnvNameIsBlank
 		t.Fatalf("expected no error, got: %v", err)
 	}
 }
+
+func TestValidateDecisionConfigDependencies_MockNeedsNoAPIKey(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "sentinel")
+	os.Unsetenv("JEV_API_KEY")
+	cfg := validDecisionConfig()
+	cfg.Decision.Jev.Mock = true
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	if err := ValidateDecisionConfigDependencies(cfg, checker); err != nil {
+		t.Fatalf("expected mock mode to pass without an API key, got: %v", err)
+	}
+}

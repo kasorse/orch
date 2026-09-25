@@ -46,6 +46,10 @@ type JevConfig struct {
 	Timeout    time.Duration
 	MaxRetries int                 `yaml:"max_retries"`
 	Complexity JevComplexityConfig `yaml:"complexity"`
+	// Mock swaps the HTTP client for the offline mock (jev.NewMockClient): no network,
+	// no API key, deterministic keyword-based answers. It exists while Jev API access
+	// is unavailable; the rest of decision.jev is still validated as usual.
+	Mock bool `yaml:"mock"`
 
 	// apiKeyLiteralSet records whether the YAML set a literal "api_key" field, which
 	// ValidateDecisionConfig rejects: the key must come from the environment
@@ -65,6 +69,7 @@ func (j *JevConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Timeout    string              `yaml:"timeout"`
 		MaxRetries int                 `yaml:"max_retries"`
 		Complexity JevComplexityConfig `yaml:"complexity"`
+		Mock       bool                `yaml:"mock"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -75,6 +80,7 @@ func (j *JevConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	j.Model = raw.Model
 	j.MaxRetries = raw.MaxRetries
 	j.Complexity = raw.Complexity
+	j.Mock = raw.Mock
 	d, err := parseDurationField("decision.jev.timeout", raw.Timeout)
 	if err != nil {
 		return err
@@ -349,12 +355,12 @@ func validatePolicyConfig(p PolicyConfig) []string {
 // ValidateDecisionConfigDependencies checks the parts of the Jev integration's config
 // that require touching the environment: the executables backing translation and
 // research, and that decision.jev.api_key_env actually names a set environment
-// variable. It must run after ValidateDecisionConfig, for the same reason
+// variable (unless decision.jev.mock is set: the mock needs no key). It must run after ValidateDecisionConfig, for the same reason
 // ValidateDependencies must run after Validate.
 func ValidateDecisionConfigDependencies(cfg Config, checker DependencyChecker) error {
 	var problems []string
 
-	if env := strings.TrimSpace(cfg.Decision.Jev.APIKeyEnv); env != "" {
+	if env := strings.TrimSpace(cfg.Decision.Jev.APIKeyEnv); env != "" && !cfg.Decision.Jev.Mock {
 		if v, ok := os.LookupEnv(env); !ok || strings.TrimSpace(v) == "" {
 			problems = append(problems, fmt.Sprintf("jev decision provider: %s is not configured", env))
 		}

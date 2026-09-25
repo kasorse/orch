@@ -46,6 +46,17 @@ func FromError(err error) int {
 		return ProviderExecution
 	}
 
+	var decisionErr *apperr.DecisionError
+	if errors.As(err, &decisionErr) {
+		switch decisionErr.Kind {
+		case apperr.DecisionCancelled:
+			return UserCancellation
+		case apperr.DecisionAuth:
+			return ConfigOrDependency
+		}
+		return ProviderExecution
+	}
+
 	var limitErr *apperr.LimitExceededError
 	if errors.As(err, &limitErr) {
 		return WorkflowOrLimit

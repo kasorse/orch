@@ -157,6 +157,16 @@ func TestJevConfig_UnmarshalYAML_Timeout(t *testing.T) {
 	}
 }
 
+func TestJevConfig_UnmarshalYAML_Mock(t *testing.T) {
+	var j JevConfig
+	if err := yaml.Unmarshal([]byte("mock: true\n"), &j); err != nil {
+		t.Fatal(err)
+	}
+	if !j.Mock {
+		t.Error("Mock = false, want true")
+	}
+}
+
 func TestTranslationConfig_UnmarshalYAML(t *testing.T) {
 	var tr TranslationConfig
 	src := "provider: claude\nmodel: haiku\ntimeout: 60s\n"
