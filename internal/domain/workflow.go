@@ -16,12 +16,18 @@ const (
 
 type Step struct {
 	Action ActionType `json:"action"`
+	// Stage names the decision stage this step executes (specs/JEV integration/
+	// TASKS.md T04). Empty for a step built by the pre-Jev classifier flow
+	// (workflow.BuildLegacy) - T12 removes that flow entirely, at which point every
+	// Step will have a Stage.
+	Stage Stage `json:"stage,omitempty"`
 }
 
-// Workflow is the deterministic linear pipeline built by workflow.Build from a
-// Classification. It is used to look up whether test/review are part of this run
-// (RequiresTest/RequiresReview) - the engine's state machine decides actual traversal
-// order (including backward loops), it does not walk Steps as a queue.
+// Workflow is the deterministic linear pipeline built by workflow.Build (or, for the
+// pre-Jev flow, workflow.BuildLegacy) from a stage selection. It is used to look up
+// whether test/review are part of this run (RequiresTest/RequiresReview) - the
+// engine's state machine decides actual traversal order (including backward loops),
+// it does not walk Steps as a queue.
 type Workflow struct {
 	Steps []Step `json:"steps"`
 }

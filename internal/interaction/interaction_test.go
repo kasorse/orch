@@ -28,7 +28,7 @@ func (f *fakePrompter) Ask(prompt string) (string, error) {
 }
 
 func newRun(c domain.Classification) *domain.Run {
-	wf, err := workflow.Build(c)
+	wf, err := workflow.BuildLegacy(c)
 	if err != nil {
 		panic(err)
 	}

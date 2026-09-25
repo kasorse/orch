@@ -195,7 +195,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return err
 	}
 
-	wf, err := workflow.Build(classification)
+	wf, err := workflow.BuildLegacy(classification)
 	if err != nil {
 		run.Status = domain.RunFailed
 		run.FailureReason = err.Error()

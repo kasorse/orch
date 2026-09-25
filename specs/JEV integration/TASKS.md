@@ -473,6 +473,25 @@ stage в action. У `Step` появляется поле `Stage`. Старый `
 **Acceptance:** вход `review, development, analysis, testing` → выход
 `analysis, development, testing, review`; одна и та же selection → один и тот же workflow.
 
+**Сделано.** Отличия от плана:
+- **Старый `Build(Classification)` не удалён, а переименован в `BuildLegacy`.** Он всё ещё
+  используется реальным flow (`app.go`, `interaction/editplan.go` и их тесты) — как и в
+  T02/T03, удаление откладывается до T12, где старый flow заменяется новым целиком. Три
+  вызова обновлены механически, поведение не изменилось (полный набор старых тестов
+  зелёный без правок логики, только переименование). `TaskType` пока тоже не удалён — он
+  используется только `domain.Classification`/`BuildLegacy`, но сам по себе безвреден,
+  трогать его отдельно от остального старого flow смысла нет.
+- **`Build` обходит `domain.StageOrder()` сам**, а не доверяет порядку `sel.Stages` (хотя
+  на практике `policy.SelectStages`/`ApplyForced` уже строят его по порядку) — так
+  acceptance-пример из плана («вход review, development, analysis, testing») проверяется
+  буквально: порядок входа не имеет значения в принципе, а не только у настоящих вызовов
+  через `policy`.
+- **Добавлены два защитных случая ошибки**, которых не было в плане явно: пустая/полностью
+  выключенная selection и stage без маппинга в action (`domain.StageSelection` — публичная
+  структура, её можно было бы собрать вручную некорректно).
+- **`Step.Stage` — с `json:"stage,omitempty"`**, чтобы JSON старых run (собранных через
+  `BuildLegacy`) не менялся побайтово.
+
 ### T05 — Обобщённые переходы engine
 
 **Файлы:** `internal/workflow/{transitions,engine}.go` и тесты.

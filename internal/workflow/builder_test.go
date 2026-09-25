@@ -15,8 +15,8 @@ func actions(w domain.Workflow) []domain.ActionType {
 	return out
 }
 
-func TestBuild_Question(t *testing.T) {
-	w, err := Build(domain.Classification{Type: domain.TaskQuestion, Complexity: domain.LegacyComplexityLow})
+func TestBuildLegacy_Question(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{Type: domain.TaskQuestion, Complexity: domain.LegacyComplexityLow})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -26,8 +26,8 @@ func TestBuild_Question(t *testing.T) {
 	}
 }
 
-func TestBuild_StandaloneTest(t *testing.T) {
-	w, err := Build(domain.Classification{Type: domain.TaskTest, Complexity: domain.LegacyComplexityLow})
+func TestBuildLegacy_StandaloneTest(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{Type: domain.TaskTest, Complexity: domain.LegacyComplexityLow})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,8 +37,8 @@ func TestBuild_StandaloneTest(t *testing.T) {
 	}
 }
 
-func TestBuild_StandaloneReview(t *testing.T) {
-	w, err := Build(domain.Classification{Type: domain.TaskReview, Complexity: domain.LegacyComplexityLow})
+func TestBuildLegacy_StandaloneReview(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{Type: domain.TaskReview, Complexity: domain.LegacyComplexityLow})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,8 +48,8 @@ func TestBuild_StandaloneReview(t *testing.T) {
 	}
 }
 
-func TestBuild_BugfixLow_NoAnalyze(t *testing.T) {
-	w, err := Build(domain.Classification{
+func TestBuildLegacy_BugfixLow_NoAnalyze(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{
 		Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow,
 		RequiresTests: true, RequiresReview: true,
 	})
@@ -62,9 +62,9 @@ func TestBuild_BugfixLow_NoAnalyze(t *testing.T) {
 	}
 }
 
-func TestBuild_BugfixMediumHigh_WithAnalyze(t *testing.T) {
+func TestBuildLegacy_BugfixMediumHigh_WithAnalyze(t *testing.T) {
 	for _, complexity := range []domain.LegacyComplexity{domain.LegacyComplexityMedium, domain.LegacyComplexityHigh} {
-		w, err := Build(domain.Classification{
+		w, err := BuildLegacy(domain.Classification{
 			Type: domain.TaskBugfix, Complexity: complexity,
 			RequiresTests: true, RequiresReview: true,
 		})
@@ -78,8 +78,8 @@ func TestBuild_BugfixMediumHigh_WithAnalyze(t *testing.T) {
 	}
 }
 
-func TestBuild_Feature(t *testing.T) {
-	w, err := Build(domain.Classification{
+func TestBuildLegacy_Feature(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{
 		Type: domain.TaskFeature, Complexity: domain.LegacyComplexityHigh,
 		RequiresTests: true, RequiresReview: true,
 	})
@@ -92,8 +92,8 @@ func TestBuild_Feature(t *testing.T) {
 	}
 }
 
-func TestBuild_Refactor(t *testing.T) {
-	w, err := Build(domain.Classification{
+func TestBuildLegacy_Refactor(t *testing.T) {
+	w, err := BuildLegacy(domain.Classification{
 		Type: domain.TaskRefactor, Complexity: domain.LegacyComplexityMedium,
 		RequiresTests: true, RequiresReview: true,
 	})
@@ -106,7 +106,7 @@ func TestBuild_Refactor(t *testing.T) {
 	}
 }
 
-func TestBuild_RequiresFlagsPruneTrailingSteps(t *testing.T) {
+func TestBuildLegacy_RequiresFlagsPruneTrailingSteps(t *testing.T) {
 	cases := []struct {
 		name           string
 		requiresTests  bool
@@ -121,7 +121,7 @@ func TestBuild_RequiresFlagsPruneTrailingSteps(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			w, err := Build(domain.Classification{
+			w, err := BuildLegacy(domain.Classification{
 				Type: domain.TaskBugfix, Complexity: domain.LegacyComplexityLow,
 				RequiresTests: tc.requiresTests, RequiresReview: tc.requiresReview,
 			})
@@ -135,17 +135,17 @@ func TestBuild_RequiresFlagsPruneTrailingSteps(t *testing.T) {
 	}
 }
 
-func TestBuild_SameClassificationAlwaysProducesSameWorkflow(t *testing.T) {
+func TestBuildLegacy_SameClassificationAlwaysProducesSameWorkflow(t *testing.T) {
 	c := domain.Classification{Type: domain.TaskFeature, Complexity: domain.LegacyComplexityHigh, RequiresTests: true, RequiresReview: true}
-	w1, _ := Build(c)
-	w2, _ := Build(c)
+	w1, _ := BuildLegacy(c)
+	w2, _ := BuildLegacy(c)
 	if !reflect.DeepEqual(w1, w2) {
 		t.Errorf("expected deterministic output, got %v and %v", w1, w2)
 	}
 }
 
-func TestBuild_UnsupportedType(t *testing.T) {
-	_, err := Build(domain.Classification{Type: "invalid"})
+func TestBuildLegacy_UnsupportedType(t *testing.T) {
+	_, err := BuildLegacy(domain.Classification{Type: "invalid"})
 	if err == nil {
 		t.Fatal("expected error for unsupported task type")
 	}

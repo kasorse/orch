@@ -11,7 +11,7 @@ import (
 )
 
 // editLoop lets the user change one or more Classification fields, rebuilding
-// run.Workflow via the unmodified workflow.Build after every change - never a
+// run.Workflow via the unmodified workflow.BuildLegacy after every change - never a
 // freehand step list, per MVP.md §30. When allowTypeAndComplexity is false (the
 // manual-mode step-gate decline path), only requires_tests/requires_review are
 // offered, since type/complexity have no well-defined effect once steps have already
@@ -130,7 +130,7 @@ func applyEdit(out io.Writer, run *domain.Run, edit func(domain.Classification) 
 	}
 	*run.Classification = candidate
 
-	wf, err := workflow.Build(candidate)
+	wf, err := workflow.BuildLegacy(candidate)
 	if err != nil {
 		fmt.Fprintln(out, err)
 		return nil
