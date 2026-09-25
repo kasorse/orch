@@ -40,7 +40,7 @@ func (s *Store) LogPath(runID string, stepIndex int, actionType domain.ActionTyp
 
 // ClassifierLogPath is LogPath's counterpart for AppendClassifierLog's unindexed path.
 func (s *Store) ClassifierLogPath(runID, stream string) string {
-	return filepath.Join(s.runDir(runID), "logs", fmt.Sprintf("classify.%s.log", stream))
+	return s.CallLogPath(runID, "classify", stream)
 }
 
 // NewRun allocates a fresh run ID, creates its directory structure, writes the initial
@@ -125,14 +125,23 @@ func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionT
 }
 
 // AppendClassifierLog appends raw process output (stream is "stdout" or "stderr") to the
-// classification call's log file, creating it on first write. Unindexed (logs/classify.*)
-// since classification happens once, outside the workflow's step index sequence, so it
-// can never collide with AppendLog's logs/<NNN>-<action>.*.log paths.
+// classification call's log file (logs/classify.*), creating it on first write.
 func (s *Store) AppendClassifierLog(runID string, stream, content string) error {
-	relPath := filepath.Join("logs", fmt.Sprintf("classify.%s.log", stream))
-	full := filepath.Join(s.runDir(runID), relPath)
+	return s.AppendCallLog(runID, "classify", stream, content)
+}
 
-	f, err := os.OpenFile(full, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+// CallLogPath returns where AppendCallLog writes stream for the named call, without
+// writing anything - used to populate apperr.ProviderError.LogPath.
+func (s *Store) CallLogPath(runID, name, stream string) string {
+	return filepath.Join(s.runDir(runID), "logs", fmt.Sprintf("%s.%s.log", name, stream))
+}
+
+// AppendCallLog appends raw process output (stream is "stdout" or "stderr") of a
+// provider call made outside the workflow's steps - translation, a decision round - to
+// logs/<name>.<stream>.log, creating it on first write. These names carry no step
+// index, so they never collide with AppendLog's logs/<NNN>-<action>.*.log paths.
+func (s *Store) AppendCallLog(runID, name, stream, content string) error {
+	f, err := os.OpenFile(s.CallLogPath(runID, name, stream), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("open log file: %w", err)
 	}

@@ -194,3 +194,25 @@ func TestAppendClassifierLog_CreatesAndAppendsAcrossCalls_UnindexedPath(t *testi
 		t.Errorf("expected log contents %q, got %q", want, string(data))
 	}
 }
+
+func TestAppendCallLog_NamedUnindexedPath(t *testing.T) {
+	store := NewStore(t.TempDir())
+
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := store.AppendCallLog(run.ID, "translate", "stderr", "warning\n"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := filepath.Join(store.runDir(run.ID), "logs", "translate.stderr.log")
+	if got := store.CallLogPath(run.ID, "translate", "stderr"); got != want {
+		t.Errorf("CallLogPath = %s, want %s", got, want)
+	}
+	data, err := os.ReadFile(want)
+	if err != nil || string(data) != "warning\n" {
+		t.Errorf("log = %q, %v", data, err)
+	}
+}

@@ -854,6 +854,30 @@ Mock Jev — `httptest.Server`, отвечает по id вопросов. Пр�
 - в fake-переводе с потерянным `ProductRepository` проверка не проходит → оригинал;
 - английский запрос не вызывает CLI.
 
+**Сделано.** Отличия от плана:
+- **Код не входит в подсчёт доли кириллицы.** По правилу «доля от всех букв» пути и
+  идентификаторы размывают русскую фразу: «исправь panic в internal/config/loader.go и
+  config_test.go» набирает 19 % и не переводится. Поэтому идентификаторы, пути и
+  `backticks` вырезаются до подсчёта, и доля считается по буквам прозы. Запрос из одних
+  идентификаторов («ProductRepository.Get») букв прозы не содержит и не переводится. Порог
+  30 % — константа `CyrillicThreshold`.
+- **API:** `Translator.Prepare(ctx, runID, request) (Result, error)`. В `Result` есть
+  `Text` (что уходит в decision provider), `Original` (что получают stages) и поля для
+  trace: `detected {language, cyrillic_share}`, `translated`, `failed`, `reason`,
+  `provider`, `model`, `latency`. Ошибка возвращается только при завершении самого run
+  (Ctrl-C, `execution.timeout`). Любой сбой перевода даёт `failed: true` с причиной и
+  оригинал. Предупреждение в консоль выводит wiring (T11/T12) по `Reason`.
+- **Закрывающий тег в тексте обезврежен.** `</request>` в запросе превращается в
+  `</ request>`, иначе пользовательский текст мог бы закрыть блок данных раньше и
+  дописать инструкции модели.
+- **Вывод модели чистится**: code fences и эхо тегов `<request>` снимаются до проверки.
+- Проверка сохранности — CamelCase/snake_case-идентификаторы и пути (`a/b.go`,
+  `README.md`). Слова капсом (`HTTP`, `API`) не проверяются: переводчик вправе
+  перестроить фразу вокруг них.
+- **Логи.** В `persistence` появился общий `AppendCallLog(runID, name, stream, content)`
+  и `CallLogPath` для вызовов вне шагов workflow (`logs/translate.*`, дальше
+  `logs/decide-*.*` в T22). `AppendClassifierLog` теперь вызывает его, до удаления в T12.
+
 ### T16 — Ручной выбор при сбое Jev
 
 **Файлы:** `internal/interaction/choose.go`, использует `Prompter`.
