@@ -36,6 +36,18 @@ prove flags are passed; only this proves they are enforced.
    `Supports` to false in T02's adapter until fixed.
 5. codex/gemini cases exist and skip with "codex not on PATH" / "gemini not on PATH".
 
+## As built
+
+- `test/security/claude_test.go`, six tests, `t.Parallel()`. Calls go through
+  `claude.New(...).Execute` rather than a copy of the argv, so the suite tests exactly what
+  runs. Model: `haiku`, override with `ORCH_SECURITY_MODEL`.
+- The web sentinel is `https://httpbin.org/base64/<sentinel>`: the body is a fresh random
+  token, so only a real fetch can quote it; the test skips when httpbin is unreachable.
+- V10's positive control runs `claude` directly with `--setting-sources project` and
+  `--mcp-config .mcp.json` on the same planted files, proving the markers do appear when the
+  files are loaded.
+- Passed twice in a row on claude 2.1.283.
+
 ## Acceptance
 
 - `go test ./...` unaffected; `go test -tags security ./test/security/...` runs the suite.

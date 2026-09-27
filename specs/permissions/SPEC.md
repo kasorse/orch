@@ -376,9 +376,15 @@ the manual checks below into a build-tagged suite).
 | V7 | claude 2.1.283 | native sandbox with `failIfUnavailable: true` | ✅ refuses to start (socat missing; bwrap blocked by AppArmor userns restriction) — fail-closed works, sandbox itself unavailable here | 2026-09-27 |
 | V8 | claude 2.1.283 | `none` argv exactly as built (`--tools ""` then `--model`, prompt last): completes, cannot quote a file sentinel | ✅ | 2026-09-27 |
 | V9 | claude 2.1.283 | `web` argv as built: WebFetch works (`example.com` title), no file tool | ✅ | 2026-09-27 |
-| V10 | claude 2.1.283 | planted `.claude/settings.json` hook and `.mcp.json` do not run | ⬜ T07 | — |
+| V10 | claude 2.1.283 | planted `.claude/settings.json` hooks (SessionStart, PreToolUse) and `.mcp.json` server do not run; positive control: the same files do act under `--setting-sources project` / `--mcp-config` | ✅ | 2026-09-27 |
 | V11 | claude 2.1.283 | `read` argv as built: WebFetch not among its tools; `.env` denied | ✅ | 2026-09-27 |
 | V12 | codex, gemini | anything | ⬜ not installed | — |
+
+V2–V6 and V8–V11 are repeatable as `go test -tags security ./test/security/...` (T07): six
+tests, each negative paired with a positive control, run through the adapter itself (same
+argv, same scrubbed environment); passed twice in a row on 2.1.283, 2026-09-27, ~30 s and
+about a dozen `haiku` calls per run. A failing case flips that authority to unsupported in
+`claude.Supports` until fixed.
 
 ## 12. Acceptance
 
