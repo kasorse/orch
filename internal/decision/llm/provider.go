@@ -112,7 +112,11 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 	}
 	start := time.Now()
 	stop := p.startHeartbeat()
-	result, err := p.Client.Execute(callCtx, provider.Request{Prompt: prompt, Model: p.Model, Stream: p.Stream})
+	// The questions are answered from the request and the project context in the prompt
+	// alone, so the call gets no tools.
+	result, err := p.Client.Execute(callCtx, provider.Request{
+		Prompt: prompt, Model: p.Model, Stream: p.Stream, Authority: domain.AuthorityNone,
+	})
 	stop()
 	if p.Observer != nil {
 		p.Observer.ProviderCallFinished(p.ProviderID, p.Model, time.Since(start), err)

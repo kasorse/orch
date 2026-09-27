@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,6 +28,9 @@ func (f *fakeClient) Supports(domain.Authority) bool { return true }
 
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.lastReq = req
+	if !req.Authority.Valid() {
+		return provider.Result{}, fmt.Errorf("fake provider: request without a valid authority (%q)", req.Authority)
+	}
 	if f.err != nil {
 		// Mirrors the real provider adapters: the process's stdout/stderr are still
 		// returned alongside a failure, not discarded (this is the F3 fix under test).
@@ -106,6 +110,9 @@ func TestExecuteAnalyze_Success(t *testing.T) {
 	if d.lastAnalysis == nil || d.lastAnalysis.Summary != "s" {
 		t.Errorf("expected analysis to be stored, got %+v", d.lastAnalysis)
 	}
+	if client.lastReq.Authority != domain.AuthorityRead {
+		t.Errorf("analyze authority = %q, want read", client.lastReq.Authority)
+	}
 	if len(writer.calls) != 1 {
 		t.Fatalf("expected one artifact save, got %d", len(writer.calls))
 	}
@@ -167,6 +174,9 @@ func TestExecuteImplement_IncludesAnalysisAndPlanContext(t *testing.T) {
 	}
 	if d.lastImpl == nil || d.lastImpl.Summary != "done" {
 		t.Errorf("expected implementation to be stored, got %+v", d.lastImpl)
+	}
+	if client.lastReq.Authority != domain.AuthorityEdit {
+		t.Errorf("implement authority = %q, want edit", client.lastReq.Authority)
 	}
 }
 
@@ -274,6 +284,9 @@ func TestExecuteReview_Pass(t *testing.T) {
 	}
 	if !contains(client.lastReq.Prompt, "diff content") {
 		t.Errorf("expected prompt to include git diff, got: %s", client.lastReq.Prompt)
+	}
+	if client.lastReq.Authority != domain.AuthorityRead {
+		t.Errorf("review authority = %q, want read", client.lastReq.Authority)
 	}
 }
 

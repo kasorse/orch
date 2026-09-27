@@ -9,8 +9,8 @@ authority is visible before approval and recorded in `run.json` (F10).
 
 ## Files
 
-- `internal/action/context.go` — `Dispatcher.call` sets `Authority: domain.AuthorityFor(actionName)`
-- `internal/translate/translator.go`, `internal/decision/llm/provider.go` — `AuthorityNone`
+- `internal/action/context.go`, `internal/translate/translator.go`,
+  `internal/decision/llm/provider.go` — `DenyRead` (the `Authority` field is set since T02)
 - `internal/projectctx/secrets.go` — export `DenyPatterns(extra []string) []string`
 - `internal/domain/run.go` — `StepExecution.Authority`
 - `internal/workflow` — `StepOutcome.Authority` copied onto the appended `StepExecution`
@@ -21,8 +21,7 @@ authority is visible before approval and recorded in `run.json` (F10).
 
 1. `projectctx.DenyPatterns(extra)` returns `defaultDeny` + extra; the Context Manager uses it
    too, so there is one list. Call sites pass it as `Request.DenyRead` (`config.Context.ExtraDeny`).
-2. Translate and decision/llm: `Authority: domain.AuthorityNone`, comment that they are not
-   workflow actions and need no tools.
+2. ~~Translate and decision/llm: `Authority: domain.AuthorityNone`~~ — done in T02.
 3. `StepOutcome` carries `Authority`; the engine writes it to `StepExecution.Authority`
    (`json:"authority,omitempty"` — `test` has none). `internal/workflow` still imports only
    `domain`.
@@ -39,7 +38,7 @@ authority is visible before approval and recorded in `run.json` (F10).
 
 ## Acceptance
 
-- Test doubles reject an empty `Authority`, so a missed call site fails a test.
+- (done in T02) Test doubles reject an empty `Authority`, so a missed call site fails a test.
 - Integration: `run.json` has `authority` on every AI step execution, including retries.
 - The fake executor sees `--tools ""` for `ACTION: translate` / `ACTION: decide-*` prompts
   and `--tools Read,Grep,Glob` for `ACTION: review`.

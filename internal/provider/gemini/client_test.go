@@ -18,7 +18,7 @@ func TestClient_BuildsExpectedArgs(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "do the thing", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "do the thing", Model: "pro"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestClient_NonZeroExit(t *testing.T) {
 	}
 	c := New(fake)
 
-	res, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro", WorkingDir: "/repo"})
+	res, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro", WorkingDir: "/repo"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -77,7 +77,7 @@ func TestClient_PropagatesRunError(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -99,7 +99,7 @@ func TestClient_TimeoutPreservesExitCode(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -118,7 +118,7 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -135,6 +135,20 @@ func TestClient_SupportsNothing(t *testing.T) {
 	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
 		if c.Supports(a) {
 			t.Errorf("Supports(%q) = true, want false", a)
+		}
+	}
+}
+
+func TestClient_ExecuteRefusesEveryAuthority(t *testing.T) {
+	for _, a := range []domain.Authority{"", domain.AuthorityNone, domain.AuthorityRead, domain.AuthorityEdit} {
+		fake := &execution.FakeProcessExecutor{}
+		_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: a})
+		var authErr *apperr.AuthorityError
+		if !errors.As(err, &authErr) {
+			t.Errorf("authority %q: expected *apperr.AuthorityError, got %T: %v", a, err, err)
+		}
+		if len(fake.Calls) != 0 {
+			t.Errorf("authority %q: expected no process, got %d", a, len(fake.Calls))
 		}
 	}
 }

@@ -34,7 +34,10 @@ removes the defect.
    `Execute` refuses like claude.
 7. ~~`orchestrator.example.yaml`: route `review` to claude~~ — done in T01, since T01's
    check already refuses codex.
-8. T01 left `claude.Supports` returning true for every valid authority with a
+8. The three call sites set `Authority` here, not in T03: once `Execute` refuses an empty
+   authority, leaving them to T03 would break every run in between. T03 keeps `DenyRead`,
+   recording and display.
+9. T01 left `claude.Supports` returning true for every valid authority with a
    `TODO(T02)`: this task makes that declaration true. Remove the TODO.
 
 ## Acceptance

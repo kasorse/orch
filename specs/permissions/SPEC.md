@@ -353,10 +353,10 @@ the manual checks below into a build-tagged suite).
 | V5 | claude 2.1.283 | `edit` profile writes `.git/hooks/pre-commit` | ✅ refused by `dontAsk` | 2026-09-27 |
 | V6 | claude 2.1.283 | `read` + `Read(**/.env*)` deny: Read `.env`, Grep for its content, Read `a.txt` | ✅ refused / no match / readable | 2026-09-27 |
 | V7 | claude 2.1.283 | native sandbox with `failIfUnavailable: true` | ✅ refuses to start (socat missing; bwrap blocked by AppArmor userns restriction) — fail-closed works, sandbox itself unavailable here | 2026-09-27 |
-| V8 | claude 2.1.283 | `none` profile with `--restricted` completes a call | ⬜ T07 | — |
-| V9 | claude 2.1.283 | `web` profile: search works, Read unavailable | ⬜ T07 | — |
+| V8 | claude 2.1.283 | `none` argv exactly as built (`--tools ""` then `--model`, prompt last): completes, cannot quote a file sentinel | ✅ | 2026-09-27 |
+| V9 | claude 2.1.283 | `web` argv as built: WebFetch works (`example.com` title), no file tool | ✅ | 2026-09-27 |
 | V10 | claude 2.1.283 | planted `.claude/settings.json` hook and `.mcp.json` do not run | ⬜ T07 | — |
-| V11 | claude 2.1.283 | `read` profile cannot WebFetch | ⬜ T07 | — |
+| V11 | claude 2.1.283 | `read` argv as built: WebFetch not among its tools; `.env` denied | ✅ | 2026-09-27 |
 | V12 | codex, gemini | anything | ⬜ not installed | — |
 
 ## 12. Acceptance
@@ -374,6 +374,6 @@ the manual checks below into a build-tagged suite).
 7. Provider and test children receive no `CLAUDECODE`/`CLAUDE_CODE_MESSAGING_*`/… variable.
 8. `run.json` records `authority` on every step execution; the workflow block printed before
    approval shows each step's authority.
-9. V8–V11 pass in the live suite; README, MVP.md §38 and CLAUDE.md state the model and §10.
+9. V2–V11 pass in the live suite (T07); README, MVP.md §38 and CLAUDE.md state the model and §10.
 10. `internal/workflow` and `internal/policy` still import only `domain`; existing
     integration scenarios pass except assertions on the old argv.

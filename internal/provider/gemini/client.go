@@ -26,6 +26,11 @@ func New(executor execution.ProcessExecutor) *Client {
 	return &Client{Executor: executor}
 }
 
+// buildArgs is the unverified best-effort argv. The intended permission translation, for
+// whoever installs gemini and verifies it (specs/permissions/SPEC.md §6.4):
+// --approval-mode default plus policy-engine deny rules for the shell tools; headless
+// policy handling has open issues upstream (google-gemini/gemini-cli#20469), so each
+// authority needs a live check before Supports may report it.
 func buildArgs(model, prompt string) []string {
 	return []string{"-p", prompt, "-m", model}
 }
@@ -46,7 +51,20 @@ func (c *Client) Supports(a domain.Authority) bool {
 	return false
 }
 
+// Execute refuses every request: gemini supports no authority yet (see Supports). The
+// call path below is kept, and tested, for when a translation is verified.
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
+	if !c.Supports(req.Authority) {
+		return provider.Result{}, &apperr.AuthorityError{
+			Provider:  string(provider.Gemini),
+			Authority: string(req.Authority),
+			Reason:    "No permission translation for gemini has been verified against the real CLI (specs/permissions/SPEC.md §6.4).",
+		}
+	}
+	return c.run(ctx, req)
+}
+
+func (c *Client) run(ctx context.Context, req provider.Request) (provider.Result, error) {
 	args := buildArgs(req.Model, req.Prompt)
 
 	spec := execution.Spec{

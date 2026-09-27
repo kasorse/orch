@@ -107,7 +107,10 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	start := time.Now()
 
 	stopHeartbeat := d.startHeartbeat()
-	result, err := client.Execute(ctx, provider.Request{Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream})
+	result, err := client.Execute(ctx, provider.Request{
+		Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream,
+		Authority: domain.AuthorityFor(actionName),
+	})
 	stopHeartbeat()
 
 	if d.Observer != nil {

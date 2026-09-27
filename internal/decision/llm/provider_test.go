@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -32,6 +33,9 @@ func (f *fakeClient) Supports(domain.Authority) bool { return true }
 
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.calls = append(f.calls, req)
+	if !req.Authority.Valid() {
+		return provider.Result{}, fmt.Errorf("fake provider: request without a valid authority (%q)", req.Authority)
+	}
 	if f.block {
 		<-ctx.Done()
 		return provider.Result{}, &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureTimeout, Err: ctx.Err()}
@@ -97,6 +101,9 @@ func TestContextDepth(t *testing.T) {
 	}
 	if strings.Count(prompt, "</state>") != 1 {
 		t.Error("the request must not be able to close the state block")
+	}
+	if client.calls[0].Authority != domain.AuthorityNone {
+		t.Errorf("authority = %q, want none", client.calls[0].Authority)
 	}
 	if client.calls[0].Model != "sonnet" || logs.logs["decide-context.stdout"] != contextOut {
 		t.Errorf("model %q, logs %v", client.calls[0].Model, logs.logs)
