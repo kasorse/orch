@@ -25,6 +25,11 @@ func TestOpen_Success(t *testing.T) {
 	if len(exec.Calls) != 1 || exec.Calls[0].Executable != "git" {
 		t.Fatalf("expected one git call, got %v", exec.Calls)
 	}
+	// git runs on the operator's behalf and must see their full environment (config,
+	// credentials helpers); only model-facing processes get ScrubbedEnv.
+	if exec.Calls[0].Env != nil {
+		t.Errorf("git calls must inherit the environment (Env nil), got %d entries", len(exec.Calls[0].Env))
+	}
 }
 
 func TestOpen_NotARepository(t *testing.T) {

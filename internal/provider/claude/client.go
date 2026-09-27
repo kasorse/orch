@@ -131,6 +131,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		Executable: executable,
 		Args:       buildArgs(req.Authority, req.DenyRead, req.Model, req.Prompt),
 		WorkingDir: req.WorkingDir,
+		Env:        execution.ScrubbedEnv(),
 	}
 	if req.Stream != nil {
 		spec.StdoutSink = req.Stream

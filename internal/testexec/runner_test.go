@@ -3,6 +3,8 @@ package testexec
 import (
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/apperr"
@@ -65,5 +67,20 @@ func TestRunner_ExecutorError(t *testing.T) {
 	var execErr *apperr.ExecutionError
 	if !errors.As(err, &execErr) {
 		t.Fatalf("expected *apperr.ExecutionError, got %T", err)
+	}
+}
+
+func TestRunner_ScrubsParentSessionEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", "planted")
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+	if _, err := New(exec).Run(context.Background(), "go test ./...", "/repo"); err != nil {
+		t.Fatal(err)
+	}
+	env := exec.Calls[0].Env
+	if env == nil {
+		t.Fatal("expected an explicit environment, got nil (inherit)")
+	}
+	if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_TOKEN=") }) {
+		t.Error("the test command must not inherit CLAUDE_CODE_MESSAGING_TOKEN")
 	}
 }

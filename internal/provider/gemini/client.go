@@ -71,6 +71,7 @@ func (c *Client) run(ctx context.Context, req provider.Request) (provider.Result
 		Executable: executable,
 		Args:       args,
 		WorkingDir: req.WorkingDir,
+		Env:        execution.ScrubbedEnv(),
 	}
 	if req.Stream != nil {
 		spec.StdoutSink = req.Stream

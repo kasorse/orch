@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/apperr"
@@ -149,6 +150,24 @@ func TestClient_ExecuteRefusesEveryAuthority(t *testing.T) {
 		}
 		if len(fake.Calls) != 0 {
 			t.Errorf("authority %q: expected no process, got %d", a, len(fake.Calls))
+		}
+	}
+}
+
+func TestClient_ScrubsParentSessionEnv(t *testing.T) {
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	if _, err := New(fake).run(context.Background(), provider.Request{Prompt: "x", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	env := fake.Calls[0].Env
+	if env == nil {
+		t.Fatal("expected an explicit environment, got nil (inherit)")
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CLAUDECODE=") || strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_SOCKET=") {
+			t.Errorf("parent-session variable leaked: %s", kv)
 		}
 	}
 }

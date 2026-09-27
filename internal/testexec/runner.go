@@ -22,7 +22,11 @@ func New(executor execution.ProcessExecutor) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, command string, workingDir string) (domain.TestResult, error) {
-	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir})
+	// The test command runs code a model may have written, so it must not inherit a
+	// parent agent session's IPC channel either (specs/permissions/SPEC.md §7.1).
+	result, err := r.Executor.Run(ctx, execution.Spec{
+		Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir, Env: execution.ScrubbedEnv(),
+	})
 	if err != nil {
 		return domain.TestResult{}, &apperr.ExecutionError{Msg: "failed to run test command", Err: err}
 	}
