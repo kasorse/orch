@@ -427,10 +427,14 @@ func TestDecision_LLMProvider(t *testing.T) {
 }`)
 	t.Setenv("JEV_API_KEY", "")
 
+	argsDir := t.TempDir()
+	t.Setenv("FAKE_ARGS_DIR", argsDir)
+
 	opts := defaultConfigOptions()
 	opts.providers.Decision = "claude"
 	stdout, stderr, err := runOrchestrator(t, repoDir, writeConfig(t, t.TempDir(), opts), "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
+	assertAuthorities(t, repoDir, argsDir, stdout)
 
 	want := []string{"decide-context", "decide-classify", "analyze", "implement", "review"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {

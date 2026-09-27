@@ -80,10 +80,13 @@ func args(a domain.Authority, denyRead []string, model, prompt string) []string 
 	return append(argv, "--model", model, prompt)
 }
 
-// denySettings renders the read deny list as a --settings JSON document. Each pattern
-// matches one path segment (as in internal/projectctx), so it is denied as a file at any
-// depth and as a directory with everything under it. A Read deny rule also blocks Edit and
-// Write on the same path.
+// denySettings renders the read deny list as a --settings JSON document. Each pattern is
+// denied at any depth, as a file and as a directory with everything under it - for a
+// segment pattern that is what internal/projectctx does, and for a path pattern
+// (context.extra_deny "a/b") it is broader than projectctx's root-anchored match, which
+// errs on the side of denying. A Read deny rule also blocks Edit and Write on the same
+// path. Unlike projectctx, the CLI matches case-sensitively; the patterns arrive
+// lowercased, so ".ENV" is not covered.
 func denySettings(patterns []string) string {
 	rules := make([]string, 0, 2*len(patterns))
 	for _, p := range patterns {

@@ -31,8 +31,8 @@ Claude Code's sandboxing docs, "Ubuntu 24.04 and later". Do this before starting
    `--dev /dev --proc /proc --unshare-net --unshare-pid --die-with-parent --chdir <repo>
    sh -c <command>`, `Env: ScrubbedEnv()`. Keep the argv order from `SPEC.md` §8 and pin it
    in a test — `--tmpfs $HOME` after the repo bind would hide a repo under `$HOME`.
-4. `TestResult` records whether it ran sandboxed; the workflow block shows
-   `test  runs (sandboxed): go test ./...`.
+4. `TestResult` records whether it ran sandboxed; the `authority:` line shows
+   `test runs (sandboxed): go test ./...`.
 
 ## Acceptance
 

@@ -157,6 +157,10 @@ func DirtyRepoWarning(w io.Writer) {
 
 func (r *ConsoleReporter) StepStarted(run *domain.Run, index int, action domain.ActionType) {
 	fmt.Fprintf(r.Out, "\n[%d] %s\n", index+1, strings.ToUpper(string(action)))
+	// --verbose names the step's authority up front; test makes no AI call, so it has none.
+	if r.Verbose && action != domain.ActionTest {
+		fmt.Fprintf(r.Out, "Authority: %s\n", domain.AuthorityFor(action))
+	}
 }
 
 func (r *ConsoleReporter) StepFinished(run *domain.Run, index int, exec domain.StepExecution, outcome workflow.StepOutcome) {

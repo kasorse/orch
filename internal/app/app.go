@@ -250,6 +250,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return err
 	}
 	reporter.Decided(res.Trace(wf))
+	reporter.Authority(wf, cfg.Test.Command)
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}

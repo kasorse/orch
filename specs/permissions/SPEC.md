@@ -372,8 +372,9 @@ the manual checks below into a build-tagged suite).
 6. A workflow with `implement` on a dirty worktree fails before the approval prompt;
    `run.json` has `pre_run_ref` for every run that executes steps.
 7. Provider and test children receive no `CLAUDECODE`/`CLAUDE_CODE_MESSAGING_*`/… variable.
-8. `run.json` records `authority` on every step execution; the workflow block printed before
-   approval shows each step's authority.
+8. `run.json` records the authority of every AI step execution (`provider.authority`); an
+   `authority:` line printed after the workflow line, before approval, shows each step's
+   authority and the test command.
 9. V2–V11 pass in the live suite (T07); README, MVP.md §38 and CLAUDE.md state the model and §10.
 10. `internal/workflow` and `internal/policy` still import only `domain`; existing
     integration scenarios pass except assertions on the old argv.

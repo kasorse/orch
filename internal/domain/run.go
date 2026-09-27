@@ -12,9 +12,13 @@ const (
 	RunStopped   RunStatus = "stopped"
 )
 
+// ProviderRef identifies the provider call a step made: which CLI, which model, and the
+// authority it ran with (specs/permissions/SPEC.md §5), so run.json answers "what was this
+// step allowed to do" after the fact.
 type ProviderRef struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	Authority Authority `json:"authority,omitempty"`
 }
 
 type StepExecStatus string

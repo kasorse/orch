@@ -13,7 +13,7 @@ protected; MVP.md is normative; CLAUDE.md keeps future changes aligned.
    modes do not change authority, fail-closed rule and its position in the fail-fast chain,
    the guards (§7), the audit fields. Touch up §7 (add `ValidateAuthorities` to the chain),
    §15 (adapters declare `Supports` and translate authority), §22 (`Authority`,
-   `StepExecution.Authority`, `Run.PreRunRef`), §27 (authority in the workflow block,
+   `ProviderRef.Authority`, `Run.PreRunRef`), §27 (the `authority:` line after `workflow:`,
    `Restore point:` line, manual gate summary), §21 (run.json fields).
 2. **README "## Security model"** after Configuration: one paragraph (steps get the least
    tools their job needs; no step has a shell; unsupported → refuse); the table; modes; the
