@@ -1,6 +1,6 @@
 # Spec: Execution authority for provider CLI calls (v2)
 
-Status: **implemented** (T01–T08; T09 optional), see `README.md`. Supersedes v1 (kept verbatim in
+Status: **implemented** (T01–T09), see `README.md`. Supersedes v1 (kept verbatim in
 `archive/v1/`; what changed and why is in `DECISIONS.md`).
 Scope: how much authority each provider CLI invocation gets, how that is enforced, checked
 before any AI call, recorded, and documented. No change to the decision flow, workflow
@@ -300,33 +300,55 @@ drawn delimiter gets a fresh nonce. The task
 description is operator input and is not fenced. Defense in depth only — P1/P2 are what make
 a followed injection achieve little.
 
-## 8. Test step isolation (optional, phase 3)
+## 8. Test step isolation (optional, T09)
 
 F5 is the remaining real hole: `test` runs agent-written code with the operator's full
-authority. The orchestrator owns this process, so it can isolate it itself, provider-neutrally:
+authority. The orchestrator owns this process, so it isolates it itself, provider-neutrally:
 
 ```yaml
 test:
   command: "go test ./..."
-  sandbox: none            # none (default) | bwrap
+  sandbox: bwrap           # none (default) | bwrap
+  ro_binds: [~/go/pkg/mod]
+  rw_binds: [~/.cache/go-build]
 ```
 
-`bwrap`: `testexec` runs
-`bwrap --ro-bind / / --tmpfs $HOME --bind <repo> <repo> --ro-bind <each test.ro_binds>
---bind <each test.rw_binds> --dev /dev --proc /proc --unshare-net --unshare-pid
---die-with-parent --chdir <repo> sh -c <command>` with `ScrubbedEnv()`. Network off,
-home hidden, writes only to the repository and explicitly bound caches (e.g. `GOCACHE`,
-module cache read-only). Mount order is load-bearing: bwrap applies mounts in order, so
-`--tmpfs $HOME` must come **before** the repository and cache binds, or it would hide a
-repository that lives under `$HOME`.
+With `bwrap`, `testexec` runs (`internal/testexec/sandbox.go`, pinned by a full-argv test):
 
-Preconditions, checked in `ValidateDependencies` when `sandbox: bwrap`: `bwrap` on PATH and
-a one-shot probe `bwrap --ro-bind / / --unshare-net true` succeeds. On Ubuntu ≥ 24.04 the
-default AppArmor policy blocks it (observed here: `setting up uid map: Permission denied`)
-until an AppArmor profile for `bwrap` is installed — the error message must say exactly that.
+```text
+bwrap --ro-bind / / --dev /dev --proc /proc --tmpfs /tmp
+      --tmpfs $HOME
+      --bind <repo root> <repo root>
+      --ro-bind <git dir> <git dir>            (and the common dir of a linked worktree)
+      --ro-bind <each ro_bind> ... --bind <each rw_bind> ...
+      --unshare-user --unshare-net --unshare-pid --unshare-ipc --unshare-uts
+      --die-with-parent --new-session
+      --chdir <working dir> sh -c <command>
+```
 
-This amends MVP.md §30 ("no OS-level sandboxing") for the test step only; that amendment is
-part of T09. Until T09 lands, `none` is the behavior and README states F5 as unprotected.
+with `ScrubbedEnv()` plus `TMPDIR=/tmp`. The filesystem is read-only; the repository, a
+private `/tmp` and the rw binds are writable; `$HOME` is an empty tmpfs; there is no
+network. Mount order is load-bearing — bwrap applies mounts in order: `$HOME`'s tmpfs comes
+before the repository and cache binds (or it would hide a repository under `$HOME`), and the
+git directories come after the repository bind (or they would be writable again: a test that
+wrote a hook or `core.fsmonitor` would run code outside the sandbox on the orchestrator's
+next git call). `--new-session` keeps the test from pushing input into the orchestrator's
+terminal.
+
+Checks, all before any AI call: `Validate` accepts `sandbox` ∈ {none, bwrap}, refuses binds
+without bwrap, and binds that are relative, contain `..`, or are `/` or `~` themselves;
+`ValidateDependencies` wants `bwrap` on PATH and every bind to exist; then `testexec.Probe`
+runs bwrap once with the same mounts and isolation. On Ubuntu ≥ 24.04 the default AppArmor
+policy blocks it (observed here: `setting up uid map: Permission denied`, or with
+`--unshare-net` `loopback: Failed RTM_NEWADDR`) until an AppArmor profile for `bwrap` is
+installed, and the error says exactly that.
+
+The same guard as `implement` (§7.3) runs around the test command, sandboxed or not: a test
+that plants a hook, CI file or agent setting stops the run. The guard compares the `.git`
+fingerprint **before** running git status — `git status` itself runs a planted
+`core.fsmonitor` (verified on git 2.43).
+
+This amends MVP.md §30 ("no OS-level sandboxing") for the test step only.
 
 ## 9. Configuration
 
@@ -337,9 +359,9 @@ security:
 
 test:
   command: "go test ./..."
-  sandbox: none                  # T09: none | bwrap
-  ro_binds: []                   # T09: e.g. ["~/go/pkg/mod"]
-  rw_binds: []                   # T09: e.g. ["~/.cache/go-build"]
+  sandbox: none                  # none | bwrap (§8)
+  ro_binds: []                   # e.g. ["~/go/pkg/mod"]
+  rw_binds: []                   # e.g. ["~/.cache/go-build"]
 ```
 
 No knob widens a step's authority. `require_clean_worktree` needs `*bool` in the YAML shape
@@ -379,6 +401,8 @@ the manual checks below into a build-tagged suite).
 | V10 | claude 2.1.283 | planted `.claude/settings.json` hooks (SessionStart, PreToolUse) and `.mcp.json` server do not run; positive control: the same files do act under `--setting-sources project` / `--mcp-config` | ✅ | 2026-09-27 |
 | V11 | claude 2.1.283 | `read` argv as built: WebFetch not among its tools; `.env` denied | ✅ | 2026-09-27 |
 | V12 | codex, gemini | anything | ⬜ not installed | — |
+| V13 | bwrap 0.9.0 | test sandbox: no `$HOME`, no writes outside the repository or into `.git/hooks`, no network; repository writable (`TestTestSandbox`, positive control unsandboxed); and this repository's full `go test` passes sandboxed with `ro_binds: [~/go/pkg/mod]`, `rw_binds: [~/.cache/go-build]` | ✅ with the AppArmor profile for bwrap installed | 2026-09-27 |
+| V14 | git 2.43 | `git status` runs a planted `core.fsmonitor`; the guard compares the fingerprint first and never triggers it (`TestRepoGuard_GitChangeStopsBeforeGitStatus`) | ✅ | 2026-09-27 |
 
 V2–V6 and V8–V11 are repeatable as `go test -tags security ./test/security/...` (T07): six
 tests, each negative paired with a positive control, run through the adapter itself (same

@@ -239,6 +239,7 @@ func TestExecuteTest_Success(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: "PASS", ExitCode: 0}},
 	}
 	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{}
 
 	run := &domain.Run{ID: "run-1"}
 	outcome, err := d.Execute(context.Background(), domain.ActionTest, run)
@@ -261,6 +262,7 @@ func TestExecuteTest_Failure(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: "", Stderr: "FAIL", ExitCode: 1}},
 	}
 	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{}
 
 	run := &domain.Run{ID: "run-1"}
 	outcome, err := d.Execute(context.Background(), domain.ActionTest, run)
@@ -636,7 +638,7 @@ func TestExecuteImplement_GuardViolationFailsTheStep(t *testing.T) {
 	if !errors.As(err, &wfErr) {
 		t.Fatalf("expected *apperr.WorkflowError, got %T: %v", err, err)
 	}
-	for _, want := range []string{".claude/settings.json", ".git (config or hooks)", "Restore point: abc123", "security.protected_paths"} {
+	for _, want := range []string{".claude/settings.json", ".git (config or hooks)", "Restore point: abc123", "security.protected_paths", "Do not run git"} {
 		if !contains(err.Error(), want) {
 			t.Errorf("expected %q in:\n%v", want, err)
 		}
@@ -672,5 +674,32 @@ func TestExecuteImplement_SnapshotFailureRefusesBeforeTheCall(t *testing.T) {
 	}
 	if client.lastReq.Prompt != "" {
 		t.Error("no provider call may happen when the guard cannot take its snapshot")
+	}
+}
+
+func TestExecuteTest_GuardViolationFailsTheStep(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "PASS"}}}
+	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{changed: []string{".github/workflows/ci.yml"}}
+
+	outcome, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1", PreRunRef: "abc"})
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) || !contains(err.Error(), "test changed protected paths") || !contains(err.Error(), ".github/workflows/ci.yml") {
+		t.Fatalf("expected a protected-path WorkflowError, got %T: %v", err, err)
+	}
+	if outcome.TestResult == nil || outcome.RawStdout != "PASS" {
+		t.Errorf("the outcome must keep the test output for the logs, got %+v", outcome)
+	}
+}
+
+func TestExecuteTest_WithoutGuardRefusesBeforeRunning(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{}
+	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+
+	if _, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1"}); err == nil {
+		t.Fatal("expected a refusal without a guard")
+	}
+	if len(exec.Calls) != 0 {
+		t.Errorf("the test command must not run without a guard, got %d calls", len(exec.Calls))
 	}
 }

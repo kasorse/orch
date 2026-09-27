@@ -1,7 +1,7 @@
 # Execution authority for provider CLI calls
 
-Status: **implemented (v2)** on branch `feature/permissions`: T01–T08 landed; T09 (test-step
-sandbox) is optional and not started.
+Status: **implemented (v2)** on branch `feature/permissions`: T01–T09 landed and verified
+live (claude 2.1.283, bwrap 0.9.0 with an AppArmor profile for bwrap).
 
 | document | role |
 |---|---|

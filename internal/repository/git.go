@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -298,4 +299,20 @@ func hashFile(h io.Writer, path string) {
 	}
 	fmt.Fprintf(h, "%s: %d\n", path, len(data))
 	h.Write(data)
+}
+
+// GitDirs returns the absolute git directory and, when it differs (a linked worktree),
+// the common directory holding config and hooks.
+func (r *Repository) GitDirs(ctx context.Context) ([]string, error) {
+	out, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !slices.Contains(dirs, line) {
+			dirs = append(dirs, line)
+		}
+	}
+	return dirs, nil
 }

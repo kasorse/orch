@@ -14,8 +14,8 @@ import (
 	"orchestrator/internal/repository"
 )
 
-// Guard checks what an implement call changed before anything runs the result
-// (specs/permissions/SPEC.md §7.3). It checks the outcome, not the CLI, so it holds for
+// Guard checks what an implement call - or the test command, which runs code a model
+// wrote - changed, before anything runs the result (specs/permissions/SPEC.md §7.3). It checks the outcome, not the CLI, so it holds for
 // any provider regardless of that CLI's own protected-path rules.
 type Guard interface {
 	// Snapshot records the protected state before an implement call.
@@ -56,6 +56,10 @@ func (g *RepoGuard) Snapshot(ctx context.Context) (GuardState, error) {
 	if err != nil {
 		return GuardState{}, err
 	}
+	return g.snapshotWith(ctx, fp)
+}
+
+func (g *RepoGuard) snapshotWith(ctx context.Context, fp string) (GuardState, error) {
 	top, err := g.Repo.TopLevel(ctx)
 	if err != nil {
 		return GuardState{}, err
@@ -74,14 +78,21 @@ func (g *RepoGuard) Snapshot(ctx context.Context) (GuardState, error) {
 }
 
 func (g *RepoGuard) Changed(ctx context.Context, before GuardState) ([]string, error) {
-	after, err := g.Snapshot(ctx)
+	// The fingerprint is compared before anything runs git status: a planted
+	// core.fsmonitor would run on that very status call. rev-parse, which the fingerprint
+	// uses, does not run it.
+	fp, err := g.Repo.GitFingerprint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if fp != before.gitFingerprint {
+		return []string{gitViolation}, nil
+	}
+	after, err := g.snapshotWith(ctx, fp)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
-	if after.gitFingerprint != before.gitFingerprint {
-		out = append(out, gitViolation)
-	}
 	seen := map[string]bool{}
 	for p, h := range after.protected {
 		seen[p] = true

@@ -70,6 +70,12 @@ actions:
 
 test:
   command: "go test ./..."
+  # Run the test command - which executes code the model wrote - under bubblewrap:
+  # filesystem read-only, repository writable, $HOME hidden, no network (MVP.md §38.3).
+  # Needs bwrap (and on Ubuntu 24.04+ an AppArmor profile for it, see README).
+  # sandbox: bwrap
+  # ro_binds: [~/go/pkg/mod]        # module cache, read-only
+  # rw_binds: [~/.cache/go-build]   # build cache, writable
 
 limits:
   max_steps: 12

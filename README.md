@@ -132,7 +132,9 @@ security:
   action's authority: `codex` and `gemini` currently cannot, so routing an action (or the
   translator, or the decision provider) to them fails validation with exit 2.
 - `test.command` runs via `sh -c` in the target repository (the one place a shell is used —
-  it's trusted operator configuration, not user input).
+  it's trusted operator configuration, not user input). `test.sandbox: bwrap` runs it under
+  bubblewrap — see [Security model](#security-model); `test.ro_binds` / `test.rw_binds`
+  re-expose paths such as a module cache (read-only) and a build cache (writable).
 - `limits.max_steps` bounds total workflow steps; `limits.max_fix_iterations` bounds how many
   times a failing test or review can send the workflow back to `implement` — both exist purely
   to guarantee termination.
@@ -190,6 +192,52 @@ Around `implement` the orchestrator itself guards the result, for any provider:
   untouched. Otherwise the run stops (exit 4) naming the files; the changes stay for you to
   inspect.
 - In `manual` mode the prompt before the step after `implement` lists what it changed.
+- The same check runs around the test command, which executes code the model wrote: a test
+  that plants a hook, CI file or agent setting stops the run too. `.git` is compared before
+  the orchestrator runs `git status`, which would otherwise execute a planted
+  `core.fsmonitor`.
+
+### Sandboxing the test step
+
+With `test.sandbox: bwrap` the test command runs under
+[bubblewrap](https://github.com/containers/bubblewrap):
+
+| | access |
+|---|---|
+| the filesystem (`/usr`, `/etc`, your toolchain) | read-only |
+| the repository | read-write; its `.git` read-only |
+| `/tmp` | a private, empty, writable tmpfs (`TMPDIR=/tmp`) |
+| `$HOME` (`~/.ssh`, `~/.aws`, `~/.config/gh`, …) | hidden — an empty tmpfs |
+| `test.ro_binds` / `test.rw_binds` | re-exposed read-only / read-write |
+| network | none |
+
+So a test can build and write inside the repository, but cannot read your credentials, send
+anything out, or write outside the repository. For Go, re-expose the module cache and the
+build cache, or every run starts cold and cannot download modules:
+
+```yaml
+test:
+  command: "go test ./..."
+  sandbox: bwrap
+  ro_binds: [~/go/pkg/mod]
+  rw_binds: [~/.cache/go-build]
+```
+
+Tests that need the network or outside services (a database, docker) fail in the sandbox;
+keep `sandbox: none` for them. Linux only. `run` and `validate` probe bwrap before any AI
+call; on Ubuntu 24.04 and later AppArmor blocks bwrap's user namespaces until you install a
+profile for it:
+
+```bash
+sudo tee /etc/apparmor.d/bwrap > /dev/null <<'PROFILE'
+abi <abi/4.0>,
+include <tunables/global>
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+PROFILE
+sudo systemctl reload apparmor
+```
 
 Provider CLIs and the test command also do not inherit the variables through which a Claude
 Code session you launched the orchestrator from reaches its children (`CLAUDECODE`,
@@ -197,17 +245,18 @@ Code session you launched the orchestrator from reaches its children (`CLAUDECOD
 
 ### What is not protected
 
-- **Code the model writes runs in `test`** with your permissions — a test file can do
-  anything your user can. Reviewing the changes in `manual` mode before `test` is the
-  mitigation today.
+- **Without `test.sandbox: bwrap`, code the model writes runs in `test`** with your
+  permissions — a test file can do anything your user can; reviewing the changes in `manual`
+  mode before `test` is then the only mitigation. With the sandbox, a test can still read
+  what your user can read outside `$HOME`, and change anything inside the repository.
 - **Your repository goes to the model provider** — that is the job. Only the deny list above
   is withheld, and only from the file tools.
 - **Prompt injection is reduced, not eliminated.** Text in the repository or the diff can
   still mislead a step; what it can make that step do is bounded by the table above, and the
   guard, `review` and the diff expose the result.
 - **`test.command` is trusted configuration** run through `sh -c`. For a repository you do not
-  control, pass `--config` from outside it, keep `manual` mode, and run the whole thing in a
-  container.
+  control, pass `--config` from outside it, use `test.sandbox: bwrap`, keep `manual` mode,
+  and run the whole thing in a container.
 - **A hostile provider CLI binary** is out of scope.
 
 Details, the threat model and the rejected alternatives: `specs/permissions/`; normative
@@ -375,7 +424,7 @@ a fake Jev served by `httptest`.
 The live security suite checks that `claude` actually enforces each authority — every
 refusal paired with a control showing the same harness sees the action when it is allowed.
 It makes about a dozen small real calls (model `haiku`, override with
-`ORCH_SECURITY_MODEL`) and needs network:
+`ORCH_SECURITY_MODEL`) and needs network; its bwrap test skips where bwrap cannot sandbox:
 
 ```
 go test -tags security ./test/security/...

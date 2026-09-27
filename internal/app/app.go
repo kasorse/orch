@@ -110,10 +110,14 @@ func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose b
 	return configPath, mode, verbose, rest, nil
 }
 
+// sandboxProbeTimeout bounds the one bwrap run that checks the host can sandbox tests.
+const sandboxProbeTimeout = 10 * time.Second
+
 // loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
-// ValidateDependencies -> ValidateAuthorities. The registry is only asked what its
+// ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
+// ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls.
-func loadAndValidateConfig(configPath string, registry *provider.Registry, reporter *logging.ConsoleReporter) (config.Config, error) {
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter) (config.Config, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
@@ -125,6 +129,16 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, repor
 	}
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}); err != nil {
 		return config.Config{}, err
+	}
+	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
+	// here, not at the first test step after the AI calls.
+	if cfg.Test.Sandboxed() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), sandboxProbeTimeout)
+		err := testexec.Probe(probeCtx, executor)
+		cancel()
+		if err != nil {
+			return config.Config{}, err
+		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
@@ -146,8 +160,8 @@ func newRegistry(executor execution.ProcessExecutor) *provider.Registry {
 }
 
 func runValidate(configPath string, stdout io.Writer) error {
-	registry := newRegistry(execution.NewOSProcessExecutor())
-	_, err := loadAndValidateConfig(configPath, registry, logging.NewConsoleReporter(stdout))
+	executor := execution.NewOSProcessExecutor()
+	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewConsoleReporter(stdout))
 	return err
 }
 
@@ -160,7 +174,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called.
-	cfg, err := loadAndValidateConfig(configPath, registry, reporter)
+	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter)
 	if err != nil {
 		return err
 	}
@@ -263,7 +277,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return err
 	}
 	reporter.Decided(res.Trace(wf))
-	reporter.Authority(wf, cfg.Test.Command)
+	reporter.Authority(wf, cfg.Test.Command, cfg.Test.Sandboxed())
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
@@ -302,7 +316,13 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	runCtx, cancelRun := engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
 	defer cancelRun()
 
-	dispatcher := action.New(&cfg, registry, repo, testexec.New(osExec))
+	runner := testexec.New(osExec)
+	if cfg.Test.Sandboxed() {
+		if runner.Sandbox, err = testSandbox(ctx, repo, cfg.Test); err != nil {
+			return failRun(store, run, err)
+		}
+	}
+	dispatcher := action.New(&cfg, registry, repo, runner)
 	dispatcher.Artifacts = store
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
@@ -350,6 +370,26 @@ func recordRestorePoint(ctx context.Context, repo *repository.Repository, run *d
 	}
 	run.PreRunRef = ref
 	reporter.RestorePoint(ref)
+}
+
+// testSandbox resolves test.sandbox: bwrap into the paths the sandbox binds: the
+// repository root writable, its git directories read-only over it, $HOME hidden, and the
+// configured binds.
+func testSandbox(ctx context.Context, repo *repository.Repository, t config.TestConfig) (*testexec.Sandbox, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, &apperr.ConfigError{Msg: "test.sandbox: cannot determine the home directory to hide", Err: err}
+	}
+	top, err := repo.TopLevel(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gitDirs, err := repo.GitDirs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ro, rw := t.ResolveBinds(home)
+	return &testexec.Sandbox{Home: home, RepoRoot: top, GitDirs: gitDirs, ReadOnly: ro, ReadWrite: rw}, nil
 }
 
 // configPattern returns the config file's path relative to the repository root when it

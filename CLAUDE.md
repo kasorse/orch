@@ -100,10 +100,12 @@ read-only step (research/analyze/plan) writes the final `answer`, printed at the
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
   run records `pre_run_ref`; `action.Guard` compares protected paths (git-ignored ones
-  included) and the git config/hooks fingerprint around every `implement` call and fails the
-  step before `test`. `Dispatcher.Guard` is required — `implement` refuses without one.
-  Provider CLIs and `test` run with `execution.ScrubbedEnv()`; git keeps the full
-  environment.
+  included) and the git config/hooks fingerprint around every `implement` call and every
+  test command (both run code a model wrote) and fails the step. The fingerprint is compared
+  before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
+  required — `implement` and `test` refuse without one. Provider CLIs and `test` run with
+  `execution.ScrubbedEnv()`; git keeps the full environment. `test.sandbox: bwrap`
+  (`testexec.Sandbox`) is probed in the fail-fast chain; its mount order is load-bearing.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
   `git diff`, not just an implementation summary. Never parse phrases like "all tests should

@@ -177,3 +177,15 @@ func TestStatusSummary_ExcludesRunDirectory(t *testing.T) {
 		t.Errorf("StatusSummary = %q, want %q", got, " M a.go")
 	}
 }
+
+func TestGitDirs(t *testing.T) {
+	repo, dir := realRepo(t)
+	got, err := repo.GitDirs(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(filepath.Join(dir, ".git"))
+	if len(got) != 1 || (got[0] != want && got[0] != filepath.Join(dir, ".git")) {
+		t.Errorf("GitDirs = %q, want [%s]", got, want)
+	}
+}

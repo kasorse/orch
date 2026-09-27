@@ -12,6 +12,8 @@ type TestResult struct {
 	Stdout   string        `json:"stdout"`
 	Stderr   string        `json:"stderr"`
 	Duration time.Duration `json:"duration"`
+	// Sandboxed is true when the command ran under test.sandbox (bwrap).
+	Sandboxed bool `json:"sandboxed,omitempty"`
 }
 
 type Severity string

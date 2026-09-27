@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -45,6 +46,7 @@ func ValidateDependencies(cfg Config, checker DependencyChecker) error {
 	problems := jevKeyProblems(cfg.Decision)
 	pms := append(cfg.actionProviderModels(), decisionProviderModels(cfg)...)
 	problems = append(problems, checkExecutablesPresent(pms, checker)...)
+	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
 	if len(problems) == 0 {
 		return nil
 	}
@@ -114,4 +116,29 @@ func cliDisplayName(providerID string) string {
 	default:
 		return providerID + " CLI"
 	}
+}
+
+// sandboxDependencyProblems checks, for test.sandbox: bwrap, that bwrap is on PATH and that
+// every bind exists. Whether bwrap can actually create a sandbox on this host is probed
+// separately (testexec.Probe), right after this check.
+func sandboxDependencyProblems(t TestConfig, checker DependencyChecker) []string {
+	if !t.Sandboxed() {
+		return nil
+	}
+	var problems []string
+	if _, err := checker.LookPath("bwrap"); err != nil {
+		problems = append(problems, "test.sandbox is bwrap, but executable \"bwrap\" was not found in PATH.\n\n"+
+			"Install bubblewrap (e.g. apt install bubblewrap) or set test.sandbox: none.")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return append(problems, fmt.Sprintf("test.sandbox is bwrap, but the home directory is unknown: %v", err))
+	}
+	ro, rw := t.ResolveBinds(home)
+	for _, b := range append(ro, rw...) {
+		if _, err := os.Stat(b); err != nil {
+			problems = append(problems, fmt.Sprintf("test sandbox bind %s does not exist: %v", b, err))
+		}
+	}
+	return problems
 }

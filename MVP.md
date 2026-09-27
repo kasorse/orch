@@ -262,6 +262,8 @@ limits:
 execution:
   timeout: 15m
 
+# test.sandbox: bwrap runs the test command under bubblewrap (§38.3), with
+# test.ro_binds / test.rw_binds re-exposing caches
 security:                      # optional (§38); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
   protected_paths: []          # extra patterns implement must not change
@@ -1789,7 +1791,8 @@ arbitrary user-defined workflow language
 a mode that bypasses provider permission checks
 per-action configurable authority or a permission policy language
 per-tool-call approval during a step
-OS-level sandboxing of provider CLIs
+OS-level sandboxing of provider CLIs (the test step's optional bwrap sandbox, §38.3, is
+the one exception)
 ```
 
 Avoid introducing abstractions only required for these future features.
@@ -2231,6 +2234,13 @@ human sees and confirms between steps.
   fails the step (`WorkflowError`, exit 4) naming the paths and the restore point; the
   changes stay on disk. Without a guard, or when its snapshot fails, `implement` refuses
   before the provider call.
+* **The test step.** The same guard runs around the test command, which executes code the
+  model wrote; the guard compares the git fingerprint before running `git status`, which
+  would itself run a planted `core.fsmonitor`. With `test.sandbox: bwrap` the command runs
+  under bubblewrap: filesystem read-only, the repository and a private `/tmp` writable, the
+  git directories read-only, `$HOME` an empty tmpfs, no network, only `test.ro_binds` /
+  `test.rw_binds` re-exposed. The fail-fast chain checks `bwrap` on PATH, the binds, and one
+  probe run with the same isolation; the authority line shows `test runs (sandboxed)`.
 * **Fenced data.** The git diff (review) and test output (implement retry) are embedded in
   prompts inside a delimiter with a per-prompt random nonce and a line saying the block is
   data, never instructions. Defense in depth, not a boundary.
@@ -2242,9 +2252,10 @@ human sees and confirms between steps.
 
 ## 38.5 Not protected
 
-* Code the model writes runs in `test` with the operator's authority. Reviewing the
-  changes in `manual` mode before `test` is the mitigation; an OS sandbox for the test step
-  is a planned option (`specs/permissions/tasks/TASK-09-test-sandbox.md`).
+* Without `test.sandbox: bwrap`, code the model writes runs in `test` with the operator's
+  authority; reviewing the changes in `manual` mode before `test` is then the mitigation.
+  With it, the test can still read what the operator can read outside `$HOME`, and write
+  anything inside the repository.
 * Repository content goes to the model provider - that is the job; only the secret deny
   list is withheld from the file tools, matched case-sensitively.
 * Prompt injection is reduced, not eliminated; its effects are bounded by the step's

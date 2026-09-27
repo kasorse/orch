@@ -122,3 +122,41 @@ func TestRepoGuard_PreExistingChange(t *testing.T) {
 		t.Errorf("removing the pre-existing change must count too, got %q", got)
 	}
 }
+
+// TestRepoGuard_GitChangeStopsBeforeGitStatus: a planted core.fsmonitor would run on the
+// guard's own git status, so a moved fingerprint must be reported without running it.
+func TestRepoGuard_GitChangeStopsBeforeGitStatus(t *testing.T) {
+	repo, dir := guardRepo(t)
+	g := NewRepoGuard(repo, nil)
+	ctx := context.Background()
+	before, err := g.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	marker := filepath.Join(t.TempDir(), "fsmonitor-ran")
+	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
+	put(t, filepath.Dir(hook), filepath.Base(hook), "#!/bin/sh\ntouch "+marker+"\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("[core]\n\tfsmonitor = " + hook + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	got, err := g.Changed(ctx, before)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, []string{gitViolation}) {
+		t.Errorf("Changed = %q, want [%s]", got, gitViolation)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the planted core.fsmonitor ran during the guard's check")
+	}
+}

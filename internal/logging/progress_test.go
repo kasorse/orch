@@ -56,9 +56,14 @@ func TestRenderAuthority(t *testing.T) {
 		{steps(domain.ActionAnalyze), "authority: analyze=read\n"},
 		{steps(domain.ActionTest), "authority: test runs: go test ./...\n"},
 	}
+	var sandboxed bytes.Buffer
+	RenderAuthority(&sandboxed, steps(domain.ActionImplement, domain.ActionTest), "go test ./...", true)
+	if want := "authority: implement=edit; test runs (sandboxed): go test ./...\n"; sandboxed.String() != want {
+		t.Errorf("got %q, want %q", sandboxed.String(), want)
+	}
 	for _, tc := range cases {
 		var buf bytes.Buffer
-		RenderAuthority(&buf, tc.wf, "go test ./...")
+		RenderAuthority(&buf, tc.wf, "go test ./...", false)
 		if buf.String() != tc.want {
 			t.Errorf("got %q, want %q", buf.String(), tc.want)
 		}

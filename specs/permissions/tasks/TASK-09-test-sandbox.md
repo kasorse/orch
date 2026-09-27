@@ -34,6 +34,26 @@ Claude Code's sandboxing docs, "Ubuntu 24.04 and later". Do this before starting
 4. `TestResult` records whether it ran sandboxed; the `authority:` line shows
    `test runs (sandboxed): go test ./...`.
 
+## As built
+
+- `internal/testexec/sandbox.go`: `Sandbox`, the argv, `Probe`/`ProbeArgs`. Additions over
+  the plan: `--tmpfs /tmp` and `TMPDIR=/tmp` (with `/` read-only `go test` could not build);
+  the git directories re-bound read-only over the repository; `--unshare-ipc/-uts` and
+  `--new-session`.
+- The probe runs from `app` right after `ValidateDependencies` (bwrap on PATH and binds
+  existing are checked there), in `run` and `validate`.
+- New: the implement guard also runs around the test step, sandboxed or not; and
+  `RepoGuard.Changed` compares the `.git` fingerprint before any `git status`, because git
+  status runs a planted `core.fsmonitor` (verified). A `.git` violation message now warns not
+  to run git until `.git/config` and the hooks are inspected.
+- `TestResult.Sandboxed`; the authority line shows `test runs (sandboxed): ...`.
+- Tests: full-argv unit test, env, probe; config validation and dependency checks; scenario
+  16 through a fake bwrap (argv, authority line, run.json; unusable sandbox → exit 2 with no
+  AI call and no Jev request); live `TestTestSandbox` with an unsandboxed positive control.
+- Verified live after installing the AppArmor profile: `TestTestSandbox` passes, and this
+  repository's whole `go test` suite passes inside the sandbox with the module cache
+  read-only and the build cache writable.
+
 ## Acceptance
 
 - Unit: argv full-slice test; `sandbox: none` produces today's `sh -c` spec exactly.

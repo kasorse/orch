@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -60,18 +61,22 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		return outcome, &apperr.WorkflowError{Msg: "failed to check protected paths after implement", Err: err}
 	}
 	if len(changed) > 0 {
-		return outcome, &apperr.WorkflowError{Msg: protectedViolation(changed, run.PreRunRef)}
+		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
 	}
 	return outcome, nil
 }
 
 // protectedViolation explains why the run stopped. The changes stay on disk for
 // inspection.
-func protectedViolation(changed []string, restoreRef string) string {
+func protectedViolation(step domain.ActionType, changed []string, restoreRef string) string {
 	var b strings.Builder
-	b.WriteString("implement changed protected paths; the run stops before anything executes them:\n")
+	fmt.Fprintf(&b, "%s changed protected paths; the run stops before anything executes them:\n", step)
 	for _, p := range changed {
 		fmt.Fprintf(&b, "  %s\n", p)
+	}
+	if slices.Contains(changed, gitViolation) {
+		b.WriteString("\nDo not run git in this repository until you have inspected .git/config and the hooks " +
+			"directory by hand: git status itself would run a planted core.fsmonitor.\n")
 	}
 	b.WriteString("\nThe changes are left in the working tree for inspection.")
 	if restoreRef != "" {
