@@ -1,6 +1,7 @@
 # Execution authority for provider CLI calls
 
-Status: **accepted (v2)**, ready to implement. No code written yet.
+Status: **implemented (v2)** on branch `feature/permissions`: T01–T08 landed; T09 (test-step
+sandbox) is optional and not started.
 
 | document | role |
 |---|---|
@@ -9,14 +10,15 @@ Status: **accepted (v2)**, ready to implement. No code written yet.
 | [`tasks/`](tasks/) | 9 implementation tasks |
 | [`archive/v1/`](archive/v1/) | the superseded v1 design (15 tasks), kept as the record of what was considered |
 
-MVP.md §38 becomes the normative home once T08 lands. Where they disagree, MVP.md wins.
+MVP.md §38 is the normative home; README "Security model" is the operator's view. Where
+they disagree with this folder, MVP.md wins.
 
 ## The problem in one paragraph
 
-Every provider call — workflow steps, the translator, the LLM decision provider — runs
-`claude --permission-mode bypassPermissions`, so steps that only need to read can run
-commands, write anywhere, reach the network and load the repository's own hooks and MCP
-servers. The fix: each call site gets one of four fixed tool profiles (`none`, `web`,
+Before this work every provider call — workflow steps, the translator, the LLM decision
+provider — ran `claude --permission-mode bypassPermissions`, so steps that only needed to
+read could run commands, write anywhere, reach the network and load the repository's own
+hooks and MCP servers. The fix: each call site gets one of four fixed tool profiles (`none`, `web`,
 `read`, `edit`); no profile has a shell; everything not granted is denied without prompting;
 a provider that cannot enforce a profile is refused before any AI call; and the orchestrator
 itself guards what `implement` changed before `test` runs anything.

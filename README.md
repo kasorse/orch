@@ -82,7 +82,7 @@ actions:
   analyze:   { provider: claude, model: sonnet }
   plan:      { provider: claude, model: sonnet }
   implement: { provider: claude, model: opus }
-  review:    { provider: codex,  model: gpt, timeout: 20m }
+  review:    { provider: claude, model: sonnet, timeout: 20m }
 
 test:
   command: "go test ./..."
@@ -93,6 +93,10 @@ limits:
 
 execution:
   timeout: 15m
+
+security:
+  require_clean_worktree: true
+  protected_paths: []
 ```
 
 - **`decision`** chooses who estimates the probabilities, like an action chooses its
@@ -104,7 +108,8 @@ execution:
     deterministic answers from keywords in the request. Useful while you have no API
     access; a warning is printed and the trace marks the model as `mock:<model>`. The
     numbers are plausible, not calibrated.
-  - `claude` / `codex` / `gemini` — the same questions answered by that CLI.
+  - `claude` / `codex` / `gemini` — the same questions answered by that CLI (today only
+    `claude` passes the authority check, see [Security model](#security-model)).
   - The flow is the same for all of them. A failing provider never falls back to another:
     with `on_failure: ask` you choose the complexity and stages yourself (interactive runs
     only); with `fail` the run stops.
@@ -123,7 +128,9 @@ execution:
 - Each entry under **`actions`** independently chooses a `provider` (`claude` | `codex` |
   `gemini`) and a `model` string passed straight through to that provider's CLI — there's no
   automatic "best model" selection, fallback, or benchmarking. `timeout` optionally tightens
-  that action's share of `execution.timeout`.
+  that action's share of `execution.timeout`. A provider must be able to enforce the
+  action's authority: `codex` and `gemini` currently cannot, so routing an action (or the
+  translator, or the decision provider) to them fails validation with exit 2.
 - `test.command` runs via `sh -c` in the target repository (the one place a shell is used —
   it's trusted operator configuration, not user input).
 - `limits.max_steps` bounds total workflow steps; `limits.max_fix_iterations` bounds how many
@@ -131,6 +138,80 @@ execution:
   to guarantee termination.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the
   decision — except the time you spend on a manual choice.
+- **`security`** (optional) never widens what a step may do. `require_clean_worktree`
+  (default `true`) makes a workflow with `implement` refuse to start on a dirty worktree;
+  `protected_paths` adds patterns `implement` must not change. See
+  [Security model](#security-model).
+
+## Security model
+
+Every provider call gets the least tools its job needs, chosen by a fixed table in Go code —
+never by the model, a provider default or config. **No step has a shell.** A provider that
+cannot enforce an authority is refused before any AI call, and nothing ever runs a CLI with
+its permission checks turned off.
+
+| call | authority | may | may not |
+|---|---|---|---|
+| translation, decision | `none` | answer from the prompt | use any tool |
+| `research` | `web` | search and fetch web pages | read any file |
+| `analyze`, `plan`, `review` | `read` | read and search the repository | write, run commands, use the network |
+| `implement` | `edit` | read, create and modify files **inside the repository** | run commands (not even `go build`), use the network, write outside the repository, touch `.git/` or `.claude/` |
+| `test` | — | the orchestrator runs `test.command` itself | — |
+
+No call has both repository access and a way out (network or shell). Anything a call was not
+granted is denied on the spot, never prompted, so no mode can hang on a permission question.
+**Modes do not change authority**: `manual`, `accept-edits` and `auto` all run each step with
+the table above; they differ only in how much you see and confirm between steps.
+
+For `claude` that means `--restricted --permission-mode dontAsk --permission-prompts none
+--strict-mcp-config --setting-sources ""` plus the authority's `--tools`. Consequences:
+
+- The target repository's `.claude/settings.json` hooks, `.mcp.json` servers and settings are
+  never loaded.
+- Your own `~/.claude/settings.json` is not loaded either. Authentication that lives in the
+  environment or in Claude Code's credentials keeps working; if yours depends on `env` or
+  `apiKeyHelper` in user settings, export the variable instead.
+- The file tools cannot read the secret deny list — `.env`, `.env.*`, `*.pem`, `*.key`,
+  `credentials*`, `secrets*` and `context.extra_deny` — the same list the Context Manager
+  applies. The match is case-sensitive (`.ENV` is not covered).
+
+Around `implement` the orchestrator itself guards the result, for any provider:
+
+- A workflow with `implement` refuses to start on a dirty worktree (commit or stash first, or
+  set `security.require_clean_worktree: false`).
+- Before the first step it records a restore point, printed as `Restore point: <sha>` and
+  saved as `pre_run_ref` in `run.json`: HEAD, or on a dirty tree a snapshot commit of
+  everything (untracked files included) that leaves your tree, index and stash alone.
+  `git checkout <sha> -- .` brings the files back.
+- After every `implement` call, before anything runs its output, it checks that no protected
+  file changed — `.claude/**`, `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`,
+  `.envrc`, `.vscode/**`, the config file when it lives in the repository (even if
+  git-ignored), `security.protected_paths` — and that `.git/config` and the git hooks are
+  untouched. Otherwise the run stops (exit 4) naming the files; the changes stay for you to
+  inspect.
+- In `manual` mode the prompt before the step after `implement` lists what it changed.
+
+Provider CLIs and the test command also do not inherit the variables through which a Claude
+Code session you launched the orchestrator from reaches its children (`CLAUDECODE`,
+`CLAUDE_CODE_MESSAGING_*`, …).
+
+### What is not protected
+
+- **Code the model writes runs in `test`** with your permissions — a test file can do
+  anything your user can. Reviewing the changes in `manual` mode before `test` is the
+  mitigation today.
+- **Your repository goes to the model provider** — that is the job. Only the deny list above
+  is withheld, and only from the file tools.
+- **Prompt injection is reduced, not eliminated.** Text in the repository or the diff can
+  still mislead a step; what it can make that step do is bounded by the table above, and the
+  guard, `review` and the diff expose the result.
+- **`test.command` is trusted configuration** run through `sh -c`. For a repository you do not
+  control, pass `--config` from outside it, keep `manual` mode, and run the whole thing in a
+  container.
+- **A hostile provider CLI binary** is out of scope.
+
+Details, the threat model and the rejected alternatives: `specs/permissions/`; normative
+summary: `MVP.md` §38.
 
 ## How a workflow is decided
 
@@ -193,18 +274,20 @@ orchestrator [--config path] run [--verbose|-v] "<task description>"
   only see a `→ running <provider>...` line before each call and a `✓ completed (Ns)` line
   after it.
 
-Config loading, structural validation, and dependency validation (executables on `PATH`, the
-Jev API key) always run to completion, in that order, *before* any AI provider is invoked or
-any request is sent to Jev — a missing executable for an action used later in the workflow
-(e.g. `codex` for `review`) fails `run` immediately.
+Config loading, structural validation, dependency validation (executables on `PATH`, the
+Jev API key) and the authority check (every route's provider can enforce its authority) always
+run to completion, in that order, *before* any AI provider is invoked or any request is sent
+to Jev — a missing executable for an action used later in the workflow (e.g. `codex` for
+`review`) fails `run` immediately. `orchestrator validate` runs the same chain.
 
 `execution.timeout` bounds the entire run, including the decision — not just workflow step
 execution. Each provider/test child process runs in its own process group, so a timeout or
 Ctrl-C kills the whole process tree it spawned, not just the direct child.
 
-If the target repository has uncommitted changes when `run` starts, the orchestrator prints a
-warning and continues — it never stashes, resets, or otherwise touches your working tree on
-your behalf.
+If the target repository has uncommitted changes when `run` starts, a workflow with
+`implement` refuses to start (see [Security model](#security-model)); any other workflow
+prints a warning and continues. The orchestrator never stashes, resets, or otherwise touches
+your working tree on your behalf.
 
 ## Run artifacts
 
@@ -212,7 +295,8 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
 
 ```
 .orchestrator/runs/<run-id>/
-  run.json              # run status, the decision, step history, limits/iteration counters
+  run.json              # run status, the decision, step history (with each AI step's
+                        # provider.authority), limits/iteration counters, pre_run_ref
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
@@ -246,7 +330,7 @@ provider: claude
 action: implement
 model: opus
 failure: exit (the CLI ran and exited non-zero)
-command: claude --print --permission-mode bypassPermissions --model opus <prompt: 1832 chars>
+command: claude --print --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus <prompt: 1832 chars>
 working dir: /home/user/repo
 exit code: 1
 duration: 2.4s
@@ -287,6 +371,15 @@ gofmt -l .   # should print nothing
 `go test ./...` requires no network access, no Jev key and no real `claude`/`codex`/`gemini`
 installs: the `test/integration` suite uses fake executables installed on a scoped `PATH` and
 a fake Jev served by `httptest`.
+
+The live security suite checks that `claude` actually enforces each authority — every
+refusal paired with a control showing the same harness sees the action when it is allowed.
+It makes about a dozen small real calls (model `haiku`, override with
+`ORCH_SECURITY_MODEL`) and needs network:
+
+```
+go test -tags security ./test/security/...
+```
 
 ## Limitations
 

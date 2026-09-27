@@ -28,6 +28,21 @@ protected; MVP.md is normative; CLAUDE.md keeps future changes aligned.
 4. `orchestrator.example.yaml`: `security:` block with comments.
 5. `specs/permissions/README.md`: flip status to "implemented" with the landing commit.
 
+## As built
+
+- MVP.md: new §38; touched §4 (modes don't change authority), §5 (example: review on claude,
+  `security:` block), §7 (authority check with an example error), §15, §16 (clean start,
+  restore point), §21, §22, §23 (`AuthorityError`, the real claude command line), §24, §25.1
+  and §27 (examples moved off codex; `authority:`/`Restore point:` lines), §30.
+- README: "Security model" with the may/may-not table and "What is not protected"; config,
+  validation chain, dirty-tree paragraph, run.json, live suite.
+- CLAUDE.md: two new invariants (least authority; guard implement's result), fail-fast chain,
+  fencing, artifacts, tests.
+- Found while writing the docs: `apperr` joined argv with bare spaces, so the `command:` line
+  lost `--setting-sources ""` and split the `--settings` JSON — no longer pasteable. Args
+  that a shell would split or drop are now single-quoted (the `<prompt: N chars>` marker is
+  left as is).
+
 ## Acceptance
 
 - Someone who did not write the code, reading README only, can state what `implement` may

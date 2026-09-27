@@ -1,11 +1,11 @@
 # Spec: Execution authority for provider CLI calls (v2)
 
-Status: **accepted**, ready to implement via `tasks/`. Supersedes v1 (kept verbatim in
+Status: **implemented** (T01–T08; T09 optional), see `README.md`. Supersedes v1 (kept verbatim in
 `archive/v1/`; what changed and why is in `DECISIONS.md`).
 Scope: how much authority each provider CLI invocation gets, how that is enforced, checked
 before any AI call, recorded, and documented. No change to the decision flow, workflow
 construction, transitions, limits, static routing, or what is trusted (exit codes + git diff).
-MVP.md gains a normative §38 once T08 lands; where the two disagree, MVP.md wins.
+MVP.md §38 is the normative summary; where the two disagree, MVP.md wins.
 
 ---
 

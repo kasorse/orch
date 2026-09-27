@@ -134,3 +134,15 @@ func TestAuthorityError_WithoutRoute(t *testing.T) {
 		t.Errorf("Error() = %q, want %q", got, want)
 	}
 }
+
+func TestCommandLine_QuotesWhatAShellWouldSplit(t *testing.T) {
+	got := commandLine("claude", []string{
+		"--setting-sources", "", "--settings", `{"permissions":{"deny":["Read(**/.env)"]}}`,
+		"--tools", "Read,Grep,Glob", "--model", "opus", "it's", "<prompt: 42 chars>",
+	})
+	want := `claude --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)"]}}' ` +
+		`--tools Read,Grep,Glob --model opus 'it'\''s' <prompt: 42 chars>`
+	if got != want {
+		t.Errorf("commandLine =\n  %s\nwant\n  %s", got, want)
+	}
+}
