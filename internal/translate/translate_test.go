@@ -3,12 +3,14 @@ package translate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 )
 
@@ -19,8 +21,13 @@ type fakeClient struct {
 	calls  []provider.Request
 }
 
+func (f *fakeClient) Supports(domain.Authority) bool { return true }
+
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.calls = append(f.calls, req)
+	if !req.Authority.Valid() {
+		return provider.Result{}, fmt.Errorf("fake provider: request without a valid authority (%q)", req.Authority)
+	}
 	if f.delay {
 		<-ctx.Done()
 		return provider.Result{}, &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureTimeout, Err: ctx.Err()}
@@ -106,6 +113,9 @@ func TestPrepare_Translates(t *testing.T) {
 	}
 	if len(client.calls) != 1 || client.calls[0].Model != "haiku" {
 		t.Fatalf("calls = %+v", client.calls)
+	}
+	if client.calls[0].Authority != domain.AuthorityNone {
+		t.Errorf("authority = %q, want none", client.calls[0].Authority)
 	}
 	prompt := client.calls[0].Prompt
 	if !strings.HasPrefix(prompt, "ACTION: translate\n") || !strings.Contains(prompt, "<request>\n"+request+"\n</request>") {

@@ -165,3 +165,25 @@ func TestValidateDependencies_DecisionLLMProvider(t *testing.T) {
 		t.Errorf("a missing decision executable must fail before any AI call: %v", err)
 	}
 }
+
+func TestValidateDependencies_Sandbox(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	existing := t.TempDir()
+
+	cfg := validConfig()
+	cfg.Test = TestConfig{Command: "go test ./...", Sandbox: "bwrap", ROBinds: []string{existing}}
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{}}); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	cfg.Test.RWBinds = []string{existing + "/missing"}
+	err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"bwrap": true}})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	for _, want := range []string{`executable "bwrap" was not found in PATH`, existing + "/missing does not exist"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+}

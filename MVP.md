@@ -185,6 +185,9 @@ orchestrator run "..." --mode auto             # fully unattended (no prompts at
 Omitting `--mode` shows the decided workflow for approval (approve/cancel) and then
 interactively asks the user to choose one of the four modes above (see §1 and §27).
 
+Modes change how much the human sees and confirms between steps, never what a step is
+allowed to do: every provider call runs with the fixed authority of §38 in every mode.
+
 ---
 
 # 5. Configuration
@@ -246,8 +249,8 @@ actions:
     provider: claude
     model: opus
   review:
-    provider: codex
-    model: gpt
+    provider: claude
+    model: sonnet
 
 test:
   command: "go test ./..."
@@ -258,6 +261,12 @@ limits:
 
 execution:
   timeout: 15m
+
+# test.sandbox: bwrap runs the test command under bubblewrap (§38.3), with
+# test.ro_binds / test.rw_binds re-exposing caches
+security:                      # optional (§38); no key widens what a step may do
+  require_clean_worktree: true # a workflow with implement refuses a dirty tree
+  protected_paths: []          # extra patterns implement must not change
 ```
 
 Model names must be treated as opaque provider-specific strings.
@@ -389,6 +398,28 @@ orchestrator run "..."
 must fail before Jev is called or Claude is invoked.
 
 Do not partially execute the workflow and discover missing dependencies later.
+
+### Authority check
+
+The chain is `config.Load` → `Validate` → `ValidateDependencies` →
+**`ValidateAuthorities`**, all before any provider call. `ValidateAuthorities` asks, for
+every route (each action, the translator, an LLM decision provider), whether the routed
+provider can enforce the authority that route runs with (§38). A route it cannot enforce
+fails the run with an `AuthorityError` (exit 2), e.g.:
+
+```text
+configuration validation failed:
+
+provider "codex" cannot enforce the "read" authority required by "review"
+
+The orchestrator does not run a provider with authority it cannot enforce, rather than let it run with unknown authority (specs/permissions/SPEC.md §6).
+
+remedy: route review to a provider that supports it: claude (actions.review.provider: claude)
+```
+
+codex and gemini currently support no authority (their flags are unverified, §38), so any
+route to them fails here even when their executable is installed. `orchestrator validate`
+runs the same chain.
 
 ---
 
@@ -768,7 +799,12 @@ Each adapter must support:
 * context cancellation;
 * stdout;
 * stderr;
-* non-zero process exit.
+* non-zero process exit;
+* the call's authority (§38): `Supports(authority)` declares what the adapter can
+  enforce, only after a live check against the real CLI; `buildArgs` translates the
+  authority into that CLI's flags - the only place such flags exist; `Execute` refuses a
+  missing or unsupported authority without spawning anything;
+* the scrubbed environment (`execution.ScrubbedEnv`, §38).
 
 ---
 
@@ -790,12 +826,21 @@ Before workflow execution:
 * detect dirty working tree;
 * do not discard existing changes.
 
-If there are existing uncommitted changes, display a warning:
+If there are existing uncommitted changes and the workflow contains `implement`, the run
+refuses to start (exit 2, before any approval prompt) unless
+`security.require_clean_worktree: false` (§38). Otherwise - a read-only workflow, or the
+key set to false - display a warning:
 
 ```text
 Warning: repository contains uncommitted changes.
 Existing changes will not be reverted.
 ```
+
+The tree's state is read at startup, before `.orchestrator/runs/` is created inside it.
+
+Before the first step the run records a restore point, `pre_run_ref` (§38): HEAD on a
+clean tree, otherwise a snapshot commit of everything the run starts on top of, untracked
+files included, built on a throwaway index. It is printed as `Restore point: <sha>`.
 
 Do not automatically stash, reset, checkout, or revert user files.
 
@@ -1084,7 +1129,8 @@ At minimum save:
   latency of each decision step;
 * workflow;
 * executed steps;
-* provider/model for each AI step;
+* provider/model and authority for each AI step (`provider.authority`, §38);
+* the restore point (`pre_run_ref`) recorded before the first step;
 * step result;
 * test result;
 * review result;
@@ -1117,7 +1163,8 @@ Workflow
 Step
 StepExecution
 Artifact
-ProviderRef
+ProviderRef                                  (provider, model, authority)
+Authority                                    (none, web, read, edit - §38)
 ReviewResult
 TestResult
 RunMode
@@ -1174,9 +1221,14 @@ WorkflowError
 RepositoryError
 ExecutionError
 LimitExceededError
+AuthorityError
 ```
 
 Preserve underlying errors.
+
+`AuthorityError{Provider, Route, Authority, Reason, Remedy}` means a provider cannot
+enforce the authority a call requires (§38); it is raised by `ValidateAuthorities` before
+any AI call and again by an adapter's `Execute` as a backstop.
 
 `DecisionError{Provider, Kind, StatusCode, Attempts, Body, Err}` is every decision
 provider failure, Jev or LLM (§8.4, §8.5). `Kind` is one of `timeout`, `connection`,
@@ -1230,7 +1282,7 @@ provider: claude
 action: implement
 model: opus
 failure: exit (the CLI ran and exited non-zero)
-command: claude --print --permission-mode bypassPermissions --model opus <prompt: 1832 chars>
+command: claude --print --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus <prompt: 1832 chars>
 working dir: /home/user/repo
 exit code: 1
 duration: 2.4s
@@ -1277,7 +1329,8 @@ Suggested:
 Exact values may be encapsulated centrally.
 
 A `DecisionError` maps to 3, except `auth` (2 - a key problem is a configuration
-problem) and `cancelled` (5).
+problem) and `cancelled` (5). An `AuthorityError` maps to 2: routing an action to a
+provider that cannot enforce its authority is misconfiguration.
 
 ---
 
@@ -1317,8 +1370,8 @@ actions:
 ```yaml
 actions:
   review:
-    provider: codex
-    model: gpt
+    provider: claude
+    model: sonnet
     timeout: 20m
 ```
 
@@ -1392,6 +1445,8 @@ context: project (p=0.91 ≥ 0.50)
 complexity: medium (choice p=0.63, score=1.20 → medium ✓)
 decision: jev (jev-1.13.0)
 workflow: analyze → implement → test → review
+authority: analyze=read, implement=edit, review=read; test runs: go test ./...
+Restore point: 9c1e0f4d2b7a...
 
 [1] ANALYZE
 Provider: claude
@@ -1410,9 +1465,9 @@ Command: go test ./...
 ✓ passed
 
 [4] REVIEW
-Provider: codex
-Model: gpt
-→ running codex...
+Provider: claude
+Model: sonnet
+→ running claude...
 ✗ review failed
 
 1 high severity issue found.
@@ -1429,9 +1484,9 @@ Command: go test ./...
 ✓ passed
 
 [7] REVIEW
-Provider: codex
-Model: gpt
-→ running codex...
+Provider: claude
+Model: sonnet
+→ running claude...
 ✓ PASS
 
 Run completed successfully.
@@ -1441,7 +1496,12 @@ The decision summary shows, when they apply: a `translation: ru → en via <prov
 line (or a `Warning: translation failed (...)` line), the context depth with the
 probability and threshold (plus `limited: <reason>` when collection failed), the
 complexity with both questions' readings (a disagreement is flagged `✗ disagrees`), who
-decided, and the workflow. `--verbose` adds the per-stage table:
+decided, and the workflow. The `authority:` line follows in every mode, before any prompt:
+each AI step's authority and the command the test step runs (§38). `Restore point:` is
+printed once the mode is settled, before the first step; with `--verbose` each AI step's
+header is followed by `Authority: <authority>`. In `manual` mode the gate before the step
+that follows a completed `implement` first lists the working tree's changes and
+`Protected paths: unchanged`. `--verbose` adds the per-stage table:
 
 ```text
 stages:
@@ -1728,6 +1788,11 @@ persistent conversational memory
 database
 custom dynamically defined action types
 arbitrary user-defined workflow language
+a mode that bypasses provider permission checks
+per-action configurable authority or a permission policy language
+per-tool-call approval during a step
+OS-level sandboxing of provider CLIs (the test step's optional bwrap sandbox, §38.3, is
+the one exception)
 ```
 
 Avoid introducing abstractions only required for these future features.
@@ -2094,3 +2159,108 @@ that becomes the default offered choice.
 * No editing the task description, decision, or workflow on resume - if any of
   those need to change, that is a new `run`, not a resume.
 
+---
+
+# 38. Execution Authority
+
+Normative. Design record, findings, rejected alternatives and live checks:
+`specs/permissions/` (`SPEC.md`, `DECISIONS.md`).
+
+## 38.1 Authorities
+
+Every provider call runs with exactly one **authority** - a fixed set of tools, chosen by
+Go code per call site, never by a model, a provider default or config:
+
+```text
+none   no tools: text in, text out
+web    web search and fetch; no file access at all
+read   read and search files under the working directory
+edit   read + create and modify files under the working directory
+```
+
+No authority includes a shell. A step is restricted by the tools it is given, not by rules
+about how it may use them; rules that constrain a shell tool's arguments are never a
+boundary here.
+
+| call | authority | why |
+|---|---|---|
+| translation, decide-context, decide-classify | `none` | work on the request text in the prompt |
+| research | `web` | external knowledge; its prompt carries only the task, so no repository data can leak |
+| analyze, plan, review | `read` | inspect the repository; review also gets the diff in its prompt |
+| implement | `edit` | the only step that changes code; compiling and testing is the test step's job |
+| test | - | no AI call: the orchestrator runs `test.command` itself |
+
+No call has both repository access and a way out (network, shell). An action without an
+entry in `domain.AuthorityFor` gets `none`.
+
+Modes (§4) do not change authority. Every authority denies whatever it does not grant
+without prompting, so every mode is safe to run unattended; modes differ only in what the
+human sees and confirms between steps.
+
+## 38.2 Enforcement
+
+* Adapters declare `Supports(authority)` and translate an authority into CLI flags only in
+  `buildArgs`. An authority is declared supported only after a live check against the real
+  CLI shows the permitted action works and the forbidden one is refused
+  (`go test -tags security ./test/security/...`).
+* claude (verified on 2.1.283): `--print --restricted --permission-mode dontAsk
+  --permission-prompts none --strict-mcp-config --setting-sources ""`, the authority's
+  `--tools` and `--allowed-tools`, `--settings` with `Read(...)` deny rules for the secret
+  deny list (§8.3's list, one source: `projectctx.DenyPatterns`), then `--model` and the
+  prompt last. The target repository's settings, hooks and MCP servers never load.
+* codex and gemini support no authority until their flags are verified.
+* `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
+  `Execute` refuses a missing or unsupported authority without spawning anything.
+* There is no bypass: the codebase never passes a permission-skipping mode.
+* Provider CLIs and the test command get `execution.ScrubbedEnv()`: the inherited
+  environment minus the variables through which a launching agent session reaches its
+  children (`CLAUDECODE`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
+  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID`). git keeps the full
+  environment.
+
+## 38.3 Guards around implement
+
+* **Clean start.** A workflow containing `implement` refuses a dirty worktree (exit 2,
+  before any approval prompt) unless `security.require_clean_worktree: false`.
+* **Restore point.** Before the first step `run.json` records `pre_run_ref`: HEAD, or on a
+  dirty tree a snapshot commit of the whole tree (untracked files included) written through
+  a throwaway index - the working tree, index, stash list and refs are untouched.
+* **Protected paths.** Around every `implement` call, a snapshot before is compared with
+  one after, before the outcome is accepted and so before `test` runs anything: files that
+  differ from HEAD or are git-ignored and match `.claude/**`, `.mcp.json`,
+  `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`, the config file when it
+  lives in the worktree, or `security.protected_paths` (at any depth, by content hash); and
+  a fingerprint of the repository's git config and effective hooks directory. A change
+  fails the step (`WorkflowError`, exit 4) naming the paths and the restore point; the
+  changes stay on disk. Without a guard, or when its snapshot fails, `implement` refuses
+  before the provider call.
+* **The test step.** The same guard runs around the test command, which executes code the
+  model wrote; the guard compares the git fingerprint before running `git status`, which
+  would itself run a planted `core.fsmonitor`. With `test.sandbox: bwrap` the command runs
+  under bubblewrap: filesystem read-only, the repository and a private `/tmp` writable, the
+  git directories read-only, `$HOME` an empty tmpfs, no network, only `test.ro_binds` /
+  `test.rw_binds` re-exposed. The fail-fast chain checks `bwrap` on PATH, the binds, and one
+  probe run with the same isolation; the authority line shows `test runs (sandboxed)`.
+* **Fenced data.** The git diff (review) and test output (implement retry) are embedded in
+  prompts inside a delimiter with a per-prompt random nonce and a line saying the block is
+  data, never instructions. Defense in depth, not a boundary.
+
+## 38.4 Audit
+
+`run.json` records each AI step's `provider.authority` and the run's `pre_run_ref`; the
+`authority:` line and `Restore point:` line are printed in every mode (§27).
+
+## 38.5 Not protected
+
+* Without `test.sandbox: bwrap`, code the model writes runs in `test` with the operator's
+  authority; reviewing the changes in `manual` mode before `test` is then the mitigation.
+  With it, the test can still read what the operator can read outside `$HOME`, and write
+  anything inside the repository.
+* Repository content goes to the model provider - that is the job; only the secret deny
+  list is withheld from the file tools, matched case-sensitively.
+* Prompt injection is reduced, not eliminated; its effects are bounded by the step's
+  authority and exposed by the guard, review and the diff.
+* `test.command` is trusted config run through `sh -c`. A repository you do not control
+  additionally needs `--config` from outside it, a sandboxed test step and ideally a
+  container.
+* A hostile provider CLI binary is out of scope.

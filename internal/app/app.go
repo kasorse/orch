@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -109,7 +110,14 @@ func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose b
 	return configPath, mode, verbose, rest, nil
 }
 
-func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter) (config.Config, error) {
+// sandboxProbeTimeout bounds the one bwrap run that checks the host can sandbox tests.
+const sandboxProbeTimeout = 10 * time.Second
+
+// loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
+// ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
+// ValidateAuthorities. The registry is only asked what its
+// adapters can enforce; constructing it makes no calls.
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter) (config.Config, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
@@ -122,13 +130,38 @@ func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}); err != nil {
 		return config.Config{}, err
 	}
+	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
+	// here, not at the first test step after the AI calls.
+	if cfg.Test.Sandboxed() {
+		probeCtx, cancel := context.WithTimeout(context.Background(), sandboxProbeTimeout)
+		err := testexec.Probe(probeCtx, executor)
+		cancel()
+		if err != nil {
+			return config.Config{}, err
+		}
+	}
+	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
+	// single check, before the mode is even known, is complete.
+	if err := config.ValidateAuthorities(cfg, registry); err != nil {
+		return config.Config{}, err
+	}
 
 	reporter.ConfigValid()
 	return cfg, nil
 }
 
+// newRegistry registers every supported provider adapter with executor.
+func newRegistry(executor execution.ProcessExecutor) *provider.Registry {
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, claude.New(executor))
+	registry.Register(provider.Codex, codex.New(executor))
+	registry.Register(provider.Gemini, gemini.New(executor))
+	return registry
+}
+
 func runValidate(configPath string, stdout io.Writer) error {
-	_, err := loadAndValidateConfig(configPath, logging.NewConsoleReporter(stdout))
+	executor := execution.NewOSProcessExecutor()
+	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewConsoleReporter(stdout))
 	return err
 }
 
@@ -136,9 +169,12 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	reporter := logging.NewConsoleReporter(stdout)
 	reporter.Verbose = verbose
 
-	// Fail fast (MVP.md §7): Load -> Validate -> ValidateDependencies run in full before
-	// any provider, decision client or translator exists.
-	cfg, err := loadAndValidateConfig(configPath, reporter)
+	osExec := execution.NewOSProcessExecutor()
+	registry := newRegistry(osExec)
+
+	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
+	// or translator exists and before any provider is called.
+	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter)
 	if err != nil {
 		return err
 	}
@@ -155,22 +191,16 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
 	}
 
-	osExec := execution.NewOSProcessExecutor()
-
 	repo, err := repository.Open(decideCtx, cwd, osExec)
 	if err != nil {
 		return err
 	}
-	if dirty, err := repo.IsDirty(decideCtx); err != nil {
+	// Taken now, before the run directory exists: .orchestrator/runs/ may live inside the
+	// worktree, and the run must not count its own files as uncommitted changes.
+	dirty, err := repo.IsDirty(decideCtx)
+	if err != nil {
 		return err
-	} else if dirty {
-		logging.DirtyRepoWarning(stderr)
 	}
-
-	registry := provider.NewRegistry()
-	registry.Register(provider.Claude, claude.New(osExec))
-	registry.Register(provider.Codex, codex.New(osExec))
-	registry.Register(provider.Gemini, gemini.New(osExec))
 
 	var stream io.Writer
 	if verbose {
@@ -226,6 +256,17 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the workflow", Err: err})
 	}
+	// A workflow that writes must start from a clean restore point (specs/permissions/
+	// SPEC.md §7.2); checked before any approval prompt, so nobody approves a run that
+	// cannot start.
+	if dirty {
+		if wf.Contains(domain.ActionImplement) && cfg.Security.CleanWorktreeRequired() {
+			return failRun(store, run, &apperr.ConfigError{Msg: "the workflow includes implement, but the repository has uncommitted changes\n\n" +
+				"Commit or stash them first, so the run starts from a clean restore point,\n" +
+				"or set security.require_clean_worktree: false to run on top of them."})
+		}
+		logging.DirtyRepoWarning(stderr)
+	}
 	run.Decision = &res.Decision
 	run.Workflow = &wf
 
@@ -236,6 +277,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return err
 	}
 	reporter.Decided(res.Trace(wf))
+	reporter.Authority(wf, cfg.Test.Command, cfg.Test.Sandboxed())
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
@@ -266,14 +308,26 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		run.Mode = domain.ModeAuto
 	}
 
+	recordRestorePoint(ctx, repo, run, dirty, reporter)
+	if err := store.SaveRun(run); err != nil {
+		return err
+	}
+
 	runCtx, cancelRun := engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
 	defer cancelRun()
 
-	dispatcher := action.New(&cfg, registry, repo, testexec.New(osExec))
+	runner := testexec.New(osExec)
+	if cfg.Test.Sandboxed() {
+		if runner.Sandbox, err = testSandbox(ctx, repo, cfg.Test); err != nil {
+			return failRun(store, run, err)
+		}
+	}
+	dispatcher := action.New(&cfg, registry, repo, runner)
 	dispatcher.Artifacts = store
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
+	dispatcher.Guard = action.NewRepoGuard(repo, append(cfg.Security.ProtectedPaths, configPattern(decideCtx, repo, configPath)...))
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -285,7 +339,9 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	}
 
 	if mode == domain.ModeManual {
-		engine.Gate = interaction.NewTerminalGate(prompter, stdout)
+		gate := interaction.NewTerminalGate(prompter, stdout)
+		gate.Changes = repo.StatusSummary
+		engine.Gate = gate
 	}
 
 	if err := engine.Run(runCtx, run); err != nil {
@@ -295,6 +351,64 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		fmt.Fprintf(stdout, "\nAnswer:\n%s\n", answer)
 	}
 	return nil
+}
+
+// recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a
+// snapshot commit of everything the run starts on top of, untracked files included.
+// Failing to record it (e.g. a repository without commits) is reported, not fatal.
+func recordRestorePoint(ctx context.Context, repo *repository.Repository, run *domain.Run, dirty bool, reporter *logging.ConsoleReporter) {
+	var ref string
+	var err error
+	if dirty {
+		ref, err = repo.SnapshotCommit(ctx)
+	} else {
+		ref, err = repo.HeadRef(ctx)
+	}
+	if err != nil {
+		reporter.RestorePointUnavailable(err)
+		return
+	}
+	run.PreRunRef = ref
+	reporter.RestorePoint(ref)
+}
+
+// testSandbox resolves test.sandbox: bwrap into the paths the sandbox binds: the
+// repository root writable, its git directories read-only over it, $HOME hidden, and the
+// configured binds.
+func testSandbox(ctx context.Context, repo *repository.Repository, t config.TestConfig) (*testexec.Sandbox, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, &apperr.ConfigError{Msg: "test.sandbox: cannot determine the home directory to hide", Err: err}
+	}
+	top, err := repo.TopLevel(ctx)
+	if err != nil {
+		return nil, err
+	}
+	gitDirs, err := repo.GitDirs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ro, rw := t.ResolveBinds(home)
+	return &testexec.Sandbox{Home: home, RepoRoot: top, GitDirs: gitDirs, ReadOnly: ro, ReadWrite: rw}, nil
+}
+
+// configPattern returns the config file's path relative to the repository root when it
+// lives inside the worktree, so implement cannot change the test command the next run
+// executes; nil when the config is outside the worktree.
+func configPattern(ctx context.Context, repo *repository.Repository, configPath string) []string {
+	abs, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil
+	}
+	top, err := repo.TopLevel(ctx)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(top, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	return []string{filepath.ToSlash(rel)}
 }
 
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over

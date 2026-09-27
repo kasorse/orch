@@ -7,12 +7,20 @@ import (
 	"context"
 	"io"
 	"time"
+
+	"orchestrator/internal/domain"
 )
 
 type Request struct {
 	Prompt     string
 	Model      string
 	WorkingDir string
+	// Authority is the set of tools this call may use (specs/permissions/SPEC.md §5). It
+	// has no usable zero value: an adapter refuses "" rather than guess.
+	Authority domain.Authority
+	// DenyRead lists file-name patterns (the projectctx secret deny list) the call must
+	// not be able to read, even under an authority that can read files.
+	DenyRead []string
 	// Stream is an optional live sink for the CLI's combined output as it arrives
 	// (--verbose only). Nil means capture-only - no behavior change.
 	Stream io.Writer
@@ -27,6 +35,10 @@ type Result struct {
 
 type Client interface {
 	Execute(ctx context.Context, req Request) (Result, error)
+	// Supports reports whether the adapter can enforce a, i.e. translate it into CLI
+	// flags that were verified against the real executable. An unsupported authority is
+	// refused before any AI call (config.ValidateAuthorities) and again in Execute.
+	Supports(a domain.Authority) bool
 }
 
 // ID identifies one of the fixed, supported provider CLIs.

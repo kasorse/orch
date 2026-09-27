@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -71,6 +73,34 @@ type ActionsConfig struct {
 
 type TestConfig struct {
 	Command string `yaml:"command"`
+	// Sandbox is "none" (or empty) or "bwrap": run the command under bubblewrap with the
+	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8).
+	Sandbox string `yaml:"sandbox"`
+	// ROBinds and RWBinds re-expose paths inside the sandbox - absolute or "~/"-relative,
+	// e.g. a module cache read-only and a build cache writable. Only valid with bwrap.
+	ROBinds []string `yaml:"ro_binds"`
+	RWBinds []string `yaml:"rw_binds"`
+}
+
+// SandboxBwrap is the one sandbox test.sandbox currently supports.
+const SandboxBwrap = "bwrap"
+
+// Sandboxed reports whether the test command runs under a sandbox.
+func (t TestConfig) Sandboxed() bool { return t.Sandbox == SandboxBwrap }
+
+// ResolveBinds expands "~/" against home and cleans every bind path.
+func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
+	resolve := func(paths []string) []string {
+		out := make([]string, 0, len(paths))
+		for _, p := range paths {
+			if rest, ok := strings.CutPrefix(p, "~/"); ok {
+				p = filepath.Join(home, rest)
+			}
+			out = append(out, filepath.Clean(p))
+		}
+		return out
+	}
+	return resolve(t.ROBinds), resolve(t.RWBinds)
 }
 
 type LimitsConfig struct {
@@ -115,6 +145,25 @@ type Config struct {
 	Translation TranslationConfig `yaml:"translation"`
 	Policy      PolicyConfig      `yaml:"policy"`
 	Context     ContextConfig     `yaml:"context"`
+
+	// Security holds the knobs of the execution-authority guards (specs/permissions/
+	// SPEC.md §7, §9). None of them widens what a step may do.
+	Security SecurityConfig `yaml:"security"`
+}
+
+type SecurityConfig struct {
+	// RequireCleanWorktree is a pointer so an absent key (nil) can default to true while an
+	// explicit false still means false; read it through CleanWorktreeRequired.
+	RequireCleanWorktree *bool `yaml:"require_clean_worktree"`
+	// ProtectedPaths extends domain.DefaultProtectedPaths: patterns an implement step must
+	// not change.
+	ProtectedPaths []string `yaml:"protected_paths"`
+}
+
+// CleanWorktreeRequired reports whether a workflow with implement must start on a clean
+// worktree - true unless security.require_clean_worktree is explicitly false.
+func (s SecurityConfig) CleanWorktreeRequired() bool {
+	return s.RequireCleanWorktree == nil || *s.RequireCleanWorktree
 }
 
 // actionProviderModels returns every configured action alongside its pseudo-action

@@ -109,3 +109,40 @@ func TestConfigError_Unwrap(t *testing.T) {
 		t.Error("expected errors.As to match *ConfigError")
 	}
 }
+
+func TestAuthorityError_Message(t *testing.T) {
+	err := &AuthorityError{
+		Provider:  "codex",
+		Route:     "review",
+		Authority: "read",
+		Reason:    "codex's permission translation is unverified.",
+		Remedy:    "route review to a provider that supports it: claude (actions.review.provider: claude)",
+	}
+	want := `provider "codex" cannot enforce the "read" authority required by "review"
+
+codex's permission translation is unverified.
+
+remedy: route review to a provider that supports it: claude (actions.review.provider: claude)`
+	if got := err.Error(); got != want {
+		t.Errorf("Error() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestAuthorityError_WithoutRoute(t *testing.T) {
+	err := &AuthorityError{Provider: "claude", Authority: ""}
+	if got, want := err.Error(), `provider "claude" cannot enforce the "" authority required by this call`; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
+func TestCommandLine_QuotesWhatAShellWouldSplit(t *testing.T) {
+	got := commandLine("claude", []string{
+		"--setting-sources", "", "--settings", `{"permissions":{"deny":["Read(**/.env)"]}}`,
+		"--tools", "Read,Grep,Glob", "--model", "opus", "it's", "<prompt: 42 chars>",
+	})
+	want := `claude --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)"]}}' ` +
+		`--tools Read,Grep,Glob --model opus 'it'\''s' <prompt: 42 chars>`
+	if got != want {
+		t.Errorf("commandLine =\n  %s\nwant\n  %s", got, want)
+	}
+}

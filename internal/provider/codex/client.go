@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -25,6 +26,15 @@ func New(executor execution.ProcessExecutor) *Client {
 	return &Client{Executor: executor}
 }
 
+// buildArgs is the unverified best-effort argv. The intended permission translation, for
+// whoever installs codex and verifies it (specs/permissions/SPEC.md §6.4):
+//
+//	read:  exec --sandbox read-only --ask-for-approval never
+//	edit:  exec --sandbox workspace-write --ask-for-approval never  (network off by default)
+//
+// Caveat before declaring read supported: codex's read-only sandbox can read the whole
+// disk (~/.ssh, ~/.aws) through its shell, and what it reads goes to the model provider,
+// so it is weaker than claude's read and needs its own analysis.
 func buildArgs(model, prompt string) []string {
 	return []string{"exec", prompt, "--model", model}
 }
@@ -36,13 +46,36 @@ func redactedArgs(model string, promptLen int) []string {
 	return []string{"exec", fmt.Sprintf("<prompt: %d chars>", promptLen), "--model", model}
 }
 
+// Supports is false for every authority. The codex CLI is not installed on the
+// development machine, so no permission translation for it has been verified, and an
+// unverified translation must not ship as verified (specs/permissions/SPEC.md §6.4, D13):
+// until one is, every route to codex is refused before any AI call rather than run with
+// unknown authority.
+func (c *Client) Supports(a domain.Authority) bool {
+	return false
+}
+
+// Execute refuses every request: codex supports no authority yet (see Supports). The
+// call path below is kept, and tested, for when a translation is verified.
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
+	if !c.Supports(req.Authority) {
+		return provider.Result{}, &apperr.AuthorityError{
+			Provider:  string(provider.Codex),
+			Authority: string(req.Authority),
+			Reason:    "No permission translation for codex has been verified against the real CLI (specs/permissions/SPEC.md §6.4).",
+		}
+	}
+	return c.run(ctx, req)
+}
+
+func (c *Client) run(ctx context.Context, req provider.Request) (provider.Result, error) {
 	args := buildArgs(req.Model, req.Prompt)
 
 	spec := execution.Spec{
 		Executable: executable,
 		Args:       args,
 		WorkingDir: req.WorkingDir,
+		Env:        execution.ScrubbedEnv(),
 	}
 	if req.Stream != nil {
 		spec.StdoutSink = req.Stream

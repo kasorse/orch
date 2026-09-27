@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -17,7 +19,7 @@ func TestClient_BuildsExpectedArgs(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "do the thing", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "do the thing", Model: "pro"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestClient_NonZeroExit(t *testing.T) {
 	}
 	c := New(fake)
 
-	res, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro", WorkingDir: "/repo"})
+	res, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro", WorkingDir: "/repo"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -76,7 +78,7 @@ func TestClient_PropagatesRunError(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -98,7 +100,7 @@ func TestClient_TimeoutPreservesExitCode(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -117,12 +119,55 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
+	_, err := c.run(context.Background(), provider.Request{Prompt: "x", Model: "pro"})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
 	}
 	if provErr.Kind != apperr.FailureSpawn {
 		t.Errorf("expected Kind FailureSpawn, got %q", provErr.Kind)
+	}
+}
+
+// TestClient_SupportsNothing pins the fail-closed default: no translation for gemini is
+// verified, so every route to it is refused (specs/permissions/SPEC.md §6.4).
+func TestClient_SupportsNothing(t *testing.T) {
+	c := New(&execution.FakeProcessExecutor{})
+	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
+		if c.Supports(a) {
+			t.Errorf("Supports(%q) = true, want false", a)
+		}
+	}
+}
+
+func TestClient_ExecuteRefusesEveryAuthority(t *testing.T) {
+	for _, a := range []domain.Authority{"", domain.AuthorityNone, domain.AuthorityRead, domain.AuthorityEdit} {
+		fake := &execution.FakeProcessExecutor{}
+		_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: a})
+		var authErr *apperr.AuthorityError
+		if !errors.As(err, &authErr) {
+			t.Errorf("authority %q: expected *apperr.AuthorityError, got %T: %v", a, err, err)
+		}
+		if len(fake.Calls) != 0 {
+			t.Errorf("authority %q: expected no process, got %d", a, len(fake.Calls))
+		}
+	}
+}
+
+func TestClient_ScrubsParentSessionEnv(t *testing.T) {
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	if _, err := New(fake).run(context.Background(), provider.Request{Prompt: "x", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	env := fake.Calls[0].Env
+	if env == nil {
+		t.Fatal("expected an explicit environment, got nil (inherit)")
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CLAUDECODE=") || strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_SOCKET=") {
+			t.Errorf("parent-session variable leaked: %s", kv)
+		}
 	}
 }

@@ -134,6 +134,9 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, ".env"), []byte(envSecret+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Committed, the worst realistic case: git lists it, so only the deny list keeps it
+	// out - and the worktree stays clean, as a workflow with implement requires.
+	commitAll(t, repoDir, "add .env")
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 
@@ -427,10 +430,14 @@ func TestDecision_LLMProvider(t *testing.T) {
 }`)
 	t.Setenv("JEV_API_KEY", "")
 
+	argsDir := t.TempDir()
+	t.Setenv("FAKE_ARGS_DIR", argsDir)
+
 	opts := defaultConfigOptions()
 	opts.providers.Decision = "claude"
 	stdout, stderr, err := runOrchestrator(t, repoDir, writeConfig(t, t.TempDir(), opts), "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
+	assertAuthorities(t, repoDir, argsDir, stdout)
 
 	want := []string{"decide-context", "decide-classify", "analyze", "implement", "review"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {

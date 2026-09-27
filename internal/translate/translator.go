@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 )
 
@@ -109,7 +110,10 @@ func (t *Translator) call(ctx context.Context, runID, request string) (string, e
 	}
 	start := time.Now()
 	stopHeartbeat := t.startHeartbeat()
-	result, err := t.Client.Execute(callCtx, provider.Request{Prompt: BuildPrompt(request), Model: t.Model, Stream: t.Stream})
+	// Translation reads nothing but the request text in its prompt, so it gets no tools.
+	result, err := t.Client.Execute(callCtx, provider.Request{
+		Prompt: BuildPrompt(request), Model: t.Model, Stream: t.Stream, Authority: domain.AuthorityNone,
+	})
 	stopHeartbeat()
 	if t.Observer != nil {
 		t.Observer.ProviderCallFinished(t.ProviderID, t.Model, time.Since(start), err)

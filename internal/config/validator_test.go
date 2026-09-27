@@ -158,3 +158,62 @@ func TestValidate_AggregatesAllProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_ProtectedPaths(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.ProtectedPaths = []string{"go.mod", "/etc/hosts", "["}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected invalid protected_paths to fail")
+	}
+	for _, want := range []string{`security.protected_paths[1] "/etc/hosts"`, `security.protected_paths[2] "["`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), `"go.mod"`) {
+		t.Errorf("go.mod is a valid pattern:\n%v", err)
+	}
+}
+
+func TestValidate_TestSandbox(t *testing.T) {
+	valid := []TestConfig{
+		{Command: "go test ./..."},
+		{Command: "go test ./...", Sandbox: "none"},
+		{Command: "go test ./...", Sandbox: "bwrap", ROBinds: []string{"~/go/pkg/mod"}, RWBinds: []string{"/var/cache/x"}},
+	}
+	for _, tc := range valid {
+		cfg := validConfig()
+		cfg.Test = tc
+		if err := Validate(cfg); err != nil {
+			t.Errorf("%+v: unexpected error: %v", tc, err)
+		}
+	}
+
+	cases := []struct {
+		test TestConfig
+		want string
+	}{
+		{TestConfig{Command: "x", Sandbox: "docker"}, `test.sandbox must be none or bwrap, got "docker"`},
+		{TestConfig{Command: "x", ROBinds: []string{"~/go"}}, "only apply with test.sandbox: bwrap"},
+		{TestConfig{Command: "x", Sandbox: "bwrap", ROBinds: []string{"go/pkg"}}, `test.ro_binds[0] "go/pkg": must be absolute or start with ~/`},
+		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/../etc"}}, `test.rw_binds[0] "~/../etc": must not contain ..`},
+		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/"}}, "must not be the root or the home directory itself"},
+		{TestConfig{Command: "x", Sandbox: "bwrap", ROBinds: []string{"/"}}, "must not be the root or the home directory itself"},
+	}
+	for _, tc := range cases {
+		cfg := validConfig()
+		cfg.Test = tc.test
+		err := Validate(cfg)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: expected %q, got %v", tc.test, tc.want, err)
+		}
+	}
+}
+
+func TestResolveBinds(t *testing.T) {
+	ro, rw := TestConfig{ROBinds: []string{"~/go/pkg/mod/", "/opt/x"}, RWBinds: []string{"~/.cache/go-build"}}.ResolveBinds("/home/u")
+	if strings.Join(ro, " ") != "/home/u/go/pkg/mod /opt/x" || strings.Join(rw, " ") != "/home/u/.cache/go-build" {
+		t.Errorf("ro = %q, rw = %q", ro, rw)
+	}
+}

@@ -9,6 +9,7 @@ type RecordedCall struct {
 	Args       []string
 	Stdin      string
 	WorkingDir string
+	Env        []string
 }
 
 // FakeProcessExecutor is a test double: each call to Run consumes the next scripted
@@ -28,6 +29,7 @@ func (f *FakeProcessExecutor) Run(ctx context.Context, spec Spec) (ProcessResult
 		Args:       spec.Args,
 		Stdin:      spec.Stdin,
 		WorkingDir: spec.WorkingDir,
+		Env:        spec.Env,
 	})
 
 	idx := f.callNum

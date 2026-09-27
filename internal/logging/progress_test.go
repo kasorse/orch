@@ -22,6 +22,54 @@ func TestStepStarted_PrintsNumberedUppercaseHeader(t *testing.T) {
 	}
 }
 
+func TestStepStarted_VerboseNamesAuthority(t *testing.T) {
+	for action, want := range map[domain.ActionType]string{
+		domain.ActionImplement: "\n[2] IMPLEMENT\nAuthority: edit\n",
+		domain.ActionTest:      "\n[2] TEST\n",
+	} {
+		var buf bytes.Buffer
+		r := NewConsoleReporter(&buf)
+		r.Verbose = true
+		r.StepStarted(&domain.Run{}, 1, action)
+		if buf.String() != want {
+			t.Errorf("%s: got %q, want %q", action, buf.String(), want)
+		}
+	}
+}
+
+func TestRenderAuthority(t *testing.T) {
+	steps := func(actions ...domain.ActionType) domain.Workflow {
+		var wf domain.Workflow
+		for _, a := range actions {
+			wf.Steps = append(wf.Steps, domain.Step{Action: a})
+		}
+		return wf
+	}
+	cases := []struct {
+		wf   domain.Workflow
+		want string
+	}{
+		{
+			steps(domain.ActionResearch, domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest, domain.ActionReview),
+			"authority: research=web, analyze=read, implement=edit, review=read; test runs: go test ./...\n",
+		},
+		{steps(domain.ActionAnalyze), "authority: analyze=read\n"},
+		{steps(domain.ActionTest), "authority: test runs: go test ./...\n"},
+	}
+	var sandboxed bytes.Buffer
+	RenderAuthority(&sandboxed, steps(domain.ActionImplement, domain.ActionTest), "go test ./...", true)
+	if want := "authority: implement=edit; test runs (sandboxed): go test ./...\n"; sandboxed.String() != want {
+		t.Errorf("got %q, want %q", sandboxed.String(), want)
+	}
+	for _, tc := range cases {
+		var buf bytes.Buffer
+		RenderAuthority(&buf, tc.wf, "go test ./...", false)
+		if buf.String() != tc.want {
+			t.Errorf("got %q, want %q", buf.String(), tc.want)
+		}
+	}
+}
+
 func TestProviderCallStarted_PrintsProviderModelAndRunningLine(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)

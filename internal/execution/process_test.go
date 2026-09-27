@@ -92,3 +92,25 @@ func TestOSProcessExecutor_StreamsToSinks(t *testing.T) {
 		t.Errorf("expected stderr to reach both the sink and the result, got sink=%q result=%q", stderr.String(), res.Stderr)
 	}
 }
+
+func TestOSProcessExecutor_Env(t *testing.T) {
+	t.Setenv("ORCH_INHERITED", "from-parent")
+	exec := NewOSProcessExecutor()
+	script := `printf '%s|%s' "$ORCH_INHERITED" "$ORCH_GIVEN"`
+
+	res, err := exec.Run(context.Background(), Spec{Executable: "sh", Args: []string{"-c", script}, Env: []string{"ORCH_GIVEN=given"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Stdout != "|given" {
+		t.Errorf("with Env set the child must see exactly Env, got %q", res.Stdout)
+	}
+
+	res, err = exec.Run(context.Background(), Spec{Executable: "sh", Args: []string{"-c", script}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Stdout != "from-parent|" {
+		t.Errorf("with Env nil the child must inherit, got %q", res.Stdout)
+	}
+}

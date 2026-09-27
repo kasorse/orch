@@ -30,13 +30,23 @@ type denyList struct {
 	full    []string
 }
 
-func newDenyList(extra []string) denyList {
-	var d denyList
+// DenyPatterns returns the secret deny list - the built-in patterns plus extra
+// (context.extra_deny), normalized and lowercased. It is the one list both the Context
+// Manager and the provider calls' read deny rules (provider.Request.DenyRead) come from.
+func DenyPatterns(extra []string) []string {
+	var out []string
 	for _, p := range append(append([]string(nil), defaultDeny...), extra...) {
 		p = strings.ToLower(strings.Trim(strings.TrimSpace(p), "/"))
-		if p == "" {
-			continue
+		if p != "" {
+			out = append(out, p)
 		}
+	}
+	return out
+}
+
+func newDenyList(extra []string) denyList {
+	var d denyList
+	for _, p := range DenyPatterns(extra) {
 		if strings.Contains(p, "/") {
 			d.full = append(d.full, p)
 		} else {

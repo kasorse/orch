@@ -1,10 +1,20 @@
 // Package repository wraps the real git executable (via execution.ProcessExecutor) so the
 // orchestrator can inspect the repository it operates on without ever mutating it - it
-// never stashes, resets, checks out, or reverts user files.
+// never stashes, resets, checks out, or reverts user files. (SnapshotCommit only writes
+// objects, through a throwaway index; the tree, the index and all refs are untouched.)
 package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -132,7 +142,12 @@ func (r *Repository) ChangedFiles(ctx context.Context) ([]string, error) {
 }
 
 func (r *Repository) git(ctx context.Context, args ...string) (string, error) {
-	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: args, WorkingDir: r.Dir})
+	return r.gitEnv(ctx, nil, args...)
+}
+
+// gitEnv is git with an explicit environment (nil inherits).
+func (r *Repository) gitEnv(ctx context.Context, env []string, args ...string) (string, error) {
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: args, WorkingDir: r.Dir, Env: env})
 	if err != nil {
 		return "", &apperr.RepositoryError{Msg: "failed to run git " + args[0], Err: err}
 	}
@@ -140,4 +155,164 @@ func (r *Repository) git(ctx context.Context, args ...string) (string, error) {
 		return "", &apperr.RepositoryError{Msg: "git " + args[0] + " failed: " + result.Stderr}
 	}
 	return result.Stdout, nil
+}
+
+// TopLevel returns the absolute path of the working tree's root.
+func (r *Repository) TopLevel(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// ChangedOrIgnoredPaths returns, among the files matching pathspecs, every one that
+// differs from HEAD - modified, staged, deleted, untracked - and every ignored one, relative
+// to the repository root and listed individually. Ignored files matter to the guard: a
+// .gitignore'd orchestrator.yaml or .claude/settings.local.json is invisible to a plain
+// status, yet changing it changes what runs next. --ignored=traditional with -uall lists
+// the files inside an ignored directory one by one (=matching would name only the
+// directory); restricting to pathspecs keeps git from listing every ignored build output.
+// A rename is reported under its new path.
+func (r *Repository) ChangedOrIgnoredPaths(ctx context.Context, pathspecs []string) ([]string, error) {
+	args := append([]string{"status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=traditional", "--"}, pathspecs...)
+	out, err := r.git(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	entries := strings.Split(out, "\x00")
+	for i := 0; i < len(entries); i++ {
+		e := entries[i]
+		if len(e) < 4 {
+			continue
+		}
+		files = append(files, e[3:])
+		if e[0] == 'R' || e[0] == 'C' {
+			i++
+		}
+	}
+	return files, nil
+}
+
+// HeadRef returns the commit HEAD points to.
+func (r *Repository) HeadRef(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// SnapshotCommit records the whole working tree - tracked changes, deletions and
+// untracked files, minus .gitignore'd ones and the orchestrator's run directory - as a
+// commit on top of HEAD, and returns its ref. It works on a throwaway index, so the
+// working tree, the real index, the stash list and every ref are untouched ("git stash
+// create" would leave untracked files out). The commit is referenced by nothing, so git gc
+// may prune it after its usual grace period.
+func (r *Repository) SnapshotCommit(ctx context.Context) (string, error) {
+	tmp, err := os.MkdirTemp("", "orchestrator-index-")
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to create a temporary index", Err: err}
+	}
+	defer os.RemoveAll(tmp)
+
+	env := append(os.Environ(),
+		"GIT_INDEX_FILE="+filepath.Join(tmp, "index"),
+		// The snapshot is not the user's work; an identity is set so commit-tree works
+		// even where user.name/user.email are not configured.
+		"GIT_AUTHOR_NAME=orchestrator", "GIT_AUTHOR_EMAIL=orchestrator@localhost",
+		"GIT_COMMITTER_NAME=orchestrator", "GIT_COMMITTER_EMAIL=orchestrator@localhost",
+	)
+	steps := [][]string{
+		{"read-tree", "HEAD"},
+		{"add", "-A", "--", ":(top)", ":(exclude,top).orchestrator"},
+	}
+	for _, args := range steps {
+		if _, err := r.gitEnv(ctx, env, args...); err != nil {
+			return "", err
+		}
+	}
+	tree, err := r.gitEnv(ctx, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	commit, err := r.gitEnv(ctx, env, "commit-tree", strings.TrimSpace(tree), "-p", "HEAD", "-m", "orchestrator: restore point before the run")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(commit), nil
+}
+
+// StatusSummary is a short, human-readable list of the uncommitted changes (one
+// "XY path" line per file), leaving out the orchestrator's own run directory.
+func (r *Repository) StatusSummary(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "status", "--short", "--untracked-files=all", "--", ":(top)", ":(exclude,top).orchestrator")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(out, "\n"), nil
+}
+
+// GitFingerprint hashes the parts of the git directory that make git itself run code: the
+// repository config (core.fsmonitor, core.hooksPath, filter drivers, aliases) and every
+// hook in the effective hooks directory (core.hooksPath honoured), skipping the inert
+// *.sample files. Git status never reports them, so a change is only visible by comparing
+// fingerprints (specs/permissions/SPEC.md §7.3).
+func (r *Repository) GitFingerprint(ctx context.Context) (string, error) {
+	common, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	hooks, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-path", "hooks")
+	if err != nil {
+		return "", err
+	}
+
+	h := sha256.New()
+	hashFile(h, filepath.Join(strings.TrimSpace(common), "config"))
+	hooksDir := strings.TrimSpace(hooks)
+	entries, err := os.ReadDir(hooksDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", &apperr.RepositoryError{Msg: "failed to read the git hooks directory", Err: err}
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".sample") {
+			continue
+		}
+		fmt.Fprintf(h, "hook %s\n", e.Name())
+		hashFile(h, filepath.Join(hooksDir, e.Name()))
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// hashFile writes path's content, or a marker for a missing or unreadable file, to h.
+func hashFile(h io.Writer, path string) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(h, "%s: <missing>\n", path)
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(h, "%s: <unreadable>\n", path)
+		return
+	}
+	fmt.Fprintf(h, "%s: %d\n", path, len(data))
+	h.Write(data)
+}
+
+// GitDirs returns the absolute git directory and, when it differs (a linked worktree),
+// the common directory holding config and hooks.
+func (r *Repository) GitDirs(ctx context.Context) ([]string, error) {
+	out, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if err != nil {
+		return nil, err
+	}
+	var dirs []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" && !slices.Contains(dirs, line) {
+			dirs = append(dirs, line)
+		}
+	}
+	return dirs, nil
 }

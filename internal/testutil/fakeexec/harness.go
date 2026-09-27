@@ -55,6 +55,9 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_PROMPTS_DIR: if set, the prompt of each call is saved to
 //     <dir>/<action>.txt (the last call of an action wins), so tests can assert what
 //     text a step was given.
+//   - FAKE_ARGS_DIR: if set, the argv of each call is saved to <dir>/<action>.args, one
+//     argument per line with the prompt replaced by "<prompt>" (the last call of an
+//     action wins), so tests can assert the flags a step ran with.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
 //     (implement_calls, review_calls) across invocations of the same test.
 //   - FAKE_IMPLEMENT_FIX_ON_CALL: 1-based implement call number (default 1) on
@@ -102,6 +105,15 @@ if [ -n "${FAKE_PROMPTS_DIR:-}" ]; then
   done
 fi
 
+if [ -n "${FAKE_ARGS_DIR:-}" ]; then
+  : > "$FAKE_ARGS_DIR/$action.args"
+  for arg in "$@"; do
+    case "$arg" in
+      "ACTION: "*) printf '%s\n' "<prompt>" >> "$FAKE_ARGS_DIR/$action.args" ;;
+      *) printf '%s\n' "$arg" >> "$FAKE_ARGS_DIR/$action.args" ;;
+    esac
+  done
+fi
 if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
   sleep "${FAKE_SLEEP_SECONDS:-1}"
 fi

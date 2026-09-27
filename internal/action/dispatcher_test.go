@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,8 +24,13 @@ type fakeClient struct {
 	lastReq provider.Request
 }
 
+func (f *fakeClient) Supports(domain.Authority) bool { return true }
+
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.lastReq = req
+	if !req.Authority.Valid() {
+		return provider.Result{}, fmt.Errorf("fake provider: request without a valid authority (%q)", req.Authority)
+	}
 	if f.err != nil {
 		// Mirrors the real provider adapters: the process's stdout/stderr are still
 		// returned alongside a failure, not discarded (this is the F3 fix under test).
@@ -39,6 +45,8 @@ func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provide
 type ctxCapturingClient struct {
 	observedErr error
 }
+
+func (c *ctxCapturingClient) Supports(domain.Authority) bool { return true }
 
 func (c *ctxCapturingClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	<-ctx.Done()
@@ -82,7 +90,25 @@ func testConfig() *config.Config {
 func newDispatcher(client provider.Client) *Dispatcher {
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	return New(testConfig(), registry, &repository.Repository{Dir: "/repo"}, nil)
+	d := New(testConfig(), registry, &repository.Repository{Dir: "/repo"}, nil)
+	d.Guard = &fakeGuard{}
+	return d
+}
+
+// fakeGuard reports changed as the violation of every implement call, or fails.
+type fakeGuard struct {
+	changed     []string
+	snapshotErr error
+	snapshots   int
+}
+
+func (g *fakeGuard) Snapshot(ctx context.Context) (GuardState, error) {
+	g.snapshots++
+	return GuardState{}, g.snapshotErr
+}
+
+func (g *fakeGuard) Changed(ctx context.Context, before GuardState) ([]string, error) {
+	return g.changed, nil
 }
 
 func TestExecuteAnalyze_Success(t *testing.T) {
@@ -101,6 +127,9 @@ func TestExecuteAnalyze_Success(t *testing.T) {
 	}
 	if d.lastAnalysis == nil || d.lastAnalysis.Summary != "s" {
 		t.Errorf("expected analysis to be stored, got %+v", d.lastAnalysis)
+	}
+	if client.lastReq.Authority != domain.AuthorityRead {
+		t.Errorf("analyze authority = %q, want read", client.lastReq.Authority)
 	}
 	if len(writer.calls) != 1 {
 		t.Fatalf("expected one artifact save, got %d", len(writer.calls))
@@ -164,6 +193,9 @@ func TestExecuteImplement_IncludesAnalysisAndPlanContext(t *testing.T) {
 	if d.lastImpl == nil || d.lastImpl.Summary != "done" {
 		t.Errorf("expected implementation to be stored, got %+v", d.lastImpl)
 	}
+	if client.lastReq.Authority != domain.AuthorityEdit {
+		t.Errorf("implement authority = %q, want edit", client.lastReq.Authority)
+	}
 }
 
 func TestExecuteImplement_IncludesTestFailureContext_AndClearsIt(t *testing.T) {
@@ -207,6 +239,7 @@ func TestExecuteTest_Success(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: "PASS", ExitCode: 0}},
 	}
 	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{}
 
 	run := &domain.Run{ID: "run-1"}
 	outcome, err := d.Execute(context.Background(), domain.ActionTest, run)
@@ -229,6 +262,7 @@ func TestExecuteTest_Failure(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: "", Stderr: "FAIL", ExitCode: 1}},
 	}
 	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{}
 
 	run := &domain.Run{ID: "run-1"}
 	outcome, err := d.Execute(context.Background(), domain.ActionTest, run)
@@ -270,6 +304,9 @@ func TestExecuteReview_Pass(t *testing.T) {
 	}
 	if !contains(client.lastReq.Prompt, "diff content") {
 		t.Errorf("expected prompt to include git diff, got: %s", client.lastReq.Prompt)
+	}
+	if client.lastReq.Authority != domain.AuthorityRead {
+		t.Errorf("review authority = %q, want read", client.lastReq.Authority)
 	}
 }
 
@@ -588,4 +625,81 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+func TestExecuteImplement_GuardViolationFailsTheStep(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done","changed_files":[".claude/settings.json"]}`}
+	d := newDispatcher(client)
+	d.Guard = &fakeGuard{changed: []string{".claude/settings.json", ".git (config or hooks)"}}
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}, PreRunRef: "abc123"}
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) {
+		t.Fatalf("expected *apperr.WorkflowError, got %T: %v", err, err)
+	}
+	for _, want := range []string{".claude/settings.json", ".git (config or hooks)", "Restore point: abc123", "security.protected_paths", "Do not run git"} {
+		if !contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if outcome.Provider == nil || outcome.RawStdout == "" {
+		t.Errorf("the outcome must still carry the call's output for the logs, got %+v", outcome)
+	}
+}
+
+func TestExecuteImplement_WithoutGuardRefusesBeforeTheCall(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done"}`}
+	d := newDispatcher(client)
+	d.Guard = nil
+
+	_, err := d.Execute(context.Background(), domain.ActionImplement, &domain.Run{ID: "run-1"})
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) {
+		t.Fatalf("expected *apperr.WorkflowError, got %T: %v", err, err)
+	}
+	if client.lastReq.Prompt != "" {
+		t.Error("no provider call may happen without a guard")
+	}
+}
+
+func TestExecuteImplement_SnapshotFailureRefusesBeforeTheCall(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done"}`}
+	d := newDispatcher(client)
+	d.Guard = &fakeGuard{snapshotErr: errors.New("git broke")}
+
+	_, err := d.Execute(context.Background(), domain.ActionImplement, &domain.Run{ID: "run-1"})
+	if err == nil || !contains(err.Error(), "git broke") {
+		t.Fatalf("expected the snapshot error, got %v", err)
+	}
+	if client.lastReq.Prompt != "" {
+		t.Error("no provider call may happen when the guard cannot take its snapshot")
+	}
+}
+
+func TestExecuteTest_GuardViolationFailsTheStep(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "PASS"}}}
+	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+	d.Guard = &fakeGuard{changed: []string{".github/workflows/ci.yml"}}
+
+	outcome, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1", PreRunRef: "abc"})
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) || !contains(err.Error(), "test changed protected paths") || !contains(err.Error(), ".github/workflows/ci.yml") {
+		t.Fatalf("expected a protected-path WorkflowError, got %T: %v", err, err)
+	}
+	if outcome.TestResult == nil || outcome.RawStdout != "PASS" {
+		t.Errorf("the outcome must keep the test output for the logs, got %+v", outcome)
+	}
+}
+
+func TestExecuteTest_WithoutGuardRefusesBeforeRunning(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{}
+	d := New(testConfig(), provider.NewRegistry(), &repository.Repository{Dir: "/repo"}, testexec.New(exec))
+
+	if _, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1"}); err == nil {
+		t.Fatal("expected a refusal without a guard")
+	}
+	if len(exec.Calls) != 0 {
+		t.Errorf("the test command must not run without a guard, got %d calls", len(exec.Calls))
+	}
 }

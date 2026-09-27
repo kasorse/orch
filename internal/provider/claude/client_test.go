@@ -4,46 +4,100 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"slices"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
 
-func TestClient_BuildsExpectedArgs(t *testing.T) {
-	fake := &execution.FakeProcessExecutor{
-		Results: []execution.ProcessResult{{Stdout: "ok", ExitCode: 0}},
-	}
-	c := New(fake)
+// common is the prefix every authority shares (specs/permissions/SPEC.md §6.2).
+var common = []string{
+	"--print",
+	"--restricted",
+	"--permission-mode", "dontAsk",
+	"--permission-prompts", "none",
+	"--strict-mcp-config",
+	"--setting-sources", "",
+}
 
-	_, err := c.Execute(context.Background(), provider.Request{
-		Prompt:     "do the thing",
-		Model:      "opus",
-		WorkingDir: "/tmp/repo",
+func TestClient_BuildsExpectedArgsPerAuthority(t *testing.T) {
+	cases := []struct {
+		authority domain.Authority
+		profile   []string
+	}{
+		{domain.AuthorityNone, []string{"--tools", ""}},
+		{domain.AuthorityWeb, []string{"--tools", "WebSearch,WebFetch", "--allowed-tools", "WebSearch,WebFetch"}},
+		{domain.AuthorityRead, []string{"--tools", "Read,Grep,Glob"}},
+		{domain.AuthorityEdit, []string{"--tools", "Read,Grep,Glob,Edit,Write", "--allowed-tools", "Edit,Write"}},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.authority), func(t *testing.T) {
+			fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+			_, err := New(fake).Execute(context.Background(), provider.Request{
+				Prompt: "do the thing", Model: "opus", WorkingDir: "/tmp/repo", Authority: tc.authority,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(fake.Calls) != 1 {
+				t.Fatalf("expected 1 call, got %d", len(fake.Calls))
+			}
+			call := fake.Calls[0]
+			if call.Executable != "claude" || call.WorkingDir != "/tmp/repo" {
+				t.Errorf("unexpected call %+v", call)
+			}
+			want := append(append(append([]string{}, common...), tc.profile...), "--model", "opus", "do the thing")
+			if !slices.Equal(call.Args, want) {
+				t.Errorf("args =\n  %q\nwant\n  %q", call.Args, want)
+			}
+		})
+	}
+}
+
+func TestClient_DenyReadBecomesSettings(t *testing.T) {
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	_, err := New(fake).Execute(context.Background(), provider.Request{
+		Prompt: "p", Model: "opus", Authority: domain.AuthorityRead, DenyRead: []string{".env", "*.pem"},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	settings := `{"permissions":{"deny":["Read(**/.env)","Read(**/.env/**)","Read(**/*.pem)","Read(**/*.pem/**)"]}}`
+	want := append(append([]string{}, common...), "--settings", settings, "--tools", "Read,Grep,Glob", "--model", "opus", "p")
+	if got := fake.Calls[0].Args; !slices.Equal(got, want) {
+		t.Errorf("args =\n  %q\nwant\n  %q", got, want)
+	}
+}
 
-	if len(fake.Calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(fake.Calls))
+// TestRedactedArgsMirrorBuildArgs: the argv in an error message is the one that ran, with
+// only the prompt replaced.
+func TestRedactedArgsMirrorBuildArgs(t *testing.T) {
+	deny := []string{".env"}
+	built := buildArgs(domain.AuthorityEdit, deny, "opus", "secret prompt")
+	redacted := redactedArgs(domain.AuthorityEdit, deny, "opus", len("secret prompt"))
+	if !slices.Equal(built[:len(built)-1], redacted[:len(redacted)-1]) {
+		t.Errorf("redactedArgs diverged from buildArgs:\n  %q\n  %q", built, redacted)
 	}
-	call := fake.Calls[0]
-	if call.Executable != "claude" {
-		t.Errorf("expected executable claude, got %q", call.Executable)
+	if got := redacted[len(redacted)-1]; got != "<prompt: 13 chars>" {
+		t.Errorf("last redacted arg = %q", got)
 	}
-	want := []string{"--print", "--permission-mode", "bypassPermissions", "--model", "opus", "do the thing"}
-	if len(call.Args) != len(want) {
-		t.Fatalf("expected args %v, got %v", want, call.Args)
-	}
-	for i := range want {
-		if call.Args[i] != want[i] {
-			t.Errorf("arg[%d] = %q, want %q", i, call.Args[i], want[i])
+}
+
+func TestClient_RefusesMissingOrUnknownAuthority(t *testing.T) {
+	for _, a := range []domain.Authority{"", "all"} {
+		fake := &execution.FakeProcessExecutor{}
+		_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: a})
+		var authErr *apperr.AuthorityError
+		if !errors.As(err, &authErr) {
+			t.Errorf("authority %q: expected *apperr.AuthorityError, got %T: %v", a, err, err)
 		}
-	}
-	if call.WorkingDir != "/tmp/repo" {
-		t.Errorf("expected working dir /tmp/repo, got %q", call.WorkingDir)
+		if len(fake.Calls) != 0 {
+			t.Errorf("authority %q: expected no process, got %d", a, len(fake.Calls))
+		}
 	}
 }
 
@@ -53,7 +107,7 @@ func TestClient_NonZeroExit(t *testing.T) {
 	}
 	c := New(fake)
 
-	res, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", WorkingDir: "/repo"})
+	res, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", WorkingDir: "/repo", Authority: domain.AuthorityRead})
 	if err == nil {
 		t.Fatal("expected error for non-zero exit")
 	}
@@ -95,7 +149,7 @@ func TestClient_PropagatesRunError(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus"})
+	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	if err == nil {
 		t.Fatal("expected error to propagate")
 	}
@@ -121,7 +175,7 @@ func TestClient_TimeoutPreservesExitCode(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus"})
+	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	var provErr *apperr.ProviderError
 	if !errors.As(err, &provErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -140,7 +194,7 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	c := New(fake)
 
-	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus"})
+	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	if err == nil {
 		t.Fatal("expected error to propagate")
 	}
@@ -151,5 +205,37 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	if provErr.Kind != apperr.FailureSpawn {
 		t.Errorf("expected Kind FailureSpawn, got %q", provErr.Kind)
+	}
+}
+
+func TestClient_Supports(t *testing.T) {
+	c := New(&execution.FakeProcessExecutor{})
+	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
+		if !c.Supports(a) {
+			t.Errorf("Supports(%q) = false, want true", a)
+		}
+	}
+	for _, a := range []domain.Authority{"", "all"} {
+		if c.Supports(a) {
+			t.Errorf("Supports(%q) = true, want false", a)
+		}
+	}
+}
+
+func TestClient_ScrubsParentSessionEnv(t *testing.T) {
+	t.Setenv("CLAUDECODE", "1")
+	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	if _, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: domain.AuthorityRead}); err != nil {
+		t.Fatal(err)
+	}
+	env := fake.Calls[0].Env
+	if env == nil {
+		t.Fatal("expected an explicit environment, got nil (inherit)")
+	}
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "CLAUDECODE=") || strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_SOCKET=") {
+			t.Errorf("parent-session variable leaked: %s", kv)
+		}
 	}
 }

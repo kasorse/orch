@@ -27,6 +27,10 @@ type Spec struct {
 	Args       []string
 	Stdin      string
 	WorkingDir string
+	// Env is the child's environment. nil means inherit the orchestrator's environment
+	// unchanged - git calls rely on that, so nil must keep meaning "inherit", never
+	// "empty". Provider and test processes pass ScrubbedEnv().
+	Env        []string
 	StdoutSink io.Writer
 	StderrSink io.Writer
 }
@@ -46,6 +50,9 @@ func NewOSProcessExecutor() *OSProcessExecutor { return &OSProcessExecutor{} }
 func (e *OSProcessExecutor) Run(ctx context.Context, spec Spec) (ProcessResult, error) {
 	cmd := exec.CommandContext(ctx, spec.Executable, spec.Args...)
 	cmd.Dir = spec.WorkingDir
+	if spec.Env != nil {
+		cmd.Env = spec.Env
+	}
 	if spec.Stdin != "" {
 		cmd.Stdin = bytes.NewBufferString(spec.Stdin)
 	}

@@ -128,11 +128,28 @@ func failureDescription(kind FailureKind) string {
 	return string(kind)
 }
 
+// commandLine renders argv so it can be pasted into a shell: an argument that is empty or
+// holds anything but plain characters (a --settings JSON document, --setting-sources "")
+// is single-quoted, since joining it bare would lose or split it.
 func commandLine(executable string, args []string) string {
 	parts := make([]string, 0, len(args)+1)
 	parts = append(parts, executable)
-	parts = append(parts, args...)
+	for _, a := range args {
+		parts = append(parts, shellQuote(a))
+	}
 	return strings.Join(parts, " ")
+}
+
+// shellQuote leaves the adapters' "<prompt: N chars>" placeholder alone: it stands in for
+// the redacted prompt and is not meant to be pasted.
+func shellQuote(a string) string {
+	if strings.HasPrefix(a, "<prompt: ") && strings.HasSuffix(a, " chars>") {
+		return a
+	}
+	if a != "" && strings.Trim(a, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.,/:=+@%<>") == "" {
+		return a
+	}
+	return "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 }
 
 // truncateTail renders an empty stream explicitly (rather than a blank, easily-missed
@@ -194,3 +211,31 @@ type LimitExceededError struct {
 }
 
 func (e *LimitExceededError) Error() string { return e.Reason }
+
+// AuthorityError means a provider cannot enforce the authority a call requires
+// (specs/permissions/SPEC.md §6). It is raised before any AI call by
+// config.ValidateAuthorities, and again by an adapter's Execute as a backstop. It is a
+// misconfiguration - the wrong provider for the job - so it maps to exit code 2.
+type AuthorityError struct {
+	Provider  string
+	Route     string // the action or pseudo-action (translation, decision); "" if unknown
+	Authority string
+	Reason    string
+	Remedy    string
+}
+
+func (e *AuthorityError) Error() string {
+	route := "this call"
+	if e.Route != "" {
+		route = fmt.Sprintf("%q", e.Route)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "provider %q cannot enforce the %q authority required by %s", e.Provider, e.Authority, route)
+	if e.Reason != "" {
+		fmt.Fprintf(&b, "\n\n%s", e.Reason)
+	}
+	if e.Remedy != "" {
+		fmt.Fprintf(&b, "\n\nremedy: %s", e.Remedy)
+	}
+	return b.String()
+}

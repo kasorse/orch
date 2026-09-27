@@ -150,6 +150,17 @@ func (r *ConsoleReporter) Deciding() {
 
 // DirtyRepoWarning prints the exact warning text from MVP.md §16 - the orchestrator never
 // stashes, resets, checks out, or reverts existing changes, only warns about them.
+// RestorePoint announces the ref recorded before the first step, so the operator can
+// always get back to where the run started (specs/permissions/SPEC.md §7.2).
+func (r *ConsoleReporter) RestorePoint(ref string) {
+	fmt.Fprintf(r.Out, "Restore point: %s\n", ref)
+}
+
+// RestorePointUnavailable reports that no restore point could be recorded; the run goes on.
+func (r *ConsoleReporter) RestorePointUnavailable(err error) {
+	fmt.Fprintf(r.Out, "Warning: no restore point recorded: %s\n", firstLine(err.Error()))
+}
+
 func DirtyRepoWarning(w io.Writer) {
 	fmt.Fprintln(w, "Warning: repository contains uncommitted changes.")
 	fmt.Fprintln(w, "Existing changes will not be reverted.")
@@ -157,6 +168,10 @@ func DirtyRepoWarning(w io.Writer) {
 
 func (r *ConsoleReporter) StepStarted(run *domain.Run, index int, action domain.ActionType) {
 	fmt.Fprintf(r.Out, "\n[%d] %s\n", index+1, strings.ToUpper(string(action)))
+	// --verbose names the step's authority up front; test makes no AI call, so it has none.
+	if r.Verbose && action != domain.ActionTest {
+		fmt.Fprintf(r.Out, "Authority: %s\n", domain.AuthorityFor(action))
+	}
 }
 
 func (r *ConsoleReporter) StepFinished(run *domain.Run, index int, exec domain.StepExecution, outcome workflow.StepOutcome) {

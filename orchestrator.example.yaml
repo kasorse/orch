@@ -56,8 +56,12 @@ actions:
     model: opus
 
   review:
-    provider: codex
-    model: gpt
+    provider: claude
+    model: sonnet
+    # codex and gemini are refused for every action until their permission flags are
+    # verified against the real CLI (specs/permissions/SPEC.md §6.4):
+    # provider: codex
+    # model: gpt
     # Optional per-action timeout override. Review can be the slowest step (it inspects
     # the full git diff), so it's the most likely to need more than its share of
     # execution.timeout below. Still bounded by whatever's left of execution.timeout for
@@ -66,6 +70,12 @@ actions:
 
 test:
   command: "go test ./..."
+  # Run the test command - which executes code the model wrote - under bubblewrap:
+  # filesystem read-only, repository writable, $HOME hidden, no network (MVP.md §38.3).
+  # Needs bwrap (and on Ubuntu 24.04+ an AppArmor profile for it, see README).
+  # sandbox: bwrap
+  # ro_binds: [~/go/pkg/mod]        # module cache, read-only
+  # rw_binds: [~/.cache/go-build]   # build cache, writable
 
 limits:
   max_steps: 12
@@ -73,3 +83,10 @@ limits:
 
 execution:
   timeout: 15m
+
+# What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement
+# writes, and only inside the repository. These keys only tighten the guards around
+# implement; none of them widens what a step may do.
+security:
+  require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
+  protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]

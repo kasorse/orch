@@ -13,6 +13,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/config"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/projectctx"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
@@ -69,6 +70,9 @@ type Dispatcher struct {
 	// Stream, if set (--verbose only), is passed through to provider.Request.Stream
 	// as a live tee of the CLI's combined output. Nil means capture-only.
 	Stream io.Writer
+	// Guard checks every implement call's changes before the run goes on. It is
+	// required: implement refuses to run without one.
+	Guard Guard
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
@@ -91,7 +95,8 @@ func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repos
 // *apperr.ProviderError - fills in the Action field the adapter deliberately leaves blank
 // and, if Logs is set, the LogPath the failing step's output will be written to.
 func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string) (provider.Result, domain.ProviderRef, error) {
-	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model}
+	authority := domain.AuthorityFor(actionName)
+	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Authority: authority}
 
 	client, err := d.Registry.Resolve(pm.Provider)
 	if err != nil {
@@ -107,7 +112,13 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	start := time.Now()
 
 	stopHeartbeat := d.startHeartbeat()
-	result, err := client.Execute(ctx, provider.Request{Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream})
+	result, err := client.Execute(ctx, provider.Request{
+		Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream,
+		Authority: authority,
+		// The same secret deny list the Context Manager applies: a step that can read
+		// files must not read these either (specs/permissions/SPEC.md §6.3).
+		DenyRead: projectctx.DenyPatterns(d.Config.Context.ExtraDeny),
+	})
 	stopHeartbeat()
 
 	if d.Observer != nil {

@@ -46,6 +46,8 @@ type configOptions struct {
 	jevURL string
 	// onFailure is decision.on_failure: "ask" or "fail".
 	onFailure string
+	// extraYAML is appended to the rendered config verbatim (e.g. a security: block).
+	extraYAML string
 }
 
 func defaultConfigOptions() configOptions {
@@ -131,9 +133,9 @@ limits:
 
 execution:
   timeout: %s
-`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
+%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
-		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout)
+		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
 
 	path := filepath.Join(dir, "orchestrator.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
