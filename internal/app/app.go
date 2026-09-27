@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -180,10 +181,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return err
 	}
-	if dirty, err := repo.IsDirty(decideCtx); err != nil {
+	// Taken now, before the run directory exists: .orchestrator/runs/ may live inside the
+	// worktree, and the run must not count its own files as uncommitted changes.
+	dirty, err := repo.IsDirty(decideCtx)
+	if err != nil {
 		return err
-	} else if dirty {
-		logging.DirtyRepoWarning(stderr)
 	}
 
 	var stream io.Writer
@@ -240,6 +242,17 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the workflow", Err: err})
 	}
+	// A workflow that writes must start from a clean restore point (specs/permissions/
+	// SPEC.md §7.2); checked before any approval prompt, so nobody approves a run that
+	// cannot start.
+	if dirty {
+		if wf.Contains(domain.ActionImplement) && cfg.Security.CleanWorktreeRequired() {
+			return failRun(store, run, &apperr.ConfigError{Msg: "the workflow includes implement, but the repository has uncommitted changes\n\n" +
+				"Commit or stash them first, so the run starts from a clean restore point,\n" +
+				"or set security.require_clean_worktree: false to run on top of them."})
+		}
+		logging.DirtyRepoWarning(stderr)
+	}
 	run.Decision = &res.Decision
 	run.Workflow = &wf
 
@@ -281,6 +294,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		run.Mode = domain.ModeAuto
 	}
 
+	recordRestorePoint(ctx, repo, run, dirty, reporter)
+	if err := store.SaveRun(run); err != nil {
+		return err
+	}
+
 	runCtx, cancelRun := engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
 	defer cancelRun()
 
@@ -289,6 +307,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
+	dispatcher.Guard = action.NewRepoGuard(repo, append(cfg.Security.ProtectedPaths, configPattern(decideCtx, repo, configPath)...))
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -300,7 +319,9 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	}
 
 	if mode == domain.ModeManual {
-		engine.Gate = interaction.NewTerminalGate(prompter, stdout)
+		gate := interaction.NewTerminalGate(prompter, stdout)
+		gate.Changes = repo.StatusSummary
+		engine.Gate = gate
 	}
 
 	if err := engine.Run(runCtx, run); err != nil {
@@ -310,6 +331,44 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		fmt.Fprintf(stdout, "\nAnswer:\n%s\n", answer)
 	}
 	return nil
+}
+
+// recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a
+// snapshot commit of everything the run starts on top of, untracked files included.
+// Failing to record it (e.g. a repository without commits) is reported, not fatal.
+func recordRestorePoint(ctx context.Context, repo *repository.Repository, run *domain.Run, dirty bool, reporter *logging.ConsoleReporter) {
+	var ref string
+	var err error
+	if dirty {
+		ref, err = repo.SnapshotCommit(ctx)
+	} else {
+		ref, err = repo.HeadRef(ctx)
+	}
+	if err != nil {
+		reporter.RestorePointUnavailable(err)
+		return
+	}
+	run.PreRunRef = ref
+	reporter.RestorePoint(ref)
+}
+
+// configPattern returns the config file's path relative to the repository root when it
+// lives inside the worktree, so implement cannot change the test command the next run
+// executes; nil when the config is outside the worktree.
+func configPattern(ctx context.Context, repo *repository.Repository, configPath string) []string {
+	abs, err := filepath.Abs(configPath)
+	if err != nil {
+		return nil
+	}
+	top, err := repo.TopLevel(ctx)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(top, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	return []string{filepath.ToSlash(rel)}
 }
 
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over

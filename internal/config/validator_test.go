@@ -158,3 +158,20 @@ func TestValidate_AggregatesAllProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_ProtectedPaths(t *testing.T) {
+	cfg := validConfig()
+	cfg.Security.ProtectedPaths = []string{"go.mod", "/etc/hosts", "["}
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected invalid protected_paths to fail")
+	}
+	for _, want := range []string{`security.protected_paths[1] "/etc/hosts"`, `security.protected_paths[2] "["`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), `"go.mod"`) {
+		t.Errorf("go.mod is a valid pattern:\n%v", err)
+	}
+}

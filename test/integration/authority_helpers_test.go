@@ -3,6 +3,7 @@ package integration
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -92,4 +93,16 @@ func flagValue(args []string, flag string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// commitAll commits everything in dir, for tests that shape the fixture before a run.
+func commitAll(t *testing.T, dir, msg string) {
+	t.Helper()
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", msg}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
 }

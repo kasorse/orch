@@ -39,6 +39,23 @@ execution stops the run before `test` (`SPEC.md` §7.2–7.3, D8, D9).
 4. `manual` gate: when the previous step was `implement`, print `git diff --stat` and
    `protected paths: ok` before asking. Pass the data in; the gate does not run git itself.
 
+## As built
+
+- The restore point on a dirty tree is `Repository.SnapshotCommit` (throwaway index), not
+  `git stash create`, which leaves untracked files out — found by the integration test.
+- The tree's state is read at startup, before `.orchestrator/runs/` exists; the decision is
+  taken after `workflow.Build`.
+- `Repository.ChangedOrIgnoredPaths` (`-uall --ignored=traditional`, limited to the
+  protected patterns) lists untracked **and ignored** files individually. Without ignored
+  files the guard missed this repository's own `.gitignore`d `orchestrator.yaml` and
+  Claude's `.claude/settings.local.json`. Patterns match at any depth.
+- The guard compares content hashes, so an untouched pre-existing protected change is not a
+  violation; `Dispatcher.Guard` is required (nil or a failed snapshot refuses implement).
+- The gate prints `git status --short` rather than `git diff --stat`: it shows untracked
+  files too.
+- `TestDecision_ProjectContextExcludesSecrets` now commits its `.env` (the worst realistic
+  case), since an untracked file makes the tree dirty.
+
 ## Acceptance
 
 - Dirty tree + workflow with `implement` → exit 2, no step ran, no

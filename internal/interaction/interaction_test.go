@@ -141,3 +141,30 @@ func TestTerminalPrompter_EOFGivesActionableGuidance(t *testing.T) {
 		t.Errorf("expected guidance toward --mode auto, got: %v", err)
 	}
 }
+
+func TestTerminalGate_ShowsChangesAfterImplement(t *testing.T) {
+	var out bytes.Buffer
+	g := NewTerminalGate(&fakePrompter{answers: []string{"y", "y"}}, &out)
+	calls := 0
+	g.Changes = func(ctx context.Context) (string, error) {
+		calls++
+		return " M fixture.go", nil
+	}
+
+	afterAnalyze := &domain.Run{Executions: []domain.StepExecution{{Action: domain.ActionAnalyze, Status: domain.StepCompleted}}}
+	if _, err := g.BeforeStep(context.Background(), afterAnalyze, 1, domain.ActionImplement); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 || strings.Contains(out.String(), "Changes") {
+		t.Errorf("no summary expected after analyze, got %q", out.String())
+	}
+
+	afterImplement := &domain.Run{Executions: []domain.StepExecution{{Action: domain.ActionImplement, Status: domain.StepCompleted}}}
+	if _, err := g.BeforeStep(context.Background(), afterImplement, 2, domain.ActionTest); err != nil {
+		t.Fatal(err)
+	}
+	want := "Changes in the working tree:\n M fixture.go\nProtected paths: unchanged\n"
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("expected %q in %q", want, out.String())
+	}
+}

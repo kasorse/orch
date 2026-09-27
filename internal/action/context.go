@@ -70,6 +70,9 @@ type Dispatcher struct {
 	// Stream, if set (--verbose only), is passed through to provider.Request.Stream
 	// as a live tee of the CLI's combined output. Nil means capture-only.
 	Stream io.Writer
+	// Guard checks every implement call's changes before the run goes on. It is
+	// required: implement refuses to run without one.
+	Guard Guard
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact

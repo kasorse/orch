@@ -134,6 +134,9 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repoDir, ".env"), []byte(envSecret+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// Committed, the worst realistic case: git lists it, so only the deny list keeps it
+	// out - and the worktree stays clean, as a workflow with implement requires.
+	commitAll(t, repoDir, "add .env")
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 

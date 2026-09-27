@@ -53,7 +53,11 @@ type Run struct {
 	Decision *Decision `json:"decision,omitempty"`
 	Workflow *Workflow `json:"workflow,omitempty"`
 	// Mode is the execution mode this run actually ran under (MVP.md §1/§27).
-	Mode          RunMode         `json:"mode,omitempty"`
+	Mode RunMode `json:"mode,omitempty"`
+	// PreRunRef is the restore point recorded before the first step: HEAD on a clean
+	// tree, or a snapshot commit of the uncommitted changes (untracked files included)
+	// the run started from (specs/permissions/SPEC.md §7.2).
+	PreRunRef     string          `json:"pre_run_ref,omitempty"`
 	Executions    []StepExecution `json:"executions"`
 	Status        RunStatus       `json:"status"`
 	FailureReason string          `json:"failure_reason,omitempty"`

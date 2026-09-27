@@ -188,3 +188,25 @@ func TestLoad_ExampleConfigIsValid(t *testing.T) {
 		t.Errorf("orchestrator.example.yaml must pass Validate: %v", err)
 	}
 }
+
+func TestLoad_RequireCleanWorktree(t *testing.T) {
+	cases := map[string]bool{
+		"": true, // no security block
+		"security:\n  protected_paths: [go.mod]\n":     true, // block without the key
+		"security:\n  require_clean_worktree: true\n":  true,
+		"security:\n  require_clean_worktree: false\n": false,
+	}
+	for extra, want := range cases {
+		path := filepath.Join(t.TempDir(), "orchestrator.yaml")
+		if err := os.WriteFile(path, []byte("version: 2\n"+extra), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("%q: %v", extra, err)
+		}
+		if got := cfg.Security.CleanWorktreeRequired(); got != want {
+			t.Errorf("%q: CleanWorktreeRequired() = %v, want %v", extra, got, want)
+		}
+	}
+}

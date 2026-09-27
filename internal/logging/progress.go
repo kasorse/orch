@@ -150,6 +150,17 @@ func (r *ConsoleReporter) Deciding() {
 
 // DirtyRepoWarning prints the exact warning text from MVP.md §16 - the orchestrator never
 // stashes, resets, checks out, or reverts existing changes, only warns about them.
+// RestorePoint announces the ref recorded before the first step, so the operator can
+// always get back to where the run started (specs/permissions/SPEC.md §7.2).
+func (r *ConsoleReporter) RestorePoint(ref string) {
+	fmt.Fprintf(r.Out, "Restore point: %s\n", ref)
+}
+
+// RestorePointUnavailable reports that no restore point could be recorded; the run goes on.
+func (r *ConsoleReporter) RestorePointUnavailable(err error) {
+	fmt.Fprintf(r.Out, "Warning: no restore point recorded: %s\n", firstLine(err.Error()))
+}
+
 func DirtyRepoWarning(w io.Writer) {
 	fmt.Fprintln(w, "Warning: repository contains uncommitted changes.")
 	fmt.Fprintln(w, "Existing changes will not be reverted.")

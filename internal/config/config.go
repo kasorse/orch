@@ -115,6 +115,25 @@ type Config struct {
 	Translation TranslationConfig `yaml:"translation"`
 	Policy      PolicyConfig      `yaml:"policy"`
 	Context     ContextConfig     `yaml:"context"`
+
+	// Security holds the knobs of the execution-authority guards (specs/permissions/
+	// SPEC.md §7, §9). None of them widens what a step may do.
+	Security SecurityConfig `yaml:"security"`
+}
+
+type SecurityConfig struct {
+	// RequireCleanWorktree is a pointer so an absent key (nil) can default to true while an
+	// explicit false still means false; read it through CleanWorktreeRequired.
+	RequireCleanWorktree *bool `yaml:"require_clean_worktree"`
+	// ProtectedPaths extends domain.DefaultProtectedPaths: patterns an implement step must
+	// not change.
+	ProtectedPaths []string `yaml:"protected_paths"`
+}
+
+// CleanWorktreeRequired reports whether a workflow with implement must start on a clean
+// worktree - true unless security.require_clean_worktree is explicitly false.
+func (s SecurityConfig) CleanWorktreeRequired() bool {
+	return s.RequireCleanWorktree == nil || *s.RequireCleanWorktree
 }
 
 // actionProviderModels returns every configured action alongside its pseudo-action

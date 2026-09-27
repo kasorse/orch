@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 )
 
@@ -52,6 +53,12 @@ func Validate(cfg Config) error {
 	}
 
 	problems = append(problems, decisionProblems(cfg)...)
+
+	for i, p := range cfg.Security.ProtectedPaths {
+		if err := domain.ValidateProtectedPattern(p); err != nil {
+			problems = append(problems, fmt.Sprintf("security.protected_paths[%d] %q: %v", i, p, err))
+		}
+	}
 
 	if len(problems) == 0 {
 		return nil

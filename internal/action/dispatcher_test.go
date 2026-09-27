@@ -90,7 +90,25 @@ func testConfig() *config.Config {
 func newDispatcher(client provider.Client) *Dispatcher {
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	return New(testConfig(), registry, &repository.Repository{Dir: "/repo"}, nil)
+	d := New(testConfig(), registry, &repository.Repository{Dir: "/repo"}, nil)
+	d.Guard = &fakeGuard{}
+	return d
+}
+
+// fakeGuard reports changed as the violation of every implement call, or fails.
+type fakeGuard struct {
+	changed     []string
+	snapshotErr error
+	snapshots   int
+}
+
+func (g *fakeGuard) Snapshot(ctx context.Context) (GuardState, error) {
+	g.snapshots++
+	return GuardState{}, g.snapshotErr
+}
+
+func (g *fakeGuard) Changed(ctx context.Context, before GuardState) ([]string, error) {
+	return g.changed, nil
 }
 
 func TestExecuteAnalyze_Success(t *testing.T) {
@@ -605,4 +623,54 @@ func indexOf(haystack, needle string) int {
 		}
 	}
 	return -1
+}
+
+func TestExecuteImplement_GuardViolationFailsTheStep(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done","changed_files":[".claude/settings.json"]}`}
+	d := newDispatcher(client)
+	d.Guard = &fakeGuard{changed: []string{".claude/settings.json", ".git (config or hooks)"}}
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}, PreRunRef: "abc123"}
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) {
+		t.Fatalf("expected *apperr.WorkflowError, got %T: %v", err, err)
+	}
+	for _, want := range []string{".claude/settings.json", ".git (config or hooks)", "Restore point: abc123", "security.protected_paths"} {
+		if !contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if outcome.Provider == nil || outcome.RawStdout == "" {
+		t.Errorf("the outcome must still carry the call's output for the logs, got %+v", outcome)
+	}
+}
+
+func TestExecuteImplement_WithoutGuardRefusesBeforeTheCall(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done"}`}
+	d := newDispatcher(client)
+	d.Guard = nil
+
+	_, err := d.Execute(context.Background(), domain.ActionImplement, &domain.Run{ID: "run-1"})
+	var wfErr *apperr.WorkflowError
+	if !errors.As(err, &wfErr) {
+		t.Fatalf("expected *apperr.WorkflowError, got %T: %v", err, err)
+	}
+	if client.lastReq.Prompt != "" {
+		t.Error("no provider call may happen without a guard")
+	}
+}
+
+func TestExecuteImplement_SnapshotFailureRefusesBeforeTheCall(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"done"}`}
+	d := newDispatcher(client)
+	d.Guard = &fakeGuard{snapshotErr: errors.New("git broke")}
+
+	_, err := d.Execute(context.Background(), domain.ActionImplement, &domain.Run{ID: "run-1"})
+	if err == nil || !contains(err.Error(), "git broke") {
+		t.Fatalf("expected the snapshot error, got %v", err)
+	}
+	if client.lastReq.Prompt != "" {
+		t.Error("no provider call may happen when the guard cannot take its snapshot")
+	}
 }

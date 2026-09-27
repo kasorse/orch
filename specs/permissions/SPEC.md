@@ -245,31 +245,51 @@ agent-written code run by `test` — is what §8 addresses.
 When the built workflow contains `implement` and `security.require_clean_worktree` is true
 (default), a dirty worktree fails the run **before the approval prompt** with
 `*apperr.ConfigError` (exit 2), naming both remedies (commit/stash, or set the key to `false`).
-Workflows without `implement` keep today's warning. The check runs after `workflow.Build`
-— that is the first point where "contains implement" is known, and the decision calls
-before it are cheap.
+Workflows without `implement` keep today's warning. The decision is taken after
+`workflow.Build` — the first point where "contains implement" is known — but the tree's
+state is read at startup, before the run directory exists: `.orchestrator/runs/` may live
+inside the worktree, and the run must not count its own files as uncommitted changes.
 
-Before the first step, `run.PreRunRef` records `git rev-parse HEAD` (clean tree) or
-`git stash create`'s ref (dirty tree allowed by config), persisted in `run.json` and
-printed: `Restore point: <sha>`.
+Before the first step, `run.PreRunRef` records `git rev-parse HEAD` (clean tree) or, when a
+dirty tree is allowed by config, a **snapshot commit** of everything the run starts on top
+of — tracked changes, deletions and untracked files, minus ignored files and the run
+directory — built on a throwaway index (`GIT_INDEX_FILE`: `read-tree HEAD`, `add -A`,
+`write-tree`, `commit-tree -p HEAD`). The working tree, the real index, the stash list and
+all refs stay untouched. (`git stash create` was rejected: it leaves untracked files out, so
+the "restore point" would silently lose them.) The commit is unreferenced, so `git gc` may
+prune it after its grace period. Persisted in `run.json`, printed as
+`Restore point: <sha>`; failing to record it is a warning, not a failure.
 
 ### 7.3 Protected-path guard after `implement` (F6)
 
-Right after every `implement` call returns, before its outcome is accepted (and so before
-`test` can execute anything):
+Around every `implement` call, the guard takes a snapshot before and compares after —
+before the outcome is accepted, and so before `test` can execute anything:
 
-1. `repo.ChangedFiles` is matched against protected patterns: `.claude/**`, `.mcp.json`,
-   `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`, the in-use config file
-   when it is inside the worktree, plus `security.protected_paths`.
-2. A fingerprint of `.git/config` and the non-`.sample` entries of `.git/hooks/` taken
-   before the call must be unchanged (git status never reports `.git/` itself).
+1. Files that differ from HEAD **or are ignored** (`git status -uall
+   --ignored=traditional`, limited to the protected patterns as glob pathspecs, so files are
+   listed individually and ignored build output is not walked) are matched against the
+   protected patterns. Ignored files matter: this repository ignores its own
+   `orchestrator.yaml`, and Claude ignores `.claude/settings.local.json` — both invisible to
+   a plain status, both able to change what runs next. The patterns: `.claude/**`, `.mcp.json`,
+   `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`
+   (`domain.DefaultProtectedPaths`), the in-use config file when it is inside the worktree,
+   plus `security.protected_paths`. Patterns match at any depth (`.claude/**` also covers
+   `sub/.claude/…`). Each matching file's content is hashed, so a protected file that was
+   already changed before the call (possible only with `require_clean_worktree: false`) is
+   a violation only if the call touches it.
+2. A fingerprint of the repository config (from `--git-common-dir`, so worktrees work) and
+   of every non-`.sample` hook in the effective hooks directory (`--git-path hooks`, which
+   honours `core.hooksPath`) must be unchanged — git status never reports `.git/` itself.
 
 A violation fails the step with `*apperr.WorkflowError` (exit 4) listing the paths; the run
 stops before `test`. The changes stay on disk for inspection; the message prints the restore
-point. Provider-neutral: it checks the result, not the CLI.
+point. The guard fails closed: a dispatcher without one, or a snapshot that cannot be taken,
+refuses `implement` before the provider call. Provider-neutral: it checks the result, not
+the CLI.
 
-In `manual` mode, the gate before the step that follows `implement` first prints
-`git diff --stat` and "protected paths: ok".
+In `manual` mode, the gate before the step that follows a completed `implement` first prints
+the working tree's changes (`git status --short`, run directory excluded) and
+`Protected paths: unchanged`.
 
 ### 7.4 Untrusted text in prompts
 
