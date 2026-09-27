@@ -293,9 +293,10 @@ the working tree's changes (`git status --short`, run directory excluded) and
 
 ### 7.4 Untrusted text in prompts
 
-Repository-derived spans in action prompts (the git diff, test stdout/stderr, file excerpts)
-go through one `fence(label, content)` helper: a `crypto/rand` nonce delimiter plus a line
-stating the content is data. Content containing the delimiter gets a fresh nonce. The task
+Repository-derived spans in action prompts (the git diff in review, the test stdout/stderr
+in an implement retry) go through one `fence` helper: a delimiter with a 128-bit random
+nonce (`crypto/rand`) plus a line stating the content is data. Content containing the
+drawn delimiter gets a fresh nonce. The task
 description is operator input and is not fenced. Defense in depth only — P1/P2 are what make
 a followed injection achieve little.
 

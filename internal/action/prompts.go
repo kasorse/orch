@@ -134,8 +134,11 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 
 	if in.LastTestResult != nil {
 		b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
-		fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\nstdout:\n%s\n\nstderr:\n%s\n\n",
-			in.LastTestResult.Command, in.LastTestResult.ExitCode, in.LastTestResult.Stdout, in.LastTestResult.Stderr)
+		fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", in.LastTestResult.Command, in.LastTestResult.ExitCode)
+		b.WriteString(fence("stdout", "the test command's stdout", in.LastTestResult.Stdout))
+		b.WriteString("\n")
+		b.WriteString(fence("stderr", "the test command's stderr", in.LastTestResult.Stderr))
+		b.WriteString("\n")
 	}
 
 	if len(in.ReviewIssues) > 0 {
@@ -181,7 +184,8 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 			in.TestResult.Command, in.TestResult.ExitCode, in.TestResult.Success)
 	}
 
-	fmt.Fprintf(&b, "Git diff:\n%s\n", in.GitDiff)
+	b.WriteString("Git diff:\n")
+	b.WriteString(fence("diff", "the git diff of the working tree", in.GitDiff))
 
 	return b.String()
 }

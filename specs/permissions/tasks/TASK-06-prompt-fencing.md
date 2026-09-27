@@ -24,6 +24,18 @@ depth, not a boundary — say so in the code.
    they are.
 3. Do not touch the JSON-shape instructions; `internal/action` parses those responses.
 
+## As built
+
+- `fence(label, what, content)` in `internal/action/fence.go`; the nonce is `rand.Text()`
+  (128 bits) rather than 12 hex digits. On a collision it redraws until the delimiter is
+  absent instead of giving up after bounded retries: at 128 bits the first draw succeeds in
+  practice, and keeping the builders' `string` signature avoids an error path that cannot
+  occur. The nonce source is a variable so a test forces the collision.
+- Fenced: the git diff in the review prompt, the test command's stdout and stderr in the
+  implement retry prompt. No action prompt embeds file excerpts (steps read files through
+  their tools), so there was nothing else to fence. The command and exit code come from
+  the orchestrator and stay outside the fence; so does the task.
+
 ## Acceptance
 
 - A diff containing a fake closing delimiter and `IGNORE ALL PREVIOUS INSTRUCTIONS` ends up
