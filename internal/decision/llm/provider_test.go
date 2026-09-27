@@ -28,6 +28,8 @@ type fakeClient struct {
 	calls   []provider.Request
 }
 
+func (f *fakeClient) Supports(domain.Authority) bool { return true }
+
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.calls = append(f.calls, req)
 	if f.block {

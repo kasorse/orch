@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -43,6 +44,15 @@ func redactedArgs(model string, promptLen int) []string {
 		"--model", model,
 		fmt.Sprintf("<prompt: %d chars>", promptLen),
 	}
+}
+
+// Supports reports every defined authority as enforceable.
+//
+// TODO(T02): buildArgs still passes bypassPermissions regardless of req.Authority, so
+// today this is a declaration of intent, not enforcement. T02 translates each authority
+// into the verified flag sets of specs/permissions/SPEC.md §6.2.
+func (c *Client) Supports(a domain.Authority) bool {
+	return a.Valid()
 }
 
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {

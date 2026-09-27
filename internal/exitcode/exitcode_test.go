@@ -3,6 +3,7 @@ package exitcode
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"orchestrator/internal/apperr"
@@ -18,6 +19,8 @@ func TestFromError(t *testing.T) {
 		{"generic", errors.New("boom"), GenericError},
 		{"config", apperr.NewConfigError("bad config", nil), ConfigOrDependency},
 		{"dependency", apperr.NewDependencyError("missing dep", nil), ConfigOrDependency},
+		{"authority", &apperr.AuthorityError{Provider: "codex", Authority: "read"}, ConfigOrDependency},
+		{"authority wrapped", fmt.Errorf("validation: %w", errors.Join(&apperr.AuthorityError{Provider: "codex"})), ConfigOrDependency},
 		{"provider", &apperr.ProviderError{Provider: "claude"}, ProviderExecution},
 		{"provider exit", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureExit}, ProviderExecution},
 		{"provider timeout", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureTimeout}, ProviderExecution},

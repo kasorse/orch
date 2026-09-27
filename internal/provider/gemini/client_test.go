@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -124,5 +125,16 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	if provErr.Kind != apperr.FailureSpawn {
 		t.Errorf("expected Kind FailureSpawn, got %q", provErr.Kind)
+	}
+}
+
+// TestClient_SupportsNothing pins the fail-closed default: no translation for gemini is
+// verified, so every route to it is refused (specs/permissions/SPEC.md §6.4).
+func TestClient_SupportsNothing(t *testing.T) {
+	c := New(&execution.FakeProcessExecutor{})
+	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
+		if c.Supports(a) {
+			t.Errorf("Supports(%q) = true, want false", a)
+		}
 	}
 }

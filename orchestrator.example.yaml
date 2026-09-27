@@ -56,8 +56,12 @@ actions:
     model: opus
 
   review:
-    provider: codex
-    model: gpt
+    provider: claude
+    model: sonnet
+    # codex and gemini are refused for every action until their permission flags are
+    # verified against the real CLI (specs/permissions/SPEC.md §6.4):
+    # provider: codex
+    # model: gpt
     # Optional per-action timeout override. Review can be the slowest step (it inspects
     # the full git diff), so it's the most likely to need more than its share of
     # execution.timeout below. Still bounded by whatever's left of execution.timeout for

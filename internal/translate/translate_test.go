@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 )
 
@@ -18,6 +19,8 @@ type fakeClient struct {
 	delay  bool // block until the context ends
 	calls  []provider.Request
 }
+
+func (f *fakeClient) Supports(domain.Authority) bool { return true }
 
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.calls = append(f.calls, req)

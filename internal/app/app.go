@@ -109,7 +109,10 @@ func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose b
 	return configPath, mode, verbose, rest, nil
 }
 
-func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter) (config.Config, error) {
+// loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
+// ValidateDependencies -> ValidateAuthorities. The registry is only asked what its
+// adapters can enforce; constructing it makes no calls.
+func loadAndValidateConfig(configPath string, registry *provider.Registry, reporter *logging.ConsoleReporter) (config.Config, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
@@ -122,13 +125,28 @@ func loadAndValidateConfig(configPath string, reporter *logging.ConsoleReporter)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}); err != nil {
 		return config.Config{}, err
 	}
+	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
+	// single check, before the mode is even known, is complete.
+	if err := config.ValidateAuthorities(cfg, registry); err != nil {
+		return config.Config{}, err
+	}
 
 	reporter.ConfigValid()
 	return cfg, nil
 }
 
+// newRegistry registers every supported provider adapter with executor.
+func newRegistry(executor execution.ProcessExecutor) *provider.Registry {
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, claude.New(executor))
+	registry.Register(provider.Codex, codex.New(executor))
+	registry.Register(provider.Gemini, gemini.New(executor))
+	return registry
+}
+
 func runValidate(configPath string, stdout io.Writer) error {
-	_, err := loadAndValidateConfig(configPath, logging.NewConsoleReporter(stdout))
+	registry := newRegistry(execution.NewOSProcessExecutor())
+	_, err := loadAndValidateConfig(configPath, registry, logging.NewConsoleReporter(stdout))
 	return err
 }
 
@@ -136,9 +154,12 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	reporter := logging.NewConsoleReporter(stdout)
 	reporter.Verbose = verbose
 
-	// Fail fast (MVP.md §7): Load -> Validate -> ValidateDependencies run in full before
-	// any provider, decision client or translator exists.
-	cfg, err := loadAndValidateConfig(configPath, reporter)
+	osExec := execution.NewOSProcessExecutor()
+	registry := newRegistry(osExec)
+
+	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
+	// or translator exists and before any provider is called.
+	cfg, err := loadAndValidateConfig(configPath, registry, reporter)
 	if err != nil {
 		return err
 	}
@@ -155,8 +176,6 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
 	}
 
-	osExec := execution.NewOSProcessExecutor()
-
 	repo, err := repository.Open(decideCtx, cwd, osExec)
 	if err != nil {
 		return err
@@ -166,11 +185,6 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	} else if dirty {
 		logging.DirtyRepoWarning(stderr)
 	}
-
-	registry := provider.NewRegistry()
-	registry.Register(provider.Claude, claude.New(osExec))
-	registry.Register(provider.Codex, codex.New(osExec))
-	registry.Register(provider.Gemini, gemini.New(osExec))
 
 	var stream io.Writer
 	if verbose {

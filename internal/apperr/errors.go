@@ -194,3 +194,31 @@ type LimitExceededError struct {
 }
 
 func (e *LimitExceededError) Error() string { return e.Reason }
+
+// AuthorityError means a provider cannot enforce the authority a call requires
+// (specs/permissions/SPEC.md §6). It is raised before any AI call by
+// config.ValidateAuthorities, and again by an adapter's Execute as a backstop. It is a
+// misconfiguration - the wrong provider for the job - so it maps to exit code 2.
+type AuthorityError struct {
+	Provider  string
+	Route     string // the action or pseudo-action (translation, decision); "" if unknown
+	Authority string
+	Reason    string
+	Remedy    string
+}
+
+func (e *AuthorityError) Error() string {
+	route := "this call"
+	if e.Route != "" {
+		route = fmt.Sprintf("%q", e.Route)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "provider %q cannot enforce the %q authority required by %s", e.Provider, e.Authority, route)
+	if e.Reason != "" {
+		fmt.Fprintf(&b, "\n\n%s", e.Reason)
+	}
+	if e.Remedy != "" {
+		fmt.Fprintf(&b, "\n\nremedy: %s", e.Remedy)
+	}
+	return b.String()
+}

@@ -11,6 +11,7 @@ import (
 	"fmt"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -34,6 +35,15 @@ func buildArgs(model, prompt string) []string {
 // apperr.ProviderError never has to know or receive the real prompt text.
 func redactedArgs(model string, promptLen int) []string {
 	return []string{"-p", fmt.Sprintf("<prompt: %d chars>", promptLen), "-m", model}
+}
+
+// Supports is false for every authority. The gemini CLI is not installed on the
+// development machine, so no permission translation for it has been verified, and an
+// unverified translation must not ship as verified (specs/permissions/SPEC.md §6.4, D13):
+// until one is, every route to gemini is refused before any AI call rather than run with
+// unknown authority.
+func (c *Client) Supports(a domain.Authority) bool {
+	return false
 }
 
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {

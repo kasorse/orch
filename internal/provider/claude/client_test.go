@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
@@ -151,5 +152,17 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 	if provErr.Kind != apperr.FailureSpawn {
 		t.Errorf("expected Kind FailureSpawn, got %q", provErr.Kind)
+	}
+}
+
+func TestClient_Supports(t *testing.T) {
+	c := New(&execution.FakeProcessExecutor{})
+	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
+		if !c.Supports(a) {
+			t.Errorf("Supports(%q) = false, want true", a)
+		}
+	}
+	if c.Supports("") {
+		t.Error(`Supports("") = true, want false: a request without an authority must be refused`)
 	}
 }

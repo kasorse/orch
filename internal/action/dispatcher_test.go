@@ -23,6 +23,8 @@ type fakeClient struct {
 	lastReq provider.Request
 }
 
+func (f *fakeClient) Supports(domain.Authority) bool { return true }
+
 func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	f.lastReq = req
 	if f.err != nil {
@@ -39,6 +41,8 @@ func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provide
 type ctxCapturingClient struct {
 	observedErr error
 }
+
+func (c *ctxCapturingClient) Supports(domain.Authority) bool { return true }
 
 func (c *ctxCapturingClient) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	<-ctx.Done()

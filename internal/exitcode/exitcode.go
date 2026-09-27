@@ -38,6 +38,11 @@ func FromError(err error) int {
 		return ConfigOrDependency
 	}
 
+	var authErr *apperr.AuthorityError
+	if errors.As(err, &authErr) {
+		return ConfigOrDependency
+	}
+
 	var providerErr *apperr.ProviderError
 	if errors.As(err, &providerErr) {
 		if providerErr.Kind == apperr.FailureCancelled {
