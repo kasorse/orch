@@ -90,6 +90,10 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		},
 	}
 
+	// What the working tree holds, shown before approval; read only once the protected
+	// state matched the run's start, since git status runs a planted core.fsmonitor.
+	var treeSummary string
+	var treeErr error
 	if len(run.Executions) == 0 {
 		// No step ran, so no model touched the tree and there is no baseline yet: this is
 		// the tail of a fresh run (plan mode, cancelled at approval, refused for a dirty
@@ -127,9 +131,12 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 			return err
 		}
 		opts.resume.Entry, opts.resume.Why = domain.ActionType(entry), why
+		treeSummary, treeErr = repo.StatusSummary(ctx)
 	}
 
 	reporter.ResumeHeader(run, store.RunDir(run.ID))
+	reporter.History(run)
+	reporter.WorkingTree(treeSummary, treeErr)
 	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remainingSteps(*run.Workflow, opts.resume.Entry))
 	return executeWorkflow(ctx, s, opts)
 }

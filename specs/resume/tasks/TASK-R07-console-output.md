@@ -28,6 +28,28 @@ next (`SPEC.md` §12).
 5. The existing `Authority` and `RestorePoint` lines are reused unchanged.
 6. `--verbose` changes nothing here.
 
+## As built
+
+- `internal/logging/resume.go`: `ResumeHeader`, `History`, `WorkingTree`, `NextStep` and
+  `AlreadyCompleted`. `resumeTask` prints them in §12 order, followed by the existing
+  `Authority` and `RestorePoint` lines from the shared tail.
+- `History` columns: ✓/✗, index, action, `provider/model`, authority, result. The test
+  step has no provider, so it shows "test command" and no authority. The result and the
+  mark come from the trusted verdict: a completed test that exited non-zero is
+  ✗ "tests failed (exit N)", and a review is ✗ "FAIL (n issues)" whenever
+  `ReviewResult.Decide()` fails, whatever the model reported. A failed step shows its
+  error's first line. Steps a resume ran are suffixed "(resume n)" from `Attempt`.
+- `WorkingTree(summary, err)` takes the `StatusSummary` error too. As in the manual gate,
+  an unreadable tree prints "Working tree: unavailable (…)" instead of stopping the
+  resume. `resumeTask` reads the tree only in the with-history branch, after
+  `checkProtectedState` passed. A `pending` run shows no working tree (the fresh-run
+  dirty warning covers it).
+- A `pending` run with no reason is shown as "pending — no step has run yet".
+- Goldens: `resume_interrupted`, `resume_failed_implement` (with an unavailable working
+  tree), `resume_limit_raised` (a review failed under a self-reported pass, then a
+  resumed implement and test), `resume_plan_mode`. The test renders each twice and checks
+  that `--verbose` changes nothing.
+
 ## Acceptance
 
 - Golden files for: an interrupted run, failed at implement; limit-stopped after a test
