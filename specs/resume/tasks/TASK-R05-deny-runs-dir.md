@@ -28,6 +28,18 @@ of a step's reach.
 3. Live suite: under `read`, reading `.orchestrator/runs/x/run.json` is refused. Under
    `edit`, editing and writing it are refused, and a normal source edit still works.
 
+## As built
+
+- `Dispatcher.RunsDir` is set in `app` from the same `worktreeRel` value that feeds the
+  step guard's `RunDirPatterns` (R04), so the two cannot disagree. `Dispatcher.denyRead()`
+  appends it after `projectctx.DenyPatterns`, so it is not lowercased; claude matches
+  case-sensitively.
+- Live: `TestRunsDirectory_IsDeniedToFileTools` passed twice on claude **2.1.285**, the
+  suite's first run on that version (it was verified on 2.1.283). Under `read`, a
+  `run.json` is neither read nor found by search. Under `edit`, it is neither edited nor
+  written next to, while `a.txt` / `notes.txt` positive controls work. The rest of the
+  live suite was not re-run.
+
 ## Acceptance
 
 - Unit: the recorded argv for every workflow action contains the runs directory rules.

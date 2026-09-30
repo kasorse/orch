@@ -335,7 +335,9 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
-	dispatcher.Guard = action.NewRepoGuard(repo, append(protected, action.RunDirPatterns(worktreeRel(decideCtx, repo, runsBaseDir))...))
+	runsRel := worktreeRel(decideCtx, repo, runsBaseDir)
+	dispatcher.Guard = action.NewRepoGuard(repo, append(protected, action.RunDirPatterns(runsRel)...))
+	dispatcher.RunsDir = runsRel
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 

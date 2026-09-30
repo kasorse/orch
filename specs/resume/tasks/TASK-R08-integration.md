@@ -9,7 +9,8 @@ and refuses what it must (`SPEC.md` §14).
 
 ## Files
 
-- `test/integration/scenario17_resume_*_test.go` … one file per scenario group
+- `test/integration/scenario18_resume_*_test.go` … one file per scenario group
+  (scenario 17 is R04's `scenario17_resume_inputs_test.go`, which already covers item 9)
 - `test/integration/helpers_test.go` — `resume(t, dir, id, args...)`, run-JSON load/edit
   helpers
 
@@ -50,7 +51,7 @@ Fakes are routed by the `ACTION: <name>` prompt line. Call order and prompts com
 
 ## Acceptance
 
-All scenarios pass under `go test ./test/integration/...`, as do scenarios 1–16, with no
+All scenarios pass under `go test ./test/integration/...`, as do scenarios 1–17, with no
 network and no real provider CLI.
 
 ## Gates

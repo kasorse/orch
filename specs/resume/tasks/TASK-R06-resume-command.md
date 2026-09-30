@@ -21,7 +21,7 @@ one code path for both commands.
    are set, into `executeWorkflow(ctx, deps, run, opts)`: authority line, approval and
    mode, restore point + `head_ref` + baseline (only when the run has none), sandbox,
    Dispatcher + both guards, engine, final answer. `runTask` calls it, and its behaviour is
-   unchanged; scenarios 1–16 are the check.
+   unchanged; scenarios 1–17 are the check.
 2. **`IsDirty` ignores the runs directory.** `repo.IsDirty` is a plain
    `git status --porcelain`, so in a repository that does not ignore `.orchestrator/` a
    resume of a `pending` run would be refused by its own run directory (found in R04).
@@ -57,7 +57,7 @@ one code path for both commands.
 
 ## Acceptance
 
-- Scenarios 1–16 pass unchanged.
+- Scenarios 1–17 pass unchanged.
 - `orchestrator resume` with no argument or two arguments → usage error, exit 2.
 - The order in 5.6 is covered by R08 scenarios 5–7, and no provider call is made on any
   refusal path.

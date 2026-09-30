@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -701,5 +703,39 @@ func TestExecuteTest_WithoutGuardRefusesBeforeRunning(t *testing.T) {
 	}
 	if len(exec.Calls) != 0 {
 		t.Errorf("the test command must not run without a guard, got %d calls", len(exec.Calls))
+	}
+}
+
+func TestCall_DeniesTheRunsDirectory(t *testing.T) {
+	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionReview} {
+		t.Run(string(a), func(t *testing.T) {
+			client := &fakeClient{output: `{"status":"pass","summary":"s","issues":[]}`}
+			registry := provider.NewRegistry()
+			registry.Register(provider.Claude, client)
+			d := New(testConfig(), registry, reviewRepo(t, "diff", ""), nil)
+			d.Guard = &fakeGuard{}
+			d.RunsDir = "sub/.orchestrator/runs"
+
+			if _, err := d.Execute(context.Background(), a, &domain.Run{ID: "r"}); err != nil {
+				t.Fatal(err)
+			}
+			deny := client.lastReq.DenyRead
+			if len(deny) == 0 || deny[len(deny)-1] != "sub/.orchestrator/runs" {
+				t.Errorf("DenyRead = %v, want the runs directory", deny)
+			}
+			if !slices.Contains(deny, ".env") {
+				t.Errorf("DenyRead = %v, lost the secret deny list", deny)
+			}
+		})
+	}
+
+	// Outside the worktree there is nothing to deny.
+	client := &fakeClient{output: "{}"}
+	d := newDispatcher(client)
+	if _, err := d.Execute(context.Background(), domain.ActionAnalyze, &domain.Run{ID: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	if slices.ContainsFunc(client.lastReq.DenyRead, func(p string) bool { return strings.Contains(p, "orchestrator") }) {
+		t.Errorf("DenyRead = %v", client.lastReq.DenyRead)
 	}
 }

@@ -1,7 +1,7 @@
 # Resume a run by ID
 
 Status: **in progress**. The spec is accepted and the decisions are taken (`SPEC.md` §16).
-R01–R04 are done.
+R01–R05 are done; R06–R09 remain.
 
 | document | role |
 |---|---|
@@ -30,7 +30,7 @@ back is strictly validated, because the run directory is writable by the model.
 | [R02](tasks/TASK-R02-entry-state.md) | `workflow.Entry`, derived counters, `Verify`, limit pre-check ✓ | S–M | R01 |
 | [R03](tasks/TASK-R03-restore-context.md) | `Dispatcher.Restore` from artifacts; implement's artifact after the guard ✓ | M | R01 |
 | [R04](tasks/TASK-R04-baseline-and-guard.md) | run-start baseline, `head_ref`, resume inputs under the guard ✓ | M–L | R01 |
-| [R05](tasks/TASK-R05-deny-runs-dir.md) | runs directory in every workflow call's deny list + live check | S | R01 |
+| [R05](tasks/TASK-R05-deny-runs-dir.md) | runs directory in every workflow call's deny list + live check ✓ | S | R01 |
 | [R06](tasks/TASK-R06-resume-command.md) | `resume` command; `run` and `resume` share one tail | L | R01–R04 |
 | [R07](tasks/TASK-R07-console-output.md) | resume header, history, next step; golden files | S | R06 |
 | [R08](tasks/TASK-R08-integration.md) | integration scenarios | M | R06, R07 |
@@ -59,7 +59,7 @@ and `resume_baseline` (R04) and denies its runs directory to the file tools (R05
   before the git fingerprint matches the baseline.
 - `Executions` stays append-only.
 - Each task ends green on `go build ./...`, `go vet ./...`, `go test ./...`, and `gofmt -l .`
-  empty. Existing integration scenarios 1–16 keep passing unchanged.
+  empty. Existing integration scenarios 1–17 keep passing unchanged.
 
 ## Deferred
 

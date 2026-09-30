@@ -73,6 +73,11 @@ type Dispatcher struct {
 	// Guard checks every implement call's changes before the run goes on. It is
 	// required: implement refuses to run without one.
 	Guard Guard
+	// RunsDir is the runs directory relative to the repository root, slash-separated, or
+	// "" when it lies outside the worktree. Every call's file tools are denied it: a step
+	// has no business reading other runs' prompts and context, or writing what a resume
+	// reads back (specs/resume/SPEC.md §9.3).
+	RunsDir string
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
@@ -115,9 +120,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	result, err := client.Execute(ctx, provider.Request{
 		Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority: authority,
-		// The same secret deny list the Context Manager applies: a step that can read
-		// files must not read these either (specs/permissions/SPEC.md §6.3).
-		DenyRead: projectctx.DenyPatterns(d.Config.Context.ExtraDeny),
+		DenyRead:  d.denyRead(),
 	})
 	stopHeartbeat()
 
@@ -150,6 +153,17 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		return result, ref, err
 	}
 	return result, ref, nil
+}
+
+// denyRead is every call's file-tool deny list: the same secret deny list the Context
+// Manager applies (specs/permissions/SPEC.md §6.3), plus the runs directory. In claude a
+// Read deny rule also blocks Edit and Write on the same path.
+func (d *Dispatcher) denyRead() []string {
+	deny := projectctx.DenyPatterns(d.Config.Context.ExtraDeny)
+	if d.RunsDir != "" {
+		deny = append(deny, d.RunsDir)
+	}
+	return deny
 }
 
 // startHeartbeat notifies d.Observer every heartbeatInterval while a provider call is in
