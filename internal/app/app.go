@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
-// together into the orchestrator's three CLI commands
-// (version, validate, run). This is the composition root - no other package
+// together into the orchestrator's four CLI commands
+// (version, validate, run, resume). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,7 +54,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
 	if len(rest) == 0 {
-		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] <version|validate|run "<task>">`}
+		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] <version|validate|run "<task>"|resume <run-id>>`}
 	}
 
 	switch rest[0] {
@@ -67,6 +68,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"`}
 		}
 		return runTask(ctx, configPath, strings.Join(rest[1:], " "), mode, verbose, stdin, stdout, stderr)
+	case "resume":
+		if len(rest) != 2 {
+			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
+		}
+		return resumeTask(ctx, configPath, rest[1], mode, verbose, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -214,6 +220,13 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return err
 	}
+	// Held until the run returns, so a resume cannot take the run over while it is alive
+	// (specs/resume/SPEC.md §11).
+	unlock, err := store.Lock(run.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
 	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)
@@ -257,110 +270,215 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	if err != nil {
 		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the workflow", Err: err})
 	}
-	// A workflow that writes must start from a clean restore point (specs/permissions/
-	// SPEC.md §7.2); checked before any approval prompt, so nobody approves a run that
-	// cannot start.
-	if dirty {
-		if wf.Contains(domain.ActionImplement) && cfg.Security.CleanWorktreeRequired() {
-			return failRun(store, run, &apperr.ConfigError{Msg: "the workflow includes implement, but the repository has uncommitted changes\n\n" +
-				"Commit or stash them first, so the run starts from a clean restore point,\n" +
-				"or set security.require_clean_worktree: false to run on top of them."})
-		}
-		logging.DirtyRepoWarning(stderr)
-	}
+	// Persisted before the dirty-tree refusal, so a refused run keeps its decided workflow
+	// and can be resumed once the tree is clean (specs/resume/SPEC.md G10).
 	run.Decision = &res.Decision
 	run.Workflow = &wf
-
 	if err := store.SaveDecision(run.ID, res.Trace(wf)); err != nil {
 		return err
 	}
 	if err := store.SaveProjectContext(run.ID, res.Project); err != nil {
 		return err
 	}
-	reporter.Decided(res.Trace(wf))
-	reporter.Authority(wf, cfg.Test.Command, cfg.Test.Sandboxed())
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
-
-	if mode != domain.ModeAuto {
-		resolvedMode, approved, err := interaction.ReviewAndSelectMode(prompter, stdout, mode)
-		if err != nil {
-			return failRun(store, run, err)
-		}
-		if !approved {
-			run.Status = domain.RunStopped
-			run.FailureReason = "cancelled by user"
-			_ = store.SaveRun(run)
-			return fmt.Errorf("run cancelled by user: %w", context.Canceled)
-		}
-
-		mode = resolvedMode
-		run.Mode = mode
-		if err := store.SaveRun(run); err != nil {
-			return err
-		}
-
-		if mode == domain.ModePlan {
-			fmt.Fprintln(stdout, "\nPlan approved. Not executing (plan mode).")
-			return nil
-		}
-	} else {
-		run.Mode = domain.ModeAuto
-	}
-
-	recordRestorePoint(ctx, repo, run, dirty, reporter)
-	// The guard over what the run must never change: the run-start baseline a resume is
-	// checked against. The step guard also covers the runs directory's resume inputs,
-	// which change with every step and so cannot be part of the baseline.
-	protected := append(append([]string(nil), cfg.Security.ProtectedPaths...), configPattern(decideCtx, repo, configPath)...)
-	if err := recordBaseline(ctx, repo, run, action.NewRepoGuard(repo, protected)); err != nil {
+	if err := checkWorktree(cfg, wf, dirty, stderr); err != nil {
 		return failRun(store, run, err)
 	}
-	if err := store.SaveRun(run); err != nil {
-		return err
+	reporter.Decided(res.Trace(wf))
+
+	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
+	return executeWorkflow(ctx, s, tailOptions{
+		mode:  mode,
+		dirty: dirty,
+		engineContext: func() (context.Context, context.CancelFunc) {
+			return engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
+		},
+	})
+}
+
+// checkWorktree applies the clean-worktree rule to a run that has not executed a step: a
+// workflow that writes must start from a clean restore point (specs/permissions/SPEC.md
+// §7.2). It is checked before any approval prompt, so nobody approves a run that cannot
+// start. A dirty tree that is allowed only gets a warning.
+func checkWorktree(cfg config.Config, wf domain.Workflow, dirty bool, stderr io.Writer) error {
+	if !dirty {
+		return nil
 	}
+	if wf.Contains(domain.ActionImplement) && cfg.Security.CleanWorktreeRequired() {
+		return &apperr.ConfigError{Msg: "the workflow includes implement, but the repository has uncommitted changes\n\n" +
+			"Commit or stash them first, so the run starts from a clean restore point,\n" +
+			"or set security.require_clean_worktree: false to run on top of them."}
+	}
+	logging.DirtyRepoWarning(stderr)
+	return nil
+}
 
-	runCtx, cancelRun := engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
-	defer cancelRun()
+// session is what the part of a run after the decision needs. run and resume each build
+// one, and both hand it to executeWorkflow.
+type session struct {
+	cfg        *config.Config
+	repo       *repository.Repository
+	store      *persistence.Store
+	run        *domain.Run
+	reporter   *logging.ConsoleReporter
+	prompter   interaction.Prompter
+	stdout     io.Writer
+	runner     *testexec.Runner
+	dispatcher *action.Dispatcher
+	// protected are the patterns the run must never change: security.protected_paths and
+	// the config file. They make the run-start baseline; the step guard adds the runs
+	// directory's resume inputs, which change with every step.
+	protected []string
+	// runsRel is the runs directory relative to the repository top level, or "".
+	runsRel string
+}
 
+// newSession builds the Dispatcher and resolves the guarded paths. Nothing here calls a
+// provider or runs git status: resume builds it before the baseline check, to restore the
+// Dispatcher's context from the artifacts.
+func newSession(ctx context.Context, cfg *config.Config, configPath string, registry *provider.Registry, osExec execution.ProcessExecutor,
+	repo *repository.Repository, store *persistence.Store, run *domain.Run, reporter *logging.ConsoleReporter,
+	prompter interaction.Prompter, stream, stdout io.Writer) *session {
 	runner := testexec.New(osExec)
-	if cfg.Test.Sandboxed() {
-		if runner.Sandbox, err = testSandbox(ctx, repo, cfg.Test); err != nil {
-			return failRun(store, run, err)
-		}
-	}
-	dispatcher := action.New(&cfg, registry, repo, runner)
+	dispatcher := action.New(cfg, registry, repo, runner)
 	dispatcher.Artifacts = store
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
-	runsRel := worktreeRel(decideCtx, repo, runsBaseDir)
-	dispatcher.Guard = action.NewRepoGuard(repo, append(protected, action.RunDirPatterns(runsRel)...))
+	runsRel := worktreeRel(ctx, repo, runsBaseDir)
 	dispatcher.RunsDir = runsRel
+	return &session{
+		cfg: cfg, repo: repo, store: store, run: run, reporter: reporter, prompter: prompter, stdout: stdout,
+		runner: runner, dispatcher: dispatcher,
+		protected: slices.Concat(cfg.Security.ProtectedPaths, configPattern(ctx, repo, configPath)),
+		runsRel:   runsRel,
+	}
+}
 
-	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
+// tailOptions is how run and resume differ in the shared tail.
+type tailOptions struct {
+	// mode is --mode; empty asks.
+	mode domain.RunMode
+	// defaultMode is what an empty answer to the mode prompt picks; empty has no default.
+	defaultMode domain.RunMode
+	// dirty is whether a run without executions starts on uncommitted changes, which
+	// makes its restore point a snapshot commit.
+	dirty bool
+	// resume is set by `resume`: the record appended to run.Resumes once the operator
+	// approved. Until then the persisted run is left exactly as it was found.
+	resume *domain.Resume
+	// engineContext starts the workflow's share of execution.timeout.
+	engineContext func() (context.Context, context.CancelFunc)
+}
+
+// executeWorkflow is everything after the decision, shared by run and resume: the
+// authority line, approval and mode, the restore point and run-start baseline (for a run
+// that has not executed a step), the test sandbox, the step guard, the engine and the
+// final answer.
+func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
+	run, store, cfg := s.run, s.store, s.cfg
+	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
+	if len(run.Executions) > 0 && run.PreRunRef != "" {
+		s.reporter.RestorePoint(run.PreRunRef)
+	}
+
+	mode := opts.mode
+	if mode != domain.ModeAuto {
+		resolvedMode, approved, err := interaction.ReviewAndSelectMode(s.prompter, s.stdout, mode, opts.defaultMode)
+		if err != nil {
+			if opts.resume != nil {
+				return err
+			}
+			return failRun(store, run, err)
+		}
+		if !approved {
+			if opts.resume == nil {
+				run.Status = domain.RunStopped
+				run.FailureReason = "cancelled by user"
+				_ = store.SaveRun(run)
+			}
+			return fmt.Errorf("run cancelled by user: %w", context.Canceled)
+		}
+		mode = resolvedMode
+		if mode == domain.ModePlan {
+			// A plan-mode resume changes nothing: the run stays resumable as it was.
+			if opts.resume == nil {
+				run.Mode = mode
+				if err := store.SaveRun(run); err != nil {
+					return err
+				}
+			}
+			fmt.Fprintln(s.stdout, "\nPlan approved. Not executing (plan mode).")
+			return nil
+		}
+	}
+	run.Mode = mode
+	if opts.resume != nil {
+		record := *opts.resume
+		record.At = time.Now()
+		record.Mode = mode
+		run.Resumes = append(run.Resumes, record)
+		run.Status = domain.RunRunning
+		run.FailureReason = ""
+	}
+	if err := store.SaveRun(run); err != nil {
+		return err
+	}
+
+	if len(run.Executions) == 0 {
+		recordRestorePoint(ctx, s.repo, run, opts.dirty, s.reporter)
+		// The guard over what the run must never change: the run-start baseline a resume
+		// is checked against.
+		if err := recordBaseline(ctx, s.repo, run, action.NewRepoGuard(s.repo, s.protected)); err != nil {
+			return failRun(store, run, err)
+		}
+		if err := store.SaveRun(run); err != nil {
+			return err
+		}
+	}
+
+	runCtx, cancelRun := opts.engineContext()
+	defer cancelRun()
+
+	if cfg.Test.Sandboxed() {
+		sandbox, err := testSandbox(ctx, s.repo, cfg.Test)
+		if err != nil {
+			return failRun(store, run, err)
+		}
+		s.runner.Sandbox = sandbox
+	}
+	// The step guard also covers the runs directory's resume inputs, which change with
+	// every step and so cannot be part of the baseline.
+	s.dispatcher.Guard = action.NewRepoGuard(s.repo, slices.Concat(s.protected, action.RunDirPatterns(s.runsRel)))
+
+	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
 	engine := &workflow.Engine{
-		Executor: dispatcher,
-		Observer: &runObserver{reporter: reporter, store: store},
+		Executor: s.dispatcher,
+		Observer: &runObserver{reporter: s.reporter, store: store},
 		Persist:  store.SaveRun,
-		Limits:   domain.LimitsView{MaxSteps: cfg.Limits.MaxSteps, MaxFixIterations: cfg.Limits.MaxFixIterations},
+		Limits:   limitsView(*cfg),
 	}
 
 	if mode == domain.ModeManual {
-		gate := interaction.NewTerminalGate(prompter, stdout)
-		gate.Changes = repo.StatusSummary
+		gate := interaction.NewTerminalGate(s.prompter, s.stdout)
+		gate.Changes = s.repo.StatusSummary
 		engine.Gate = gate
 	}
 
 	if err := engine.Run(runCtx, run); err != nil {
 		return err
 	}
-	if answer := dispatcher.FinalAnswer(run); answer != "" {
-		fmt.Fprintf(stdout, "\nAnswer:\n%s\n", answer)
+	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
+		fmt.Fprintf(s.stdout, "\nAnswer:\n%s\n", answer)
 	}
 	return nil
+}
+
+func limitsView(cfg config.Config) domain.LimitsView {
+	return domain.LimitsView{MaxSteps: cfg.Limits.MaxSteps, MaxFixIterations: cfg.Limits.MaxFixIterations}
 }
 
 // recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a

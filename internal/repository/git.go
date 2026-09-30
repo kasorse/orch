@@ -41,9 +41,10 @@ func Open(ctx context.Context, dir string, executor execution.ProcessExecutor) (
 }
 
 // IsDirty reports whether the working tree has uncommitted changes (staged, unstaged, or
-// untracked).
+// untracked). The orchestrator's own run directory does not count: in a repository that
+// does not ignore it, a run would otherwise make every later run and resume look dirty.
 func (r *Repository) IsDirty(ctx context.Context) (bool, error) {
-	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"status", "--porcelain"}, WorkingDir: r.Dir})
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"status", "--porcelain", "--", ":(top)", ":(exclude,top).orchestrator"}, WorkingDir: r.Dir})
 	if err != nil {
 		return false, &apperr.RepositoryError{Msg: "failed to run git status", Err: err}
 	}
@@ -202,6 +203,27 @@ func (r *Repository) HeadRef(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(out), nil
+}
+
+// CommitExists reports whether ref is a full commit SHA naming a commit in the repository.
+// Anything else - an abbreviation, a branch name, an option - is false without running git.
+func (r *Repository) CommitExists(ctx context.Context, ref string) (bool, error) {
+	if !isFullSHA(ref) {
+		return false, nil
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"cat-file", "-e", ref + "^{commit}"}, WorkingDir: r.Dir})
+	if err != nil {
+		return false, &apperr.RepositoryError{Msg: "failed to run git cat-file", Err: err}
+	}
+	return result.ExitCode == 0, nil
+}
+
+// isFullSHA reports whether s is a full SHA-1 or SHA-256 object name in lowercase hex.
+func isFullSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	return strings.Trim(s, "0123456789abcdef") == ""
 }
 
 // SnapshotCommit records the whole working tree - tracked changes, deletions and

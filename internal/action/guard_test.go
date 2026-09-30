@@ -283,7 +283,8 @@ func TestCheckBaseline(t *testing.T) {
 			t.Errorf("git status ran after the fingerprint changed: %v", rec.argv)
 		}
 		if msg := BaselineViolation(changed, "abc").Error(); !strings.Contains(msg, "since the run started") ||
-			!strings.Contains(msg, "Do not run git") || !strings.Contains(msg, "Restore point: abc") {
+			!strings.Contains(msg, "Do not run git") || !strings.Contains(msg, "Restore point: abc") ||
+			!strings.Contains(msg, "Moving or renaming the repository") {
 			t.Errorf("violation message:\n%s", msg)
 		}
 	})

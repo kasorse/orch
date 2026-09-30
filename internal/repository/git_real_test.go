@@ -178,6 +178,42 @@ func TestStatusSummary_ExcludesRunDirectory(t *testing.T) {
 	}
 }
 
+func TestIsDirty_IgnoresRunDirectory(t *testing.T) {
+	repo, dir := realRepo(t)
+	ctx := context.Background()
+	writeFile(t, filepath.Join(dir, ".orchestrator", "runs", "r1", "run.json"), "{}")
+	if dirty, err := repo.IsDirty(ctx); err != nil || dirty {
+		t.Fatalf("IsDirty with only the run directory = %v, %v; want clean", dirty, err)
+	}
+	writeFile(t, filepath.Join(dir, "notes.txt"), "untracked\n")
+	if dirty, err := repo.IsDirty(ctx); err != nil || !dirty {
+		t.Errorf("IsDirty with an untracked file = %v, %v; want dirty", dirty, err)
+	}
+}
+
+func TestCommitExists(t *testing.T) {
+	repo, dir := realRepo(t)
+	ctx := context.Background()
+	head := gitOut(t, dir, "rev-parse", "HEAD")
+	tree := gitOut(t, dir, "rev-parse", "HEAD^{tree}")
+	for _, tc := range []struct {
+		ref  string
+		want bool
+	}{
+		{head, true},
+		{tree, false}, // an object, but not a commit
+		{strings.Repeat("0", 40), false},
+		{head[:12], false}, // abbreviations are not accepted
+		{"HEAD", false},
+		{"--output=/tmp/x", false},
+		{strings.ToUpper(head), false},
+	} {
+		if got, err := repo.CommitExists(ctx, tc.ref); err != nil || got != tc.want {
+			t.Errorf("CommitExists(%q) = %v, %v; want %v", tc.ref, got, err, tc.want)
+		}
+	}
+}
+
 func TestGitDirs(t *testing.T) {
 	repo, dir := realRepo(t)
 	got, err := repo.GitDirs(context.Background())

@@ -38,7 +38,7 @@ func TestReviewAndSelectMode_ImmediateApproveWithPinnedMode(t *testing.T) {
 	p := &fakePrompter{answers: []string{"a"}}
 	var out bytes.Buffer
 
-	mode, approved, err := ReviewAndSelectMode(p, &out, domain.ModeManual)
+	mode, approved, err := ReviewAndSelectMode(p, &out, domain.ModeManual, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
 	p := &fakePrompter{answers: []string{"a", "2"}}
 	var out bytes.Buffer
 
-	mode, approved, err := ReviewAndSelectMode(p, &out, "")
+	mode, approved, err := ReviewAndSelectMode(p, &out, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,11 +69,48 @@ func TestReviewAndSelectMode_ApproveThenInteractiveModeSelect(t *testing.T) {
 	}
 }
 
+func TestReviewAndSelectMode_DefaultMode(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		answers []string
+		pinned  domain.RunMode
+		want    domain.RunMode
+	}{
+		{"empty answer takes the default", []string{"a", ""}, "", domain.ModeAuto},
+		{"an explicit choice wins", []string{"a", "2"}, "", domain.ModeManual},
+		{"--mode wins", []string{"a"}, domain.ModeAcceptEdits, domain.ModeAcceptEdits},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &fakePrompter{answers: tc.answers}
+			var out bytes.Buffer
+			mode, approved, err := ReviewAndSelectMode(p, &out, tc.pinned, domain.ModeAuto)
+			if err != nil || !approved || mode != tc.want {
+				t.Fatalf("ReviewAndSelectMode = %s, %v, %v; want %s", mode, approved, err, tc.want)
+			}
+			if p.idx != len(tc.answers) {
+				t.Errorf("consumed %d answers, want %d", p.idx, len(tc.answers))
+			}
+		})
+	}
+}
+
+func TestReviewAndSelectMode_EmptyAnswerWithoutDefaultAsksAgain(t *testing.T) {
+	p := &fakePrompter{answers: []string{"a", "", "3"}}
+	var out bytes.Buffer
+	mode, _, err := ReviewAndSelectMode(p, &out, "", "")
+	if err != nil || mode != domain.ModeAcceptEdits {
+		t.Fatalf("ReviewAndSelectMode = %s, %v; want accept-edits", mode, err)
+	}
+	if !strings.Contains(out.String(), "unrecognized option") {
+		t.Errorf("an empty answer without a default must be rejected, output:\n%s", out.String())
+	}
+}
+
 func TestReviewAndSelectMode_Cancel(t *testing.T) {
 	p := &fakePrompter{answers: []string{"c"}}
 	var out bytes.Buffer
 
-	_, approved, err := ReviewAndSelectMode(p, &out, "")
+	_, approved, err := ReviewAndSelectMode(p, &out, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

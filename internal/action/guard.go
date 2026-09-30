@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"orchestrator/internal/apperr"
@@ -176,7 +177,13 @@ func CheckBaseline(ctx context.Context, repo *repository.Repository, baseline js
 // BaselineViolation is the error a resume stops with when protected state changed since
 // the run started.
 func BaselineViolation(changed []string, restoreRef string) error {
-	return &apperr.WorkflowError{Msg: violationMessage("protected paths changed since the run started; the resume stops before anything runs:\n", changed, restoreRef)}
+	msg := violationMessage("protected paths changed since the run started; the resume stops before anything runs:\n", changed, restoreRef)
+	if slices.Contains(changed, gitViolation) {
+		// The fingerprint covers absolute paths, so a moved checkout looks the same.
+		msg += "\nMoving or renaming the repository since the run started is also reported as a .git change; " +
+			"such a run cannot be resumed from the new location."
+	}
+	return &apperr.WorkflowError{Msg: msg}
 }
 
 // pathspecs renders the patterns as git glob pathspecs anchored at the top and matching
