@@ -69,8 +69,12 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 // protectedViolation explains why the run stopped. The changes stay on disk for
 // inspection.
 func protectedViolation(step domain.ActionType, changed []string, restoreRef string) string {
+	return violationMessage(fmt.Sprintf("%s changed protected paths; the run stops before anything executes them:\n", step), changed, restoreRef)
+}
+
+func violationMessage(heading string, changed []string, restoreRef string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s changed protected paths; the run stops before anything executes them:\n", step)
+	b.WriteString(heading)
 	for _, p := range changed {
 		fmt.Fprintf(&b, "  %s\n", p)
 	}

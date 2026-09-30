@@ -22,12 +22,17 @@ one code path for both commands.
    mode, restore point + `head_ref` + baseline (only when the run has none), sandbox,
    Dispatcher + both guards, engine, final answer. `runTask` calls it, and its behaviour is
    unchanged; scenarios 1–16 are the check.
-2. **`run` changes.** Take `store.Lock` right after `NewRun`, held until return. Set and save
+2. **`IsDirty` ignores the runs directory.** `repo.IsDirty` is a plain
+   `git status --porcelain`, so in a repository that does not ignore `.orchestrator/` a
+   resume of a `pending` run would be refused by its own run directory (found in R04).
+   Exclude `:(exclude,top).orchestrator` as `StatusSummary` and `SnapshotCommit` already
+   do. For a second `run` in such a repository, this fixes the same false positive.
+3. **`run` changes.** Take `store.Lock` right after `NewRun`, held until return. Set and save
    `run.Decision`/`run.Workflow` before the dirty-tree refusal (G10). The refusal still
    happens before any prompt.
-3. **`resume` dispatch.** `case "resume"` with exactly one argument. The usage string gets
+4. **`resume` dispatch.** `case "resume"` with exactly one argument. The usage string gets
    `resume <run-id>`.
-4. **`resumeTask`**, in this order:
+5. **`resumeTask`**, in this order:
    1. Fail-fast chain (`loadAndValidateConfig`).
    2. `repository.Open` (rev-parse only).
    3. `ResolveRunID` → `Lock` → `LoadRun` → `workflow.Verify` (→ `not_resumable`).
@@ -42,19 +47,19 @@ one code path for both commands.
       (the engine stamps `len(run.Resumes)`), clear `FailureReason`, set status `running`,
       and save.
    No translator, decision provider or project-context manager is constructed.
-5. **Mode (§10).** `--mode` wins. Otherwise the mode prompt shows the persisted mode
+6. **Mode (§10).** `--mode` wins. Otherwise the mode prompt shows the persisted mode
    (unless it is `plan` or empty) as the default on an empty answer. A persisted `auto`
    still asks, and `--mode auto` is required for an unattended resume. The approval prompt
    is shown for every non-auto mode. In `plan` mode, resume prints the remaining workflow
    and returns without executing or changing the status.
-6. **Timeout.** `execution.timeout` starts at the beginning of `resumeTask`'s engine
+7. **Timeout.** `execution.timeout` starts at the beginning of `resumeTask`'s engine
    phase. There is no decision phase to discount.
 
 ## Acceptance
 
 - Scenarios 1–16 pass unchanged.
 - `orchestrator resume` with no argument or two arguments → usage error, exit 2.
-- The order in 4.6 is covered by R08 scenarios 5–7, and no provider call is made on any
+- The order in 5.6 is covered by R08 scenarios 5–7, and no provider call is made on any
   refusal path.
 - A dirty-tree refusal now leaves a `run.json` with `workflow`, and it is resumable after
   a commit.

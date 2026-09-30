@@ -41,6 +41,29 @@ what a later resume reads back without the guard stopping the step (`SPEC.md` §
 6. The violation message: reuse `protectedViolation` with a heading parameter
    ("changed since the run started" for resume, the step name at run time).
 
+## As built
+
+- The baseline **carries its own patterns** (`{"patterns", "git_fingerprint",
+  "protected"}`), and `CheckBaseline(ctx, repo, raw)` compares with exactly those. A
+  `security.protected_paths` edit between the stop and the resume therefore neither
+  hides a baseline path nor makes an unrelated path look changed. The current config's
+  patterns protect the steps that run from now on.
+- `GuardState.UnmarshalJSON` is strict: unknown fields, or an empty fingerprint, pattern
+  list or protected map, are refused.
+- `worktreeRel` (generalized from `configPattern`) resolves symlinks before comparing with
+  git's top level, which git reports resolved. Before this, a checkout reached through a
+  symlink would silently lose the config-file pattern.
+- `head_ref` is recorded best-effort, like the restore point: a repository without commits
+  has none. The baseline is required (step 4).
+- `violationMessage` is shared by the step guard and `BaselineViolation`. Only the heading
+  differs.
+- The git fingerprint hashes absolute paths, so a repository moved between the stop and
+  the resume is refused as a `.git (config or hooks)` change. That is safe, but the message
+  is misleading; R06 should say so when HEAD and the tree are otherwise unchanged.
+- Integration: `scenario17_resume_inputs_test.go` (the run records `head_ref` and the
+  baseline; implement rewriting another run's `run.json` or artifact → exit 4, `test`
+  never runs; a log write passes).
+
 ## Acceptance
 
 - `GuardState` round-trips through JSON, and `Changed(roundTripped)` is empty on an

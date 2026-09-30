@@ -7,6 +7,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -309,6 +310,13 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	}
 
 	recordRestorePoint(ctx, repo, run, dirty, reporter)
+	// The guard over what the run must never change: the run-start baseline a resume is
+	// checked against. The step guard also covers the runs directory's resume inputs,
+	// which change with every step and so cannot be part of the baseline.
+	protected := append(append([]string(nil), cfg.Security.ProtectedPaths...), configPattern(decideCtx, repo, configPath)...)
+	if err := recordBaseline(ctx, repo, run, action.NewRepoGuard(repo, protected)); err != nil {
+		return failRun(store, run, err)
+	}
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
@@ -327,7 +335,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
-	dispatcher.Guard = action.NewRepoGuard(repo, append(cfg.Security.ProtectedPaths, configPattern(decideCtx, repo, configPath)...))
+	dispatcher.Guard = action.NewRepoGuard(repo, append(protected, action.RunDirPatterns(worktreeRel(decideCtx, repo, runsBaseDir))...))
 
 	reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -372,6 +380,26 @@ func recordRestorePoint(ctx context.Context, repo *repository.Repository, run *d
 	reporter.RestorePoint(ref)
 }
 
+// recordBaseline sets run.HeadRef and run.ResumeBaseline before the first step
+// (specs/resume/SPEC.md §9.1-§9.2). Unlike the restore point, a baseline that cannot be
+// taken stops the run: without it the run could never be resumed safely, and the guard
+// takes the same snapshot around every implement and test anyway.
+func recordBaseline(ctx context.Context, repo *repository.Repository, run *domain.Run, guard *action.RepoGuard) error {
+	if head, err := repo.HeadRef(ctx); err == nil {
+		run.HeadRef = head
+	}
+	state, err := guard.Snapshot(ctx)
+	if err != nil {
+		return &apperr.WorkflowError{Msg: "failed to record the protected state before the first step", Err: err}
+	}
+	baseline, err := json.Marshal(state)
+	if err != nil {
+		return &apperr.WorkflowError{Msg: "failed to record the protected state before the first step", Err: err}
+	}
+	run.ResumeBaseline = baseline
+	return nil
+}
+
 // testSandbox resolves test.sandbox: bwrap into the paths the sandbox binds: the
 // repository root writable, its git directories read-only over it, $HOME hidden, and the
 // configured binds.
@@ -396,19 +424,33 @@ func testSandbox(ctx context.Context, repo *repository.Repository, t config.Test
 // lives inside the worktree, so implement cannot change the test command the next run
 // executes; nil when the config is outside the worktree.
 func configPattern(ctx context.Context, repo *repository.Repository, configPath string) []string {
-	abs, err := filepath.Abs(configPath)
+	if rel := worktreeRel(ctx, repo, configPath); rel != "" {
+		return []string{rel}
+	}
+	return nil
+}
+
+// worktreeRel returns p relative to the repository root, slash-separated, or "" when p is
+// outside the worktree or cannot be resolved.
+func worktreeRel(ctx context.Context, repo *repository.Repository, p string) string {
+	abs, err := filepath.Abs(p)
 	if err != nil {
-		return nil
+		return ""
+	}
+	// git reports the top level with symlinks resolved; so must p be, or a checkout
+	// reached through a symlink would put every path "outside" the worktree.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
 	}
 	top, err := repo.TopLevel(ctx)
 	if err != nil {
-		return nil
+		return ""
 	}
 	rel, err := filepath.Rel(top, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return nil
+		return ""
 	}
-	return []string{filepath.ToSlash(rel)}
+	return filepath.ToSlash(rel)
 }
 
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over
