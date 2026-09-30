@@ -1,0 +1,17 @@
+
+Fetching PMC-2789 from yourcompany.atlassian.net...
+✓ PMC-2789 (Bug) fetched in 0.3s
+
+Task (from PMC-2789):
+  | PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
+  | Type: Bug
+  | Parent: PMC-2663 — Tags & Labels
+  | Source: https://yourcompany.atlassian.net/browse/PMC-2789
+  | 
+  | Description:
+  | Steps to reproduce:
+  | # Hover {{Tags}}
+  | 
+  | Operator notes:
+  | only the FE part; leave pim-qa alone
+

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"orchestrator/internal/domain"
 )
@@ -85,6 +86,16 @@ func TestResumeOverview_Golden(t *testing.T) {
 			tree:  " M internal/retry/retry.go",
 			entry: domain.ActionImplement, why: "tests failed, retrying implement",
 			remaining: []domain.ActionType{domain.ActionImplement, domain.ActionTest, domain.ActionReview},
+		},
+		{
+			name: "resume_jira_source",
+			run: domain.Run{Status: domain.RunPending, Task: domain.Task{Description: "PMC-2789: ...", Source: &domain.TaskSource{
+				Kind: domain.TaskSourceJira, Key: "PMC-2789", URL: "https://example.atlassian.net/browse/PMC-2789",
+				// Local, so the golden file reads 10:12 in any time zone.
+				FetchedAt: time.Date(2026, 9, 30, 10, 12, 30, 0, time.Local),
+			}}},
+			entry: domain.ActionAnalyze, why: "start",
+			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
 		},
 		{
 			name:  "resume_plan_mode",

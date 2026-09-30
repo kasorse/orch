@@ -72,7 +72,44 @@ header line on a resumed Jira run.
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **`parseArgs`** returns `cliArgs`. The three value flags share one helper for the
+  `--flag X` / `--flag=X` forms, and their error messages are unchanged. `--jira`'s value
+  is trimmed. An empty or blank value gives `--jira requires an issue key or URL`, and a
+  second `--jira` gives `--jira given twice`.
+- **`Run`** refuses `--jira` with any command other than `run` before anything else, so
+  no config is read and nothing is printed. The general usage line and the `run` usage
+  line both show `run --jira <KEY|URL> ["notes"]`.
+- **`runTask(ctx, configPath, text, jiraRef, …)`**: `text` is the typed task, or the
+  notes with `--jira`. `DependencyOptions{Jira: jiraRef != ""}` is passed as a closure.
+  `ParseRef` runs right after the fail-fast chain. `taskFromJira` runs after
+  `repo.IsDirty` and before `store.NewRun`, under `decideCtx`, as in §10.
+  `TaskSource.Notes` is true only for notes that are non-empty after trimming, matching
+  what `Render` prints.
+- **`taskFromJira`** passes `EmailEnv`/`TokenEnv` to `jira.Options` for its messages (see
+  J02). It shows the host from `base_url` (`host[:port]`) in `Fetching … from …`.
+- **Console**:
+  - `FetchingTicket` opens with a blank line, as in §13.
+  - `TicketFetched` uses the existing `formatDuration` (`0.3s`, or `0s` against a local
+    server).
+  - `TicketMoved` prints to stdout, inside the ticket block (`task_block_moved.golden`).
+  - `TaskBlock` ends the text's last line if it lacks a newline, then prints a blank line
+    before `Run:`. Blank task lines print as `  | ` through the shared `PrefixWriter`.
+- **Resume**: `ResumeHeader` puts the source line right after `Resuming run …`
+  (`resume_jira_source.golden`). The other resume goldens are unchanged.
+- **J03 follow-up**: `ParseRef` now compares the hostname first, then the scheme, then
+  the port. An end-to-end check showed that a URL from another host with a different
+  scheme was reported as a scheme mismatch, which hid the real problem. A new `ParseRef`
+  case covers it.
+- **Tests**: `internal/app/args_test.go` is the package's first test file. It has the
+  `parseArgs` table, a check that `--jira` with `version`, `validate` or `resume` is a
+  usage error that prints nothing, and the usage strings. The acceptance item "a
+  `ParseRef` failure makes no request and creates no run directory" is left to J07
+  (scenario 5). It was checked once by hand through the integration harness, along with a
+  full `run --jira pmc-1 only Add`. That run printed the block, put the rendered task and
+  notes into the implement prompt, wrote `task.source` and `ticket.json`, and exited 0.
+  That throwaway test was not kept, because J07 writes the real scenarios.
 
 ## Gates
 

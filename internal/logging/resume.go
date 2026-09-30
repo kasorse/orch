@@ -12,10 +12,13 @@ import (
 // it: ResumeHeader, History, WorkingTree, NextStep, then the existing Authority and
 // RestorePoint lines. --verbose changes nothing here.
 
-// ResumeHeader opens `orchestrator resume`: the run, its directory, and the state the
-// previous attempt left it in. A run found "running" is one whose process died.
+// ResumeHeader opens `orchestrator resume`: the run, its directory, where its task came
+// from when that was a Jira ticket, and the state the previous attempt left it in. A run found "running" is one whose process died.
 func (r *ConsoleReporter) ResumeHeader(run *domain.Run, dir string) {
 	fmt.Fprintf(r.Out, "Resuming run %s  (%s)\n", run.ID, dir)
+	if run.Task.Source != nil {
+		fmt.Fprintln(r.Out, taskSourceLine(run.Task.Source))
+	}
 	status := string(run.Status)
 	switch {
 	case run.Status == domain.RunRunning:

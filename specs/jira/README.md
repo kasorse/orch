@@ -3,7 +3,7 @@
 Status: **in progress**. The design questions are answered (`SPEC.md` §18 Q1–Q7). The
 tasks assume the defaults D1–D7 in `SPEC.md` §18.
 
-J01–J05 are done; J06–J08 remain.
+J01–J06 are done; J07 and J08 remain.
 
 | document | role |
 |---|---|
@@ -33,7 +33,7 @@ gap where the test command could read them.
 | [J03](tasks/TASK-J03-parse-and-render.md) | `ParseRef`, `Render`, golden files ✓ | S | J05 |
 | [J04](tasks/TASK-J04-scrub-credentials.md) | child processes lose the Jira and Jev credential variables ✓ | S | J01 |
 | [J05](tasks/TASK-J05-domain-and-persistence.md) | `Ticket`, `TaskSource`, load validation, `ticket.json` ✓ | S | — |
-| [J06](tasks/TASK-J06-run-flag.md) | `run --jira`: CLI, `taskFromJira`, console output, exit codes, resume line | M | J01–J05 |
+| [J06](tasks/TASK-J06-run-flag.md) | `run --jira`: CLI, `taskFromJira`, console output, exit codes, resume line ✓ | M | J01–J05 |
 | [J07](tasks/TASK-J07-integration.md) | integration scenarios 19a–19h | M | J06 |
 | [J08](tasks/TASK-J08-documentation.md) | MVP.md §39 and the amendments, CLAUDE.md, README, example config | S | all |
 

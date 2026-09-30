@@ -43,6 +43,7 @@ func TestParseRef(t *testing.T) {
 		// URLs that do not name one issue on this instance.
 		{"dc without context path", "https://h/browse/PMC-1", dc, "", "is not an issue link"},
 		{"other host", "https://x.example/browse/PMC-1", cloud, "", `--jira URL host "x.example" does not match jira.base_url "h.atlassian.net"`},
+		{"other host and scheme", "http://x.example/browse/PMC-1", cloud, "", `--jira URL host "x.example" does not match`},
 		{"other scheme", "http://h.atlassian.net/browse/PMC-1", cloud, "", `--jira URL scheme "http" does not match jira.base_url's "https"`},
 		{"other port", "https://h.atlassian.net:8443/browse/PMC-1", cloud, "", `--jira URL host "h.atlassian.net:8443" does not match`},
 		{"board", cloud + "/jira/software/projects/PMC/boards/1?selectedIssue=PMC-1", cloud, "", "is not an issue link"},

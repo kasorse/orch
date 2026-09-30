@@ -26,6 +26,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/interaction"
+	"orchestrator/internal/jira"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/projectctx"
@@ -45,16 +46,23 @@ const defaultConfigPath = "orchestrator.yaml"
 
 const runsBaseDir = ".orchestrator/runs"
 
+const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
+	`<version|validate|run "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>>`
+
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
 // exitcode.FromError.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	configPath, mode, verbose, rest, err := parseArgs(args)
+	cli, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
+	rest := cli.rest
 	if len(rest) == 0 {
-		return &apperr.ConfigError{Msg: `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] <version|validate|run "<task>"|resume <run-id>>`}
+		return &apperr.ConfigError{Msg: usage}
+	}
+	if cli.jiraRef != "" && rest[0] != "run" {
+		return &apperr.ConfigError{Msg: "--jira is only valid with run"}
 	}
 
 	switch rest[0] {
@@ -62,59 +70,89 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "orchestrator version %s\n", Version)
 		return nil
 	case "validate":
-		return runValidate(configPath, stdout)
+		return runValidate(cli.configPath, stdout)
 	case "run":
-		if len(rest) < 2 {
-			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"`}
+		// With --jira the ticket is the task, and any text is the operator's notes on it.
+		if cli.jiraRef == "" && len(rest) < 2 {
+			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, configPath, strings.Join(rest[1:], " "), mode, verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
 		}
-		return resumeTask(ctx, configPath, rest[1], mode, verbose, stdin, stdout, stderr)
+		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.verbose, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, and --verbose/-v out of args (in
-// any position) and returns the resolved config path, resolved mode (empty if --mode was
-// not given - the caller then runs the interactive mode-select prompt), whether --verbose
-// was given (spec §11 Q5: the sole verbosity switch - no config key or env var), and the
-// remaining positional arguments.
-func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose bool, rest []string, err error) {
-	configPath = defaultConfigPath
+// cliArgs is the command line after parseArgs.
+type cliArgs struct {
+	configPath string
+	// mode is empty if --mode was not given - the caller then runs the interactive
+	// mode-select prompt.
+	mode domain.RunMode
+	// verbose is --verbose (spec §11 Q5: the sole verbosity switch - no config key or env
+	// var).
+	verbose bool
+	// jiraRef is --jira's value: an issue key or its URL (specs/jira/SPEC.md §6).
+	jiraRef string
+	// rest are the positional arguments.
+	rest []string
+}
+
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X and
+// --verbose/-v out of args, in any position, and returns them with the remaining
+// positional arguments.
+func parseArgs(args []string) (cliArgs, error) {
+	cli := cliArgs{configPath: defaultConfigPath}
+	// value returns the flag's value from "--flag=X" or the next argument.
+	value := func(i *int, name string) (string, error) {
+		if v, ok := strings.CutPrefix(args[*i], name+"="); ok {
+			return v, nil
+		}
+		if *i+1 >= len(args) {
+			return "", fmt.Errorf("%s requires a value", name)
+		}
+		*i++
+		return args[*i], nil
+	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
-		case arg == "--config":
-			if i+1 >= len(args) {
-				return "", "", false, nil, fmt.Errorf("--config requires a value")
+		case arg == "--config" || strings.HasPrefix(arg, "--config="):
+			v, err := value(&i, "--config")
+			if err != nil {
+				return cliArgs{}, err
 			}
-			configPath = args[i+1]
-			i++
-		case strings.HasPrefix(arg, "--config="):
-			configPath = strings.TrimPrefix(arg, "--config=")
-		case arg == "--mode":
-			if i+1 >= len(args) {
-				return "", "", false, nil, fmt.Errorf("--mode requires a value")
+			cli.configPath = v
+		case arg == "--mode" || strings.HasPrefix(arg, "--mode="):
+			v, err := value(&i, "--mode")
+			if err != nil {
+				return cliArgs{}, err
 			}
-			if mode, err = domain.ParseRunMode(args[i+1]); err != nil {
-				return "", "", false, nil, err
+			if cli.mode, err = domain.ParseRunMode(v); err != nil {
+				return cliArgs{}, err
 			}
-			i++
-		case strings.HasPrefix(arg, "--mode="):
-			if mode, err = domain.ParseRunMode(strings.TrimPrefix(arg, "--mode=")); err != nil {
-				return "", "", false, nil, err
+		case arg == "--jira" || strings.HasPrefix(arg, "--jira="):
+			if cli.jiraRef != "" {
+				return cliArgs{}, fmt.Errorf("--jira given twice")
+			}
+			v, err := value(&i, "--jira")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.jiraRef = strings.TrimSpace(v); cli.jiraRef == "" {
+				return cliArgs{}, fmt.Errorf("--jira requires an issue key or URL")
 			}
 		case arg == "--verbose" || arg == "-v":
-			verbose = true
+			cli.verbose = true
 		default:
-			rest = append(rest, arg)
+			cli.rest = append(cli.rest, arg)
 		}
 	}
-	return configPath, mode, verbose, rest, nil
+	return cli, nil
 }
 
 // sandboxProbeTimeout bounds the one bwrap run that checks the host can sandbox tests.
@@ -185,7 +223,9 @@ func runValidate(configPath string, stdout io.Writer) error {
 	return err
 }
 
-func runTask(ctx context.Context, configPath, taskDescription string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+// runTask runs a new task. text is the task typed on the command line or, with jiraRef
+// (run --jira), the operator's notes on the ticket, which may be empty.
+func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := logging.NewConsoleReporter(stdout)
 	reporter.Verbose = verbose
 
@@ -193,10 +233,18 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 	registry := newRegistry(osExec)
 
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
-	// or translator exists and before any provider is called.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
+	// or translator exists and before any provider is called. With --jira it includes the
+	// credential variables, and the reference is resolved before any request.
+	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
+	}
+	var jiraKey string
+	if jiraRef != "" {
+		if jiraKey, err = jira.ParseRef(jiraRef, cfg.Jira.BaseURL); err != nil {
+			return err
+		}
 	}
 
 	// execution.timeout starts here and covers translation, the pre-check, context
@@ -227,8 +275,21 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		stream = logging.NewPrefixWriter(stdout, "  | ")
 	}
 
+	task := domain.Task{Description: text, CreatedAt: time.Now()}
+	var ticket domain.Ticket
+	if jiraKey != "" {
+		// The one Jira request. A failure creates no run: there is nothing to resume
+		// without a task (specs/jira/SPEC.md J2).
+		if ticket, task.Description, err = taskFromJira(decideCtx, cfg, jiraKey, text, reporter); err != nil {
+			return err
+		}
+		task.Source = &domain.TaskSource{
+			Kind: domain.TaskSourceJira, Key: ticket.Key, RequestedKey: ticket.RequestedKey,
+			URL: ticket.URL, FetchedAt: ticket.FetchedAt, Notes: strings.TrimSpace(text) != "",
+		}
+	}
+
 	store := persistence.NewStore(runsBaseDir)
-	task := domain.Task{Description: taskDescription, CreatedAt: time.Now()}
 	run, err := store.NewRun(task)
 	if err != nil {
 		return err
@@ -240,6 +301,11 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 		return err
 	}
 	defer unlock()
+	if task.Source != nil {
+		if err := store.SaveTicket(run.ID, ticket); err != nil {
+			return failRun(store, run, err)
+		}
+	}
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
 	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)

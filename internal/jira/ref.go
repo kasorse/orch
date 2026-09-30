@@ -38,13 +38,19 @@ func ParseRef(ref, baseURL string) (string, error) {
 		return "", apperr.NewConfigError("jira.base_url is not a valid URL", nil)
 	}
 
+	// The host is checked first: it is what a URL from another instance gets wrong, and
+	// the most useful thing to name.
+	hostMismatch := apperr.NewConfigError(fmt.Sprintf(
+		"--jira URL host %q does not match jira.base_url %q", u.Host, base.Host), nil)
+	if !strings.EqualFold(u.Hostname(), base.Hostname()) {
+		return "", hostMismatch
+	}
 	if !strings.EqualFold(u.Scheme, base.Scheme) {
 		return "", apperr.NewConfigError(fmt.Sprintf(
 			"--jira URL scheme %q does not match jira.base_url's %q", u.Scheme, base.Scheme), nil)
 	}
-	if !strings.EqualFold(u.Hostname(), base.Hostname()) || port(u) != port(base) {
-		return "", apperr.NewConfigError(fmt.Sprintf(
-			"--jira URL host %q does not match jira.base_url %q", u.Host, base.Host), nil)
+	if port(u) != port(base) {
+		return "", hostMismatch
 	}
 
 	// On Data Center the base carries a context path (https://jira.corp/jira); issue URLs
