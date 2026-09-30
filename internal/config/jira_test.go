@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -227,5 +228,35 @@ func TestLoad_JiraAbsent(t *testing.T) {
 	}
 	if cfg.Jira != nil {
 		t.Errorf("Jira = %+v, want nil", cfg.Jira)
+	}
+}
+
+func TestConfig_CredentialEnvNames(t *testing.T) {
+	bearer := validJira()
+	bearer.Auth, bearer.EmailEnv, bearer.TokenEnv = JiraAuthBearer, "", "JIRA_PAT"
+	basic := validJira()
+	shared := validJira()
+	shared.EmailEnv, shared.TokenEnv = "JEV_API_KEY", "JEV_API_KEY"
+
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   []string
+	}{
+		{"jev only", func(*Config) {}, []string{"JEV_API_KEY"}},
+		{"llm provider keeps the jev variable", func(c *Config) { c.Decision.Provider = "claude" }, []string{"JEV_API_KEY"}},
+		{"no jev variable", func(c *Config) { c.Decision.Jev.APIKeyEnv = "  " }, nil},
+		{"basic", func(c *Config) { c.Jira = &basic }, []string{"JEV_API_KEY", "JIRA_API_TOKEN", "JIRA_EMAIL"}},
+		{"bearer has no email", func(c *Config) { c.Jira = &bearer }, []string{"JEV_API_KEY", "JIRA_PAT"}},
+		{"duplicates", func(c *Config) { c.Jira = &shared }, []string{"JEV_API_KEY"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg)
+			if got := cfg.CredentialEnvNames(); !slices.Equal(got, tc.want) {
+				t.Errorf("CredentialEnvNames() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

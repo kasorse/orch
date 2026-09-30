@@ -51,7 +51,32 @@ its own before the rest of the feature.
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **`CredentialEnvNames`** is in `internal/config/config.go`. It trims
+  `decision.jev.api_key_env` (as `jevKeyProblems` does), drops empty names, and returns
+  `nil` when nothing is named.
+- **`ScrubCredentials`** ignores empty names. `scrub` holds the read lock for the whole
+  pass. The `ScrubbedEnv` comment now says the credential variables are removed too;
+  before, it said auth variables are inherited.
+- **Where it runs**: the call sits in `loadAndValidateConfig` right after `Validate`, so
+  it applies before `ValidateDependencies` and the bwrap probe. That covers `run`,
+  `resume` and `validate` alike.
+- **Sandbox test**: `TestSandboxEnv` registers a name only it uses
+  (`ORCH_SANDBOX_TEST_TOKEN`) instead of resetting the set. The reset helper lives in
+  `execution`'s `export_test.go`, which `testexec` tests cannot see, and the set only
+  grows.
+- **Tests**:
+  - `TestScrub_CredentialVars` drops exactly the three names plus the parent-session
+    variables, including a bare `JIRA_EMAIL` with no `=`. It keeps `JIRA_API_TOKEN_OLD`,
+    `XJEV_API_KEY`, a lower-case `jira_api_token`, `PATH` and `HOME`.
+  - `TestScrubbedEnv_CredentialVarsRegisteredLater` checks that the set is read at call
+    time.
+  - `TestConfig_CredentialEnvNames` covers Jev only, an LLM provider (the Jev name is
+    kept), a blank name, basic, bearer and duplicates.
+- **Integration check**: scenario 19g (the test command's environment) is left for J07,
+  as planned. Integration scenarios 1–18 pass unchanged; no fake provider relied on
+  `JEV_API_KEY`.
 
 ## Gates
 

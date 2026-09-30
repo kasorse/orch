@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -168,6 +169,21 @@ type SecurityConfig struct {
 // worktree - true unless security.require_clean_worktree is explicitly false.
 func (s SecurityConfig) CleanWorktreeRequired() bool {
 	return s.RequireCleanWorktree == nil || *s.RequireCleanWorktree
+}
+
+// CredentialEnvNames lists the environment variables the configuration names as the
+// orchestrator's own credentials, sorted and without duplicates: decision.jev.api_key_env
+// whatever the decision provider (the variable may be set either way), and jira.token_env
+// and jira.email_env when the jira section is present. No child process may inherit them
+// (execution.ScrubCredentials, specs/jira/SPEC.md §12).
+func (c Config) CredentialEnvNames() []string {
+	names := []string{strings.TrimSpace(c.Decision.Jev.APIKeyEnv)}
+	if c.Jira != nil {
+		names = append(names, c.Jira.TokenEnv, c.Jira.EmailEnv)
+	}
+	names = slices.DeleteFunc(names, func(n string) bool { return n == "" })
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 // actionProviderModels returns every configured action alongside its pseudo-action

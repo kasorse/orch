@@ -121,7 +121,7 @@ func parseArgs(args []string) (configPath string, mode domain.RunMode, verbose b
 const sandboxProbeTimeout = 10 * time.Second
 
 // loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
-// ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
+// (register the credential variables to scrub) -> ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
 // ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
@@ -135,6 +135,9 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	if err := config.Validate(cfg); err != nil {
 		return config.Config{}, err
 	}
+	// From here on no child process - the sandbox probe included - inherits a variable
+	// the config names as a credential (specs/jira/SPEC.md §12).
+	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
 		return config.Config{}, err
 	}

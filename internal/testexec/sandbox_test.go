@@ -54,6 +54,10 @@ func TestSandboxArgs(t *testing.T) {
 func TestSandboxEnv(t *testing.T) {
 	t.Setenv("TMPDIR", "/tmp/claude-1000")
 	t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", "planted")
+	// A name only this test uses: the credential set is process-wide and only grows, and
+	// its reset helper is private to package execution.
+	t.Setenv("ORCH_SANDBOX_TEST_TOKEN", "planted")
+	execution.ScrubCredentials("ORCH_SANDBOX_TEST_TOKEN")
 	env := testSandbox().env()
 	tmp := slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return !strings.HasPrefix(kv, "TMPDIR=") })
 	if !slices.Equal(tmp, []string{"TMPDIR=/tmp"}) {
@@ -61,6 +65,9 @@ func TestSandboxEnv(t *testing.T) {
 	}
 	if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_TOKEN=") }) {
 		t.Error("the sandboxed environment must be scrubbed too")
+	}
+	if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "ORCH_SANDBOX_TEST_TOKEN=") }) {
+		t.Error("the sandboxed environment must not carry a credential variable")
 	}
 }
 
