@@ -123,8 +123,9 @@ const sandboxProbeTimeout = 10 * time.Second
 // loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
 // ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
 // ValidateAuthorities. The registry is only asked what its
-// adapters can enforce; constructing it makes no calls.
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter) (config.Config, error) {
+// adapters can enforce; constructing it makes no calls. depOpts chooses the optional
+// dependency checks from the loaded config (see config.DependencyOptions).
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
@@ -134,7 +135,7 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	if err := config.Validate(cfg); err != nil {
 		return config.Config{}, err
 	}
-	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}); err != nil {
+	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
 		return config.Config{}, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
@@ -166,9 +167,18 @@ func newRegistry(executor execution.ProcessExecutor) *provider.Registry {
 	return registry
 }
 
+// noJiraDependencies is the dependency check of a command that does not fetch a ticket:
+// a jira section's variables are not its concern (specs/jira/SPEC.md §7.2).
+func noJiraDependencies(config.Config) config.DependencyOptions { return config.DependencyOptions{} }
+
+// runValidate checks the Jira variables whenever the section is present, so validate
+// answers "would run --jira work here?".
 func runValidate(configPath string, stdout io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
-	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewConsoleReporter(stdout))
+	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewConsoleReporter(stdout),
+		func(cfg config.Config) config.DependencyOptions {
+			return config.DependencyOptions{Jira: cfg.Jira != nil}
+		})
 	return err
 }
 
@@ -181,7 +191,7 @@ func runTask(ctx context.Context, configPath, taskDescription string, mode domai
 
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter)
+	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}

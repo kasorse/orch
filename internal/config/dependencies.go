@@ -36,17 +36,34 @@ func (f FakeDependencyChecker) LookPath(file string) (string, error) {
 	return "/fake/bin/" + file, nil
 }
 
+// DependencyOptions says which optional integrations this invocation needs, so their
+// dependencies are checked only then: a jira section in the file must not break a run
+// that does not use --jira (specs/jira/SPEC.md §7.2).
+type DependencyOptions struct {
+	// Jira checks that the jira section exists and its credential variables are set:
+	// run --jira, and orchestrator validate whenever the section is present.
+	Jira bool
+
+	// getenv reads the environment; nil means os.Getenv. Tests inject it so they don't
+	// have to mutate the process environment.
+	getenv func(string) string
+}
+
 // ValidateDependencies verifies, for every provider referenced by cfg - every action,
 // translation, and an LLM decision provider - that the corresponding CLI executable is
-// present in PATH, and for the Jev decision provider that its API key is set. It must
-// run after Validate and before any provider or decision object is constructed, so a
-// missing dependency is caught before any AI call is made - even one only needed by a
-// later step (MVP.md §7).
-func ValidateDependencies(cfg Config, checker DependencyChecker) error {
+// present in PATH, for the Jev decision provider that its API key is set, and with
+// opts.Jira that the Jira credential variables are set. It must run after Validate and
+// before any provider or decision object is constructed, so a missing dependency is
+// caught before any AI call or HTTP request is made - even one only needed by a later
+// step (MVP.md §7).
+func ValidateDependencies(cfg Config, checker DependencyChecker, opts DependencyOptions) error {
 	problems := jevKeyProblems(cfg.Decision)
 	pms := append(cfg.actionProviderModels(), decisionProviderModels(cfg)...)
 	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
+	if opts.Jira {
+		problems = append(problems, jiraCredentialProblems(cfg.Jira, opts.getenv)...)
+	}
 	if len(problems) == 0 {
 		return nil
 	}

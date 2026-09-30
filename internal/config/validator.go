@@ -12,7 +12,8 @@ import (
 
 // Validate checks structural correctness of the config: version, action provider/model
 // presence, supported provider names, test command presence, positive limits/timeout,
-// and the decision surface (decision, translation, policy, context - see decision.go).
+// the decision surface (decision, translation, policy, context - see decision.go) and,
+// when present, the jira section (jira.go).
 // It aggregates every problem found into a single *apperr.ConfigError rather than
 // failing on the first issue, so a user sees the full list of what to fix in one pass.
 func Validate(cfg Config) error {
@@ -61,6 +62,10 @@ func Validate(cfg Config) error {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
 			problems = append(problems, fmt.Sprintf("security.protected_paths[%d] %q: %v", i, p, err))
 		}
+	}
+
+	if cfg.Jira != nil {
+		problems = append(problems, validateJira(*cfg.Jira)...)
 	}
 
 	if len(problems) == 0 {

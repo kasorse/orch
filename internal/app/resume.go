@@ -33,7 +33,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter)
+	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}
