@@ -1,16 +1,16 @@
 # Task from a Jira ticket
 
-Status: **in progress**. The design questions are answered (`SPEC.md` §18 Q1–Q7). The
-tasks assume the defaults D1–D7 in `SPEC.md` §18.
-
-J01–J07 are done; J08 remains.
+Status: **implemented** (2026-09-30). All tasks J01–J08 are done. MVP.md §39 is the
+normative home; this folder is the design record. The design questions are answered
+(`SPEC.md` §18 Q1–Q7), and the defaults D1–D7 were kept. What was built differently, and
+why, is in each task's "As built" section.
 
 | document | role |
 |---|---|
 | [`SPEC.md`](SPEC.md) | the specification: findings, principles, CLI, config, fetch, rendering, persistence, security, errors, tests, decisions |
 | [`tasks/`](tasks/) | 8 implementation tasks |
 
-When J08 is done, MVP.md §39 is the normative home, and this folder is the design record.
+MVP.md §39 is the normative home, and this folder is the design record.
 
 ## The problem in one paragraph
 
@@ -35,7 +35,7 @@ gap where the test command could read them.
 | [J05](tasks/TASK-J05-domain-and-persistence.md) | `Ticket`, `TaskSource`, load validation, `ticket.json` ✓ | S | — |
 | [J06](tasks/TASK-J06-run-flag.md) | `run --jira`: CLI, `taskFromJira`, console output, exit codes, resume line ✓ | M | J01–J05 |
 | [J07](tasks/TASK-J07-integration.md) | integration scenarios 19a–19h ✓ | M | J06 |
-| [J08](tasks/TASK-J08-documentation.md) | MVP.md §39 and the amendments, CLAUDE.md, README, example config | S | all |
+| [J08](tasks/TASK-J08-documentation.md) | MVP.md §39 and the amendments, CLAUDE.md, README, example config ✓ | S | all |
 
 ```
 J05 ──┬── J02 ──┐

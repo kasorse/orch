@@ -1,8 +1,8 @@
 # Spec: Take the task from a Jira ticket
 
-Status: **proposed**. The design questions were answered on 2026-09-30 (§18). Defaults
-chosen without asking are marked "default" in §18 and can still be changed before work
-starts.
+Status: **implemented** (2026-09-30), with the defaults of §18 kept. MVP.md §39 is now the
+normative summary; this document is the design record. Where the build differs from the
+text below, the task's "As built" section in `tasks/` says how and why.
 Scope: a new `--jira <KEY|URL>` flag on `orchestrator run`. It fetches one issue over the
 Jira REST API (read-only) and renders it into the task text, and the rest of the run is
 unchanged. The decision flow, workflow construction, transitions, static routing,

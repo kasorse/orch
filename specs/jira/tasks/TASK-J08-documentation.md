@@ -56,7 +56,60 @@ as `specs/resume/` is for §37 (`SPEC.md` §15).
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **MVP.md**:
+  - **§39** has ten subsections: CLI and `ParseRef`, config and credentials, the request,
+    response validation, rendering, order of operations, persistence and resume, security,
+    errors and exit codes, and not covered.
+  - **Amended**: §2 (two HTTP exceptions), §4, §5 (a commented `jira` block in the example
+    config), §6, §7, §21 (`ticket.json` in the tree, `task.source` in the saved list),
+    §23, §24, §27 (the ticket block and the resume source line, after the resume
+    overview), §30 and §38.5.
+  - **Not in the task's list**: §26 (the `jira/` package, and that its wire types stay
+    unexported) and §29 (a "Jira scenarios" paragraph like the resume and decision ones).
+  - **Env scrub**: the text went into §38.2, not §38.3, because that is where MVP.md
+    describes `ScrubbedEnv`.
+  - **§27 example**: the run ID uses the short style of the rest of §27, because
+    `SPEC.md` §13's `20260930-101204-a1b2c3d4` is not what the code produces (IDs are
+    UUIDs).
+- **CLAUDE.md**:
+  - The intro points to §39 and `specs/jira/`.
+  - The Architecture paragraph notes that `internal/jira` keeps its wire types private and
+    never imports `config`.
+  - The flow diagram gains the `[--jira]` fetch line, and the text under it names
+    `app.taskFromJira`.
+  - The fail-fast bullet mentions `DependencyOptions`, and the guard bullet mentions the
+    credential scrub.
+  - The Jev-key sentence now says the key is scrubbed from child processes.
+  - The new Jira invariant is its own bullet.
+  - Out of scope, the test harness (`FAKE_ENV_DIR`, the fake Jira, the `internal/jira`
+    golden files) and run artifacts are updated.
+- **README**:
+  - Prerequisites and the configuration bullets say the credentials are needed only by
+    `run --jira`.
+  - The security section mentions the scrubbed credential variables and has a "not
+    protected" bullet for ticket text.
+  - "What is sent to Jev" notes that the rendered ticket is the request text, and a new
+    "What is sent to Jira" section follows it.
+  - Usage adds the synopsis line and a `validate` note, plus a new "Taking the task from a
+    Jira ticket" section: examples, the config block, Cloud and Data Center token setup,
+    finding custom field ids via `/rest/api/2/field`, resume, and failures.
+  - A Jira paragraph is added under "Reading a failure", `ticket.json` and `task.source`
+    under run artifacts, and the limitations are updated.
+- **`orchestrator.example.yaml`**: the commented `jira` block, one comment per key.
+  `TestLoad_ExampleConfigIsValid` still passes with it commented out.
+- **Checked by hand**: the example config with the `jira` block uncommented, validated
+  with `go build` and `orchestrator --config … validate`:
+  - with `JEV_API_KEY`, `JIRA_EMAIL` and `JIRA_API_TOKEN` set: `✓ configuration valid`,
+    exit 0;
+  - with the two Jira variables unset: both named (`jira.email_env names JIRA_EMAIL, which
+    is not set`, `jira.token_env names JIRA_API_TOKEN, which is not set`), exit 2.
+- **HTTP review**: `grep -n "HTTP" MVP.md CLAUDE.md README.md` was reviewed. The remaining
+  mentions are status codes, the Jev client, and the three places that now say the HTTP
+  integrations are Jev and one Jira read (MVP.md §2 and §30, CLAUDE.md out of scope,
+  README limitations).
+- **Status**: `specs/jira/README.md` and `SPEC.md` now say **implemented**.
 
 ## Gates
 

@@ -8,7 +8,9 @@ persisting run state to disk. Full spec: `MVP.md` — treat it as the source of 
 decision layer in detail: `specs/JEV integration/SPEC.md` (normative) and
 `specs/JEV integration/TASKS.md` (plan, decisions, and what was built differently and why);
 the permission model: MVP.md §38, with its design record in `specs/permissions/`;
-resume: MVP.md §37, with its design record in `specs/resume/`.
+resume: MVP.md §37, with its design record in `specs/resume/`;
+the task from a Jira ticket (`run --jira`): MVP.md §39, with its design record in
+`specs/jira/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -28,7 +30,8 @@ Orchestrator/workflow code must never contain AI-provider-specific behavior. Per
 argv quirks — including how an authority becomes permission flags — are isolated in each
 provider's `buildArgs` function (`internal/provider/{claude,codex,gemini}/client.go`). Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
-are unexported.
+are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
+`domain`, `apperr` and the standard library, never `config`).
 
 `internal/workflow` and `internal/policy` must never import anything but `domain` (the
 workflow package also defines its own `StepExecutor` interface). `internal/action` is the
@@ -38,6 +41,7 @@ composition point that implements `StepExecutor` using config/provider/repositor
 ## Decision flow (MVP.md §8–§9)
 
 ```
+[--jira] → fetch the issue, render it as the task  (internal/jira; failure → exit, no run)
 request → translate if ≥30% Cyrillic prose (internal/translate; failure → original + warning)
         → pre-check: P(none), P(project)              (decision.Provider.ContextDepth)
         → policy: project if P(project) ≥ project_threshold
@@ -49,9 +53,11 @@ request → translate if ≥30% Cyrillic prose (internal/translate; failure → 
   provider failure → manual choice (on_failure: ask, interactive only) or error
 ```
 
-`internal/classification.Service` runs this flow. Providers: `jev.Provider` (HTTP client or
-the offline `jev.NewMockClient()` with `decision.jev.mock: true`) and `llm.Provider` (a CLI
-answering the same questions), selected statically by `decision.provider`. Both use the
+`internal/classification.Service` runs this flow; `app.taskFromJira` runs the optional
+fetch before it, and the rendered text is then the request like typed text. Providers:
+`jev.Provider` (HTTP client or the offline `jev.NewMockClient()` with
+`decision.jev.mock: true`) and `llm.Provider` (a CLI answering the same questions),
+selected statically by `decision.provider`. Both use the
 shared questions (`internal/decision/questions.go`) and state (`internal/decision/state.go`) —
 edit them in one place only, and treat any wording change as a reason to recalibrate
 thresholds.
@@ -86,7 +92,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   run fully, in order, before any decision client or translator is constructed (the provider
   registry is built first; constructing it calls nothing). `Validate` covers the decision
   surface too; `ValidateDependencies` checks every action's, the translator's and an LLM
-  decision provider's executable, and the Jev API key; `ValidateAuthorities` checks that each
+  decision provider's executable, and the Jev API key, and — only with
+  `DependencyOptions{Jira: true}` (`run --jira`, and `validate` when the section is
+  present) — the Jira section and its variables; `ValidateAuthorities` checks that each
   route's provider can enforce its authority. A missing executable for an action used later
   (e.g. Codex for `review`) must fail `orchestrator run` before anything is called.
 - **Least authority, fixed in Go, fail closed** (MVP.md §38, `specs/permissions/`). Every
@@ -107,7 +115,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
   required — `implement` and `test` refuse without one. Provider CLIs and `test` run with
-  `execution.ScrubbedEnv()`; git keeps the full environment. `test.sandbox: bwrap`
+  `execution.ScrubbedEnv()`, which also drops the credential variables the config names
+  (`Config.CredentialEnvNames`, registered right after `Validate`); git keeps the full
+  environment. `test.sandbox: bwrap`
   (`testexec.Sandbox`) is probed in the fail-fast chain; its mount order is load-bearing.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
@@ -125,7 +135,16 @@ history, otherwise the state the history and the transition table give (MVP.md �
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads
   binaries, large files or symlinks. The Jev API key comes only from the environment
   (`decision.jev.api_key_env`), is read in `app`, passed only to the client's constructor,
-  and redacted from every error; a literal `api_key` in the config is rejected.
+  redacted from every error and scrubbed from every child process; a literal `api_key` in
+  the config is rejected.
+- **Jira: read-only, one GET, before the run exists, never on resume** (MVP.md §39).
+  `run --jira` makes one `GET /rest/api/2/issue/{key}` to `jira.base_url` after the whole
+  fail-fast chain and `jira.ParseRef`, and before `store.NewRun` — a failure creates no
+  run. No redirect is followed; the answer is strictly validated. The request goes only to
+  `jira.base_url`, never to a URL the operator pasted. Credentials are env-only (a literal
+  secret key is rejected), read only in `app.taskFromJira`, redacted from every error and
+  scrubbed from child processes. The rendered ticket becomes `Task.Description`; no stage
+  learns where the task came from, and `resume` builds no Jira client.
 - Provider CLI invocation is argv-only (`exec.CommandContext`), never `sh -c`, for the user's
   task/prompt — the one documented exception is `test.command`, which is trusted operator
   config and does go through `sh -c` to support shell syntax. User text inside prompts
@@ -147,12 +166,13 @@ history, otherwise the state the history and the transition table give (MVP.md �
 
 ## Out of scope (MVP.md §30)
 
-No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the Jev decision API is the one
-HTTP integration), no model benchmarking or automatic model selection/routing/fallback, no
-parallel or multi-agent workflows, no Web UI/REST API/IDE plugin, no GitHub/GitLab
-integration, no remote repository execution, no RAG or persistent conversational memory, no
-database, no custom dynamically-defined action types or user-defined workflow language. Don't
-add abstractions only useful for these.
+No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
+decision API and reading one Jira issue for `run --jira`), no model benchmarking or automatic
+model selection/routing/fallback, no parallel or multi-agent workflows, no Web UI/REST
+API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue (no
+comments, transitions or JQL), no remote repository execution, no RAG or persistent
+conversational memory, no database, no custom dynamically-defined action types or
+user-defined workflow language. Don't add abstractions only useful for these.
 
 ## Build & test
 
@@ -165,18 +185,22 @@ gofmt -l .          # must be empty
 
 Tests need no network, no Jev key and no real provider CLIs: `test/integration` uses fake
 executables (`internal/testutil/fakeexec`, routed by the `ACTION: <name>` first line of every
-prompt; `FAKE_ARGS_DIR` records each call's argv) and a fake Jev
-(`test/integration/jev_test.go`). The live permission suite is separate and spends real calls:
+prompt; `FAKE_ARGS_DIR` records each call's argv, `FAKE_ENV_DIR` its environment), a fake
+Jev (`test/integration/jev_test.go`) and a fake Jira (`test/integration/jira_test.go`). The
+live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
-`go test ./internal/decision/jev -update`, `go test ./internal/logging -update`.
+`go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
+`go test ./internal/jira -update`.
 
 ## Run artifacts
 
-Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with the `decision`,
+Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
+`run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), the
 append-only `resumes`, and each execution's `provider.authority` and `attempt`), `decision.json` (full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
+`ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
 `artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log`, and for calls
 outside steps `logs/translate.*` and `logs/decide-{context,classify}.*`.

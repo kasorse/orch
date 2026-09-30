@@ -109,9 +109,13 @@ codex
 gemini
 ```
 
-Do not integrate directly with provider HTTP APIs. The one exception is the decision
-provider: the Jev decision API (`POST /v1/systemone`) is called over HTTP with `net/http`
-(§8). It only returns probabilities; it never writes code or runs tools.
+Do not integrate directly with provider HTTP APIs. There are two exceptions, both called
+with `net/http`:
+
+* the decision provider: the Jev decision API (`POST /v1/systemone`, §8). It only returns
+  probabilities; it never writes code or runs tools;
+* the Jira REST API, read-only: one `GET /rest/api/2/issue/{key}` per `run --jira`, before
+  the run exists (§39). Nothing is ever written to Jira.
 
 Do not add LiteLLM, OpenRouter, a database, Web UI, IDE plugin, server mode, or distributed execution.
 
@@ -161,12 +165,18 @@ Implement these commands:
 
 ```bash
 orchestrator run "<task>"
+orchestrator run --jira <KEY|URL> ["notes"]
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
+
+`run --jira` takes the task from one Jira issue: `--jira PMC-2789`, `--jira=pmc-2789` or
+the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator
+notes appended to the ticket. `--jira` is valid only with `run`, and giving it twice or
+empty is a usage error (exit 2). Details in §39.
 
 Support configuration file selection, for example:
 
@@ -270,6 +280,18 @@ execution:
 security:                      # optional (§38); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
   protected_paths: []          # extra patterns implement must not change
+
+# jira:                        # optional; needed only for run --jira (§39)
+#   base_url: https://example.atlassian.net   # DC: with any context path
+#   auth: basic                # basic: Cloud (email + API token) | bearer: DC PAT
+#   email_env: JIRA_EMAIL      # basic only
+#   token_env: JIRA_API_TOKEN  # the token itself never goes in this file
+#   timeout: 10s               # one HTTP attempt
+#   max_retries: 1             # 0-3; 408/429/500/502/503/504 only
+#   max_bytes: 32768           # cap on the rendered task; over it is refused
+#   fields:                    # extra text custom fields, in this order
+#     - id: customfield_10035
+#       label: Acceptance criteria
 ```
 
 Model names must be treated as opaque provider-specific strings.
@@ -305,7 +327,14 @@ Validate:
 * supported provider names;
 * limits;
 * execution timeout;
-* test command.
+* test command;
+* `jira`, when present (§39.2): an absolute `https` `base_url` with no query, fragment
+  or credentials (`http` only for `localhost`, `127.0.0.1`, `::1`); `auth` in
+  `basic|bearer`; `token_env` required and `email_env` required for `basic`, rejected for
+  `bearer`, both valid variable names; `timeout` > 0, `max_retries` in 0–3, `max_bytes` in
+  1024–262144; each `fields[]` a `customfield_<N>` id with a unique, single-line label
+  that is not a reserved section name. A literal `token`, `api_token`, `password`, `pat` or
+  `email` key is an error.
 
 All problems are aggregated into one error.
 
@@ -382,6 +411,13 @@ does not depend on the request's language), and so is an LLM decision provider's
 the Jev decision provider, `decision.jev.api_key_env` must name a set, non-blank
 environment variable (`jev decision provider: JEV_API_KEY is not configured`), unless
 `decision.jev.mock` is on.
+
+The Jira credential variables are checked only when they will be used (§39.2):
+`run --jira` requires the `jira` section and a set, non-blank `jira.token_env` (and
+`jira.email_env` for `basic`), e.g. `jira.token_env names JIRA_API_TOKEN, which is not
+set`. `orchestrator validate` checks them whenever the section is present. `run` without
+`--jira` and `resume` never check them, so a `jira` section does not break runs that do
+not use it.
 
 ### Critical fail-fast requirement
 
@@ -1105,6 +1141,7 @@ Location:
       decision.json            # full decision trace
       project_context.json     # exactly the context sent, only when one was sent
       workflow.json
+      ticket.json              # the fetched Jira issue, run --jira only (§39.7)
 
       artifacts/
         <NNN>-<action>.json
@@ -1124,7 +1161,7 @@ the process that owns it (§37.9).
 
 At minimum save:
 
-* original task;
+* original task, and with `run --jira` where it came from (`task.source`, §39.7);
 * run ID;
 * the decision (`run.json`'s `decision`) and its full trace (`decision.json`): the
   request and its translation, who decided (`jev`, `llm` or `user`, with the provider
@@ -1231,9 +1268,17 @@ ExecutionError
 LimitExceededError
 AuthorityError
 RunStateError
+JiraError
 ```
 
 Preserve underlying errors.
+
+`JiraError{Key, Kind, StatusCode, Attempts, Detail, Body, Err}` is a failed fetch for
+`run --jira` (§39.9). `Kind` is one of `auth`, `not_found`, `redirect`, `timeout`,
+`connection`, `rate_limited`, `unavailable`, `invalid_response`, `cancelled`;
+`Kind.Transient()` drives the retries. `Detail` names the credential variables, the
+redirect's host, the attempt timeout or the offending JSON path. `Body` is a bounded,
+redacted excerpt. No credential ever appears in its text.
 
 `AuthorityError{Provider, Route, Authority, Reason, Remedy}` means a provider cannot
 enforce the authority a call requires (§38); it is raised by `ValidateAuthorities` before
@@ -1344,7 +1389,8 @@ Exact values may be encapsulated centrally.
 A `DecisionError` maps to 3, except `auth` (2 - a key problem is a configuration
 problem) and `cancelled` (5). An `AuthorityError` maps to 2: routing an action to a
 provider that cannot enforce its authority is misconfiguration. A `RunStateError` maps to
-1, whatever it wraps.
+1, whatever it wraps. A `JiraError` maps to 2 for `auth`, `not_found` and `redirect`
+(the operator's credentials, key or `base_url`), 5 for `cancelled`, and 3 otherwise.
 
 ---
 
@@ -1426,6 +1472,7 @@ internal/
   projectctx/       Context Manager (§8.3)
   policy/           thresholds → decisions (§9); imports only domain
   classification/   the decision flow and the manual-choice fallback (§8)
+  jira/             read one Jira issue: ParseRef, the client, Render (§39); imports only domain, apperr
   workflow/         builder, engine, transitions; imports only domain
   provider/         CLI provider abstraction, registry, claude/codex/gemini adapters
   execution/        process executor
@@ -1438,7 +1485,8 @@ internal/
   apperr/, exitcode/
 ```
 
-Jev's transport types stay unexported inside `internal/decision/jev`.
+Jev's transport types stay unexported inside `internal/decision/jev`, and Jira's inside
+`internal/jira`.
 
 ---
 
@@ -1574,6 +1622,35 @@ Restore point: 8b4dd14…
 
 A completed run prints `Run <id> already completed. Nothing to resume.` and its answer, if
 it has one.
+
+With `run --jira` (§39), the fetch and the whole rendered task are printed between the
+configuration check and the run header, in every mode and whatever `--verbose` says:
+
+```text
+Validating configuration...
+✓ configuration valid
+
+Fetching PMC-2789 from yourcompany.atlassian.net...
+✓ PMC-2789 (Bug) fetched in 0.3s
+
+Task (from PMC-2789):
+  | PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
+  | Type: Bug
+  | Parent: PMC-2663 — Tags & Labels
+  | Source: https://yourcompany.atlassian.net/browse/PMC-2789
+  |
+  | Description:
+  | ...
+  |
+  | Operator notes:
+  | only the FE part; leave pim-qa alone
+
+Run: 2f3c1a8b  (.orchestrator/runs/2f3c1a8b)
+```
+
+A moved issue adds `Warning: PMC-1 has moved to NEW-9; using NEW-9` after the fetched
+line. Resuming a Jira run adds `Task from PMC-2789, fetched 2026-09-30 10:12 (not
+re-fetched)` under the `Resuming run` line (local time).
 
 Example (no `--mode` flag - the interactive default: approve the workflow, choose a mode,
 then confirm each step under `manual`):
@@ -1807,6 +1884,16 @@ a moved HEAD are refused; a tampered `run.json` or artifact is `corrupt`; implem
 rewrite resume inputs; a completed run is reported; run-ID prefixes resolve or are
 refused; a locked run is `in_use`. No refusal calls a provider or changes `run.json`.
 
+### Jira scenarios
+
+`test/integration/scenario19_jira_*_test.go` (§39), against a fake Jira on loopback: the
+ticket is fetched once and becomes the task of every stage and of the decision, with
+`task.source` and `ticket.json` written; operator notes come last; a retried 503; a
+missing issue, a missing token and a foreign-host URL are exit 2 with no run and no AI
+call (the last two with no request); a resume makes no request and needs no Jira
+variables; neither the test command nor a provider CLI inherits `JIRA_API_TOKEN`,
+`JIRA_EMAIL` or `JEV_API_KEY`; a `jira` section without `--jira` changes nothing.
+
 ### Decision scenarios
 
 `specs/JEV integration/TASKS.md` T13: project context without secrets, depth none
@@ -1821,7 +1908,7 @@ choice and score disagreeing, and an LLM decision provider.
 Do not implement:
 
 ```text
-HTTP provider APIs (except the Jev decision API, §2)
+HTTP provider APIs (except the Jev decision API and reading one Jira issue, §2)
 OpenRouter
 LiteLLM
 model benchmarking
@@ -1833,8 +1920,7 @@ multi-agent parallel execution
 Web UI
 REST API
 IDE plugin
-GitHub PR integration
-GitLab integration
+GitHub/GitLab integration; Jira beyond reading one issue for `run --jira` (§39)
 remote repository execution
 RAG
 persistent conversational memory
@@ -2416,7 +2502,12 @@ human sees and confirms between steps.
 * Provider CLIs and the test command get `execution.ScrubbedEnv()`: the inherited
   environment minus the variables through which a launching agent session reaches its
   children (`CLAUDECODE`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
-  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID`). git keeps the full
+  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID`), and minus the
+  credential variables the config names: `decision.jev.api_key_env` (whatever the decision
+  provider) and, with a `jira` section, `jira.token_env` and `jira.email_env`
+  (`Config.CredentialEnvNames`, registered through `execution.ScrubCredentials` right
+  after `Validate`). The orchestrator reads those itself; no child needs them, and the test
+  command runs code a model wrote. Names are exact, never prefixes. git keeps the full
   environment.
 
 ## 38.3 Guards around implement
@@ -2477,6 +2568,11 @@ human sees and confirms between steps.
 * `test.command` is trusted config run through `sh -c`. A repository you do not control
   additionally needs `--config` from outside it, a sandboxed test step and ideally a
   container.
+* **Ticket text** (§39) is operator-equivalent input written by anyone with edit rights on
+  the ticket. It gets no gate beyond typed text: it is printed in full before anything is
+  decided and kept verbatim in `run.json` and `ticket.json`, and no step gains authority
+  because the task came from Jira. Like typed text, it is sent to the decision and
+  translation providers.
 * A hostile provider CLI binary is out of scope.
 * **An orphaned provider CLI after SIGKILL.** If the orchestrator is killed with SIGKILL
   while a provider CLI runs, the CLI (its own process group) can keep writing after the
@@ -2485,3 +2581,206 @@ human sees and confirms between steps.
   that window could still reach the next prompt. It is bounded by that step's authority,
   and the history and next step are printed before the resume's approval so the operator
   can inspect them.
+
+---
+
+# 39. Task from a Jira ticket
+
+Normative. Design record, findings, decisions and the plan as built: `specs/jira/`
+(`SPEC.md`, `tasks/`).
+
+`orchestrator run --jira <KEY|URL> ["notes"]` reads one Jira issue and renders it into the
+task text. The ticket is only a way to write the task: the text becomes
+`Task.Description`, and translation, decision, workflow, prompts and resume carry on
+exactly as if it had been typed. No stage learns where the task came from.
+
+## 39.1 CLI
+
+```bash
+orchestrator run --jira PMC-2789
+orchestrator run --jira pmc-2789 "only the FE part; leave pim-qa alone"
+orchestrator run --jira https://yourcompany.atlassian.net/browse/PMC-2789 --mode plan
+orchestrator run --jira=PMC-2789
+```
+
+With `--jira`, positional text is optional and becomes **operator notes**. Without it,
+`run` is unchanged. `--jira` with another command, twice, or empty is a usage error
+(`ConfigError`, exit 2).
+
+`jira.ParseRef` resolves the value after the fail-fast chain and before any request. Every
+failure is a `ConfigError` (exit 2), and its text shows hosts only, never a whole URL:
+
+| value | result |
+|---|---|
+| `PMC-2789`, ` pmc-2789 ` | `PMC-2789` (trimmed, upper-cased) |
+| `https://<base host>/browse/PMC-2789`, with an optional trailing `/`, query or fragment | `PMC-2789` |
+| a URL on a Data Center base with a context path: `https://jira.corp/jira/browse/PMC-1` | `PMC-1` |
+| another hostname, scheme or port (default ports made explicit) | `--jira URL host "x.example" does not match jira.base_url "…"` (or the scheme) |
+| a URL with a username or password | refused |
+| any other path (boards, `selectedIssue=`, JQL) | `pass the issue key or its /browse/<KEY> URL` |
+| not `^[A-Z][A-Z0-9_]+-[1-9][0-9]*$` after upper-casing (`domain.ValidTicketKey`) | refused |
+
+The URL form only names the key. The request always goes to `jira.base_url`.
+
+## 39.2 Configuration and credentials
+
+The optional `jira` section (§5), validated whenever present (§6). Absent keys default to
+`timeout: 10s`, `max_retries: 1`, `max_bytes: 32768`, and a trailing `/` on `base_url` is
+dropped.
+
+* `auth: basic`: Jira Cloud, `email_env` + `token_env` (an Atlassian API token), sent as
+  `Authorization: Basic base64(email:token)`.
+* `auth: bearer`: Data Center, `token_env` (a personal access token), sent as
+  `Authorization: Bearer <token>`.
+
+The values come only from the environment. They are read in one place
+(`app.taskFromJira`), passed only to `jira.NewCredentials`, and sent only to
+`jira.base_url`'s host. `jira.Credentials` prints as `[REDACTED]` and holds its values
+behind a pointer.
+
+`config.ValidateDependencies(cfg, checker, DependencyOptions{Jira})` checks the section
+and the variables only when asked (§7): `run --jira` asks, `validate` asks when the
+section is present, and `run` without `--jira` and `resume` never ask.
+
+## 39.3 The request
+
+```text
+GET {base_url}/rest/api/2/issue/{KEY}?fields=summary,description,issuetype,parent,<fields[].id...>
+Accept: application/json
+User-Agent: orchestrator/<version>
+Authorization: Basic … | Bearer …
+```
+
+* REST v2 on both Cloud and Data Center: `description` and text custom fields are wiki
+  markup strings, so there is no ADF renderer.
+* No redirect is followed (`http.ErrUseLastResponse`). A 3xx is an error that shows only
+  the `Location` host.
+* The body is read through a 1 MiB cap; a larger body is `invalid_response`.
+* Each attempt is bounded by `jira.timeout`, and the whole fetch by the run's
+  `execution.timeout`.
+* 408, 429, 500, 502, 503, 504 and transport errors are retried up to `max_retries`.
+  `Retry-After` (seconds or HTTP date) is honoured, but not one longer than `timeout`.
+  Otherwise the backoff is 250 ms doubling, capped at `timeout`. Cancellation and the
+  run's deadline are never retried.
+
+## 39.4 Response validation
+
+Strict. Anything else is `invalid_response` naming the JSON path. Unknown keys are
+ignored.
+
+| field | rule |
+|---|---|
+| `key` | an issue key. A different one than requested (a moved issue) is accepted, both are recorded, and a warning is printed |
+| `fields.summary` | non-empty string |
+| `fields.description` | string, `null` or absent |
+| `fields.issuetype.name` | non-empty string |
+| `fields.parent` | absent/`null`, or `{key, fields.summary}` with a valid key and a string summary |
+| `fields.<customfield_N>` | absent, `null` or string; any other type: `not a text field; remove it from jira.fields` |
+
+`\r\n` becomes `\n` in every text value. A blank custom field is left out.
+
+## 39.5 Rendering
+
+`jira.Render(ticket, notes, max_bytes)`, deterministic:
+
+```text
+<KEY>: <summary>
+Type: <issue type>
+Parent: <parent key> — <parent summary>
+Source: <base_url>/browse/<KEY>
+
+Description:
+<description>
+
+<field label>:
+<field value>                 (each non-empty configured field, in config order)
+
+Operator notes:
+<notes>
+```
+
+Sections with no content are left out. Values are verbatim wiki markup, except that each
+line's trailing whitespace and blank lines at both ends of a section are removed. The
+notes are trimmed and come last, so the operator's own words are the final thing each stage
+reads. The text ends with one newline. Longer than `max_bytes` is refused, never
+truncated (`ConfigError`, exit 2: `PMC-2789 renders to 51203 bytes, more than
+jira.max_bytes (32768); raise the limit or trim the ticket`).
+
+## 39.6 Order of operations
+
+```text
+parseArgs                              --jira value; notes = positional text
+loadAndValidateConfig(Jira: true)      the whole fail-fast chain, variables included
+jira.ParseRef                          still no network
+decideCtx starts (execution.timeout)
+repository.Open, IsDirty
+FetchingTicket → Fetch → TicketFetched (→ TicketMoved)
+jira.Render → TaskBlock                the full task, printed before anything is decided
+store.NewRun(Task{Description, Source}) → Lock → SaveTicket
+… unchanged: run header, decision, workflow, approval, executeWorkflow
+```
+
+A fetch or render failure is returned directly: no run directory is created, and no
+provider or decision call is made.
+
+## 39.7 Persistence and resume
+
+`run.json`'s task gains an optional `source`:
+
+```text
+task.source.kind            "jira"
+task.source.key             the key the issue answered under
+task.source.requested_key   the key asked for, only when the issue has moved
+task.source.url             <base_url>/browse/<key>
+task.source.fetched_at
+task.source.notes           operator notes were appended
+```
+
+`task.description` stays the complete rendered text. Loading validates the source like
+the rest of `run.json` (§37.4): kind `jira`, valid keys, an absolute http(s) URL, a
+non-zero `fetched_at`. Otherwise it is `corrupt`. Runs without a source load as before.
+
+`ticket.json` is the validated issue, written once after the run is created. It is an
+audit record that nothing reads back, so it is not a resume input (§38.3).
+
+`resume` never contacts Jira: it builds no client, and needs neither the section nor the
+variables. A ticket edited after the run started does not change the run. The resume
+header shows the source line (§27).
+
+## 39.8 Security
+
+* **Credentials:** env only, a literal secret key in the file is rejected, and they are
+  sent only to `jira.base_url`, which is `https` except on loopback, with no redirects.
+  Every error text has the token, the email and the base64 `email:token` removed, before
+  a body excerpt is cut to 512 bytes. They are scrubbed from every child process (§38.2).
+* **Ticket text** is treated as typed text (§38.5): printed in full, persisted verbatim,
+  sent to the decision and translation providers, and no step gains authority from it.
+  Wiki mentions render as opaque `[~accountid:…]` ids.
+* **Oversized or hostile answers** are bounded by the 1 MiB cap, strict decoding and
+  `max_bytes`.
+
+## 39.9 Errors and exit codes
+
+`apperr.JiraError` (§23):
+
+| kind | cause | message (abridged) | exit |
+|---|---|---|---|
+| `auth` | 401 | `Jira rejected the credentials in JIRA_EMAIL/JIRA_API_TOKEN` | 2 |
+| `not_found` | 404, or 403 | `PMC-2789 does not exist, or the account behind JIRA_EMAIL cannot see it` | 2 |
+| `redirect` | any 3xx | `Jira answered with a redirect to <host>; check jira.base_url` | 2 |
+| `timeout` | attempt timeout, 408, run deadline | `Jira did not answer within 10s` | 3 |
+| `connection` | dial, DNS, reset | `Jira could not be reached` | 3 |
+| `rate_limited` | 429 | `Jira is rate limiting requests` | 3 |
+| `unavailable` | 500, 502, 503, 504 | `Jira is unavailable (HTTP 503 after 2 attempts)` | 3 |
+| `invalid_response` | §39.4, a body over 1 MiB, any other status | names the JSON path or the status | 3 |
+| `cancelled` | Ctrl-C | `fetching PMC-2789 from Jira was cancelled` | 5 |
+
+## 39.10 Not covered
+
+* Writing to Jira: comments, transitions, worklogs, links.
+* Comments, linked issues, sub-tasks, attachments, images; JQL, boards, sprints.
+* The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
+* Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
+* `--jira` on `resume` or `validate`.
+* Deferred (`specs/jira/SPEC.md` §19): an outcome comment or transition at the end of a
+  run, comments and linked issues as sections, fencing the task block in prompts.

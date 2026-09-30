@@ -90,3 +90,17 @@ execution:
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
   protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+
+# Optional: where `run --jira <KEY|URL>` reads the task from (MVP.md §39). Only run --jira
+# needs the credential variables; a plain run and resume work without them.
+# jira:
+#   base_url: https://yourcompany.atlassian.net   # Data Center: including any context path
+#   auth: basic                    # basic: Jira Cloud (email + API token) | bearer: Data Center PAT
+#   email_env: JIRA_EMAIL          # basic only: the variable holding the account email
+#   token_env: JIRA_API_TOKEN      # the variable holding the API token or PAT - never the token itself
+#   timeout: 10s                   # one HTTP attempt
+#   max_retries: 1                 # 0-3; 408/429/500/502/503/504 only, honours Retry-After
+#   max_bytes: 32768               # cap on the rendered task; a longer ticket is refused, not cut
+#   fields:                        # extra text custom fields, rendered in this order when non-empty
+#     - id: customfield_10035      # ids: GET <base_url>/rest/api/2/field
+#       label: Acceptance criteria

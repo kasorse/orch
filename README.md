@@ -26,6 +26,8 @@ by the real exit code of your test command, never by anything a model says.
 - With `decision.provider: jev`: a Jev API key in the environment variable named by
   `decision.jev.api_key_env` (default `JEV_API_KEY`) — or `decision.jev.mock: true` to run
   without one (see below).
+- Only for `run --jira`: a `jira` section in the config and the Jira credentials in the
+  environment variables it names (see [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket)).
 
 ## Building
 
@@ -144,6 +146,9 @@ security:
   (default `true`) makes a workflow with `implement` refuse to start on a dirty worktree;
   `protected_paths` adds patterns `implement` must not change. See
   [Security model](#security-model).
+- **`jira`** (optional) is where `run --jira` reads a ticket from. It is validated whenever
+  present, but its credential variables are needed only by `run --jira` (and checked by
+  `validate`). See [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket).
 
 ## Security model
 
@@ -244,7 +249,9 @@ sudo systemctl reload apparmor
 
 Provider CLIs and the test command also do not inherit the variables through which a Claude
 Code session you launched the orchestrator from reaches its children (`CLAUDECODE`,
-`CLAUDE_CODE_MESSAGING_*`, …).
+`CLAUDE_CODE_MESSAGING_*`, …), nor the credential variables your config names — the one in
+`decision.jev.api_key_env` and, with a `jira` section, `jira.token_env` and
+`jira.email_env`. The orchestrator reads those itself; a test the model wrote cannot.
 
 ### What is not protected
 
@@ -260,6 +267,11 @@ Code session you launched the orchestrator from reaches its children (`CLAUDECOD
 - **`test.command` is trusted configuration** run through `sh -c`. For a repository you do not
   control, pass `--config` from outside it, use `test.sandbox: bwrap`, keep `manual` mode,
   and run the whole thing in a container.
+- **A Jira ticket is task text written by whoever can edit it.** With `run --jira` it is
+  treated exactly like text you typed: printed in full before anything is decided, kept
+  verbatim in `run.json` and `ticket.json`, and given no extra authority — but also no
+  extra gate, even in `--mode auto`. Read the printed task when the ticket's author is not
+  you.
 - **A hostile provider CLI binary** is out of scope.
 - **A provider CLI orphaned by `kill -9`** of the orchestrator can keep writing after the
   last check. A resume catches protected files and a malformed `run.json`, but a subtly
@@ -300,7 +312,17 @@ matched against every path segment), files ignored by `.gitignore`, binaries, fi
 exactly what was sent. Per Jev's documentation, customer data is not used for training, and
 zero data retention is offered only on the enterprise plan — check their current terms before
 sending proprietary context. With `jev.mock: true` nothing leaves the machine; with an LLM
-decision provider the same data goes to that CLI.
+decision provider the same data goes to that CLI. With `run --jira`, the request text is the
+rendered ticket (and your notes), so the ticket goes to the decision provider and, when it
+is mostly Russian, to the translator, exactly as typed text would.
+
+## What is sent to Jira
+
+Only with `run --jira`, and only one read: `GET <jira.base_url>/rest/api/2/issue/<KEY>`
+asking for the summary, description, issue type, parent and your configured `fields`, with
+your credentials in the `Authorization` header. Nothing is ever written to Jira. The
+request goes to `jira.base_url` only — never to a URL you pasted, and never through a
+redirect — over `https` (plain `http` is accepted only for `localhost`/`127.0.0.1`/`::1`).
 
 ## Usage
 
@@ -308,16 +330,20 @@ decision provider the same data goes to that CLI.
 orchestrator [--config path] version
 orchestrator [--config path] validate
 orchestrator [--config path] run [--verbose|-v] "<task description>"
+orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] [--mode m] resume <run-id>
 ```
 
 - `version` — prints the build version.
 - `validate` — loads and validates the config, including checking that every referenced
-  provider CLI is actually resolvable on `PATH` and that the Jev API key is set, and reports
-  the result without running anything. Run this first when setting up a new config.
+  provider CLI is actually resolvable on `PATH`, that the Jev API key is set and, when the
+  config has a `jira` section, that its credential variables are set, and reports the
+  result without running anything. Run this first when setting up a new config.
 - `run "<task>"` — decides the workflow (printing the decision: context depth, complexity,
   who decided, the workflow) and executes it step by step against the repository in the
   current working directory, printing progress as it goes.
+- `run --jira <KEY|URL> ["notes"]` — takes the task from a Jira ticket. See
+  [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket).
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
@@ -384,18 +410,71 @@ Your own edits to other files between the stop and the resume are fine. They sho
 working tree listing, and `review` sees them in the diff. A completed run is just reported
 (with its answer, for a read-only workflow). Details: `MVP.md` §37 and `specs/resume/`.
 
+### Taking the task from a Jira ticket
+
+```
+orchestrator run --jira PMC-2789
+orchestrator run --jira pmc-2789 "only the FE part; leave pim-qa alone"
+orchestrator run --jira https://yourcompany.atlassian.net/browse/PMC-2789 --mode plan
+```
+
+The orchestrator reads the issue once, renders its key and summary, type, parent, a link,
+the description and any configured `fields` into plain task text, appends your notes last
+(`Operator notes:`), and prints the whole text before deciding anything. From there the run
+is exactly a typed `run`. Wiki markup (`{{code}}`, `*bold*`, `#` lists) is passed through
+verbatim — models read it fine. A ticket that renders to more than `jira.max_bytes` is
+refused, never cut. A moved issue is followed to its new key, with a warning. A URL must be
+the issue's `/browse/<KEY>` link on your configured instance; board and search links are
+refused.
+
+Add a `jira` section to the config (it is commented out in `orchestrator.example.yaml`):
+
+```yaml
+jira:
+  base_url: https://yourcompany.atlassian.net   # Data Center: including any context path
+  auth: basic                  # basic: Jira Cloud | bearer: Data Center
+  email_env: JIRA_EMAIL        # basic only
+  token_env: JIRA_API_TOKEN
+  fields:                      # optional extra text fields, rendered in this order
+    - id: customfield_10035
+      label: Acceptance criteria
+```
+
+- **Jira Cloud:** create an API token at <https://id.atlassian.com/manage-profile/security/api-tokens>,
+  use `auth: basic`, and export your account email and the token:
+  `export JIRA_EMAIL=you@example.com JIRA_API_TOKEN=...`.
+- **Jira Data Center / Server:** create a personal access token in your Jira profile, use
+  `auth: bearer`, leave out `email_env`, and export the token in the variable `token_env`
+  names.
+- **Custom field ids:** `GET <base_url>/rest/api/2/field` (e.g. `curl -u "$JIRA_EMAIL:$JIRA_API_TOKEN"
+  https://yourcompany.atlassian.net/rest/api/2/field`) lists every field with its `id` and
+  `name`. Only text fields work; a select, user or number field fails the run with a message
+  naming it.
+
+Credentials only ever come from the environment — a `token`, `api_token`, `password`, `pat`
+or `email` key in the file is rejected. They are needed only by `run --jira`; a plain `run` and a
+`resume` work without them, even with the section configured. A resume never re-reads the
+ticket: the task saved when the run started is the task, and the resume header says so
+(`Task from PMC-2789, fetched … (not re-fetched)`).
+
+When the ticket cannot be read, nothing is created and no AI is called: bad credentials,
+a missing or invisible issue, or a redirect exit 2; Jira being down or answering
+unexpectedly exits 3. Details: `MVP.md` §39 and `specs/jira/`.
+
 ## Run artifacts
 
 Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target repository:
 
 ```
 .orchestrator/runs/<run-id>/
-  run.json              # run status, the decision, step history (with each AI step's
+  run.json              # the task (with task.source for run --jira), run status, the
+                        # decision, step history (with each AI step's
                         # provider.authority and attempt), limits/iteration counters,
                         # pre_run_ref, head_ref, resume_baseline, resumes
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
+  ticket.json           # run --jira only: the issue as fetched (a record; never read back)
   artifacts/<NNN>-<action>.json          # structured output per step
   logs/<NNN>-<action>.{stdout,stderr}.log  # raw provider/test output per step
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
@@ -445,6 +524,11 @@ A decision provider failure reads `decision provider <name> failed: <kind>` — 
 with the HTTP status, the number of attempts and a bounded excerpt of the response (never the
 API key). It exits 3, or 2 for `auth`.
 
+A failed `run --jira` fetch names the ticket and what to fix, e.g. `PMC-2789 does not exist,
+or the account behind JIRA_EMAIL cannot see it (HTTP 404)` or `Jira rejected the credentials
+in JIRA_EMAIL/JIRA_API_TOKEN (HTTP 401)`, never a credential. It exits 2 for credentials, a
+missing issue or a redirect, 3 when Jira is down or answers unexpectedly, and creates no run.
+
 - `failure:` says *how* the call failed: `spawn` (couldn't start the executable at all),
   `exit` (ran and returned non-zero), `timeout` (exceeded `execution.timeout`), or `cancelled`
   (SIGINT/SIGTERM). Some provider CLIs — notably `claude --print` — write backend/API errors to
@@ -482,8 +566,8 @@ go test -tags security ./test/security/...
 This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). Notably absent:
 
 - No HTTP-based provider APIs (OpenRouter, LiteLLM, etc.) — the AI steps run only as local
-  CLI subprocesses. The one HTTP integration is the Jev decision API, which only returns
-  probabilities.
+  CLI subprocesses. The HTTP integrations are the Jev decision API, which only returns
+  probabilities, and reading one Jira issue for `run --jira`.
 - No automatic model selection, routing, or fallback between providers — including between
   decision providers.
 - Stages cannot yet be edited before a run (approve or cancel only); the decision thresholds
@@ -491,7 +575,8 @@ This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). 
 - No parallel or multi-agent workflows — one task, one sequential workflow, one run at a time.
 - No web UI, REST API, or IDE plugin — CLI only.
 - No GitHub/GitLab integration or remote repository execution — operates on the local working
-  directory only.
+  directory only. Jira is read-only and limited to one issue: no comments, transitions,
+  linked issues, attachments or JQL.
 - No RAG, persistent conversational memory, or database — state is per-run JSON on disk.
 - No custom/dynamically-defined action types or user-defined workflow language — the stage
   set, their order and the policy rules are fixed in Go code; only thresholds are configured.
