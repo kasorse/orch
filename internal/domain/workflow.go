@@ -11,6 +11,15 @@ const (
 	ActionResearch  ActionType = "research"
 )
 
+// Valid reports whether a is one of the defined actions.
+func (a ActionType) Valid() bool {
+	switch a {
+	case ActionResearch, ActionAnalyze, ActionPlan, ActionImplement, ActionTest, ActionReview:
+		return true
+	}
+	return false
+}
+
 type Step struct {
 	Action ActionType `json:"action"`
 	// Stage names the decision stage this step executes (specs/JEV integration/

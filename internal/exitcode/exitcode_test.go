@@ -34,6 +34,12 @@ func TestFromError(t *testing.T) {
 		{"limit", &apperr.LimitExceededError{Reason: "too many steps"}, WorkflowOrLimit},
 		{"workflow", &apperr.WorkflowError{Msg: "bad transition"}, WorkflowOrLimit},
 		{"cancel", context.Canceled, UserCancellation},
+		{"run not found", &apperr.RunStateError{Kind: apperr.RunNotFound}, GenericError},
+		{"run ambiguous", &apperr.RunStateError{Kind: apperr.RunAmbiguous}, GenericError},
+		{"run in use", &apperr.RunStateError{Kind: apperr.RunInUse}, GenericError},
+		{"run not resumable", &apperr.RunStateError{Kind: apperr.RunNotResumable}, GenericError},
+		{"run corrupt", &apperr.RunStateError{Kind: apperr.RunCorrupt}, GenericError},
+		{"run corrupt wrapping workflow", &apperr.RunStateError{Kind: apperr.RunCorrupt, Err: &apperr.WorkflowError{Msg: "x"}}, GenericError},
 	}
 
 	for _, tc := range cases {

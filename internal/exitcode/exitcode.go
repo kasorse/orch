@@ -28,6 +28,13 @@ func FromError(err error) int {
 		return UserCancellation
 	}
 
+	// Checked before the other categories: a run that cannot be used is exit 1 whatever
+	// underlying error it wraps (specs/resume/SPEC.md §13).
+	var runErr *apperr.RunStateError
+	if errors.As(err, &runErr) {
+		return GenericError
+	}
+
 	var configErr *apperr.ConfigError
 	if errors.As(err, &configErr) {
 		return ConfigOrDependency

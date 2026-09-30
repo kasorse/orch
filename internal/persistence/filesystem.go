@@ -110,11 +110,18 @@ func (s *Store) SaveProjectContext(runID string, pc *domain.ProjectContext) erro
 // SaveArtifact writes one action's structured output and returns its path relative to the
 // run directory, satisfying action.ArtifactWriter.
 func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any) (string, error) {
-	relPath := filepath.Join("artifacts", fmt.Sprintf("%03d-%s.json", stepIndex, actionType))
+	relPath := ArtifactRelPath(stepIndex, actionType)
 	if err := s.writeJSON(runID, relPath, artifact); err != nil {
 		return "", fmt.Errorf("save artifact: %w", err)
 	}
 	return relPath, nil
+}
+
+// ArtifactRelPath is where SaveArtifact writes a step's artifact, relative to the run
+// directory. A resume derives artifact paths from it and never trusts a path read back
+// from run.json (specs/resume/SPEC.md §7.3).
+func ArtifactRelPath(stepIndex int, actionType domain.ActionType) string {
+	return filepath.Join("artifacts", fmt.Sprintf("%03d-%s.json", stepIndex, actionType))
 }
 
 // AppendLog appends raw process output (stream is "stdout" or "stderr") to the log file

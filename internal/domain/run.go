@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type RunStatus string
 
@@ -11,6 +14,15 @@ const (
 	RunFailed    RunStatus = "failed"
 	RunStopped   RunStatus = "stopped"
 )
+
+// Valid reports whether s is one of the defined run statuses.
+func (s RunStatus) Valid() bool {
+	switch s {
+	case RunPending, RunRunning, RunCompleted, RunFailed, RunStopped:
+		return true
+	}
+	return false
+}
 
 // ProviderRef identifies the provider call a step made: which CLI, which model, and the
 // authority it ran with (specs/permissions/SPEC.md §5), so run.json answers "what was this
@@ -30,6 +42,15 @@ const (
 	StepFailed    StepExecStatus = "failed"
 )
 
+// Valid reports whether s is one of the defined step statuses.
+func (s StepExecStatus) Valid() bool {
+	switch s {
+	case StepPending, StepRunning, StepCompleted, StepFailed:
+		return true
+	}
+	return false
+}
+
 // StepExecution is one recorded attempt at an action. Run.Executions is append-only -
 // retries produce new entries rather than overwriting previous ones.
 type StepExecution struct {
@@ -43,6 +64,22 @@ type StepExecution struct {
 	TestResult   *TestResult    `json:"test_result,omitempty"`
 	ReviewResult *ReviewResult  `json:"review_result,omitempty"`
 	Error        string         `json:"error,omitempty"`
+	// Attempt is 0 for a step the original process ran and n for one run by the n-th
+	// resume (specs/resume/SPEC.md §12).
+	Attempt int `json:"attempt,omitempty"`
+}
+
+// Resume records one `orchestrator resume` of a run: what state it was found in and
+// where it continued. Run.Resumes is append-only, like Run.Executions.
+type Resume struct {
+	At time.Time `json:"at"`
+	// FromStatus is the status the run was found in; "running" means the previous process
+	// died mid-run (interrupted).
+	FromStatus RunStatus  `json:"from_status"`
+	FromReason string     `json:"from_reason,omitempty"`
+	Entry      ActionType `json:"entry"`
+	Why        string     `json:"why"`
+	Mode       RunMode    `json:"mode"`
 }
 
 type Run struct {
@@ -57,7 +94,17 @@ type Run struct {
 	// PreRunRef is the restore point recorded before the first step: HEAD on a clean
 	// tree, or a snapshot commit of the uncommitted changes (untracked files included)
 	// the run started from (specs/permissions/SPEC.md §7.2).
-	PreRunRef     string          `json:"pre_run_ref,omitempty"`
+	PreRunRef string `json:"pre_run_ref,omitempty"`
+	// HeadRef is HEAD when the first step started. A resume refuses when HEAD has moved,
+	// since review diffs against HEAD (specs/resume/SPEC.md §9.2).
+	HeadRef string `json:"head_ref,omitempty"`
+	// ResumeBaseline is the repository guard's state when the first step started: the
+	// git fingerprint and the protected paths. A resume compares against it before
+	// anything runs (specs/resume/SPEC.md §9.1). Its shape belongs to the guard, not to
+	// domain.
+	ResumeBaseline json.RawMessage `json:"resume_baseline,omitempty"`
+	// Resumes is append-only: one entry per `orchestrator resume` of this run.
+	Resumes       []Resume        `json:"resumes,omitempty"`
 	Executions    []StepExecution `json:"executions"`
 	Status        RunStatus       `json:"status"`
 	FailureReason string          `json:"failure_reason,omitempty"`

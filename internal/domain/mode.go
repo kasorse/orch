@@ -21,6 +21,9 @@ var validRunModes = map[RunMode]bool{
 	ModeAuto:        true,
 }
 
+// Valid reports whether m is one of the defined modes. The empty mode is not valid.
+func (m RunMode) Valid() bool { return validRunModes[m] }
+
 // ParseRunMode validates a --mode flag value. An empty string is not a valid
 // RunMode here - callers treat "no --mode given" as its own case before calling this.
 func ParseRunMode(s string) (RunMode, error) {
