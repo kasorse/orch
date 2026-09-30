@@ -7,7 +7,8 @@ workflow deterministically, and executes it by shelling out to locally-installed
 persisting run state to disk. Full spec: `MVP.md` — treat it as the source of truth; the
 decision layer in detail: `specs/JEV integration/SPEC.md` (normative) and
 `specs/JEV integration/TASKS.md` (plan, decisions, and what was built differently and why);
-the permission model: MVP.md §38, with its design record in `specs/permissions/`.
+the permission model: MVP.md §38, with its design record in `specs/permissions/`;
+resume: MVP.md §37, with its design record in `specs/resume/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -75,6 +76,8 @@ present, else the run completes with the verdict; any other failure fails the ru
 history is append-only (`run.Executions`), never overwritten. Two independent limits guard
 against infinite loops: `max_steps`, `max_fix_iterations`. Without `implement`, the last
 read-only step (research/analyze/plan) writes the final `answer`, printed at the end.
+`Engine.Run` always enters through `workflow.Entry(run)`: the first step for an empty
+history, otherwise the state the history and the transition table give (MVP.md §37.5).
 
 ## Non-negotiable invariants
 
@@ -129,6 +132,16 @@ read-only step (research/analyze/plan) writes the final `answer`, printed at the
   (request, project context) is embedded as delimited data that cannot close its block;
   repository-derived text in action prompts (git diff, test output) goes through
   `action.fence` (random-nonce delimiter) — defense in depth, never a boundary.
+- **Resume continues, never re-decides** (MVP.md §37). `orchestrator resume` reuses the
+  persisted decision and workflow. It constructs no translator, decision provider or
+  Context Manager, and it validates everything it reads back from the run directory
+  strictly (paths derived, never read; `workflow.Verify`), refusing rather than
+  repairing. On a run that has executed a step, the git fingerprint is compared with
+  `resume_baseline` before any `git status`, then the protected paths, then HEAD against
+  `head_ref`. The run directory is `flock`ed by the one `run`/`resume` that owns it.
+  Until the operator approves, a resume changes nothing on disk. `run` and `resume` share
+  one tail after the decision (`executeWorkflow` in `internal/app/app.go`); keep it that
+  way.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 
@@ -160,7 +173,8 @@ prompt; `FAKE_ARGS_DIR` records each call's argv) and a fake Jev
 ## Run artifacts
 
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with the `decision`,
-`pre_run_ref`, and each AI step's `provider.authority`), `decision.json` (full trace:
+`pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), the
+append-only `resumes`, and each execution's `provider.authority` and `attempt`), `decision.json` (full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,

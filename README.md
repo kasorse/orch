@@ -192,6 +192,9 @@ Around `implement` the orchestrator itself guards the result, for any provider:
   untouched. Otherwise the run stops (exit 4) naming the files; the changes stay for you to
   inspect.
 - In `manual` mode the prompt before the step after `implement` lists what it changed.
+- What a resume reads back — every run's `run.json`, `workflow.json`, `decision.json` and
+  `artifacts/` — is protected the same way. The file tools are denied the whole
+  `.orchestrator/runs/` directory as well.
 - The same check runs around the test command, which executes code the model wrote: a test
   that plants a hook, CI file or agent setting stops the run too. `.git` is compared before
   the orchestrator runs `git status`, which would otherwise execute a planted
@@ -258,6 +261,10 @@ Code session you launched the orchestrator from reaches its children (`CLAUDECOD
   control, pass `--config` from outside it, use `test.sandbox: bwrap`, keep `manual` mode,
   and run the whole thing in a container.
 - **A hostile provider CLI binary** is out of scope.
+- **A provider CLI orphaned by `kill -9`** of the orchestrator can keep writing after the
+  last check. A resume catches protected files and a malformed `run.json`, but a subtly
+  edited artifact could reach the next prompt. Check the history a resume prints before
+  approving it.
 
 Details, the threat model and the rejected alternatives: `specs/permissions/`; normative
 summary: `MVP.md` §38.
@@ -301,6 +308,7 @@ decision provider the same data goes to that CLI.
 orchestrator [--config path] version
 orchestrator [--config path] validate
 orchestrator [--config path] run [--verbose|-v] "<task description>"
+orchestrator [--config path] [--mode m] resume <run-id>
 ```
 
 - `version` — prints the build version.
@@ -310,6 +318,9 @@ orchestrator [--config path] run [--verbose|-v] "<task description>"
 - `run "<task>"` — decides the workflow (printing the decision: context depth, complexity,
   who decided, the workflow) and executes it step by step against the repository in the
   current working directory, printing progress as it goes.
+- `resume <run-id>` — continues a run that failed, was stopped, was only planned
+  (`--mode plan`) or whose process died, from where it stopped. See
+  [Resuming a run](#resuming-a-run).
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
   (and, if the decision provider fails, stops instead of asking you to choose).
@@ -338,6 +349,41 @@ If the target repository has uncommitted changes when `run` starts, a workflow w
 prints a warning and continues. The orchestrator never stashes, resets, or otherwise touches
 your working tree on your behalf.
 
+### Resuming a run
+
+```
+orchestrator resume 3f2a9c1e             # the full run ID, or a unique prefix of ≥ 8 characters
+orchestrator --mode auto resume 3f2a9c1e # unattended
+```
+
+The run ID is printed as `Run: <id>` when the run starts. Resume **never decides again**. It
+reuses the run's decision and workflow and makes no Jev or decision-provider call. From the
+run's history it works out where to continue: a failed step is retried, and after a failed
+test it goes back to `implement` with the test output, as if the run had never stopped. Steps
+that already succeeded are not paid for again. The current config applies from here on:
+providers, models, timeouts, limits, test command.
+
+Before asking anything it shows the previous attempt, every step so far, the working tree,
+the next step and the remaining workflow. Without `--mode` you approve and pick a mode as for
+`run`, and pressing Enter keeps the run's earlier mode. A run that was `auto` still asks, so an
+unattended resume needs `--mode auto`.
+
+A resume refuses, before anything runs:
+
+- when a protected file, `.git/config` or a git hook differs from when the run started — for
+  example after a step the guard stopped, or a crash mid-step. `.git` is compared before any
+  `git status`. Revert those files to resume, or start a new run to keep them;
+- when HEAD has moved since the run started, because review diffs against HEAD
+  (`git reset --soft <head_ref>` brings it back with your changes kept);
+- when a limit is already used up. Limits count the whole history, so raise the named key
+  (`limits.max_fix_iterations`, `limits.max_steps`) first;
+- when `run.json` or an artifact was edited, is missing or does not match (`corrupt`,
+  exit 1), or when another orchestrator process is working on the run (`in_use`, exit 1).
+
+Your own edits to other files between the stop and the resume are fine. They show up in the
+working tree listing, and `review` sees them in the diff. A completed run is just reported
+(with its answer, for a read-only workflow). Details: `MVP.md` §37 and `specs/resume/`.
+
 ## Run artifacts
 
 Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target repository:
@@ -345,7 +391,8 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
 ```
 .orchestrator/runs/<run-id>/
   run.json              # run status, the decision, step history (with each AI step's
-                        # provider.authority), limits/iteration counters, pre_run_ref
+                        # provider.authority and attempt), limits/iteration counters,
+                        # pre_run_ref, head_ref, resume_baseline, resumes
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision

@@ -1,13 +1,13 @@
 # Spec: Resume a run by ID
 
-Status: **accepted**. The open questions are resolved (§16); implementation is planned in `tasks/` (see `README.md`).
+Status: **implemented**. The open questions are resolved (§16). The plan and what was built differently are in `tasks/` (see `README.md`). The normative summary is MVP.md §37.
 Scope: a new `orchestrator resume <run-id>` command that continues a persisted run from where
 it stopped, without deciding again or rebuilding the workflow. The decision flow, workflow
 construction, the transition table, static routing, authorities and what is trusted (exit
 codes + git diff) stay the same.
-Supersedes the sketch in MVP.md §37, which predates the permission model (MVP.md §38) and
-misses the gaps listed in §3. Once this is implemented, MVP.md §37 is rewritten from this
-document and becomes the normative home, as with §38.
+This replaced the earlier sketch in MVP.md §37, which predated the permission model
+(MVP.md §38) and missed the gaps listed in §3. MVP.md §37 was rewritten from this document
+and is the normative home, as §38 is for `specs/permissions/`.
 
 ---
 

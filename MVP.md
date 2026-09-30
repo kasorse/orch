@@ -161,9 +161,12 @@ Implement these commands:
 
 ```bash
 orchestrator run "<task>"
+orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
 ```
+
+`resume` continues a persisted run where it stopped, without deciding again (§37).
 
 Support configuration file selection, for example:
 
@@ -173,7 +176,7 @@ orchestrator --config orchestrator.yaml run "..."
 
 A sensible default config path may be used when `--config` is omitted.
 
-Support an execution-mode flag on `run`:
+Support an execution-mode flag on `run` (and `resume`, §37.7):
 
 ```bash
 orchestrator run "..." --mode plan            # preview the plan, don't execute
@@ -1115,7 +1118,9 @@ Location:
 
 Use UUID or equivalent unique Run ID.
 
-Persist enough data so a completed or failed run can later be inspected.
+Persist enough data so a completed or failed run can later be inspected, and a failed,
+stopped, planned or interrupted run can be resumed (§37). The run directory is locked by
+the process that owns it (§37.9).
 
 At minimum save:
 
@@ -1130,7 +1135,9 @@ At minimum save:
 * workflow;
 * executed steps;
 * provider/model and authority for each AI step (`provider.authority`, §38);
-* the restore point (`pre_run_ref`) recorded before the first step;
+* the restore point (`pre_run_ref`) recorded before the first step, and with it
+  `head_ref` and `resume_baseline` (§38.3);
+* each resume (`resumes`) and, per execution, the `attempt` that ran it (§37.10);
 * step result;
 * test result;
 * review result;
@@ -1162,6 +1169,7 @@ Run
 Workflow
 Step
 StepExecution
+Resume                                       (one `orchestrator resume`, §37)
 Artifact
 ProviderRef                                  (provider, model, authority)
 Authority                                    (none, web, read, edit - §38)
@@ -1222,6 +1230,7 @@ RepositoryError
 ExecutionError
 LimitExceededError
 AuthorityError
+RunStateError
 ```
 
 Preserve underlying errors.
@@ -1229,6 +1238,10 @@ Preserve underlying errors.
 `AuthorityError{Provider, Route, Authority, Reason, Remedy}` means a provider cannot
 enforce the authority a call requires (§38); it is raised by `ValidateAuthorities` before
 any AI call and again by an adapter's `Execute` as a backstop.
+
+`RunStateError{Kind, RunID, Msg, Err}` is a problem with a persisted run rather than with
+the config, a provider or the workflow: `not_found`, `ambiguous`, `in_use`,
+`not_resumable`, `corrupt` (§37.11).
 
 `DecisionError{Provider, Kind, StatusCode, Attempts, Body, Err}` is every decision
 provider failure, Jev or LLM (§8.4, §8.5). `Kind` is one of `timeout`, `connection`,
@@ -1330,7 +1343,8 @@ Exact values may be encapsulated centrally.
 
 A `DecisionError` maps to 3, except `auth` (2 - a key problem is a configuration
 problem) and `cancelled` (5). An `AuthorityError` maps to 2: routing an action to a
-provider that cannot enforce its authority is misconfiguration.
+provider that cannot enforce its authority is misconfiguration. A `RunStateError` maps to
+1, whatever it wraps.
 
 ---
 
@@ -1350,7 +1364,8 @@ bounded by the same timeout as one that hangs during an implement step - there i
 separate, un-timed phase. The one thing not counted is the time a user spends on a
 manual choice (§8.6): it waits on a context without the deadline, and the workflow gets
 that time back. `decision.timeout` and `translation.timeout` bound each of their calls
-within the run's deadline.
+within the run's deadline. A resume has no decision phase: its `execution.timeout` is a
+fresh budget that starts after approval (§37.6).
 
 Use `context.Context` throughout the execution chain.
 
@@ -1531,6 +1546,34 @@ Run completed successfully.
 Answer:
 Use a token bucket: ...
 ```
+
+`orchestrator resume` (§37) prints an overview before the approval prompt. It shows the
+previous attempt (`running` is shown as "interrupted") and every recorded execution, with
+test and review lines showing the trusted verdict. Steps a resume ran are marked with its
+number. The working tree is listed once the baseline check has passed, and not at all
+when it is clean. Last come where the run continues, why, and the workflow from there on,
+followed by the usual `authority:` and `Restore point:` lines:
+
+```text
+Resuming run 3f2a9c1e-…  (.orchestrator/runs/3f2a9c1e-…)
+Previous attempt: stopped — maximum fix iterations exceeded
+History:
+  ✓ 000 analyze    claude/sonnet  read  completed
+  ✓ 001 implement  claude/sonnet  edit  completed
+  ✓ 002 test       test command         passed
+  ✗ 003 review     claude/sonnet  read  FAIL (2 issues)
+  ✓ 004 implement  claude/sonnet  edit  completed  (resume 1)
+  ✗ 005 test       test command         tests failed (exit 1)  (resume 1)
+Working tree:
+   M internal/retry/retry.go
+Next: implement — tests failed, retrying implement
+Remaining workflow: implement → test → review
+authority: analyze=read, implement=edit, review=read; test runs: go test ./...
+Restore point: 8b4dd14…
+```
+
+A completed run prints `Run <id> already completed. Nothing to resume.` and its answer, if
+it has one.
 
 Example (no `--mode` flag - the interactive default: approve the workflow, choose a mode,
 then confirm each step under `manual`):
@@ -1753,6 +1796,16 @@ Run fails before repository-changing actions.
 ### Scenario 9 — max iterations reached
 
 Workflow stops and does not invoke additional agents.
+
+### Resume scenarios
+
+`test/integration/scenario17_resume_inputs_test.go` and
+`scenario18_resume_*_test.go` (§37): a failed step is retried with its restored context;
+limits count across resumes; a plan-mode run is executed later; an interrupted run
+continues; a protected-path change, a planted `core.fsmonitor` (no `git status` runs) and
+a moved HEAD are refused; a tampered `run.json` or artifact is `corrupt`; implement cannot
+rewrite resume inputs; a completed run is reported; run-ID prefixes resolve or are
+refused; a locked run is `in_use`. No refusal calls a provider or changes `run.json`.
 
 ### Decision scenarios
 
@@ -2087,77 +2140,220 @@ CLI polish
 
 ---
 
-# 37. Planned Feature — Resume by Run ID (not in initial MVP delivery)
+# 37. Resume by Run ID
 
-Not required for the milestone in §33/§35, but in scope for the next implementation
-pass after it. Recorded now so the persistence/workflow layers aren't accidentally
-built in a way that forecloses it.
+Normative. Design record, gaps found, decisions and the plan as built: `specs/resume/`
+(`SPEC.md`, `tasks/`).
 
-## Problem
+A run that failed, was stopped (Ctrl-C, a manual-gate abort, a limit, a cancel at
+approval), was only planned (`--mode plan`) or whose process died can continue where it
+stopped. Resume **continues and never re-decides**. It reuses the persisted decision and
+workflow, derives where to continue from the history and the existing transition table,
+rebuilds the prompt context from the artifacts, and runs the same engine. Changing the
+task, decision or workflow means a new `run`.
 
-Today every `orchestrator run "<task>"` invocation starts a brand-new run: it always
-decides from scratch and always calls `store.NewRun` (fresh `run.json`, empty
-`Executions`). A run that failed, was stopped (`ctrl-c`, manual-mode rejection), or was
-interrupted by a crash has no way to continue - the only option is to start over,
-which re-runs the decision and loses the fact that steps 1..N already succeeded.
-
-## CLI
-
-Add a fourth command, parallel to `run`/`validate`/`version`:
+## 37.1 CLI
 
 ```bash
-orchestrator resume <run-id>
+orchestrator resume <run-id>          # the full ID, or a unique prefix of at least 8 characters
+orchestrator [--config p] [--mode m] [--verbose] resume <run-id>
 ```
 
-`--config`, `--mode`, and `--verbose` all apply exactly as they do to `run` (§4). If
-`--mode` is omitted, resuming still runs the interactive mode-select prompt (§1/§27)
-unless the persisted run already has a `mode` other than `plan` recorded, in which case
-that becomes the default offered choice.
+`--config`, `--mode` and `--verbose` behave as for `run` (§4). The **current** config
+applies to everything that runs from now on: routing, models, timeouts, limits, test
+command, sandbox. Decision thresholds are irrelevant, because nothing is decided. Each step
+records its own `provider`/`model`/`authority`, so a routing change is visible in
+`run.json`. Anything other than exactly one argument is a usage error (exit 2).
 
-## Behavior
+## 37.2 Order of operations
 
-* Fail-fast validation (`config.Load` → `config.Validate` →
-  `config.ValidateDependencies`, §7) always runs first, exactly as for `run` - resuming
-  does not bypass dependency checks, since the operator's environment or config may
-  have changed since the original run.
-* Load the persisted `Run` for `<run-id>` from `.orchestrator/runs/<run-id>/run.json`
-  (§21). Unknown run ID is a distinct error (new `RunNotFoundError` category, §23),
-  exit code 1 (§24) - not confused with a config/dependency failure (exit code 2).
-* Do **not** re-run the decision and do **not** rebuild the workflow. The persisted
-  `Decision` and `Workflow` are reused as-is (§8/§9) - resume continues the exact
-  workflow that was already committed to, even if the decision provider would answer
-  differently today. Re-deciding on resume would let the same task silently diverge
-  into a different workflow between attempts, defeating the point of resuming.
-* Resumable statuses: `failed`, `stopped`. A `running` status found on load means the
-  previous process died mid-step (crash, killed, machine restart) without updating
-  `run.json` past that point; treat it the same as `failed` and resume from the last
-  persisted `Executions` entry.
-* `completed` is not resumable: report it as already done and exit 0 without invoking
-  any provider.
-* Re-entry point is derived the same way the engine already decides "what's next"
-  after any step finishes (§11's transition table) - resume is not a special code path
-  through `workflow.Engine`, it is `Engine.Run` given a `Run` whose `Executions` is
-  non-empty instead of empty. `max_steps`/`max_fix_iterations` (§12) are evaluated
-  against the full historical `Executions` length, including the executions from
-  before the interruption - resuming a run does not reset either limit.
-* `Executions` remains append-only (§11): resuming never edits or removes prior
-  entries, it only appends new ones.
-* If `mode` was `manual` on the original run, the manual-mode gate (§11) applies again
-  on resume for every remaining step, same as a fresh manual run.
+`app.resumeTask` (`internal/app/resume.go`). No translator, decision provider or
+project-context manager is constructed. Until the operator approves, the persisted run is
+left byte-for-byte as it was found, so no refusal, cancel or plan-mode answer changes it.
 
-## Persistence additions
+```text
+fail-fast chain (§7), with the current config
+→ repository.Open                                    (rev-parse only)
+→ Store.ResolveRunID                                 exact ID, else unique prefix ≥ 8
+→ Store.Lock                                         flock on the run directory
+→ Store.LoadRun                                      strict validation (§37.4)
+→ workflow.Verify                                    workflow == Build(decision.Stages)
+→ completed: Dispatcher.Restore, "already completed", the answer again, exit 0
+→ a step has run: resume_baseline present and well-formed
+→ no step has run: git status, clean-worktree rule (§38.3), entry = first step
+  otherwise:
+    workflow.Entry                                   StateDone → marked completed, exit 0
+    → action.CheckBaseline                           git fingerprint FIRST, then protected paths
+    → HEAD == head_ref
+    → pre_run_ref is a commit                        (Repository.CommitExists)
+    → workflow.CheckLimits                           limit pre-check (§37.6)
+    → Dispatcher.Restore                             prompt context from the artifacts (§37.5)
+    → Repository.StatusSummary                       working tree, for the overview
+→ overview: header, history, working tree, next step, remaining workflow (§27)
+→ executeWorkflow (shared with run): authority line, restore point,
+  approval + mode (§37.7)
+  → append a Resume record, status running, failure_reason cleared, save
+  → no step has run: restore point, head_ref, resume_baseline recorded (§38.3)
+  → execution.timeout starts, sandbox, step guard, Engine.Run
+```
 
-* `persistence.Store` needs a `LoadRun(runID string) (*domain.Run, error)` to pair with
-  the existing `SaveRun` (§21) - reads and unmarshals `run.json`, returns
-  `RunNotFoundError` if the directory/file doesn't exist.
+`run` and `resume` share everything after the decision (`executeWorkflow` in
+`internal/app/app.go`), so a resumed step runs under exactly the checks of a fresh one.
+Nothing on the resume path calls an AI provider or makes an HTTP request before approval.
 
-## Out of scope for this feature
+## 37.3 Resumability
 
-* No schema/version migration for `run.json` written by an older binary - resuming a
-  run produced by an incompatible orchestrator version is undefined behavior, not a
-  case this feature needs to detect or handle.
-* No editing the task description, decision, or workflow on resume - if any of
-  those need to change, that is a new `run`, not a resume.
+| persisted state | resume does |
+|---|---|
+| `completed` | reports it, prints the final answer again if there is one, exit 0, no provider call |
+| no workflow (the decision failed, or the run was cancelled before one existed) | refuses: `not_resumable`, start a new run |
+| a workflow, no executions: `pending` (plan mode, or crashed before the first step), `stopped` "cancelled by user", `failed` for a dirty tree | the tail of a fresh run: clean-worktree rule, restore point, baseline, approval, engine from the first step |
+| `failed` / `stopped`, at least one execution | continues at the entry state (§37.5) |
+| `running`, lock free | the previous process died: handled like `failed`, shown as "interrupted" |
+| `running`, lock held | refuses: `in_use` |
+
+`run` saves `run.json` (with the workflow), `decision.json` and `project_context.json`
+before the dirty-tree refusal, so a refused run is resumable once the tree is clean.
+
+## 37.4 Loading and validation
+
+The run directory is inside the worktree, and a model's step can write there, so what is
+read back is input, not trusted state. `persistence.Store.LoadRun` refuses (`corrupt`),
+and never repairs:
+
+* unknown JSON fields, trailing data, unknown status/mode/action/authority values;
+* an `id` that differs from the directory name;
+* `executions[i].index != i`, an execution that is not `completed`/`failed`, a negative
+  `attempt`;
+* an `artifact_path` other than the derived `artifacts/<NNN>-<action>.json`. Paths are
+  always derived from index and action; the stored one is only compared.
+
+`workflow.Verify` then refuses a workflow that is not `workflow.Build(decision.Stages)`,
+or an execution of an action outside it. A run with executions but no `resume_baseline`
+predates resume support and is `not_resumable`. A `pre_run_ref` that is not a full commit
+SHA naming a commit in the repository is `corrupt`; it is checked only after the
+fingerprint check. Run IDs are hex and dashes only, so an argument can never name a path
+outside `.orchestrator/runs/`.
+
+## 37.5 Entry state and prompt context
+
+`workflow.Entry(run)` is a pure function of the history. `Engine.Run` always enters
+through it; a fresh run is the empty-history case.
+
+| last execution | entry |
+|---|---|
+| none | the first step ("start") |
+| `failed` (a hard error: provider, timeout, malformed output, guard) | the same action again ("retry <action> (failed: …)") |
+| `completed`, `Next` gives a step | that step ("continue after <action>", or the transition's reason, e.g. "tests failed, retrying implement") |
+| `completed`, `Next` gives done | nothing left: the run is marked completed, exit 0 |
+| `completed` test that failed, no implement in the workflow | that test again (the operator presumably fixed something) |
+
+A completed step's outcome comes only from trusted persisted results: `test_result.success`
+(the exit code) and `ReviewResult.Decide()`, never the model's own `status` (§19).
+
+`(*action.Dispatcher).Restore(run, store)` replays the context changes of every completed
+execution in order, through the same `apply*` methods the live steps use: research,
+analysis and plan artifacts; implement sets the last implementation and clears the
+pending retry context; a failed test becomes the pending test failure; a failed review
+leaves its issues pending. Failed executions change nothing, as live: a failed implement
+did not consume the retry context, and its retry gets the same one. Research, analyze,
+plan and implement artifacts are required and decoded strictly. Test and review results
+come from `run.json`, and their artifact, when present, must agree. Anything missing or
+inconsistent is `corrupt`. A resume never continues with a thinner prompt.
+
+## 37.6 Limits and timeout
+
+* `max_steps` and `max_fix_iterations` (§12) count the **whole** history, across resumes.
+  `workflow.Counters` derives `total_steps` (`len(executions)`) and `fix_iterations`
+  (completed tests/reviews that failed, in a workflow with implement) from the history.
+  The persisted counters are not trusted.
+* `workflow.CheckLimits` refuses before the approval prompt when the entry would exceed a
+  limit (`LimitExceededError`, exit 4). Its message states the used and configured
+  values, and the config key to raise. The engine applies the same check when it starts
+  with a history. A limit-stopped run therefore continues only after the limit is raised.
+* `execution.timeout` is a fresh budget for the resuming process. It starts after
+  approval, when the engine phase begins. `actions.<name>.timeout` applies per step as
+  always.
+
+## 37.7 Mode
+
+`--mode` wins. Without it, the approval prompt is shown, then the mode prompt. An empty
+answer there picks the run's persisted mode, unless that is `plan` or empty. A persisted
+`auto` is offered, never applied silently: an unattended resume needs `--mode auto`,
+because the operator may be elsewhere now. In `manual` the gate applies to every
+remaining step. Choosing `plan` on resume prints "Plan approved. Not executing" and
+returns, without changing the run. Authority never depends on the mode (§38).
+
+## 37.8 Safety on resume
+
+Before anything runs on a tree a model last touched (§38.3):
+
+1. **Git fingerprint first.** `GitFingerprint` (rev-parse and file reads only) is compared
+   with `resume_baseline`'s. Until it matches, nothing but `rev-parse` runs in the
+   repository, because `git status` would execute a planted `core.fsmonitor`.
+2. **Protected paths.** They are compared with `resume_baseline`, using the patterns the
+   baseline was taken with. Any difference refuses the resume, naming the paths and the
+   restore point. A step the guard failed left its files on disk, and a crash
+   mid-`implement` or mid-`test` skipped the guard. Only a tree back at its run-start
+   protected state may continue. To keep such a change, start a new run.
+3. **HEAD** must equal `head_ref`, because review diffs against HEAD. A moved HEAD is
+   refused, and the message shows both SHAs (`git reset --soft <head_ref>` restores it
+   with the changes kept).
+
+The clean-worktree rule applies only to a run that has not executed a step. After that,
+the tree is dirty by design, and the baseline protects it. Changes to non-protected files
+between the stop and the resume are allowed. The overview lists the working tree, and
+review reads the real diff, so manual fixes are reviewed like the model's.
+
+## 37.9 Locking
+
+`persistence.Store.Lock` takes `flock(LOCK_EX|LOCK_NB)` on the run directory's own file
+descriptor, held until the process ends and released by the kernel on a crash. There is no
+lock file to delete. `run` takes it right after creating the run, and `resume` takes it
+before loading it.
+
+## 37.10 Persistence
+
+`run.json` gains (all omitted when empty):
+
+```text
+head_ref          HEAD when the first step started
+resume_baseline   the guard's state then: {patterns, git_fingerprint, protected}
+resumes[]         append-only: at, from_status ("running" = interrupted), from_reason,
+                  entry, why, mode
+executions[].attempt   0 for the original process, n for the n-th resume
+```
+
+`executions` and `resumes` are append-only. A resume clears `failure_reason` when it
+starts; the previous reason is kept in its `resumes` record.
+
+## 37.11 Errors
+
+`apperr.RunStateError{Kind, RunID, Msg, Err}` (§23), exit 1:
+
+| kind | when |
+|---|---|
+| `not_found` | no run matches, a prefix under 8 characters, or not a run ID |
+| `ambiguous` | the prefix matches several runs (all are listed) |
+| `in_use` | another process holds the lock |
+| `not_resumable` | no workflow; a run predating resume support |
+| `corrupt` | §37.4 validation, or a missing or invalid artifact |
+
+Protected-state and HEAD refusals are `WorkflowError`, and the limit pre-check is
+`LimitExceededError`. Both are exit 4, the same category as at run time. Config and
+dependency failures are exit 2, as for `run`.
+
+## 37.12 Not covered
+
+* A run with no workflow is a new `run`. Editing the task, decision or workflow on resume
+  is also a new `run`.
+* No migration: runs written without `resume_baseline` are refused, not converted.
+* A step interrupted mid-call starts again from the beginning. Provider sessions are not
+  resumed.
+* Deferred (`specs/resume/README.md`): a checkpoint per step to show "changed since the
+  stop", review against `head_ref` so a moved HEAD is resumable, pinning `pre_run_ref`
+  under a ref so `git gc` cannot prune it (a pruned snapshot makes the run `corrupt`),
+  and `runs` / `show` commands.
 
 ---
 
@@ -2212,6 +2408,11 @@ human sees and confirms between steps.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
 * There is no bypass: the codebase never passes a permission-skipping mode.
+* The runs directory (`.orchestrator/runs`, relative to the repository root) is added to
+  every workflow call's deny list (`Dispatcher.RunsDir`). In claude a `Read(...)` deny rule
+  also blocks Edit and Write on that path. This keeps other runs' prompts and context away
+  from the file tools, and keeps a step from writing what a resume reads back (§37).
+  Verified live on claude 2.1.285.
 * Provider CLIs and the test command get `execution.ScrubbedEnv()`: the inherited
   environment minus the variables through which a launching agent session reaches its
   children (`CLAUDECODE`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
@@ -2234,6 +2435,17 @@ human sees and confirms between steps.
   fails the step (`WorkflowError`, exit 4) naming the paths and the restore point; the
   changes stay on disk. Without a guard, or when its snapshot fails, `implement` refuses
   before the provider call.
+* **Resume inputs.** The step guard also protects the run directory's resume inputs:
+  `run.json`, `workflow.json`, `decision.json` and `artifacts/**` of **every** run under
+  the runs directory (`action.RunDirPatterns`). Logs are output and never read back, so
+  they are not protected. The orchestrator itself writes nothing to the run directory
+  during a guarded call: implement's artifact is saved only after the guard's check.
+* **Run-start baseline.** Where the restore point is recorded, `run.json` also records
+  `head_ref` (HEAD) and `resume_baseline`: the guard's snapshot then (its patterns, the
+  git fingerprint, and a content hash per protected path that differs from HEAD or is
+  ignored), without the resume-input patterns, which change with every step. If that
+  snapshot fails, the run stops before its first step. A resume compares the tree with the
+  baseline, fingerprint first, before anything runs (§37.8).
 * **The test step.** The same guard runs around the test command, which executes code the
   model wrote; the guard compares the git fingerprint before running `git status`, which
   would itself run a planted `core.fsmonitor`. With `test.sandbox: bwrap` the command runs
@@ -2247,8 +2459,10 @@ human sees and confirms between steps.
 
 ## 38.4 Audit
 
-`run.json` records each AI step's `provider.authority` and the run's `pre_run_ref`; the
-`authority:` line and `Restore point:` line are printed in every mode (§27).
+`run.json` records each AI step's `provider.authority`, the run's `pre_run_ref`,
+`head_ref` and `resume_baseline`, and, per resume, a `resumes` record and each new step's
+`attempt`. The `authority:` line and the `Restore point:` line are printed in every mode
+(§27), and again before a resume's approval.
 
 ## 38.5 Not protected
 
@@ -2264,3 +2478,10 @@ human sees and confirms between steps.
   additionally needs `--config` from outside it, a sandboxed test step and ideally a
   container.
 * A hostile provider CLI binary is out of scope.
+* **An orphaned provider CLI after SIGKILL.** If the orchestrator is killed with SIGKILL
+  while a provider CLI runs, the CLI (its own process group) can keep writing after the
+  last guard check. On resume, the baseline check (§37.8) catches protected paths and
+  validation (§37.4) catches structural tampering. A subtly edited artifact written in
+  that window could still reach the next prompt. It is bounded by that step's authority,
+  and the history and next step are printed before the resume's approval so the operator
+  can inspect them.

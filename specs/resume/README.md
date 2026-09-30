@@ -1,15 +1,16 @@
 # Resume a run by ID
 
-Status: **in progress**. The spec is accepted and the decisions are taken (`SPEC.md` §16).
-R01–R08 are done; R09 remains.
+Status: **implemented**. All nine tasks are done. Each task's "As built" section records
+where the implementation differs from the plan and why.
 
 | document | role |
 |---|---|
 | [`SPEC.md`](SPEC.md) | the specification: gaps, principles, entry state, safety on resume, persistence, tests, estimate, decisions |
 | [`tasks/`](tasks/) | 9 implementation tasks |
 
-MVP.md §37 is the normative home once R09 rewrites it from `SPEC.md`. Until then this folder
-supersedes the sketch in §37.
+MVP.md §37 is the normative home (§38.3–§38.5 for the baseline, the resume-input guard and
+the residual risk). This folder is the design record: gaps found, principles, decisions,
+and the plan as built.
 
 ## The problem in one paragraph
 
@@ -34,7 +35,7 @@ back is strictly validated, because the run directory is writable by the model.
 | [R06](tasks/TASK-R06-resume-command.md) | `resume` command; `run` and `resume` share one tail ✓ | L | R01–R04 |
 | [R07](tasks/TASK-R07-console-output.md) | resume header, history, next step; golden files ✓ | S | R06 |
 | [R08](tasks/TASK-R08-integration.md) | integration scenarios ✓ | M | R06, R07 |
-| [R09](tasks/TASK-R09-documentation.md) | MVP.md §37/§38.5, CLAUDE.md, README | S | all |
+| [R09](tasks/TASK-R09-documentation.md) | MVP.md §37/§38.5, CLAUDE.md, README ✓ | S | all |
 
 ```
 R01 ──┬── R02 ──┐
