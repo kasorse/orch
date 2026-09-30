@@ -1,11 +1,14 @@
 package persistence
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"orchestrator/internal/domain"
 )
@@ -206,5 +209,38 @@ func TestSaveDecisionAndProjectContext(t *testing.T) {
 	data, err = os.ReadFile(filepath.Join(store.runDir(run.ID), "project_context.json"))
 	if err != nil || !strings.Contains(string(data), `"language": "go"`) {
 		t.Errorf("project_context.json = %s, %v", data, err)
+	}
+}
+
+func TestSaveTicket(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := domain.Ticket{
+		Key: "NEW-9", RequestedKey: "PMC-1", URL: "https://example.atlassian.net/browse/NEW-9",
+		Type: "Bug", Summary: "Hover shows nothing", Description: "Steps:\n# open {{Tags}}",
+		Parent:    &domain.TicketParent{Key: "PMC-2663", Summary: "Tags & Labels"},
+		Fields:    []domain.TicketField{{ID: "customfield_10035", Label: "Acceptance criteria", Value: "shown"}},
+		FetchedAt: time.Date(2026, 9, 30, 10, 12, 0, 0, time.UTC),
+	}
+	if err := store.SaveTicket(run.ID, want); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), "ticket.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got domain.Ticket
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&got); err != nil {
+		t.Fatalf("ticket.json is not a ticket: %v\n%s", err, data)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ticket.json decodes to\n%+v\nwant\n%+v", got, want)
 	}
 }

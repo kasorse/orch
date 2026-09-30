@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"net/url"
 
 	"orchestrator/internal/domain"
 )
@@ -17,6 +18,11 @@ func validateRun(run *domain.Run, runID string) error {
 	}
 	if run.Mode != "" && !run.Mode.Valid() {
 		return fmt.Errorf("unknown mode %q", run.Mode)
+	}
+	if run.Task.Source != nil {
+		if err := validateTaskSource(*run.Task.Source); err != nil {
+			return fmt.Errorf("task.source: %w", err)
+		}
 	}
 	if run.Workflow != nil {
 		for i, step := range run.Workflow.Steps {
@@ -67,6 +73,28 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
+	}
+	return nil
+}
+
+// validateTaskSource checks where a task came from (specs/jira/SPEC.md §11.1). The fields
+// are only displayed, never used to make a request, but the run directory is
+// model-writable, so they are validated like everything else read back.
+func validateTaskSource(src domain.TaskSource) error {
+	if src.Kind != domain.TaskSourceJira {
+		return fmt.Errorf("unknown kind %q", src.Kind)
+	}
+	if !domain.ValidTicketKey(src.Key) {
+		return fmt.Errorf("key %q is not an issue key", src.Key)
+	}
+	if src.RequestedKey != "" && !domain.ValidTicketKey(src.RequestedKey) {
+		return fmt.Errorf("requested_key %q is not an issue key", src.RequestedKey)
+	}
+	if u, err := url.Parse(src.URL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("url %q is not an absolute http(s) URL", src.URL)
+	}
+	if src.FetchedAt.IsZero() {
+		return fmt.Errorf("fetched_at is not set")
 	}
 	return nil
 }

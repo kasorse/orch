@@ -17,7 +17,9 @@ import (
 // through strict decoding covers the whole run.json shape.
 func fullRun(t *testing.T, store *Store) *domain.Run {
 	t.Helper()
-	run, err := store.NewRun(domain.Task{Description: "fix the bug", CreatedAt: time.Now()})
+	run, err := store.NewRun(domain.Task{Description: "fix the bug", CreatedAt: time.Now(),
+		Source: &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "NEW-9", RequestedKey: "PMC-1",
+			URL: "https://example.atlassian.net/browse/NEW-9", FetchedAt: time.Now(), Notes: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +142,10 @@ func execAt(m map[string]any, i int) map[string]any {
 	return m["executions"].([]any)[i].(map[string]any)
 }
 
+func sourceOf(m map[string]any) map[string]any {
+	return m["task"].(map[string]any)["source"].(map[string]any)
+}
+
 func TestLoadRun_RefusesCorruptState(t *testing.T) {
 	cases := []struct {
 		name string
@@ -167,6 +173,19 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown resume status", func(m map[string]any) {
 			m["resumes"].([]any)[0].(map[string]any)["from_status"] = "odd"
 		}, "resumes[0]"},
+		{"unknown task source field", func(m map[string]any) { sourceOf(m)["extra"] = 1 }, "unknown field"},
+		{"task source kind", func(m map[string]any) { sourceOf(m)["kind"] = "github" }, `task.source: unknown kind "github"`},
+		{"task source kind empty", func(m map[string]any) { sourceOf(m)["kind"] = "" }, "task.source: unknown kind"},
+		{"task source lower-case key", func(m map[string]any) { sourceOf(m)["key"] = "pmc-1" },
+			`task.source: key "pmc-1" is not an issue key`},
+		{"task source path key", func(m map[string]any) { sourceOf(m)["key"] = "../x" }, "is not an issue key"},
+		{"task source requested key", func(m map[string]any) { sourceOf(m)["requested_key"] = "PMC 1" },
+			`task.source: requested_key "PMC 1" is not an issue key`},
+		{"task source url", func(m map[string]any) { sourceOf(m)["url"] = "not a url" },
+			`task.source: url "not a url" is not an absolute http(s) URL`},
+		{"task source url scheme", func(m map[string]any) { sourceOf(m)["url"] = "file:///etc/passwd" }, "task.source: url"},
+		{"task source zero fetched_at", func(m map[string]any) { sourceOf(m)["fetched_at"] = time.Time{} },
+			"task.source: fetched_at is not set"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,6 +199,36 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A run.json written before tasks had a source (a typed task, or any run from before
+// specs/jira) still loads, and has no source.
+func TestLoadRun_WithoutTaskSource(t *testing.T) {
+	store := NewStore(t.TempDir())
+	id := "0f8fad5b-d9cb-469f-a165-70867728950e"
+	dir := store.runDir(id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{
+  "id": "` + id + `",
+  "task": {"description": "fix the bug", "created_at": "2026-09-01T10:00:00Z"},
+  "status": "failed",
+  "executions": [],
+  "created_at": "2026-09-01T10:00:00Z",
+  "updated_at": "2026-09-01T10:05:00Z"
+}`
+	if err := os.WriteFile(filepath.Join(dir, "run.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := store.LoadRun(id)
+	if err != nil {
+		t.Fatalf("LoadRun: %v", err)
+	}
+	if run.Task.Description != "fix the bug" || run.Task.Source != nil {
+		t.Errorf("task = %+v", run.Task)
 	}
 }
 

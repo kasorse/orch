@@ -1,5 +1,5 @@
 // Package persistence stores run state on the local filesystem under
-// <baseDir>/<run-id>/{run.json,decision.json,project_context.json,workflow.json,artifacts/,logs/} so a
+// <baseDir>/<run-id>/{run.json,decision.json,project_context.json,workflow.json,ticket.json,artifacts/,logs/} so a
 // completed or failed run can later be inspected. No database is required (MVP.md §21).
 package persistence
 
@@ -103,6 +103,16 @@ func (s *Store) SaveProjectContext(runID string, pc *domain.ProjectContext) erro
 	}
 	if err := s.writeJSON(runID, "project_context.json", pc); err != nil {
 		return fmt.Errorf("save project context: %w", err)
+	}
+	return nil
+}
+
+// SaveTicket writes ticket.json: the validated Jira issue a task was rendered from
+// (specs/jira/SPEC.md §11.2). It is an audit record only - nothing, resume included, ever
+// reads it back, so it is not a resume input and is not in action.RunDirPatterns.
+func (s *Store) SaveTicket(runID string, t domain.Ticket) error {
+	if err := s.writeJSON(runID, "ticket.json", t); err != nil {
+		return fmt.Errorf("save ticket: %w", err)
 	}
 	return nil
 }

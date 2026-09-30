@@ -50,7 +50,24 @@ that nothing reads back (`SPEC.md` §8.3, §11).
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **Location**: `TaskSource` and `TaskSourceJira` are in `internal/domain/task.go`. The
+  ticket types and `ValidTicketKey` are in `internal/domain/ticket.go`.
+- **URL check**: `task.source.url` must be an absolute `http` or `https` URL with a host.
+  So `file:///etc/passwd` is refused as well as `not a url`.
+- **Messages** are prefixed `task.source:` by `validateRun`, e.g. `run.json: task.source:
+  key "pmc-1" is not an issue key`.
+- **Shared key table**: Go test tables cannot cross packages, so `ticketKeyCases` in
+  `internal/domain/ticket_test.go` is the reference list. J03's `ParseRef` tests should
+  cover the same keys, which `ParseRef` upper-cases first.
+- **Tests**: `fullRun` now carries a source with a moved key and notes. That puts the
+  source through the strict round trip in `TestLoadRun_RoundTrip`.
+  `TestLoadRun_RefusesCorruptState` gains nine source cases: an unknown field, the kind
+  (`github`, empty), a lower-case key, a `../x` key, the requested key, the URL (`not a
+  url`, `file://`) and a zero `fetched_at`. `TestLoadRun_WithoutTaskSource` loads a
+  hand-written run.json in the shape used before this change. `TestSaveTicket` decodes
+  `ticket.json` strictly and compares it with the input.
 
 ## Gates
 
