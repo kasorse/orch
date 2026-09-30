@@ -69,6 +69,19 @@ func FromError(err error) int {
 		return ProviderExecution
 	}
 
+	// A ticket that cannot be read is the operator's to fix (credentials, key, base_url):
+	// exit 2, like a rejected Jev key. Everything else is Jira failing: exit 3.
+	var jiraErr *apperr.JiraError
+	if errors.As(err, &jiraErr) {
+		switch jiraErr.Kind {
+		case apperr.JiraCancelled:
+			return UserCancellation
+		case apperr.JiraAuth, apperr.JiraNotFound, apperr.JiraRedirect:
+			return ConfigOrDependency
+		}
+		return ProviderExecution
+	}
+
 	var limitErr *apperr.LimitExceededError
 	if errors.As(err, &limitErr) {
 		return WorkflowOrLimit

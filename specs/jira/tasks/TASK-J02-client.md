@@ -81,7 +81,42 @@ only `httptest`.
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **Redirects**: `CheckRedirect` returns `http.ErrUseLastResponse` rather than a custom
+  sentinel. `Do` then hands back the 3xx response without following it, and `attempt`
+  maps it to `redirect`, with `Detail` set to the `Location` host. A relative `Location`
+  resolves to Jira's own host. The redirect tests (same host and another host) show that
+  the target gets no request at all.
+- **`Options.EmailEnv` / `TokenEnv`**: added so that `auth` and `not_found` messages can
+  name the variables (`JIRA_EMAIL/JIRA_API_TOKEN`, or `JIRA_PAT` for bearer). The client
+  has no other source for those names. They are used only in messages.
+- **`Credentials`** holds its values behind a pointer. `fmt` cannot call `String()` on an
+  unexported field, so printing a `Client` would otherwise show the token. Now a raw print
+  shows an address. `TestCredentials_NeverPrinted` covers `%v`, `%+v` and `%#v` of the
+  value, of structs holding it (exported and unexported) and of a `Client`.
+- **Redaction order**: the body is redacted **before** it is truncated to 512 bytes, the
+  reverse of step 4. Truncating first could cut a secret in half and leave the first half
+  visible. `TestFetch_RedactsBeforeTruncating` puts the token across the cut.
+- **Statuses** not listed in step 4 (other 2xx, 1xx, 501, 505 and so on) are
+  `invalid_response` with `unexpected status N`, and are not retried. A body over 1 MiB
+  is `invalid_response` whatever the status.
+- **Timeout details**: an attempt timeout gives `Jira did not answer within 10s`. HTTP
+  408 gives `Jira did not answer in time`. The run's deadline gives `… within the run's
+  execution.timeout`, which is not retried.
+- **Message shape**: the status and attempts are added in parentheses, e.g. `Jira is
+  unavailable (HTTP 503 after 2 attempts)`, then `: <cause>`, then the redacted body
+  excerpt.
+- **Response rules**: an absent `description` counts as `null`. The parent's summary may
+  be empty but must be a string. A custom field that is blank after trimming is left out,
+  the same as `null`.
+- **`Fetch`** upper-cases the key it is given. The default `User-Agent` is `orchestrator`;
+  J06 passes `orchestrator/<app.Version>`.
+- **Tests**: the response-validation table lives in `client_test.go` and goes through
+  `Fetch` against `httptest`, not through `toTicket` directly, so every rule is checked
+  over the real HTTP path. There is no separate `response_test.go`. The status tests use
+  a server that echoes `Authorization` back in the error body, and each asserts that the
+  body excerpt shows `[REDACTED]`.
 
 ## Gates
 
