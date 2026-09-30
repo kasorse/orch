@@ -1,7 +1,7 @@
 # Resume a run by ID
 
 Status: **in progress**. The spec is accepted and the decisions are taken (`SPEC.md` §16).
-R01–R07 are done; R08–R09 remain.
+R01–R08 are done; R09 remains.
 
 | document | role |
 |---|---|
@@ -33,7 +33,7 @@ back is strictly validated, because the run directory is writable by the model.
 | [R05](tasks/TASK-R05-deny-runs-dir.md) | runs directory in every workflow call's deny list + live check ✓ | S | R01 |
 | [R06](tasks/TASK-R06-resume-command.md) | `resume` command; `run` and `resume` share one tail ✓ | L | R01–R04 |
 | [R07](tasks/TASK-R07-console-output.md) | resume header, history, next step; golden files ✓ | S | R06 |
-| [R08](tasks/TASK-R08-integration.md) | integration scenarios | M | R06, R07 |
+| [R08](tasks/TASK-R08-integration.md) | integration scenarios ✓ | M | R06, R07 |
 | [R09](tasks/TASK-R09-documentation.md) | MVP.md §37/§38.5, CLAUDE.md, README | S | all |
 
 ```

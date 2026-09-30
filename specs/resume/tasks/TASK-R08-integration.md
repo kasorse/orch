@@ -49,6 +49,37 @@ Fakes are routed by the `ACTION: <name>` prompt line. Call order and prompts com
     7-character prefix and an unknown ID → exit 1.
 12. **In use.** Hold `Store.Lock` from the test → resume exits 1 with `in_use`.
 
+## As built
+
+- Four files, all `scenario18_resume_*_test.go`:
+  - `command`: R06's tests; item 3.
+  - `retry`: items 1, 2, 4.
+  - `safety`: items 5–8.
+  - `ids`: items 10–12.
+  Item 9 is `scenario17_resume_inputs_test.go` (R04).
+- Helpers in `helpers_test.go`: `resume(t, dir, cfg, id, extra...)`, `resumedRun` +
+  `loadResumedRun`, `runJSONPath`, `editRunJSON` (returns the original bytes), `gitRun`.
+- Every refusal also asserts that nothing was called and `run.json` is byte-identical
+  (`assertRefusedUnchanged`), so no refusal records a `Resume`.
+- Item 1 needs a `plan` step, so it uses its own Jev script (analysis, planning,
+  development, testing, review). The retried implement prompt carries the plan and the
+  analysis from their artifacts, and the six executions have attempts 0,0,0,1,1,1.
+- Item 2: with the limit raised to 2, the tests still fail, so the resumed run stops
+  again at the limit after one implement. That implement prompt holds the failing output
+  in an `UNTRUSTED-STDOUT-<nonce>` fence.
+- Item 6 puts a logging `git` wrapper first on `PATH`. During the refused resume it
+  records neither `status` nor `diff`, and the planted `core.fsmonitor` (an executable
+  that touches a marker) never runs. Checked by hand that this hook does run under a
+  plain `git status`, so the test is a real canary.
+- Item 8 checks each tamper's message too: "not the one the decision builds",
+  "artifact is missing", "artifact_path". After the tampering is undone, the same run
+  resumes.
+- Item 10 uses an analysis-only run whose analyze response carries an `answer`. Item 11
+  also covers a non-ID argument (`../../etc`). The ambiguous case adds a second run
+  directory sharing the first 8 characters. Item 12 holds `persistence.Store.Lock` from
+  the test, and the resume succeeds after it is released.
+- `go test -count=3 ./test/integration/` is stable.
+
 ## Acceptance
 
 All scenarios pass under `go test ./test/integration/...`, as do scenarios 1–17, with no

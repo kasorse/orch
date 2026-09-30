@@ -6,6 +6,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -318,3 +319,93 @@ const reviewFailResponse = `{
     {"severity": "high", "file": "fixture.go", "description": "double check the fix"}
   ]
 }`
+
+// resumedRun is the part of run.json the resume scenarios assert on.
+type resumedRun struct {
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	FailureReason string `json:"failure_reason"`
+	Mode          string `json:"mode"`
+	PreRunRef     string `json:"pre_run_ref"`
+	HeadRef       string `json:"head_ref"`
+	Workflow      *struct {
+		Steps []struct {
+			Action string `json:"action"`
+		} `json:"steps"`
+	} `json:"workflow"`
+	ResumeBaseline json.RawMessage `json:"resume_baseline"`
+	Resumes        []struct {
+		FromStatus string `json:"from_status"`
+		FromReason string `json:"from_reason"`
+		Entry      string `json:"entry"`
+		Why        string `json:"why"`
+		Mode       string `json:"mode"`
+	} `json:"resumes"`
+	Executions []struct {
+		Action  string `json:"action"`
+		Attempt int    `json:"attempt"`
+	} `json:"executions"`
+}
+
+func loadResumedRun(t *testing.T, repoDir string) resumedRun {
+	t.Helper()
+	raw, ok := runFile(t, repoDir, "run.json")
+	if !ok {
+		t.Fatal("run.json was not written")
+	}
+	var run resumedRun
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+// resume runs `orchestrator --mode auto [extra...] resume <id>` in repoDir.
+func resume(t *testing.T, repoDir, configPath, id string, extra ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	return runOrchestrator(t, repoDir, configPath, append(extra, "resume", id)...)
+}
+
+// runJSONPath is the path of the single run's run.json under repoDir.
+func runJSONPath(t *testing.T, repoDir string) string {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(repoDir, ".orchestrator", "runs", "*", "run.json"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("expected exactly one run.json, got %v (err=%v)", matches, err)
+	}
+	return matches[0]
+}
+
+// editRunJSON rewrites the single run's run.json through edit, as a model's step or the
+// operator could, and returns the original bytes so a test can put them back.
+func editRunJSON(t *testing.T, repoDir string, edit func(run map[string]any)) (original []byte) {
+	t.Helper()
+	path := runJSONPath(t, repoDir)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run map[string]any
+	if err := json.Unmarshal(original, &run); err != nil {
+		t.Fatal(err)
+	}
+	edit(run)
+	data, err := json.MarshalIndent(run, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return original
+}
+
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}

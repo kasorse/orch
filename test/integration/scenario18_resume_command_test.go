@@ -1,10 +1,7 @@
 package integration
 
 import (
-	"encoding/json"
 	"errors"
-	"os"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -13,48 +10,10 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 18 (specs/resume/SPEC.md §6, §10; TASK-R06): the resume command itself - its
-// usage, a run refused for a dirty tree that is resumable once the tree is clean, and a
-// plan-mode resume that leaves the run as it found it. Resume never decides again.
-
-type resumedRun struct {
-	ID            string `json:"id"`
-	Status        string `json:"status"`
-	FailureReason string `json:"failure_reason"`
-	Mode          string `json:"mode"`
-	PreRunRef     string `json:"pre_run_ref"`
-	HeadRef       string `json:"head_ref"`
-	Workflow      *struct {
-		Steps []struct {
-			Action string `json:"action"`
-		} `json:"steps"`
-	} `json:"workflow"`
-	ResumeBaseline json.RawMessage `json:"resume_baseline"`
-	Resumes        []struct {
-		FromStatus string `json:"from_status"`
-		FromReason string `json:"from_reason"`
-		Entry      string `json:"entry"`
-		Why        string `json:"why"`
-		Mode       string `json:"mode"`
-	} `json:"resumes"`
-	Executions []struct {
-		Action  string `json:"action"`
-		Attempt int    `json:"attempt"`
-	} `json:"executions"`
-}
-
-func loadResumedRun(t *testing.T, repoDir string) resumedRun {
-	t.Helper()
-	raw, ok := runFile(t, repoDir, "run.json")
-	if !ok {
-		t.Fatal("run.json was not written")
-	}
-	var run resumedRun
-	if err := json.Unmarshal([]byte(raw), &run); err != nil {
-		t.Fatal(err)
-	}
-	return run
-}
+// Scenario 18 (specs/resume/SPEC.md §6, §10): the resume command itself - its usage, a
+// run refused for a dirty tree that is resumable once the tree is clean, and a plan-mode
+// run executed later (R08 item 3), where a plan-mode resume leaves it as it found it.
+// Resume never decides again.
 
 func TestScenario18_ResumeUsage(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
@@ -177,9 +136,19 @@ func TestScenario18_PlanModeResumeChangesNothing(t *testing.T) {
 	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
+	// The restore point, head_ref and baseline are recorded when the run first executes,
+	// and it runs from the first step.
 	run := loadResumedRun(t, repoDir)
-	if run.Status != "completed" || run.PreRunRef == "" || len(run.Resumes) != 1 || run.Resumes[0].FromStatus != "pending" {
-		t.Errorf("run after resume: %+v", run)
+	head, _ := gitOutput(repoDir, "rev-parse", "HEAD")
+	if run.Status != "completed" || run.PreRunRef != head || run.HeadRef != head || len(run.ResumeBaseline) == 0 {
+		t.Errorf("run after resume: status=%s pre_run_ref=%s head_ref=%s baseline=%d bytes (HEAD %s)",
+			run.Status, run.PreRunRef, run.HeadRef, len(run.ResumeBaseline), head)
+	}
+	if len(run.Resumes) != 1 || run.Resumes[0].FromStatus != "pending" || run.Resumes[0].Entry != "analyze" {
+		t.Errorf("resumes = %+v", run.Resumes)
+	}
+	if len(run.Executions) == 0 || run.Executions[0].Action != "analyze" {
+		t.Errorf("executions = %+v, want the first step first", run.Executions)
 	}
 
 	// A completed run: nothing runs, exit 0.
@@ -188,15 +157,5 @@ func TestScenario18_PlanModeResumeChangesNothing(t *testing.T) {
 	mustSucceed(t, stdout, stderr, err)
 	if !strings.Contains(stdout, "already completed") || len(invocations(t, invocationsLog)) != n {
 		t.Errorf("resuming a completed run must report it and call nothing:\n%s", stdout)
-	}
-}
-
-func gitRun(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=T", "GIT_AUTHOR_EMAIL=t@example.com", "GIT_COMMITTER_NAME=T", "GIT_COMMITTER_EMAIL=t@example.com")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
