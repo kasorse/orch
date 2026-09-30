@@ -38,15 +38,12 @@ func (d *Dispatcher) executeTest(ctx context.Context, run *domain.Run) (workflow
 			&apperr.WorkflowError{Msg: protectedViolation(domain.ActionTest, changed, run.PreRunRef)}
 	}
 
-	d.lastTest = &result
+	d.applyTest(result)
 	path := d.saveArtifact(run, domain.ActionTest, result)
 
 	outcome := workflow.OutcomeSuccess
-	if result.Success {
-		d.pendingTestFailure = nil
-	} else {
+	if !result.Success {
 		outcome = workflow.OutcomeFailure
-		d.pendingTestFailure = &result
 	}
 
 	return workflow.StepOutcome{

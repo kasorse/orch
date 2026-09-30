@@ -41,11 +41,15 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	}
 
 	artifact := parseImplementation(result.Output)
-	d.lastImpl = &artifact
-	// Consumed - do not resend stale retry context to a later, unrelated implement call.
-	d.pendingTestFailure = nil
-	d.pendingReviewIssues = nil
+	d.applyImplementation(artifact)
 
+	// Checked before the outcome is accepted, so a violation stops the run before test
+	// executes anything the call wrote.
+	changed, err := d.Guard.Changed(ctx, before)
+
+	// Saved only after the guard has looked: nothing may be written to the run directory
+	// while the guard is open, since the run directory's resume inputs are among the
+	// paths it protects (specs/resume/SPEC.md §9.3).
 	path := d.saveArtifact(run, domain.ActionImplement, artifact)
 	outcome := workflow.StepOutcome{
 		Outcome:      workflow.OutcomeSuccess,
@@ -53,10 +57,6 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ArtifactPath: path,
 		RawStdout:    result.Output,
 	}
-
-	// Checked before the outcome is accepted, so a violation stops the run before test
-	// executes anything the call wrote.
-	changed, err := d.Guard.Changed(ctx, before)
 	if err != nil {
 		return outcome, &apperr.WorkflowError{Msg: "failed to check protected paths after implement", Err: err}
 	}

@@ -124,6 +124,16 @@ func ArtifactRelPath(stepIndex int, actionType domain.ActionType) string {
 	return filepath.Join("artifacts", fmt.Sprintf("%03d-%s.json", stepIndex, actionType))
 }
 
+// ReadArtifact reads a step's artifact back for a resume, from the path derived from index
+// and action, satisfying action.ArtifactReader. A missing artifact is an error matching
+// fs.ErrNotExist.
+func (s *Store) ReadArtifact(runID string, stepIndex int, actionType domain.ActionType) ([]byte, error) {
+	if !isRunID(runID) {
+		return nil, fmt.Errorf("read artifact: %q is not a run ID", runID)
+	}
+	return os.ReadFile(filepath.Join(s.runDir(runID), ArtifactRelPath(stepIndex, actionType)))
+}
+
 // AppendLog appends raw process output (stream is "stdout" or "stderr") to the log file
 // for one step, creating it on first write.
 func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionType, stream, content string) error {

@@ -20,7 +20,7 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 	}
 
 	artifact := parseResearch(result.Output)
-	d.lastResearch = &artifact
+	d.applyResearch(artifact)
 	path := d.saveArtifact(run, domain.ActionResearch, artifact)
 
 	return workflow.StepOutcome{

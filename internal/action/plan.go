@@ -22,7 +22,7 @@ func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow
 	}
 
 	artifact := parsePlan(result.Output)
-	d.lastPlan = &artifact
+	d.applyPlan(artifact)
 	path := d.saveArtifact(run, domain.ActionPlan, artifact)
 
 	return workflow.StepOutcome{

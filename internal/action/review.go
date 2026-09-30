@@ -40,13 +40,10 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 
 	path := d.saveArtifact(run, domain.ActionReview, review)
 
-	decision := review.Decide()
+	d.applyReview(review)
 	outcome := workflow.OutcomeSuccess
-	if decision == domain.ReviewFail {
+	if review.Decide() == domain.ReviewFail {
 		outcome = workflow.OutcomeFailure
-		d.pendingReviewIssues = review.Issues
-	} else {
-		d.pendingReviewIssues = nil
 	}
 
 	return workflow.StepOutcome{

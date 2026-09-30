@@ -21,7 +21,7 @@ func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workf
 	}
 
 	artifact := parseAnalysis(result.Output)
-	d.lastAnalysis = &artifact
+	d.applyAnalysis(artifact)
 	path := d.saveArtifact(run, domain.ActionAnalyze, artifact)
 
 	return workflow.StepOutcome{

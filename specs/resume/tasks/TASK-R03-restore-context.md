@@ -32,6 +32,20 @@ runs (`SPEC.md` §7.3, §9.3 G13).
    violation path and the success path. The returned `StepOutcome` is unchanged. Leave a
    comment on why: nothing may be written to the run directory while the guard is open.
 
+## As built
+
+- The `apply*` helpers live in `restore.go`, next to `Restore`. Every live `execute*` path
+  changes Dispatcher state only through them.
+- For test and review, `run.json` is the source (the engine records both results), and
+  their artifact is optional because artifact writes are best-effort. When it exists it
+  must equal the `run.json` copy. Research/analyze/plan/implement artifacts are required.
+- `Store.ReadArtifact` refuses anything that is not a run ID before touching the
+  filesystem.
+- `TestRestore_MatchesLiveContextAfterEveryStep` drives the real engine and Dispatcher over
+  an 11-step run with a real `Store`: all six actions, a test failure and a review failure
+  (a high-severity issue under a self-reported "pass"). After every step it restores a
+  fresh Dispatcher from a JSON copy of the run and compares.
+
 ## Acceptance
 
 - For each action, live execution against a fake provider and `Restore` from the files
