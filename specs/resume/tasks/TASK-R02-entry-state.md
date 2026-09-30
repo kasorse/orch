@@ -42,6 +42,21 @@ The engine can continue a run from its history. The entry state is a pure functi
    Set the counters from `Counters` before the loop. `StateDone` from `Entry` → mark the run
    completed and return nil. No other change to the loop.
 
+## As built
+
+- `Counters` returns an error as well: a completed test or review without its result is
+  refused, never counted as a pass.
+- `CheckLimits(run, limits, entry)` derives the counters itself, so a caller cannot pass
+  stale ones. The engine calls the same check when it starts with a history, so the
+  app's pre-check (R06) and the engine cannot disagree. A limit hit at start is recorded
+  like one hit mid-run (`stopped`, same reason), and the error adds the key to raise.
+- A hard-failed `implement` after a test failure is not a new fix-iteration entry: that
+  iteration was already allowed when the test failed.
+- The engine stamps `Attempt = len(run.Resumes)` on every new execution (moved here from
+  R06). Fresh runs get 0, as before.
+- Test: `TestResume_EquivalentToUninterrupted` stops a 9-step run with two backward
+  transitions after each step and resumes it.
+
 ## Acceptance
 
 - A table test over every row of §7.1: review fail with and without implement, test fail

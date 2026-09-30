@@ -1,7 +1,7 @@
 # Resume a run by ID
 
 Status: **in progress**. The spec is accepted and the decisions are taken (`SPEC.md` §16).
-R01 is done.
+R01 and R02 are done.
 
 | document | role |
 |---|---|
@@ -27,7 +27,7 @@ back is strictly validated, because the run directory is writable by the model.
 | task | title | size | depends on |
 |---|---|---|---|
 | [R01](tasks/TASK-R01-load-and-lock.md) | run fields, `LoadRun`, run-ID resolution, lock, `RunStateError` ✓ | M | — |
-| [R02](tasks/TASK-R02-entry-state.md) | `workflow.Entry`, derived counters, `Verify`, limit pre-check | S–M | R01 |
+| [R02](tasks/TASK-R02-entry-state.md) | `workflow.Entry`, derived counters, `Verify`, limit pre-check ✓ | S–M | R01 |
 | [R03](tasks/TASK-R03-restore-context.md) | `Dispatcher.Restore` from artifacts; implement's artifact after the guard | M | R01 |
 | [R04](tasks/TASK-R04-baseline-and-guard.md) | run-start baseline, `head_ref`, resume inputs under the guard | M–L | R01 |
 | [R05](tasks/TASK-R05-deny-runs-dir.md) | runs directory in every workflow call's deny list + live check | S | R01 |

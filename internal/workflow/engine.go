@@ -73,7 +73,26 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		return &apperr.WorkflowError{Msg: "workflow has no steps"}
 	}
 
-	current := State(run.Workflow.Steps[0].Action)
+	// A fresh run enters at its first step; a resumed one where its history left off
+	// (specs/resume/SPEC.md §7). Counters and limits then count the whole history.
+	current, _, err := Entry(run)
+	if err != nil {
+		return &apperr.WorkflowError{Msg: "cannot continue the run", Err: err}
+	}
+	if len(run.Executions) > 0 {
+		reason, _, _, _, err := limitReached(run, e.Limits, current)
+		if err != nil {
+			return &apperr.WorkflowError{Msg: "cannot count the run's history", Err: err}
+		}
+		run.TotalSteps, run.FixIterations, _ = Counters(run)
+		if reason != "" {
+			run.Status = domain.RunStopped
+			run.FailureReason = reason
+			e.persist(run)
+			e.runFinished(run)
+			return CheckLimits(run, e.Limits, current)
+		}
+	}
 	run.Status = domain.RunRunning
 
 	for {
@@ -135,6 +154,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 			Action:    action,
 			Status:    domain.StepRunning,
 			StartedAt: time.Now(),
+			Attempt:   len(run.Resumes),
 		}
 
 		outcome, err := e.Executor.Execute(ctx, action, run)
