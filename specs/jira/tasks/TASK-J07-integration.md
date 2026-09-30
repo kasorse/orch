@@ -64,7 +64,45 @@ existing fake executables. Nothing touches the network or needs a real token
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **`fakeJira`** (`test/integration/jira_test.go`) records the path, query and
+  `Authorization` header of every request under a mutex, and checks Basic auth against
+  the credentials `startJira` sets. It can fail the first requests (`fail ...int`).
+  `Moved` was not added: a moved issue is just a body whose `key` differs, and J02's unit
+  tests cover it. `Requests()` returns the requests, not a count. Helpers:
+  - `jiraIssue` builds a v2 body.
+  - `unsetenv` really unsets a variable (after `t.Setenv`, so it is restored).
+  - `assertNoRuns` checks that no run directory exists.
+- **Config**: `configOptions.jira *jiraOptions{baseURL, fields}` renders a basic-auth
+  section after everything else, only when set. The auth type is not an option, because
+  no scenario needs bearer. `jira_config_test.go` (J01's `validate` check) now uses it
+  instead of its own YAML constant.
+- **Prompts**: they are read from `FAKE_PROMPTS_DIR` (set by `decisionEnv`), not from
+  `FAKE_ARGS_DIR`, which replaces the prompt with `<prompt>`.
+- **`fakeexec`**: `FAKE_ENV_DIR` dumps `env` to `<dir>/<action>.env`.
+- **Scenarios**:
+  - `scenario19_jira_run_test.go` holds 19a, 19b, 19h and the retry case.
+  - `scenario19_jira_refusals_test.go` holds 19c, 19d and 19e, which share
+    `assertRefusedBeforeRun`: exit 2, no run directory, no provider call, no Jev request.
+  - `scenario19_jira_resume_test.go` holds 19f. It fails implement the way
+    `failedAtImplement` does, but with `run --jira`.
+  - `scenario19_jira_scrub_test.go` holds 19g.
+- **Beyond the task's list**:
+  - 19a also checks the exact `fields=` query (with two custom fields, one `null`),
+    `task.description` equal to the expected rendering, and the whole ticket block in
+    stdout ending right before `Run:`. It also checks that neither the token nor the
+    email appears in stdout, stderr or `ticket.json`.
+  - 19b asserts the whole `Task:` section of the implement prompt, ending with the notes.
+  - 19f checks the source line is the second line of the resume header, and that the
+    persisted task is unchanged.
+  - 19g also checks the values, not only the names, and that `PATH` is still inherited.
+    It covers analyze, implement and review as well as the test command.
+  - 19h also checks there is no `ticket.json` and no ticket block.
+- **Mutation check**: with the `ScrubCredentials` call commented out, 19g fails for the
+  test command and every provider on all three names.
+- **Results**: scenarios 1–18 are unchanged (only `helpers_test.go` and `fakeexec`
+  changed). `go test -race ./test/integration/...` is clean.
 
 ## Gates
 

@@ -58,6 +58,9 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_ARGS_DIR: if set, the argv of each call is saved to <dir>/<action>.args, one
 //     argument per line with the prompt replaced by "<prompt>" (the last call of an
 //     action wins), so tests can assert the flags a step ran with.
+//   - FAKE_ENV_DIR: if set, the environment of each call is saved to
+//     <dir>/<action>.env (the output of env), so tests can assert what a provider CLI
+//     inherits.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
 //     (implement_calls, review_calls) across invocations of the same test.
 //   - FAKE_IMPLEMENT_FIX_ON_CALL: 1-based implement call number (default 1) on
@@ -113,6 +116,9 @@ if [ -n "${FAKE_ARGS_DIR:-}" ]; then
       *) printf '%s\n' "$arg" >> "$FAKE_ARGS_DIR/$action.args" ;;
     esac
   done
+fi
+if [ -n "${FAKE_ENV_DIR:-}" ]; then
+  env > "$FAKE_ENV_DIR/$action.env"
 fi
 if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
   sleep "${FAKE_SLEEP_SECONDS:-1}"

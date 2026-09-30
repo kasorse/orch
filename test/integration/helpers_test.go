@@ -49,6 +49,30 @@ type configOptions struct {
 	onFailure string
 	// extraYAML is appended to the rendered config verbatim (e.g. a security: block).
 	extraYAML string
+	// jira renders a jira: section when set (specs/jira/SPEC.md §7); nil leaves it out,
+	// so every other scenario's config is unchanged.
+	jira *jiraOptions
+}
+
+// jiraOptions is the jira: section: a basic-auth instance at baseURL reading
+// JIRA_EMAIL/JIRA_API_TOKEN, with fields as extra custom fields (id, label).
+type jiraOptions struct {
+	baseURL string
+	fields  [][2]string
+}
+
+func (j *jiraOptions) yaml() string {
+	if j == nil {
+		return ""
+	}
+	s := fmt.Sprintf("\njira:\n  base_url: %s\n  auth: basic\n  email_env: JIRA_EMAIL\n  token_env: JIRA_API_TOKEN\n", j.baseURL)
+	if len(j.fields) > 0 {
+		s += "  fields:\n"
+		for _, f := range j.fields {
+			s += fmt.Sprintf("    - id: %s\n      label: %s\n", f[0], f[1])
+		}
+	}
+	return s
 }
 
 func defaultConfigOptions() configOptions {
@@ -137,6 +161,7 @@ execution:
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
 		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
+	content += opts.jira.yaml()
 
 	path := filepath.Join(dir, "orchestrator.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {

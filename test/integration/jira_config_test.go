@@ -10,15 +10,6 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// jiraSectionYAML is a valid basic-auth jira section (specs/jira/SPEC.md §7).
-const jiraSectionYAML = `
-jira:
-  base_url: http://127.0.0.1:1
-  auth: basic
-  email_env: JIRA_EMAIL
-  token_env: JIRA_API_TOKEN
-`
-
 // orchestrator validate checks the Jira variables whenever the section is present
 // (SPEC.md §7.2): with none set it exits 2, naming each variable and no value.
 func TestJiraConfig_ValidateChecksVariables(t *testing.T) {
@@ -30,7 +21,7 @@ func TestJiraConfig_ValidateChecksVariables(t *testing.T) {
 
 	opts := defaultConfigOptions()
 	opts.jevURL = jev.URL()
-	opts.extraYAML = jiraSectionYAML
+	opts.jira = &jiraOptions{baseURL: "http://127.0.0.1:1"}
 	configPath := writeConfig(t, t.TempDir(), opts)
 
 	_, _, err := runOrchestrator(t, repoDir, configPath, "validate")
