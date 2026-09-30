@@ -1,0 +1,11 @@
+PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
+Type: Bug
+Parent: PMC-2663 — Tags & Labels
+Source: https://yourcompany.atlassian.net/browse/PMC-2789
+
+Acceptance criteria:
+* Reason shown on hover
+* No layout shift
+
+Design:
+[Figma|https://figma.example/f/1]

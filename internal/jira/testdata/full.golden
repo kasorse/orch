@@ -1,0 +1,27 @@
+PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
+Type: Bug
+Parent: PMC-2663 — Tags & Labels
+Source: https://yourcompany.atlassian.net/browse/PMC-2789
+
+Description:
+Precondition:
+While implementing PMC-2766 (locking {{Tags}}/{{Labels}} to read-only)
+
+*Impact*: editors cannot tell why the field is locked.
+
+Steps to reproduce:
+# Open a product
+# Hover {{Tags}}
+
+Actual result:
+Nothing is shown.
+
+Expected result:
+The disable reason is shown.
+
+Acceptance criteria:
+* Reason shown on hover
+* No layout shift
+
+Design:
+[Figma|https://figma.example/f/1]

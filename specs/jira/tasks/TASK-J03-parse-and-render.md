@@ -67,7 +67,34 @@ The operator's `--jira` value becomes a key without any network access. A valida
 
 ## As built
 
-_Filled in when the task is done._
+Done 2026-09-30. As planned, with these differences:
+
+- **`ParseRef` messages**:
+  - A scheme mismatch has its own message: `--jira URL scheme "http" does not match
+    jira.base_url's "https"`.
+  - A host or port mismatch uses the §6.1 wording and shows `host[:port]` only.
+  - A URL with userinfo is refused, naming only the hostname.
+  - A value that is not a URL gets `--jira value is not a valid URL`, and the value itself
+    is not shown.
+  - Any other path gets `--jira URL is not an issue link: pass the issue key or its
+    /browse/<KEY> URL`.
+- **Path matching** uses the decoded path, so `/browse/PMC-1%2F..%2Fx` is refused. The key
+  in a URL is upper-cased like a typed key. Host comparison ignores case.
+- **`Render`** also normalises `\r\n` itself, even though J02 already did, so it doesn't
+  depend on its input's origin (`crlf.golden`). A parent with an empty summary renders as
+  `Parent: <KEY>`. An empty type line is left out (J02 never produces one).
+- **Notes** are trimmed as a whole before the per-line cleanup, so leading spaces on the
+  first line go too.
+- **Error size**: `max_bytes` errors print plain numbers (`51203 bytes`), as in this task,
+  not with the spaces used in `SPEC.md` §9's example.
+- **Tests**: `ref_test.go` covers every case listed above plus loopback, an explicit
+  `:443`, host case, a base with a trailing `/`, `/browse/PMC`, `/browse/PMC-1/extra` and
+  an encoded slash. Its key cases follow `ticketKeyCases` in
+  `internal/domain/ticket_test.go`. `render_test.go` checks the five golden files. For
+  every rendering it also checks: identical output twice, exactly one final newline, no
+  `\r`, no trailing whitespace. It has the `max_bytes` boundary test (exactly at the
+  limit passes, one byte over fails with the exact message) and a test that empty
+  sections are left out.
 
 ## Gates
 
