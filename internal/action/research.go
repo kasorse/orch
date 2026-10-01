@@ -27,6 +27,7 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 		Outcome:      workflow.OutcomeSuccess,
 		Provider:     &ref,
 		ArtifactPath: path,
+		Artifact:     artifact,
 		RawStdout:    result.Output,
 	}, nil
 }

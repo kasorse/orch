@@ -33,9 +33,11 @@ func (g *TerminalGate) BeforeStep(ctx context.Context, run *domain.Run, index in
 		return workflow.GateProceed, nil
 	}
 	g.showImplementChanges(ctx, run)
+	// Named like the step header that follows ("[2] TEST"), so it is clear what is asked.
+	fmt.Fprintf(g.out, "\nNext step: [%d] %s\n", index+1, strings.ToUpper(string(action)))
 
 	for {
-		ans, err := g.prompter.Ask("Run this step? [y]es / [n]o / [A]ll remaining: ")
+		ans, err := g.prompter.Ask("Run it? [y]es / [n]o / [A]ll remaining: ")
 		if err != nil {
 			return "", err
 		}
@@ -99,5 +101,5 @@ func (g *TerminalGate) showImplementChanges(ctx context.Context, run *domain.Run
 	if summary == "" {
 		summary = "(none)"
 	}
-	fmt.Fprintf(g.out, "Changes in the working tree:\n%s\nProtected paths: unchanged\n", summary)
+	fmt.Fprintf(g.out, "\nChanges in the working tree:\n%s\nProtected paths: unchanged\n", summary)
 }

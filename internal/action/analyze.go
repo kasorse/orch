@@ -28,6 +28,7 @@ func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workf
 		Outcome:      workflow.OutcomeSuccess,
 		Provider:     &ref,
 		ArtifactPath: path,
+		Artifact:     artifact,
 		RawStdout:    result.Output,
 	}, nil
 }

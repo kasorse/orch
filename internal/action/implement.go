@@ -55,6 +55,7 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		Outcome:      workflow.OutcomeSuccess,
 		Provider:     &ref,
 		ArtifactPath: path,
+		Artifact:     artifact,
 		RawStdout:    result.Output,
 	}
 	if err != nil {

@@ -1522,11 +1522,25 @@ Model: sonnet
 → running claude...
 ✓ completed (12.8s)
 
+Result:
+  Summary: Every non-2xx response is retried, 404 included.
+  Root cause: shouldRetry only checks for err != nil.
+  Affected files:
+    - internal/http/retry.go
+  Recommendation: Retry only on 5xx and network errors.
+
 [2] IMPLEMENT
 Provider: claude
 Model: opus
 → running claude...
 ✓ completed (68.1s)
+
+Result:
+  Summary: 4xx responses are no longer retried.
+  Changed files:
+    - internal/http/retry.go
+  Tests added:
+    - internal/http/retry_test.go
 
 [3] TEST
 Command: go test ./...
@@ -1537,6 +1551,11 @@ Provider: claude
 Model: sonnet
 → running claude...
 ✗ review failed
+
+Result:
+  Summary: 404 handling is fixed; 429 is no longer retried either.
+  Issues:
+    - [high] internal/http/retry.go: 429 must still be retried
 
 1 high severity issue found.
 Returning to implementation (iteration 1/2).
@@ -1567,9 +1586,12 @@ complexity with both questions' readings (a disagreement is flagged `✗ disagre
 decided, and the workflow. The `authority:` line follows in every mode, before any prompt:
 each AI step's authority and the command the test step runs (§38). `Restore point:` is
 printed once the mode is settled, before the first step; with `--verbose` each AI step's
-header is followed by `Authority: <authority>`. In `manual` mode the gate before the step
-that follows a completed `implement` first lists the working tree's changes and
-`Protected paths: unchanged`. `--verbose` adds the per-stage table:
+header is followed by `Authority: <authority>`. A completed step is followed by a
+`Result:` block - its artifact (§21) as labelled text, empty fields left out; a review
+lists its issues, a failed test its exit code and the last 20 lines of its output. In
+`manual` mode the gate names the step it asks about (`Next step: [N] ACTION`), and the
+gate before the step that follows a completed `implement` first lists the working tree's
+changes and `Protected paths: unchanged`. `--verbose` adds the per-stage table:
 
 ```text
 stages:
@@ -1677,17 +1699,30 @@ Approve this workflow? [a]pprove / [c]ancel: a
 
 Choose execution mode: [1] plan  [2] manual  [3] accept-edits  [4] auto: 2
 
+Next step: [1] IMPLEMENT
+Run it? [y]es / [n]o / [A]ll remaining: y
+
 [1] IMPLEMENT
 Provider: claude
 Model: opus
-Run this step? [y]es / [n]o / [A]ll remaining: y
 → running claude...
 ✓ completed (68.1s)
 
+Result:
+  Summary: 404 responses are no longer retried.
+  Changed files:
+    - internal/http/retry.go
+
+Changes in the working tree:
+ M internal/http/retry.go
+Protected paths: unchanged
+
+Next step: [2] TEST
+Run it? [y]es / [n]o / [A]ll remaining: n
+[r]etry / [a]bort: r
+
 [2] TEST
 Command: go test ./...
-Run this step? [y]es / [n]o / [A]ll remaining: n
-[r]etry / [a]bort: r
 ✓ passed
 
 [3] REVIEW

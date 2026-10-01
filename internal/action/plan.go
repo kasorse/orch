@@ -29,6 +29,7 @@ func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow
 		Outcome:      workflow.OutcomeSuccess,
 		Provider:     &ref,
 		ArtifactPath: path,
+		Artifact:     artifact,
 		RawStdout:    result.Output,
 	}, nil
 }

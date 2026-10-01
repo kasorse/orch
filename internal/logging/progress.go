@@ -184,8 +184,9 @@ func (r *ConsoleReporter) StepFinished(run *domain.Run, index int, exec domain.S
 	switch outcome.Outcome {
 	case workflow.OutcomeSuccess:
 		r.printSuccess(exec)
+		r.printResult(exec, outcome)
 	case workflow.OutcomeFailure:
-		r.printFailure(run, exec)
+		r.printFailure(run, exec, outcome)
 	}
 }
 
@@ -207,14 +208,16 @@ func (r *ConsoleReporter) printSuccess(exec domain.StepExecution) {
 // printFailure handles test and review failures, both of which always loop back to
 // implement (see workflow.Next) - so the fix-iteration notice can be printed
 // unconditionally here, using the iteration count the engine is about to reach.
-func (r *ConsoleReporter) printFailure(run *domain.Run, exec domain.StepExecution) {
+func (r *ConsoleReporter) printFailure(run *domain.Run, exec domain.StepExecution, outcome workflow.StepOutcome) {
 	switch exec.Action {
 	case domain.ActionTest:
 		fmt.Fprintln(r.Out, "✗ test failed")
+		r.printResult(exec, outcome)
 		fmt.Fprintln(r.Out)
 		r.printFixIterationNotice(run)
 	case domain.ActionReview:
 		fmt.Fprintln(r.Out, "✗ review failed")
+		r.printResult(exec, outcome)
 		fmt.Fprintln(r.Out)
 		r.printReviewIssueCounts(exec.ReviewResult)
 		r.printFixIterationNotice(run)

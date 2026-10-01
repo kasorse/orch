@@ -205,3 +205,15 @@ func TestTerminalGate_ShowsChangesAfterImplement(t *testing.T) {
 		t.Errorf("expected %q in %q", want, out.String())
 	}
 }
+
+func TestTerminalGate_NamesTheStepItAsksAbout(t *testing.T) {
+	var out bytes.Buffer
+	g := NewTerminalGate(&fakePrompter{answers: []string{"y"}}, &out)
+
+	if _, err := g.BeforeStep(context.Background(), newRun(), 1, domain.ActionTest); err != nil {
+		t.Fatal(err)
+	}
+	if want := "\nNext step: [2] TEST\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("expected %q in %q", want, out.String())
+	}
+}
