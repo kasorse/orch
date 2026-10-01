@@ -1048,6 +1048,11 @@ low
 → pass with warning
 ```
 
+The review prompt states this rule to the reviewer, with a rubric for each level
+(critical: breaks the build, data or security; high: incorrect behavior, missed requirement
+or regression; medium: real but non-blocking; low: style), so the severity it picks is the
+one that decides. The outcome is still `ReviewResult.Decide()`, never the model's `status`.
+
 If review returns `fail`:
 
 ```text

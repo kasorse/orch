@@ -161,12 +161,25 @@ type ReviewPromptInput struct {
 	GitDiff        string
 }
 
+// reviewSeverityRubric tells the reviewer what each severity means and what it causes,
+// so the level it picks matches domain.ReviewResult.Decide: critical/high fail the review
+// and go back to implement, medium/low pass with a warning (MVP.md §19).
+const reviewSeverityRubric = `Severity rubric - choose by impact, not by how certain you are:
+- critical: the change breaks the build, loses or corrupts data, or opens a security hole.
+- high: incorrect behavior, a missed requirement of the task, or a regression in existing behavior.
+- medium: a real but non-blocking problem - a missing edge-case test, fragile or unclear code.
+- low: style, naming, comments, minor cleanups.
+Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue. Base every issue on the diff below, one per distinct problem.
+
+`
+
 func BuildReviewPrompt(in ReviewPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
+	b.WriteString(reviewSeverityRubric)
 
 	fmt.Fprintf(&b, "Original task (expected outcome):\n%s\n\n", in.Task)
 

@@ -103,3 +103,13 @@ func TestImplementPrompt_FencesTestOutput(t *testing.T) {
 		t.Errorf("the command and exit code come from the orchestrator and stay unfenced:\n%s", prompt)
 	}
 }
+
+func TestReviewPrompt_CarriesTheSeverityRubric(t *testing.T) {
+	prompt := BuildReviewPrompt(ReviewPromptInput{Task: "fix Add", GitDiff: "d"})
+	if !strings.Contains(prompt, reviewSeverityRubric) {
+		t.Fatal("the reviewer must be told what each severity means")
+	}
+	if strings.Index(prompt, reviewSeverityRubric) > strings.Index(prompt, "Original task") {
+		t.Error("the rubric belongs with the output instructions, before the task")
+	}
+}
