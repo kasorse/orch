@@ -9,6 +9,7 @@ import (
 
 	"orchestrator/internal/app"
 	"orchestrator/internal/exitcode"
+	"orchestrator/internal/logging"
 )
 
 func main() {
@@ -17,7 +18,7 @@ func main() {
 
 	err := app.Run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, logging.FormatError(os.Stderr, err))
 	}
 	os.Exit(exitcode.FromError(err))
 }

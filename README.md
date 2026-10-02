@@ -359,6 +359,14 @@ orchestrator [--config path] [--mode m] resume <run-id>
   with `  | `, and a completion line with byte counts and the log path. Without `--verbose` you
   only see a `→ running <provider>...` line before each call and a `✓ completed (Ns)` line
   after it.
+- **Terminal UI.** When stdout is an interactive terminal, the same information is rendered
+  the way agentic CLIs like Claude Code do: a boxed run header, `⏺` blocks with `⎿` details,
+  probability bars for the stages, an animated spinner with elapsed time while a model or
+  the test command works, coloured review severities, styled prompts and a boxed summary
+  with the chain of steps that ran. Piped or redirected output (CI logs, `| tee`) stays the
+  plain text described above, byte for byte. `NO_COLOR=1` or `ORCHESTRATOR_PLAIN=1` forces
+  plain text on a terminal too. Preview it without running a model:
+  `ORCHESTRATOR_DEMO=1 go test ./internal/logging -run TestPretty_FullRun -v`.
 
 Config loading, structural validation, dependency validation (executables on `PATH`, the
 Jev API key) and the authority check (every route's provider can enforce its authority) always

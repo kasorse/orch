@@ -12,7 +12,6 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/interaction"
-	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/workflow"
@@ -25,8 +24,8 @@ import (
 // start - git fingerprint first - before anything runs git status. Until the operator
 // approves, the persisted run is left exactly as it was found.
 func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
-	reporter := logging.NewConsoleReporter(stdout)
-	reporter.Verbose = verbose
+	reporter := newReporter(stdout, verbose)
+	defer reporter.Pause()
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -37,6 +36,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if err != nil {
 		return err
 	}
+	reporter.TestCommand = cfg.Test.Command
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -67,9 +67,9 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	var stream io.Writer
 	if verbose {
-		stream = logging.NewPrefixWriter(stdout, "  | ")
+		stream = reporter.StreamWriter()
 	}
-	prompter := interaction.NewTerminalPrompter(stdin, stdout)
+	prompter := reporter.PausingPrompter(interaction.NewTerminalPrompter(stdin, stdout))
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
 
 	if run.Status == domain.RunCompleted {
@@ -218,7 +218,7 @@ func reportCompleted(s *session) error {
 	}
 	s.reporter.AlreadyCompleted(s.run.ID)
 	if answer := s.dispatcher.FinalAnswer(s.run); answer != "" {
-		fmt.Fprintf(s.stdout, "\nAnswer:\n%s\n", answer)
+		s.reporter.Answer(answer)
 	}
 	return nil
 }

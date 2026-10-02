@@ -216,7 +216,7 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 // answers "would run --jira work here?".
 func runValidate(configPath string, stdout io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
-	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewConsoleReporter(stdout),
+	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewTerminalReporter(stdout),
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
@@ -226,8 +226,8 @@ func runValidate(configPath string, stdout io.Writer) error {
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
 func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
-	reporter := logging.NewConsoleReporter(stdout)
-	reporter.Verbose = verbose
+	reporter := newReporter(stdout, verbose)
+	defer reporter.Pause()
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -240,6 +240,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 	if err != nil {
 		return err
 	}
+	reporter.TestCommand = cfg.Test.Command
 	var jiraKey string
 	if jiraRef != "" {
 		if jiraKey, err = jira.ParseRef(jiraRef, cfg.Jira.BaseURL); err != nil {
@@ -258,6 +259,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 	if err != nil {
 		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
 	}
+	reporter.Cwd = cwd
 
 	repo, err := repository.Open(decideCtx, cwd, osExec)
 	if err != nil {
@@ -272,7 +274,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 
 	var stream io.Writer
 	if verbose {
-		stream = logging.NewPrefixWriter(stdout, "  | ")
+		stream = reporter.StreamWriter()
 	}
 
 	task := domain.Task{Description: text, CreatedAt: time.Now()}
@@ -319,20 +321,20 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 
 	// One prompter for every question on stdin: it buffers input, so a second reader
 	// would swallow answers meant for the first.
-	prompter := interaction.NewTerminalPrompter(stdin, stdout)
+	prompter := reporter.PausingPrompter(interaction.NewTerminalPrompter(stdin, stdout))
 	interactive := mode != domain.ModeAuto && isTerminal(stdin)
 
 	svc := &classification.Service{
 		Translator: &translate.Translator{
 			Client: translatorClient, ProviderID: cfg.Translation.Provider, Model: cfg.Translation.Model,
 			Timeout: cfg.Translation.Timeout, Logger: store,
-			Observer: logging.CallReporter{ConsoleReporter: reporter}, Stream: stream,
+			Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Translating"}, Stream: stream,
 		},
 		Decisions: decisions,
 		Context: projectctx.NewManager(repo, cwd, projectctx.Options{
 			MaxFiles: cfg.Context.MaxFiles, MaxBytes: cfg.Context.MaxBytes, ExtraDeny: cfg.Context.ExtraDeny,
 		}),
-		Chooser:      interaction.NewChooser(prompter, stdout, interactive),
+		Chooser:      interaction.NewChooser(prompter, reporter.PausingWriter(), interactive),
 		Policy:       cfg.DecisionPolicy(),
 		Primary:      domain.ComplexitySource(cfg.Decision.Complexity.Primary),
 		AskOnFailure: cfg.Decision.OnFailure == config.OnFailureAsk,
@@ -362,6 +364,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 	if err := store.SaveRun(run); err != nil {
 		return err
 	}
+	reporter.Pause()
 	if err := checkWorktree(cfg, wf, dirty, stderr); err != nil {
 		return failRun(store, run, err)
 	}
@@ -489,7 +492,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 					return err
 				}
 			}
-			fmt.Fprintln(s.stdout, "\nPlan approved. Not executing (plan mode).")
+			s.reporter.PlanApproved()
 			return nil
 		}
 	}
@@ -542,7 +545,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 
 	if mode == domain.ModeManual {
-		gate := interaction.NewTerminalGate(s.prompter, s.stdout)
+		gate := interaction.NewTerminalGate(s.prompter, s.reporter.PausingWriter())
 		gate.Changes = s.repo.StatusSummary
 		engine.Gate = gate
 	}
@@ -551,7 +554,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		return err
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
-		fmt.Fprintf(s.stdout, "\nAnswer:\n%s\n", answer)
+		s.reporter.Answer(answer)
 	}
 	return nil
 }
@@ -680,7 +683,7 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 	}
 	return &llm.Provider{
 		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
-		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter}, Stream: stream,
+		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Deciding the workflow"}, Stream: stream,
 	}, nil
 }
 
@@ -693,6 +696,15 @@ func engineContext(ctx, decideCtx context.Context, timeout, elapsed, userTime ti
 		return decideCtx, func() {}
 	}
 	return context.WithTimeout(ctx, timeout-(elapsed-userTime))
+}
+
+// newReporter is the run/resume console reporter: pretty on an interactive terminal,
+// the spec's plain text anywhere else.
+func newReporter(stdout io.Writer, verbose bool) *logging.ConsoleReporter {
+	r := logging.NewTerminalReporter(stdout)
+	r.Verbose = verbose
+	r.Version = Version
+	return r
 }
 
 // isTerminal reports whether stdin can answer questions. A real stdin that is not a

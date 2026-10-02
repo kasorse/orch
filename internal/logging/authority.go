@@ -12,6 +12,10 @@ import (
 // workflow line and before any approval prompt (specs/permissions/SPEC.md §5), in every
 // mode.
 func (r *ConsoleReporter) Authority(wf domain.Workflow, testCommand string, sandboxed bool) {
+	if r.Pretty {
+		r.prettyAuthority(wf, testCommand, sandboxed)
+		return
+	}
 	RenderAuthority(r.Out, wf, testCommand, sandboxed)
 }
 
