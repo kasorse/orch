@@ -300,6 +300,39 @@ func (r *Repository) PinRestorePoint(ctx context.Context, runID, sha string) err
 	return err
 }
 
+// WorktreeTree writes the whole working tree (tracked changes, deletions and untracked
+// files, minus .gitignore'd ones and the run directory) as a git tree object and returns
+// its id. Like SnapshotCommit it uses a throwaway index, so the working tree, the real
+// index and every ref are untouched; the tree is referenced by nothing.
+func (r *Repository) WorktreeTree(ctx context.Context) (string, error) {
+	tmp, err := os.MkdirTemp("", "orchestrator-index-")
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to create a temporary index", Err: err}
+	}
+	defer os.RemoveAll(tmp)
+	env := append(os.Environ(), "GIT_INDEX_FILE="+filepath.Join(tmp, "index"))
+	if _, err := r.gitEnv(ctx, env, "read-tree", "HEAD"); err != nil {
+		// No commits yet: start from an empty index.
+		if _, err := r.gitEnv(ctx, env, "read-tree", "--empty"); err != nil {
+			return "", err
+		}
+	}
+	// git add exits non-zero when the excluded run directory is itself .gitignore'd
+	// ("paths are ignored"), yet stages everything else; write-tree is what counts.
+	_, _ = r.gitEnv(ctx, env, "add", "-A", "--", ":(top)", ":(exclude,top).orchestrator")
+	tree, err := r.gitEnv(ctx, env, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(tree), nil
+}
+
+// DiffTrees is the unified diff between two trees, with renames detected. External diff
+// drivers and textconv filters are off: only git itself runs.
+func (r *Repository) DiffTrees(ctx context.Context, from, to string) (string, error) {
+	return r.git(ctx, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", from, to)
+}
+
 // Commit is one line of RecentCommits.
 type Commit struct {
 	Hash    string

@@ -133,6 +133,12 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 		}
 		r.stepUsageLine()
 		r.printResult(exec, outcome)
+		if r.stepDiff != "" {
+			if card := r.renderDiff(r.stepDiff); card != "" {
+				fmt.Fprintf(r.Out, "\n%s", card)
+			}
+			r.stepDiff = ""
+		}
 	case workflow.OutcomeFailure:
 		switch exec.Action {
 		case domain.ActionTest:
