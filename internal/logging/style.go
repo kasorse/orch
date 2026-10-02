@@ -58,7 +58,7 @@ func (s style) gray(t string) string    { return s.sgr("90", t) }
 // accent is the orchestrator's brand colour (a warm orange, like Claude Code's).
 func (s style) accent(t string) string { return s.sgr("38;5;209", t) }
 
-var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\`)
 
 // visibleWidth is the number of terminal cells s takes, ignoring ANSI sequences. It counts
 // runes, which is right for the Latin, Cyrillic and box-drawing text printed here.
@@ -78,9 +78,11 @@ func truncateVisible(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// termWidth is the terminal width from $COLUMNS, or 100: no terminal library is a
-// dependency, and the boxes only need a sensible upper bound.
+// termWidth is the terminal's width (asked from stdout's tty), else $COLUMNS, else 100.
 func termWidth() int {
+	if n := ttyWidth(os.Stdout.Fd()); n >= 40 {
+		return n
+	}
 	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n >= 40 {
 		return n
 	}

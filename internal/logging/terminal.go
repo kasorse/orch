@@ -79,9 +79,7 @@ func (r *ConsoleReporter) Answer(answer string) {
 	st := r.st()
 	fmt.Fprintln(r.Out)
 	r.bullet(st.green, "Answer", "")
-	for _, line := range strings.Split(strings.TrimRight(answer, "\n"), "\n") {
-		fmt.Fprintf(r.Out, "  %s\n", line)
-	}
+	rich{st: st, width: termWidth(), cwd: r.Cwd}.block(r.Out, "  ", answer)
 }
 
 // PlanApproved reports that plan mode stops after approval.

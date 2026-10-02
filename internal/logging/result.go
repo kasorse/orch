@@ -18,12 +18,14 @@ const testOutputTailLines = 20
 type resultFormat struct {
 	st     style
 	bullet string
+	// rich is set in the pretty renderer: values are highlighted and wrapped.
+	rich *rich
 }
 
 func (r *ConsoleReporter) resultFormat() resultFormat {
 	if r.Pretty {
 		st := style{on: true}
-		return resultFormat{st: st, bullet: st.gray("•")}
+		return resultFormat{st: st, bullet: st.gray("•"), rich: &rich{st: st, width: termWidth(), cwd: r.Cwd}}
 	}
 	return resultFormat{bullet: "-"}
 }
@@ -67,10 +69,16 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 		f.writeText(&b, "Summary", review.Summary)
 		issues := make([]string, 0, len(review.Issues))
 		for _, issue := range review.Issues {
-			sev := f.severity(issue.Severity)
-			line := fmt.Sprintf("%s %s", sev, issue.Description)
+			line := fmt.Sprintf("[%s] %s", issue.Severity, issue.Description)
 			if issue.File != "" {
-				line = fmt.Sprintf("%s %s: %s", sev, f.st.cyan(issue.File), issue.Description)
+				line = fmt.Sprintf("[%s] %s: %s", issue.Severity, issue.File, issue.Description)
+			}
+			if f.rich != nil {
+				// The severity tag is coloured here; the file is rendered as a `code` path.
+				line = f.severity(issue.Severity) + "\x00" + issue.Description
+				if issue.File != "" {
+					line = f.severity(issue.Severity) + "\x00`" + issue.File + "`: " + issue.Description
+				}
 			}
 			issues = append(issues, line)
 		}
@@ -88,12 +96,15 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 				lines = lines[len(lines)-testOutputTailLines:]
 				label = fmt.Sprintf("Output (last %d lines)", testOutputTailLines)
 			}
-			if f.st.on {
-				for i, l := range lines {
-					lines[i] = f.st.gray(l)
+			if f.rich != nil {
+				// Raw command output: shown verbatim in a gutter, never re-flowed.
+				fmt.Fprintf(&b, "  %s\n", f.label(label))
+				for _, l := range lines {
+					fmt.Fprintf(&b, "    %s %s\n", f.st.gray("│"), f.st.gray(strings.TrimRight(l, " \t\r")))
 				}
+			} else {
+				f.writeText(&b, label, strings.Join(lines, "\n"))
 			}
-			f.writeText(&b, label, strings.Join(lines, "\n"))
 		}
 	}
 	if b.Len() == 0 {
@@ -131,6 +142,15 @@ func (f resultFormat) writeText(w io.Writer, label, value string) {
 	if value == "" {
 		return
 	}
+	if f.rich != nil {
+		if !strings.Contains(value, "\n") && !bulletRE.MatchString(value) && !numberRE.MatchString(value) {
+			f.rich.para(w, "  "+f.label(label)+" ", "  ", value)
+			return
+		}
+		fmt.Fprintf(w, "  %s\n", f.label(label))
+		f.rich.block(w, "    ", value)
+		return
+	}
 	if !strings.Contains(value, "\n") {
 		fmt.Fprintf(w, "  %s %s\n", f.label(label), value)
 		return
@@ -159,6 +179,21 @@ func (f resultFormat) writeItems(w io.Writer, label string, items []string, mark
 	fmt.Fprintf(w, "  %s\n", f.label(label))
 	for i, item := range items {
 		m := marker(i)
+		if f.rich != nil {
+			first := "    " + m + " "
+			cont := "    " + strings.Repeat(" ", visibleWidth(m)+1)
+			// A pre-styled prefix (a review issue's severity) is split off by "\x00".
+			if pre, rest, ok := strings.Cut(item, "\x00"); ok {
+				first += pre + " "
+				item = rest
+			}
+			lines := strings.Split(item, "\n")
+			f.rich.para(w, first, cont, strings.TrimRight(lines[0], " \t\r"))
+			if len(lines) > 1 {
+				f.rich.block(w, cont, strings.Join(lines[1:], "\n"))
+			}
+			continue
+		}
 		lines := strings.Split(item, "\n")
 		fmt.Fprintf(w, "    %s %s\n", m, strings.TrimRight(lines[0], " \t\r"))
 		for _, line := range lines[1:] {
