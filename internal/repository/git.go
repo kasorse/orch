@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/execution"
@@ -296,6 +298,37 @@ func (r *Repository) PinRestorePoint(ctx context.Context, runID, sha string) err
 	}
 	_, err := r.git(ctx, "update-ref", "-m", "orchestrator: restore point of run "+runID, RestorePointRef(runID), sha)
 	return err
+}
+
+// Commit is one line of RecentCommits.
+type Commit struct {
+	Hash    string
+	Subject string
+	When    time.Time
+}
+
+// RecentCommits returns up to n commits from HEAD, newest first, and how many commits
+// HEAD has in total. A repository without commits returns none.
+func (r *Repository) RecentCommits(ctx context.Context, n int) ([]Commit, int, error) {
+	countOut, err := r.git(ctx, "rev-list", "--count", "HEAD")
+	if err != nil {
+		return nil, 0, nil // no commits yet
+	}
+	total, _ := strconv.Atoi(strings.TrimSpace(countOut))
+	out, err := r.git(ctx, "log", "-n", strconv.Itoa(n), "--no-show-signature", "--format=%h%x00%ct%x00%s")
+	if err != nil {
+		return nil, total, err
+	}
+	var commits []Commit
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		parts := strings.SplitN(line, "\x00", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		secs, _ := strconv.ParseInt(parts[1], 10, 64)
+		commits = append(commits, Commit{Hash: parts[0], When: time.Unix(secs, 0), Subject: parts[2]})
+	}
+	return commits, total, nil
 }
 
 // StatusSummary is a short, human-readable list of the uncommitted changes (one

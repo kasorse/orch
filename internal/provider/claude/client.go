@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -64,6 +65,10 @@ func args(a domain.Authority, denyRead []string, model, effort, prompt string) [
 	set := toolSets[a]
 	argv := []string{
 		"--print",
+		// One JSON event per line: the answer plus tool calls, usage and rate limits
+		// (stream.go). --verbose is required by the CLI for stream-json under --print.
+		"--output-format", "stream-json",
+		"--verbose",
 		"--restricted",
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
@@ -136,18 +141,41 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		WorkingDir: req.WorkingDir,
 		Env:        execution.ScrubbedEnv(),
 	}
-	if req.Stream != nil {
-		spec.StdoutSink = req.Stream
-		spec.StderrSink = req.Stream
+	if req.Stream != nil || req.Activity != nil {
+		// The raw stream is JSON; what is shown live is the readable activity.
+		stream := req.Stream
+		spec.StdoutSink = &activityWriter{dir: req.WorkingDir, report: func(what string) {
+			if req.Activity != nil {
+				req.Activity(what)
+			}
+			if stream != nil && what != "Thinking" && what != "Writing" {
+				_, _ = stream.Write([]byte("→ " + what + "\n"))
+			}
+		}}
+		if stream != nil {
+			spec.StderrSink = stream
+		}
 	}
 
 	res, err := c.Executor.Run(ctx, spec)
 
+	// The answer is the stream's result event; anything else (an older CLI, a test
+	// double) is taken as printed.
+	stdout := res.Stdout
+	var usage *domain.Usage
+	if text, u, _, ok := parseStream(res.Stdout); ok {
+		stdout, usage = text, u
+		if req.Stream != nil && text != "" {
+			_, _ = req.Stream.Write([]byte(strings.TrimRight(text, "\n") + "\n"))
+		}
+	}
+
 	result := provider.Result{
-		Output:   res.Stdout,
+		Output:   stdout,
 		Stderr:   res.Stderr,
 		ExitCode: res.ExitCode,
 		Duration: res.Duration,
+		Usage:    usage,
 	}
 
 	if err != nil {
@@ -169,7 +197,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			WorkingDir: req.WorkingDir,
 			ExitCode:   res.ExitCode,
 			Duration:   res.Duration,
-			Stdout:     res.Stdout,
+			Stdout:     stdout,
 			Stderr:     res.Stderr,
 			Err:        err,
 		}
@@ -185,7 +213,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			WorkingDir: req.WorkingDir,
 			ExitCode:   res.ExitCode,
 			Duration:   res.Duration,
-			Stdout:     res.Stdout,
+			Stdout:     stdout,
 			Stderr:     res.Stderr,
 		}
 	}

@@ -116,8 +116,10 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 	// alone, so the call gets no tools.
 	result, err := p.Client.Execute(callCtx, provider.Request{
 		Prompt: prompt, Model: p.Model, Stream: p.Stream, Authority: domain.AuthorityNone,
+		Activity: provider.ActivityHook(p.Observer),
 	})
 	stop()
+	provider.ReportUsage(p.Observer, result)
 	if p.Observer != nil {
 		p.Observer.ProviderCallFinished(p.ProviderID, p.Model, time.Since(start), err)
 	}

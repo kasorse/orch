@@ -121,8 +121,10 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority: authority,
 		DenyRead:  d.denyRead(),
+		Activity:  provider.ActivityHook(d.Observer),
 	})
 	stopHeartbeat()
+	provider.ReportUsage(d.Observer, result)
 
 	if d.Observer != nil {
 		d.Observer.ProviderCallFinished(pm.Provider, pm.Model, time.Since(start), err)

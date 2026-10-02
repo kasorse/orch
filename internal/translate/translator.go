@@ -113,8 +113,10 @@ func (t *Translator) call(ctx context.Context, runID, request string) (string, e
 	// Translation reads nothing but the request text in its prompt, so it gets no tools.
 	result, err := t.Client.Execute(callCtx, provider.Request{
 		Prompt: BuildPrompt(request), Model: t.Model, Stream: t.Stream, Authority: domain.AuthorityNone,
+		Activity: provider.ActivityHook(t.Observer),
 	})
 	stopHeartbeat()
+	provider.ReportUsage(t.Observer, result)
 	if t.Observer != nil {
 		t.Observer.ProviderCallFinished(t.ProviderID, t.Model, time.Since(start), err)
 	}

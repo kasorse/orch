@@ -373,6 +373,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 			return failRun(store, run, err)
 		}
 	}
+	if reporter.Pretty {
+		reporter.SetRepoInfo(repoInfo(decideCtx, repo))
+	}
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
 	// One prompter for every question on stdin: it buffers input, so a second reader
@@ -785,6 +788,26 @@ func engineContext(ctx, decideCtx context.Context, timeout, elapsed, userTime ti
 		return decideCtx, func() {}
 	}
 	return context.WithTimeout(ctx, timeout-(elapsed-userTime))
+}
+
+// newReporter is the run/resume console reporter: pretty on an interactive terminal,
+// repoInfo gathers the repository card for the pretty header: branch, the last few
+// commits and how many files have uncommitted changes. Failures just leave parts empty.
+func repoInfo(ctx context.Context, repo *repository.Repository) logging.RepoInfo {
+	const shown = 4
+	var info logging.RepoInfo
+	info.Branch, _ = repo.Branch(ctx)
+	commits, total, _ := repo.RecentCommits(ctx, shown)
+	for _, c := range commits {
+		info.Commits = append(info.Commits, logging.CommitInfo{Hash: c.Hash, Subject: c.Subject, When: c.When})
+	}
+	if total > len(commits) {
+		info.MoreCommits = total - len(commits)
+	}
+	if changed, err := repo.ChangedFiles(ctx); err == nil {
+		info.Changed = len(changed)
+	}
+	return info
 }
 
 // newReporter is the run/resume console reporter: pretty on an interactive terminal,

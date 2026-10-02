@@ -17,6 +17,8 @@ import (
 // common is the prefix every authority shares (specs/permissions/SPEC.md §6.2).
 var common = []string{
 	"--print",
+	"--output-format", "stream-json",
+	"--verbose",
 	"--restricted",
 	"--permission-mode", "dontAsk",
 	"--permission-prompts", "none",
