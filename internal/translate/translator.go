@@ -119,8 +119,8 @@ func (t *Translator) call(ctx context.Context, runID, request string) (string, e
 		t.Observer.ProviderCallFinished(t.ProviderID, t.Model, time.Since(start), err)
 	}
 
-	t.log(runID, "stdout", result.Output)
-	t.log(runID, "stderr", result.Stderr)
+	wroteStdout := t.log(runID, "stdout", result.Output)
+	wroteStderr := t.log(runID, "stderr", result.Stderr)
 
 	if err != nil {
 		var providerErr *apperr.ProviderError
@@ -128,11 +128,20 @@ func (t *Translator) call(ctx context.Context, runID, request string) (string, e
 			if providerErr.Action == "" {
 				providerErr.Action = logName
 			}
-			if t.Logger != nil && providerErr.LogPath == "" {
-				providerErr.LogPath = t.Logger.CallLogPath(runID, logName, "stderr")
+			// Point only at a log that exists (MVP.md §23).
+			if providerErr.LogPath == "" {
+				switch {
+				case wroteStderr:
+					providerErr.LogPath = t.Logger.CallLogPath(runID, logName, "stderr")
+				case wroteStdout:
+					providerErr.LogPath = t.Logger.CallLogPath(runID, logName, "stdout")
+				}
 			}
 			if providerErr.Kind == apperr.FailureTimeout || errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 				return "", fmt.Errorf("translation timed out after %s", t.Timeout)
+			}
+			if providerErr.LogPath == "" {
+				return "", fmt.Errorf("translation failed: %s (no output)", providerErr.Kind)
 			}
 			return "", fmt.Errorf("translation failed: %s (see %s)", providerErr.Kind, providerErr.LogPath)
 		}
@@ -216,11 +225,12 @@ func (t *Translator) startHeartbeat() func() {
 }
 
 // log is best-effort, like the classifier's: losing a log never fails the run.
-func (t *Translator) log(runID, stream, content string) {
+// It reports whether the log was written.
+func (t *Translator) log(runID, stream, content string) bool {
 	if t.Logger == nil || content == "" {
-		return
+		return false
 	}
-	_ = t.Logger.AppendCallLog(runID, logName, stream, content)
+	return t.Logger.AppendCallLog(runID, logName, stream, content) == nil
 }
 
 func firstLine(s string) string {

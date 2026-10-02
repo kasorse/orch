@@ -81,10 +81,14 @@ type ProviderError struct {
 	LogPath    string // run-relative path to the raw logs, when persisted
 	Err        error
 
-	// ConfiguredTimeout is set only when Kind == FailureTimeout and the failing action
-	// had its own actions.<name>.timeout override in effect. Zero means the run-wide
-	// execution.timeout fired instead (or the action has no override at all).
+	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
+	// the run-wide execution.timeout was the one that fired: an action's own
+	// actions.<name>.timeout override, or the per-call timeout of a call outside the
+	// steps (decision.timeout). Zero means execution.timeout fired instead.
 	ConfiguredTimeout time.Duration
+	// TimeoutSetting names the config key ConfiguredTimeout came from, e.g.
+	// "decision.timeout". Empty means actions.<Action>.timeout.
+	TimeoutSetting string
 }
 
 const maxStreamInError = 4000
@@ -96,7 +100,11 @@ func (e *ProviderError) Error() string {
 	fmt.Fprintf(&b, "action: %s\n", e.Action)
 	fmt.Fprintf(&b, "model: %s\n", e.Model)
 	if e.Kind == FailureTimeout && e.ConfiguredTimeout > 0 {
-		fmt.Fprintf(&b, "failure: timeout (exceeded actions.%s.timeout = %s)\n", e.Action, e.ConfiguredTimeout)
+		setting := e.TimeoutSetting
+		if setting == "" {
+			setting = "actions." + e.Action + ".timeout"
+		}
+		fmt.Fprintf(&b, "failure: timeout (exceeded %s = %s)\n", setting, e.ConfiguredTimeout)
 	} else if e.Kind != "" {
 		fmt.Fprintf(&b, "failure: %s\n", failureDescription(e.Kind))
 	}

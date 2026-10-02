@@ -121,8 +121,8 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 	if p.Observer != nil {
 		p.Observer.ProviderCallFinished(p.ProviderID, p.Model, time.Since(start), err)
 	}
-	p.log(logName, "stdout", result.Output)
-	p.log(logName, "stderr", result.Stderr)
+	wroteStdout := p.log(logName, "stdout", result.Output)
+	wroteStderr := p.log(logName, "stderr", result.Stderr)
 
 	if err == nil {
 		return result.Output, nil
@@ -133,8 +133,19 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 		if providerErr.Action == "" {
 			providerErr.Action = logName
 		}
-		if p.Logger != nil && providerErr.LogPath == "" {
-			providerErr.LogPath = p.Logger.CallLogPath(p.RunID, logName, "stderr")
+		// Point only at a log that exists: a call killed before it printed anything
+		// (claude --print writes only when done) leaves no file (MVP.md §23).
+		if providerErr.LogPath == "" {
+			switch {
+			case wroteStderr:
+				providerErr.LogPath = p.Logger.CallLogPath(p.RunID, logName, "stderr")
+			case wroteStdout:
+				providerErr.LogPath = p.Logger.CallLogPath(p.RunID, logName, "stdout")
+			}
+		}
+		if providerErr.Kind == apperr.FailureTimeout && callDeadlineBinds(ctx, callCtx) {
+			providerErr.ConfiguredTimeout = p.Timeout
+			providerErr.TimeoutSetting = "decision.timeout"
 		}
 	}
 	kind := apperr.DecisionUnavailable
@@ -178,10 +189,19 @@ func (p *Provider) startHeartbeat() func() {
 	return func() { close(done) }
 }
 
-// log is best-effort: losing a log never fails the run.
-func (p *Provider) log(name, stream, content string) {
+// callDeadlineBinds reports whether decision.timeout, rather than the run's
+// execution.timeout on ctx, is the deadline callCtx fires at.
+func callDeadlineBinds(ctx, callCtx context.Context) bool {
+	callDeadline, _ := callCtx.Deadline()
+	parentDeadline, ok := ctx.Deadline()
+	return !ok || callDeadline.Before(parentDeadline)
+}
+
+// log is best-effort: losing a log never fails the run. It reports whether the log
+// was written.
+func (p *Provider) log(name, stream, content string) bool {
 	if p.Logger == nil || content == "" {
-		return
+		return false
 	}
-	_ = p.Logger.AppendCallLog(p.RunID, name, stream, content)
+	return p.Logger.AppendCallLog(p.RunID, name, stream, content) == nil
 }

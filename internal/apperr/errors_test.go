@@ -83,6 +83,21 @@ func TestProviderError_TimeoutMentionsActionOverrideWhenSet(t *testing.T) {
 	}
 }
 
+func TestProviderError_TimeoutNamesTheSettingWhenGiven(t *testing.T) {
+	err := &ProviderError{
+		Provider:          "claude",
+		Action:            "decide-context",
+		Model:             "opus",
+		Kind:              FailureTimeout,
+		ConfiguredTimeout: 5 * time.Second,
+		TimeoutSetting:    "decision.timeout",
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "failure: timeout (exceeded decision.timeout = 5s)") {
+		t.Errorf("expected message to name decision.timeout, got: %s", msg)
+	}
+}
+
 func TestProviderError_TimeoutFallsBackToExecutionTimeoutMessageWhenNoOverride(t *testing.T) {
 	err := &ProviderError{
 		Provider: "codex",

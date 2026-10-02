@@ -139,7 +139,9 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 					providerErr.ConfiguredTimeout = t
 				}
 			}
-			if d.Logs != nil && providerErr.LogPath == "" {
+			// The step's logs are written only for non-empty streams (runObserver), so
+			// point only at one that will exist (MVP.md §23).
+			if d.Logs != nil && providerErr.LogPath == "" && (result.Output != "" || result.Stderr != "") {
 				stream := "stderr"
 				if result.Output != "" {
 					stream = "stdout"

@@ -1365,7 +1365,12 @@ anywhere. Do not dump secrets or complete environment variables.
 
 `full output:` is only present once the failing call's raw stdout/stderr has actually
 been persisted (see §21) - it points at the exact file to read for output longer than
-the message's 4000-byte tail.
+the message's 4000-byte tail. A call that produced no output (e.g. killed by a timeout
+before it printed anything) leaves no log file, so the line is omitted.
+
+A timeout names the limit that actually fired: `actions.<name>.timeout` or
+`decision.timeout` when that per-call limit was tighter than what was left of the run,
+otherwise `execution.timeout`.
 
 ---
 

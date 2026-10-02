@@ -211,10 +211,28 @@ func TestCallFailures(t *testing.T) {
 		t.Errorf("the CLI failure must stay inspectable: %+v", pe)
 	}
 
-	p, _ = newProvider(&fakeClient{block: true}, both)
+	p, l := newProvider(&fakeClient{block: true}, both)
 	p.Timeout = 20 * time.Millisecond
 	_, err = p.Classify(context.Background(), domain.ClassificationInput{Request: "x"})
 	assertKind(t, err, apperr.DecisionTimeout)
+	// Killed before it printed anything: no log is written, so none is named, and the
+	// message names decision.timeout, not execution.timeout.
+	if !errors.As(err, &pe) || pe.LogPath != "" || len(l.logs) != 0 {
+		t.Errorf("a call with no output must not point at a log: LogPath %q, logs %v", pe.LogPath, l.logs)
+	}
+	if msg := err.Error(); !strings.Contains(msg, "failure: timeout (exceeded decision.timeout = 20ms)") || strings.Contains(msg, "full output:") {
+		t.Errorf("the message must name decision.timeout and no log: %s", msg)
+	}
+
+	// The run's execution.timeout fires first: decision.timeout is not to blame.
+	runCtx, runCancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer runCancel()
+	p, _ = newProvider(&fakeClient{block: true}, both)
+	p.Timeout = time.Minute
+	_, err = p.ContextDepth(runCtx, "x")
+	if !errors.As(err, &pe) || pe.ConfiguredTimeout != 0 {
+		t.Errorf("execution.timeout fired, ConfiguredTimeout must stay zero: %+v", pe)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(10 * time.Millisecond); cancel() }()

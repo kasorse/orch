@@ -517,6 +517,24 @@ func TestExecute_ProviderError_LogPathFilledIn(t *testing.T) {
 	}
 }
 
+// A call killed before it printed anything leaves no step log (runObserver writes only
+// non-empty streams), so the error must not point at one.
+func TestExecute_ProviderError_NoLogPathWithoutOutput(t *testing.T) {
+	client := &fakeClient{err: &apperr.ProviderError{Provider: "claude", Model: "m", Kind: apperr.FailureTimeout, ExitCode: -1}}
+	d := newDispatcher(client)
+	d.Logs = fakeLogPathBuilder{}
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(context.Background(), domain.ActionAnalyze, run)
+	var providerErr *apperr.ProviderError
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("expected *apperr.ProviderError, got %T", err)
+	}
+	if providerErr.LogPath != "" {
+		t.Errorf("expected no LogPath for a call with no output, got %q", providerErr.LogPath)
+	}
+}
+
 // TestExecuteAnalyze_ProviderFailure_PopulatesRawOutput is the direct regression test for
 // the reported bug (F3): a failing provider call must not be discarded as an empty
 // StepOutcome{} - the CLI's stdout (where claude --print writes backend/API errors) has to
