@@ -1,5 +1,7 @@
-// Package logging renders human-readable CLI progress for a run (MVP.md §27). Plain text
-// only - terminal formatting is deliberately not a dependency of the MVP.
+// Package logging renders human-readable CLI progress for a run (MVP.md §27). Off a
+// terminal it is plain text exactly as the spec describes; on an interactive terminal the
+// same information is rendered with colour and a spinner (pretty.go), using nothing but
+// ANSI escapes - no terminal library is a dependency.
 package logging
 
 import (
@@ -30,15 +32,43 @@ type ConsoleReporter struct {
 	// MaxFixIterations is only used to render the "N/M" in the fix-iteration notice; it
 	// has no effect on control flow (the engine enforces the real limit).
 	MaxFixIterations int
+
+	// Pretty switches on the terminal renderer (colour, spinner, boxes). Set it only when
+	// Out is an interactive terminal (see PrettyFor); the plain renderer is the default.
+	Pretty bool
+	// Version, Cwd and TestCommand only decorate the pretty renderer's header and spinner.
+	Version     string
+	Cwd         string
+	TestCommand string
+
+	// action is the step in flight, for the spinner's label; spin the running spinner.
+	action domain.ActionType
+	spin   *spinner
 }
 
 func NewConsoleReporter(out io.Writer) *ConsoleReporter {
 	return &ConsoleReporter{Out: out}
 }
 
+// NewTerminalReporter is NewConsoleReporter with the pretty renderer switched on when out
+// is an interactive terminal (and NO_COLOR/ORCHESTRATOR_PLAIN are unset).
+func NewTerminalReporter(out io.Writer) *ConsoleReporter {
+	return &ConsoleReporter{Out: out, Pretty: PrettyFor(out)}
+}
+
+// Pause stops a running spinner, so a prompt or other output can use the terminal. The
+// next provider call starts a new one.
+func (r *ConsoleReporter) Pause() {
+	r.stopSpin()
+}
+
 // RunHeader prints the run header line once the run ID and directory are known (right
 // after persistence.Store.NewRun returns).
 func (r *ConsoleReporter) RunHeader(runID, dir string) {
+	if r.Pretty {
+		r.prettyRunHeader(runID, dir)
+		return
+	}
 	fmt.Fprintf(r.Out, "Run: %s  (%s)\n", runID, dir)
 }
 
@@ -46,13 +76,17 @@ func (r *ConsoleReporter) RunHeader(runID, dir string) {
 // provider call in real time, before the call happens - this is why Provider:/Model: are
 // no longer printed by StepFinished (which only runs after the call returns).
 func (r *ConsoleReporter) ProviderCallStarted(providerID, model string) {
+	if r.Pretty {
+		r.prettyProviderCallStarted(providerID, model)
+		return
+	}
 	fmt.Fprintf(r.Out, "Provider: %s\nModel: %s\n→ running %s...\n", providerID, model, providerID)
 }
 
 // ProviderCallHeartbeat implements action.CallObserver. Printing is suppressed outside
 // --verbose (heartbeat lines are a --verbose-only mechanic per spec §6.4).
 func (r *ConsoleReporter) ProviderCallHeartbeat(elapsed time.Duration) {
-	if !r.Verbose {
+	if !r.Verbose || r.Pretty {
 		return
 	}
 	fmt.Fprintf(r.Out, "   … still running (%s)\n", formatDuration(elapsed))
@@ -64,6 +98,10 @@ func (r *ConsoleReporter) ProviderCallHeartbeat(elapsed time.Duration) {
 // success (a failure's detail comes from the returned *apperr.ProviderError's own
 // rendering, not from here).
 func (r *ConsoleReporter) ProviderCallFinished(providerID, model string, duration time.Duration, err error) {
+	if r.Pretty {
+		r.stopSpin()
+		return
+	}
 	if !r.Verbose || err != nil {
 		return
 	}
@@ -89,21 +127,36 @@ func formatDuration(d time.Duration) string {
 // so it cannot be the same method on *ConsoleReporter.
 type CallReporter struct {
 	*ConsoleReporter
+	// Label is what the pretty renderer's spinner says during the call ("Translating").
+	Label string
 }
 
 func (c CallReporter) ProviderCallStarted(providerID, model string) {
+	if c.Pretty {
+		label := "Thinking"
+		if c.Label != "" {
+			label = c.Label
+		}
+		if c.Verbose {
+			c.detail(c.st().gray(label + " · " + providerID + " · " + model))
+			return
+		}
+		c.startSpin(label, providerID+" · "+model)
+		return
+	}
 	fmt.Fprintf(c.Out, "→ %s (model %s)\n", providerID, model)
 }
 
 func (c CallReporter) ProviderCallHeartbeat(elapsed time.Duration) {
-	if !c.Verbose {
+	if !c.Verbose || c.Pretty {
 		return
 	}
 	fmt.Fprintf(c.Out, "   … still running (%s)\n", formatDuration(elapsed))
 }
 
 // ProviderCallFinished is a no-op: the decision summary printed right after these calls
-// says what came of them.
+// says what came of them. The pretty renderer keeps its spinner running across the
+// decision rounds; Decided (or Pause) stops it.
 func (c CallReporter) ProviderCallFinished(providerID, model string, duration time.Duration, err error) {
 }
 
@@ -137,14 +190,27 @@ func (p *PrefixWriter) Write(b []byte) (int, error) {
 }
 
 func (r *ConsoleReporter) ValidatingConfig() {
+	if r.Pretty {
+		return
+	}
 	fmt.Fprintln(r.Out, "Validating configuration...")
 }
 
 func (r *ConsoleReporter) ConfigValid() {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray("configuration valid"))
+		return
+	}
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
 func (r *ConsoleReporter) Deciding() {
+	if r.Pretty {
+		fmt.Fprintln(r.Out)
+		r.startSpin("Deciding the workflow", "")
+		return
+	}
 	fmt.Fprintln(r.Out, "\nDeciding the workflow...")
 }
 
@@ -153,20 +219,39 @@ func (r *ConsoleReporter) Deciding() {
 // RestorePoint announces the ref recorded before the first step, so the operator can
 // always get back to where the run started (specs/permissions/SPEC.md §7.2).
 func (r *ConsoleReporter) RestorePoint(ref string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "restore")), st.gray(ref))
+		return
+	}
 	fmt.Fprintf(r.Out, "Restore point: %s\n", ref)
 }
 
 // RestorePointUnavailable reports that no restore point could be recorded; the run goes on.
 func (r *ConsoleReporter) RestorePointUnavailable(err error) {
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ no restore point recorded: "+firstLine(err.Error())))
+		return
+	}
 	fmt.Fprintf(r.Out, "Warning: no restore point recorded: %s\n", firstLine(err.Error()))
 }
 
 func DirtyRepoWarning(w io.Writer) {
+	if PrettyFor(w) {
+		st := style{on: true}
+		fmt.Fprintln(w, st.yellow("⚠ Repository contains uncommitted changes.")+" "+st.gray("Existing changes will not be reverted."))
+		return
+	}
 	fmt.Fprintln(w, "Warning: repository contains uncommitted changes.")
 	fmt.Fprintln(w, "Existing changes will not be reverted.")
 }
 
 func (r *ConsoleReporter) StepStarted(run *domain.Run, index int, action domain.ActionType) {
+	r.action = action
+	if r.Pretty {
+		r.prettyStepStarted(index, action)
+		return
+	}
 	fmt.Fprintf(r.Out, "\n[%d] %s\n", index+1, strings.ToUpper(string(action)))
 	// --verbose names the step's authority up front; test makes no AI call, so it has none.
 	if r.Verbose && action != domain.ActionTest {
@@ -175,6 +260,10 @@ func (r *ConsoleReporter) StepStarted(run *domain.Run, index int, action domain.
 }
 
 func (r *ConsoleReporter) StepFinished(run *domain.Run, index int, exec domain.StepExecution, outcome workflow.StepOutcome) {
+	if r.Pretty {
+		r.prettyStepFinished(run, exec, outcome)
+		return
+	}
 	// Provider:/Model: are announced by ProviderCallStarted, in real time, before the
 	// call happens - printing them again here (post-hoc) would duplicate that.
 	if exec.TestResult != nil {
@@ -250,6 +339,10 @@ func (r *ConsoleReporter) printReviewIssueCounts(review *domain.ReviewResult) {
 }
 
 func (r *ConsoleReporter) RunFinished(run *domain.Run) {
+	if r.Pretty {
+		r.prettyRunFinished(run)
+		return
+	}
 	switch run.Status {
 	case domain.RunCompleted:
 		fmt.Fprintln(r.Out, "\nRun completed successfully.")

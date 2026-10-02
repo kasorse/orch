@@ -13,6 +13,11 @@ import (
 // translation, context depth, complexity with the choice/score comparison, the provider
 // that decided, and the workflow; --verbose adds the per-stage table.
 func (r *ConsoleReporter) Decided(t domain.DecisionTrace) {
+	if r.Pretty {
+		r.stopSpin()
+		r.prettyDecided(t)
+		return
+	}
 	RenderDecision(r.Out, t, r.Verbose)
 }
 
