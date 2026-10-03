@@ -39,9 +39,11 @@ context:
   extra_deny: []             # glob patterns never read, on top of .env*, *.pem, *.key, ...
 
 actions:
+  # effort (optional, claude only): low | medium | high | xhigh | max; unset = CLI default.
   research:
     provider: claude
     model: sonnet
+    effort: medium
 
   analyze:
     provider: claude

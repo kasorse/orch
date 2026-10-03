@@ -77,8 +77,8 @@ func TestClient_DenyReadBecomesSettings(t *testing.T) {
 // only the prompt replaced.
 func TestRedactedArgsMirrorBuildArgs(t *testing.T) {
 	deny := []string{".env"}
-	built := buildArgs(domain.AuthorityEdit, deny, "opus", "secret prompt")
-	redacted := redactedArgs(domain.AuthorityEdit, deny, "opus", len("secret prompt"))
+	built := buildArgs(domain.AuthorityEdit, deny, "opus", "high", "secret prompt")
+	redacted := redactedArgs(domain.AuthorityEdit, deny, "opus", "high", len("secret prompt"))
 	if !slices.Equal(built[:len(built)-1], redacted[:len(redacted)-1]) {
 		t.Errorf("redactedArgs diverged from buildArgs:\n  %q\n  %q", built, redacted)
 	}
@@ -237,5 +237,16 @@ func TestClient_ScrubsParentSessionEnv(t *testing.T) {
 		if strings.HasPrefix(kv, "CLAUDECODE=") || strings.HasPrefix(kv, "CLAUDE_CODE_MESSAGING_SOCKET=") {
 			t.Errorf("parent-session variable leaked: %s", kv)
 		}
+	}
+}
+
+func TestEffortFlagOnlyWhenSet(t *testing.T) {
+	with := buildArgs(domain.AuthorityRead, nil, "opus", "high", "p")
+	i := slices.Index(with, "--effort")
+	if i < 0 || with[i+1] != "high" || with[len(with)-3] != "--effort" && with[i+2] != "--model" {
+		t.Errorf("effort flag missing or misplaced: %q", with)
+	}
+	if slices.Contains(buildArgs(domain.AuthorityRead, nil, "opus", "", "p"), "--effort") {
+		t.Error("--effort passed with no effort configured")
 	}
 }

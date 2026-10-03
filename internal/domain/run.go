@@ -30,6 +30,7 @@ func (s RunStatus) Valid() bool {
 type ProviderRef struct {
 	Provider  string    `json:"provider"`
 	Model     string    `json:"model"`
+	Effort    string    `json:"effort,omitempty"`
 	Authority Authority `json:"authority,omitempty"`
 }
 

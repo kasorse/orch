@@ -12,8 +12,10 @@ import (
 )
 
 type Request struct {
-	Prompt     string
-	Model      string
+	Prompt string
+	Model  string
+	// Effort is the optional reasoning-effort level; "" leaves the CLI's default.
+	Effort     string
 	WorkingDir string
 	// Authority is the set of tools this call may use (specs/permissions/SPEC.md §5). It
 	// has no usable zero value: an adapter refuses "" rather than guess.

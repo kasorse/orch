@@ -14,6 +14,10 @@ import (
 type ProviderModel struct {
 	Provider string `yaml:"provider"`
 	Model    string `yaml:"model"`
+	// Effort is the optional reasoning-effort level for the model (low, medium, high,
+	// xhigh, max). Empty means the CLI's own default. Only providers that can enforce it
+	// accept it (see EffortProviders); it is never silently dropped.
+	Effort string `yaml:"effort"`
 }
 
 // ActionConfig is a ProviderModel plus an optional per-action timeout override. Timeout
@@ -34,6 +38,7 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
 		Provider string `yaml:"provider"`
 		Model    string `yaml:"model"`
+		Effort   string `yaml:"effort"`
 		Timeout  string `yaml:"timeout"`
 	}
 	if err := unmarshal(&raw); err != nil {
@@ -41,6 +46,7 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 	a.Provider = raw.Provider
 	a.Model = raw.Model
+	a.Effort = raw.Effort
 	d, err := parseDurationField("timeout", raw.Timeout)
 	if err != nil {
 		return err

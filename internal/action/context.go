@@ -101,7 +101,7 @@ func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repos
 // and, if Logs is set, the LogPath the failing step's output will be written to.
 func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string) (provider.Result, domain.ProviderRef, error) {
 	authority := domain.AuthorityFor(actionName)
-	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Authority: authority}
+	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority}
 
 	client, err := d.Registry.Resolve(pm.Provider)
 	if err != nil {
@@ -118,7 +118,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 
 	stopHeartbeat := d.startHeartbeat()
 	result, err := client.Execute(ctx, provider.Request{
-		Prompt: prompt, Model: pm.Model, WorkingDir: d.Repo.Dir, Stream: d.Stream,
+		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority: authority,
 		DenyRead:  d.denyRead(),
 	})

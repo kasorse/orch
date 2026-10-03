@@ -78,6 +78,9 @@ func Validate(cfg Config) error {
 	)
 }
 
+// EffortLevels are the accepted values of an action's effort, as the claude CLI names them.
+var EffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
 func validateProviderModel(action string, pm ProviderModel) []string {
 	var problems []string
 
@@ -92,6 +95,15 @@ func validateProviderModel(action string, pm ProviderModel) []string {
 
 	if strings.TrimSpace(pm.Model) == "" {
 		problems = append(problems, fmt.Sprintf("%s.model is required", action))
+	}
+
+	if pm.Effort != "" {
+		switch {
+		case !slices.Contains(EffortLevels, pm.Effort):
+			problems = append(problems, fmt.Sprintf("%s.effort %q must be one of: %s", action, pm.Effort, strings.Join(EffortLevels, ", ")))
+		case pm.Provider != string(provider.Claude):
+			problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", action, pm.Provider))
+		}
 	}
 
 	return problems

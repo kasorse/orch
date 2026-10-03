@@ -217,3 +217,21 @@ func TestResolveBinds(t *testing.T) {
 		t.Errorf("ro = %q, rw = %q", ro, rw)
 	}
 }
+
+func TestValidate_Effort(t *testing.T) {
+	cfg := validConfig()
+	cfg.Actions.Plan.Provider, cfg.Actions.Plan.Effort = "claude", "high"
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("valid effort rejected: %v", err)
+	}
+
+	cfg.Actions.Plan.Effort = "turbo"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "plan.effort") {
+		t.Errorf("bad level not reported: %v", err)
+	}
+
+	cfg.Actions.Plan.Effort, cfg.Actions.Plan.Provider = "high", "gemini"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "only supported with provider claude") {
+		t.Errorf("effort on gemini not refused: %v", err)
+	}
+}
