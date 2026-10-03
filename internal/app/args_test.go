@@ -38,6 +38,17 @@ func TestParseArgs(t *testing.T) {
 		{"jira missing value", []string{"run", "--jira"}, cliArgs{}, "--jira requires a value"},
 		{"config missing value", []string{"run", "--config"}, cliArgs{}, "--config requires a value"},
 		{"mode missing value", []string{"--mode"}, cliArgs{}, "--mode requires a value"},
+		{"stage separate", []string{"run", "--stage", "review", "x"},
+			cliArgs{configPath: defaultConfigPath, stages: []domain.Stage{domain.StageReview}, rest: []string{"run", "x"}}, ""},
+		{"stage equals, repeated, alias, any position", []string{"--stage=test", "run", "x", "--stage", "Review"},
+			cliArgs{configPath: defaultConfigPath, stages: []domain.Stage{domain.StageTesting, domain.StageReview}, rest: []string{"run", "x"}}, ""},
+		{"stage duplicate collapsed", []string{"run", "--stage", "test", "--stage=testing", "x"},
+			cliArgs{configPath: defaultConfigPath, stages: []domain.Stage{domain.StageTesting}, rest: []string{"run", "x"}}, ""},
+		{"stage with jira", []string{"run", "--stage", "review", "--jira", "PMC-1"},
+			cliArgs{configPath: defaultConfigPath, jiraRef: "PMC-1", stages: []domain.Stage{domain.StageReview}, rest: []string{"run"}}, ""},
+		{"stage unknown", []string{"run", "--stage", "reveiw", "x"}, cliArgs{}, `unknown stage "reveiw"; valid: research, analysis`},
+		{"stage missing value", []string{"run", "--stage"}, cliArgs{}, "--stage requires a value"},
+		{"stage comma", []string{"run", "--stage", "test,review", "x"}, cliArgs{}, "one stage per flag"},
 		{"bad mode", []string{"--mode", "yolo"}, cliArgs{}, "yolo"},
 	}
 	for _, tc := range cases {
@@ -53,7 +64,7 @@ func TestParseArgs(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got.configPath != tc.want.configPath || got.mode != tc.want.mode || got.verbose != tc.want.verbose ||
-				got.jiraRef != tc.want.jiraRef || !slices.Equal(got.rest, tc.want.rest) {
+				got.jiraRef != tc.want.jiraRef || !slices.Equal(got.stages, tc.want.stages) || !slices.Equal(got.rest, tc.want.rest) {
 				t.Errorf("parseArgs(%q) = %+v, want %+v", tc.args, got, tc.want)
 			}
 		})
@@ -88,5 +99,23 @@ func TestRun_RunUsage(t *testing.T) {
 	err = Run(context.Background(), nil, strings.NewReader(""), &out, &out)
 	if err == nil || !strings.Contains(err.Error(), `run --jira <KEY|URL> ["notes"]`) {
 		t.Fatalf("got %v, want the general usage", err)
+	}
+}
+
+// --stage belongs to run alone, like --jira: a usage error before any config is read.
+func TestRun_StageOnlyWithRun(t *testing.T) {
+	for _, command := range [][]string{{"version"}, {"validate"}, {"resume", "3f2a9c1e"}} {
+		t.Run(command[0], func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml", "--stage", "review"}, command...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || err.Error() != "--stage is only valid with run" {
+				t.Fatalf("got %v, want the --stage usage error", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed %q", out.String())
+			}
+		})
 	}
 }

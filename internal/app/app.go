@@ -18,7 +18,6 @@ import (
 
 	"orchestrator/internal/action"
 	"orchestrator/internal/apperr"
-	"orchestrator/internal/classification"
 	"orchestrator/internal/config"
 	"orchestrator/internal/decision"
 	"orchestrator/internal/decision/jev"
@@ -29,14 +28,12 @@ import (
 	"orchestrator/internal/jira"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
-	"orchestrator/internal/projectctx"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/claude"
 	"orchestrator/internal/provider/codex"
 	"orchestrator/internal/provider/gemini"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
-	"orchestrator/internal/translate"
 	"orchestrator/internal/workflow"
 )
 
@@ -47,7 +44,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>>`
+	`<version|validate|run [--stage <name>]... "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -64,6 +61,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.jiraRef != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--jira is only valid with run"}
 	}
+	if len(cli.stages) > 0 && rest[0] != "run" {
+		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
+	}
 
 	switch rest[0] {
 	case "version":
@@ -74,9 +74,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
 		if cli.jiraRef == "" && len(rest) < 2 {
-			return &apperr.ConfigError{Msg: `usage: orchestrator run "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
+			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.mode, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -98,12 +98,15 @@ type cliArgs struct {
 	verbose bool
 	// jiraRef is --jira's value: an issue key or its URL (specs/jira/SPEC.md §6).
 	jiraRef string
+	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
+	// §4); empty means the decision layer chooses.
+	stages []domain.Stage
 	// rest are the positional arguments.
 	rest []string
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X and
-// --verbose/-v out of args, in any position, and returns them with the remaining
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X, the repeatable
+// --stage/--stage=X and --verbose/-v out of args, in any position, and returns them with the remaining
 // positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
 	cli := cliArgs{configPath: defaultConfigPath}
@@ -145,6 +148,18 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 			if cli.jiraRef = strings.TrimSpace(v); cli.jiraRef == "" {
 				return cliArgs{}, fmt.Errorf("--jira requires an issue key or URL")
+			}
+		case arg == "--stage" || strings.HasPrefix(arg, "--stage="):
+			v, err := value(&i, "--stage")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			parsed, err := parseStageFlags([]string{v})
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if !slices.Contains(cli.stages, parsed[0]) {
+				cli.stages = append(cli.stages, parsed[0])
 			}
 		case arg == "--verbose" || arg == "-v":
 			cli.verbose = true
@@ -225,7 +240,7 @@ func runValidate(configPath string, stdout io.Writer) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Pause()
 
@@ -310,55 +325,34 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 	}
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
-	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)
-	if err != nil {
-		return failRun(store, run, err)
-	}
-	translatorClient, err := registry.Resolve(cfg.Translation.Provider)
-	if err != nil {
-		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to resolve translation provider", Err: err})
-	}
-
 	// One prompter for every question on stdin: it buffers input, so a second reader
 	// would swallow answers meant for the first.
 	prompter := reporter.PausingPrompter(interaction.NewTerminalPrompter(stdin, stdout))
 	interactive := mode != domain.ModeAuto && isTerminal(stdin)
 
-	svc := &classification.Service{
-		Translator: &translate.Translator{
-			Client: translatorClient, ProviderID: cfg.Translation.Provider, Model: cfg.Translation.Model,
-			Timeout: cfg.Translation.Timeout, Logger: store,
-			Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Translating"}, Stream: stream,
-		},
-		Decisions: decisions,
-		Context: projectctx.NewManager(repo, cwd, projectctx.Options{
-			MaxFiles: cfg.Context.MaxFiles, MaxBytes: cfg.Context.MaxBytes, ExtraDeny: cfg.Context.ExtraDeny,
-		}),
-		Chooser:      interaction.NewChooser(prompter, reporter.PausingWriter(), interactive),
-		Policy:       cfg.DecisionPolicy(),
-		Primary:      domain.ComplexitySource(cfg.Decision.Complexity.Primary),
-		AskOnFailure: cfg.Decision.OnFailure == config.OnFailureAsk,
+	var out decisionOutcome
+	if len(stages) > 0 {
+		out, err = decideManual(stages, task.Description, reporter)
+	} else {
+		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
+			reporter, prompter, interactive, stream, stderr)
 	}
-
-	reporter.Deciding()
-	// The manual choice waits on ctx: Ctrl-C still cancels it, execution.timeout does not.
-	res, err := svc.Classify(decideCtx, classification.Request{RunID: run.ID, Text: task.Description, UserCtx: ctx})
 	if err != nil {
 		return failRun(store, run, err)
 	}
 
-	wf, err := workflow.Build(res.Decision.Stages)
+	wf, err := workflow.Build(out.decision.Stages)
 	if err != nil {
 		return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the workflow", Err: err})
 	}
 	// Persisted before the dirty-tree refusal, so a refused run keeps its decided workflow
 	// and can be resumed once the tree is clean (specs/resume/SPEC.md G10).
-	run.Decision = &res.Decision
+	run.Decision = &out.decision
 	run.Workflow = &wf
-	if err := store.SaveDecision(run.ID, res.Trace(wf)); err != nil {
+	if err := store.SaveDecision(run.ID, out.trace(wf)); err != nil {
 		return err
 	}
-	if err := store.SaveProjectContext(run.ID, res.Project); err != nil {
+	if err := store.SaveProjectContext(run.ID, out.project); err != nil {
 		return err
 	}
 	if err := store.SaveRun(run); err != nil {
@@ -368,14 +362,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, mode domain.
 	if err := checkWorktree(cfg, wf, dirty, stderr); err != nil {
 		return failRun(store, run, err)
 	}
-	reporter.Decided(res.Trace(wf))
+	out.announce(wf, stderr)
 
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
 	return executeWorkflow(ctx, s, tailOptions{
 		mode:  mode,
 		dirty: dirty,
 		engineContext: func() (context.Context, context.CancelFunc) {
-			return engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), res.Timings.ManualChoice)
+			return engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), out.manualChoice)
 		},
 	})
 }

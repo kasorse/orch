@@ -109,3 +109,23 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// ManualStages announces the stages the operator named with --stage, in StageOrder,
+// e.g. "Stages (manual): testing → review" (specs/stage-select/SPEC.md §7).
+func (r *ConsoleReporter) ManualStages(stages []domain.Stage) {
+	RenderManualStages(r.Out, stages)
+}
+
+// RenderManualStages is ManualStages without a reporter, for golden tests.
+func RenderManualStages(w io.Writer, stages []domain.Stage) {
+	names := make([]string, len(stages))
+	for i, s := range stages {
+		names[i] = string(s)
+	}
+	fmt.Fprintf(w, "Stages (manual): %s\n", strings.Join(names, " → "))
+}
+
+// GapWarning prints one gap warning (workflow.Gaps) to w.
+func GapWarning(w io.Writer, msg string) {
+	fmt.Fprintf(w, "Warning: %s\n", msg)
+}

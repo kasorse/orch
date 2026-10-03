@@ -109,3 +109,21 @@ func TestRenderDecision_Golden(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderManualStages_Golden(t *testing.T) {
+	var buf bytes.Buffer
+	RenderManualStages(&buf, []domain.Stage{domain.StageTesting, domain.StageReview})
+	path := filepath.Join("testdata", "manual_stages.golden")
+	if *update {
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != string(want) {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
