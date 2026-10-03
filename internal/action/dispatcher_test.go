@@ -757,3 +757,25 @@ func TestCall_DeniesTheRunsDirectory(t *testing.T) {
 		t.Errorf("DenyRead = %v", client.lastReq.DenyRead)
 	}
 }
+
+func TestExecuteReview_EmptyDiff_FailsBeforeProviderCall(t *testing.T) {
+	client := &fakeClient{output: `{"status":"pass","summary":"ok","issues":[]}`}
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, client)
+	d := New(testConfig(), registry, reviewRepo(t, " \n", ""), nil)
+	writer := &fakeArtifactWriter{}
+	d.Artifacts = writer
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
+	_, err := d.Execute(context.Background(), domain.ActionReview, run)
+	var workflowErr *apperr.WorkflowError
+	if !errors.As(err, &workflowErr) || !strings.Contains(err.Error(), "nothing to review") {
+		t.Fatalf("err = %v, want WorkflowError 'nothing to review'", err)
+	}
+	if client.lastReq.Prompt != "" {
+		t.Errorf("provider was called: %q", client.lastReq.Prompt)
+	}
+	if len(writer.calls) != 0 {
+		t.Errorf("artifact saved: %+v", writer.calls)
+	}
+}

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +59,28 @@ func TestParseStage(t *testing.T) {
 		if _, err := ParseStage(in); err == nil {
 			t.Errorf("ParseStage(%q) expected error, got nil", in)
 		}
+	}
+}
+
+func TestParseStageFlag(t *testing.T) {
+	ok := map[string]Stage{
+		"research": StageResearch, "analysis": StageAnalysis, "analyze": StageAnalysis,
+		"planning": StagePlanning, "plan": StagePlanning, "development": StageDevelopment,
+		"implement": StageDevelopment, "testing": StageTesting, "test": StageTesting,
+		"review": StageReview, "  ReVieW ": StageReview, "TEST": StageTesting,
+	}
+	for in, want := range ok {
+		if got, err := ParseStageFlag(in); err != nil || got != want {
+			t.Errorf("ParseStageFlag(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	_, err := ParseStageFlag("reveiw")
+	if err == nil || !strings.Contains(err.Error(), `unknown stage "reveiw"`) ||
+		!strings.Contains(err.Error(), "research, analysis, planning, development, testing, review") ||
+		!strings.Contains(err.Error(), "aliases: analyze, plan, implement, test") {
+		t.Errorf("unknown-name error = %v", err)
+	}
+	if _, err := ParseStage("analyze"); err == nil {
+		t.Error("ParseStage must stay strict")
 	}
 }

@@ -1,5 +1,10 @@
 package domain
 
+import (
+	"errors"
+	"fmt"
+)
+
 // DecisionPolicy is the deterministic rule set the Policy Engine (internal/policy,
 // specs/JEV integration/TASKS.md T03) applies to a decision provider's raw
 // probabilities to pick a ContextDepth, a Complexity, and the enabled stages. It
@@ -35,6 +40,8 @@ const (
 	DecisionSourceJev  DecisionSource = "jev"
 	DecisionSourceLLM  DecisionSource = "llm"
 	DecisionSourceUser DecisionSource = "user"
+	// DecisionSourceManual: the operator named the stages up front (run --stage).
+	DecisionSourceManual DecisionSource = "manual"
 )
 
 // ContextDepthOutcome is the Policy Engine's trace of the pre-check decision:
@@ -106,4 +113,34 @@ type Decision struct {
 	ContextDepth ContextDepthOutcome `json:"context_depth"`
 	Complexity   ComplexityOutcome   `json:"complexity"`
 	Stages       StageSelection      `json:"stages"`
+}
+
+// ManualDecision builds the Decision for stages the operator named with --stage
+// (specs/stage-select/SPEC.md §5): no context, no complexity, and no probability or
+// threshold, since none was asked. Duplicates collapse and the caller's order is
+// irrelevant - the outcomes are always in StageOrder.
+func ManualDecision(stages []Stage) (Decision, error) {
+	if len(stages) == 0 {
+		return Decision{}, errors.New("no stage selected")
+	}
+	chosen := map[Stage]bool{}
+	for _, st := range stages {
+		if _, ok := stageActions[st]; !ok {
+			return Decision{}, fmt.Errorf("unsupported stage %q (want one of: %s)", st, joinValues(stageOrder))
+		}
+		chosen[st] = true
+	}
+	outcomes := make([]StageOutcome, 0, len(stageOrder))
+	for _, st := range stageOrder {
+		reason := "not selected"
+		if chosen[st] {
+			reason = "selected with --stage"
+		}
+		outcomes = append(outcomes, StageOutcome{Stage: st, Enabled: chosen[st], Reason: reason})
+	}
+	return Decision{
+		Source:       DecisionSourceManual,
+		ContextDepth: ContextDepthOutcome{Selected: ContextDepthNone},
+		Stages:       StageSelection{Stages: outcomes},
+	}, nil
 }

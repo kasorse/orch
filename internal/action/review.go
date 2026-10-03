@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -17,6 +18,10 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	diff, err := d.Repo.Diff(ctx)
 	if err != nil {
 		return workflow.StepOutcome{}, err
+	}
+
+	if strings.TrimSpace(diff) == "" {
+		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "nothing to review: the working tree has no changes against HEAD"}
 	}
 
 	prompt := BuildReviewPrompt(ReviewPromptInput{

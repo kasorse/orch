@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Stage is one unit of work a decision provider can require for a task
 // (specs/JEV integration/SPEC.md §8). Which stages run is decided by the policy
@@ -52,6 +55,29 @@ func ParseStage(s string) (Stage, error) {
 		return "", fmt.Errorf("unsupported stage %q (want one of: %s)", s, joinValues(stageOrder))
 	}
 	return st, nil
+}
+
+// stageAliases are the action names accepted by --stage besides the canonical stage
+// names (specs/stage-select/SPEC.md §4.1). They are never persisted.
+var stageAliases = map[string]Stage{
+	"analyze":   StageAnalysis,
+	"plan":      StagePlanning,
+	"implement": StageDevelopment,
+	"test":      StageTesting,
+}
+
+// ParseStageFlag parses an operator-given stage name: trimmed, case-insensitive, a
+// canonical stage or an action-name alias. ParseStage stays strict because it reads
+// persisted data.
+func ParseStageFlag(s string) (Stage, error) {
+	n := strings.ToLower(strings.TrimSpace(s))
+	if st := Stage(n); stageActions[st] != "" {
+		return st, nil
+	}
+	if st, ok := stageAliases[n]; ok {
+		return st, nil
+	}
+	return "", fmt.Errorf("unknown stage %q; valid: %s (aliases: analyze, plan, implement, test)", s, joinValues(stageOrder))
 }
 
 // Action returns the workflow action that executes s, or false for an unknown stage.
