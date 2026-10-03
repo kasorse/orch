@@ -25,6 +25,10 @@ type jevScript struct {
 	Stages map[string]float64
 	// Fail lists statuses to answer the first requests with, before answering normally.
 	Fail []int
+	// Models is what GET /v1/models lists (TASKS.md T14); ModelsStatus, when set, is the
+	// status that request gets instead.
+	Models       []string
+	ModelsStatus int
 }
 
 // scriptBugfixMedium decides analysis -> development -> testing -> review.
@@ -52,6 +56,9 @@ type fakeJev struct {
 
 	mu     sync.Mutex
 	bodies []string
+	// modelRequests counts GET /v1/models, which bodies and Fail leave out: they are about
+	// the decision rounds.
+	modelRequests int
 }
 
 // startJev runs a fake Jev and points JEV_API_KEY at the key it accepts.
@@ -73,7 +80,18 @@ func (j *fakeJev) Bodies() []string {
 	return append([]string(nil), j.bodies...)
 }
 
+// ModelRequests returns how many times GET /v1/models was asked.
+func (j *fakeJev) ModelRequests() int {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.modelRequests
+}
+
 func (j *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && r.URL.Path == "/v1/models" {
+		j.handleModels(w, r)
+		return
+	}
 	raw, _ := io.ReadAll(r.Body)
 	j.mu.Lock()
 	j.bodies = append(j.bodies, string(raw))
@@ -162,4 +180,25 @@ func score(d [3]float64, legend []string) map[string]any {
 		conf = max(conf, p)
 	}
 	return map[string]any{"type": "score", "score": s, "legend": leg, "probabilities": probs, "confidence": conf}
+}
+
+func (j *fakeJev) handleModels(w http.ResponseWriter, r *http.Request) {
+	j.mu.Lock()
+	j.modelRequests++
+	j.mu.Unlock()
+	if r.Header.Get("Authorization") != "Bearer "+jevKey {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"Missing or invalid API key"}`)
+		return
+	}
+	if j.script.ModelsStatus != 0 {
+		w.WriteHeader(j.script.ModelsStatus)
+		_, _ = io.WriteString(w, `{"error":"scripted failure"}`)
+		return
+	}
+	models := []map[string]string{}
+	for _, name := range j.script.Models {
+		models = append(models, map[string]string{"name": name, "description": "", "release_date": "2026-01-01"})
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"models": models})
 }

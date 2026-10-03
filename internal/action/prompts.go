@@ -8,7 +8,8 @@ import (
 )
 
 // Every Build*Prompt function starts with a literal "ACTION: <name>" first line, which
-// doubles as the routing marker fake executables grep on in integration tests.
+// doubles as the routing marker fake executables grep on in integration tests. The task is
+// always embedded through taskBlock, repository data through fence.
 
 // readOnlyRule is shared by every read-only stage prompt: research, analysis and
 // planning inspect, they never change the repository.
@@ -30,7 +31,7 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	b.WriteString("Research the external knowledge the following software engineering task needs: approaches, libraries, tools, alternatives and their trade-offs. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
-	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	b.WriteString("Task:\n" + taskBlock(in.Task))
 	return b.String()
 }
 
@@ -46,7 +47,7 @@ func BuildAnalyzePrompt(in AnalyzePromptInput) string {
 	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
-	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
 	return b.String()
 }
@@ -64,7 +65,7 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
-	fmt.Fprintf(&b, "Task:\n%s\n", in.Task)
+	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
 	if in.Analysis != nil {
 		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
@@ -119,7 +120,7 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString("Implement the following software engineering task by modifying the code in the current repository directly. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
 
-	fmt.Fprintf(&b, "Task:\n%s\n\n", in.Task)
+	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
 	if in.Analysis != nil {
 		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n\n",
@@ -181,7 +182,7 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
 
-	fmt.Fprintf(&b, "Original task (expected outcome):\n%s\n\n", in.Task)
+	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
 
 	if in.Analysis != nil {
 		fmt.Fprintf(&b, "Analysis:\n%s\n\n", in.Analysis.Summary)

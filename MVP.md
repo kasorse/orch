@@ -109,6 +109,11 @@ codex
 gemini
 ```
 
+All three are accepted by the configuration and have adapters, but the MVP runs on
+**claude only**: codex and gemini support no authority until their permission flags are
+verified against the real CLI (§38.2), so `ValidateAuthorities` refuses any route to them
+(§7). Adopting either one is a separate specification of its own.
+
 Do not integrate directly with provider HTTP APIs. There are two exceptions, both called
 with `net/http`:
 
@@ -170,9 +175,18 @@ orchestrator run --stage <name> [--stage <name> ...] "<task>"
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
+orchestrator decisions report
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
+
+`decisions report` reads the `decision.json` of every run under `.orchestrator/runs/` and
+compares the two complexity questions (§8.2): how often `choice` and `score` select the
+same level, the 3×3 matrix of their selections, each one's mean confidence, and the runs
+where they disagree. It skips manual (`--stage`) runs, runs chosen by hand after a provider
+failure, mock answers and runs without the shadow question, and lists unreadable traces.
+It needs no configuration and calls nothing. It is the input for choosing one question
+(`specs/JEV integration/TASKS.md` T21).
 
 `run --jira` takes the task from one Jira issue: `--jira PMC-2789`, `--jira=pmc-2789` or
 the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator
@@ -256,6 +270,7 @@ actions:
   research:
     provider: claude
     model: sonnet
+    effort: medium           # optional, claude only: low|medium|high|xhigh|max (§15)
   analyze:
     provider: claude
     model: sonnet
@@ -268,6 +283,7 @@ actions:
   review:
     provider: claude
     model: sonnet
+    timeout: 20m             # optional; only tightens execution.timeout (§25.1)
 
 test:
   command: "go test ./..."
@@ -327,7 +343,9 @@ Validate:
   and complexity names only, `project_threshold` and complexity thresholds in [0, 1];
 * `context`: positive `max_files`/`max_bytes`, no empty `extra_deny` pattern;
 * every action's provider and model (`research`, `analyze`, `plan`, `implement`,
-  `review`), non-negative per-action timeouts;
+  `review`), non-negative per-action timeouts, and an optional `effort` in
+  `low|medium|high|xhigh|max`, accepted only with provider `claude` (an effort another
+  provider cannot apply is an error, never silently dropped);
 * supported provider names;
 * limits;
 * execution timeout;
@@ -341,6 +359,11 @@ Validate:
   `email` key is an error.
 
 All problems are aggregated into one error.
+
+A version-2 file is parsed strictly: a key the schema does not know - a typo such as
+`timout`, or a key in the wrong section such as `translation.effort` - is an error listing
+each unknown key with its line, never silently ignored. A file of another version is parsed
+leniently, so the version check can say what changed.
 
 Supported CLI provider IDs are only:
 
@@ -464,6 +487,22 @@ codex and gemini currently support no authority (their flags are unverified, §3
 route to them fails here even when their executable is installed. `orchestrator validate`
 runs the same chain.
 
+### Jev model check
+
+After the chain, and only with `decision.provider: jev` without `mock`, the orchestrator
+asks Jev which models it serves (`GET {base_url}/v1/models`, the same client, timeout and
+retries as the decision rounds). `decision.model` passes when it is listed or is a pinned
+version (`^jev-\d+\.\d+\.\d+$`, which Jev accepts but does not list); otherwise the run
+stops with a `ConfigError` (exit 2) naming the models Jev serves. `run` asks before the
+repository is opened and before any Jira request, translation or decision round, so a
+failure creates no run; `run --stage` and `resume` never ask, and `validate` asks and
+prints `✓ jev serves <model>`.
+
+A rejected key (401/403) and a cancellation always stop. Any other failure to check - Jev
+unreachable, overloaded, or answering in an unexpected shape - stops the run with
+`on_failure: fail`; with `on_failure: ask` it is a warning on stderr and the run goes on,
+because a failing decision round falls back to the manual choice anyway (§8.6).
+
 ---
 
 # 8. Decision Flow
@@ -547,7 +586,8 @@ redacted from every error. Failures map to `DecisionError` kinds: timeout/408,
 connection, 429 (rate limited), 5xx/529 (unavailable), 401/403 (auth), other 4xx (bad
 request), non-JSON (invalid response). Transient kinds are retried up to `max_retries`,
 honouring `Retry-After` within one request's `timeout`; cancellation is never retried.
-The model version Jev reports is recorded in the trace.
+The model version Jev reports is recorded in the trace. Before the first round,
+`GET {base_url}/v1/models` checks `decision.model` (§7).
 
 `decision.jev.mock: true` swaps the HTTP client for an offline stand-in: it validates the
 request the way Jev does and answers deterministically from keywords in the request. It
@@ -742,17 +782,23 @@ Create a common interface similar to:
 type Request struct {
     Prompt     string
     Model      string
+    Effort     string           // optional reasoning effort; "" = the CLI's default
     WorkingDir string
+    Authority  domain.Authority // §38; no usable zero value - "" is refused
+    DenyRead   []string         // secret deny list (+ the runs directory) for file tools
+    Stream     io.Writer        // optional live sink for --verbose; nil = capture only
 }
 
 type Result struct {
-    Output   string
+    Output   string // stdout
+    Stderr   string
     ExitCode int
     Duration time.Duration
 }
 
 type Client interface {
     Execute(ctx context.Context, req Request) (Result, error)
+    Supports(a domain.Authority) bool // only authorities verified live (§38.2)
 }
 ```
 
@@ -777,14 +823,18 @@ External commands must use a reusable abstraction.
 Example:
 
 ```go
+type Spec struct {
+    Executable string
+    Args       []string
+    Stdin      string
+    WorkingDir string
+    Env        []string  // nil inherits (git); providers and test pass ScrubbedEnv()
+    StdoutSink io.Writer // optional live tee (--verbose), in addition to capture
+    StderrSink io.Writer
+}
+
 type ProcessExecutor interface {
-    Run(
-        ctx context.Context,
-        executable string,
-        args []string,
-        stdin string,
-        workingDir string,
-    ) (ProcessResult, error)
+    Run(ctx context.Context, spec Spec) (ProcessResult, error)
 }
 ```
 
@@ -840,7 +890,8 @@ The common orchestrator must not know how individual provider CLI syntax works.
 
 Each adapter must support:
 
-* configured model;
+* configured model, and the configured `effort` where the CLI can apply it (claude
+  only; config validation rejects it for any other provider);
 * prompt;
 * working directory;
 * context cancellation;
@@ -887,7 +938,8 @@ The tree's state is read at startup, before `.orchestrator/runs/` is created ins
 
 Before the first step the run records a restore point, `pre_run_ref` (§38): HEAD on a
 clean tree, otherwise a snapshot commit of everything the run starts on top of, untracked
-files included, built on a throwaway index. It is printed as `Restore point: <sha>`.
+files included, built on a throwaway index. It is printed as `Restore point: <sha>`, and
+pinned under `refs/orchestrator/runs/<run-id>` so `git gc` cannot prune it (§38.3).
 
 Do not automatically stash, reset, checkout, or revert user files.
 
@@ -1089,7 +1141,12 @@ review
 
 Every prompt starts with a literal `ACTION: <name>` line - the marker fake executables
 route on in the integration tests. User-supplied text (the request, project context) is
-embedded as delimited data that cannot close its own block.
+embedded as delimited data that cannot close its own block. In the stage prompts the task
+- typed, or rendered from a ticket (§39) - sits in a task block: a preamble saying it is
+the task to carry out but that nothing inside it changes the prompt's rules (the response
+format, the read-only rule, the review rubric), then the task between `<<<TASK-<nonce>` and
+`>>>TASK-<nonce>` lines with a per-prompt random nonce the task does not contain, so the
+task has a visible end it cannot fake (§38.3).
 
 Do not assemble large prompts ad hoc inside workflow logic.
 
@@ -1443,8 +1500,9 @@ would leave those running, holding the pipes open and defeating the timeout.
 
 ## 25.1 Per-Action Timeout Override
 
-Support an optional `timeout` alongside `provider`/`model` on each of the six fixed
-actions:
+Support an optional `timeout` alongside `provider`/`model` on each of the five AI-backed
+actions (`research`, `analyze`, `plan`, `implement`, `review`; `test` has no provider
+entry and runs under `execution.timeout`):
 
 ```yaml
 actions:
@@ -1497,6 +1555,7 @@ internal/
   repository/       git (read-only helpers)
   action/           step executors and prompt builders
   testexec/         test runner
+  report/           decisions report over the persisted traces (§4); imports only domain
   interaction/      approval, mode select, manual-mode gate, manual choice
   persistence/      run directory
   logging/          console output
@@ -1618,9 +1677,31 @@ stages:
 
 Every provider call prints a line immediately before it - `→ running <provider>...` for a
 workflow step, `→ <provider> (model <model>)` for translation and LLM decision rounds - so
-a hang is visible in real time rather than as a silent pause; a `--verbose` run
-additionally prints redacted argv, working directory, prompt size, a 30s heartbeat, and
-the live child output prefixed with `  | ` (see SPEC-diagnostics.md §6.4).
+a hang is visible in real time rather than as a silent pause. `--verbose` (the only
+verbosity switch: no config key, no environment variable) additionally prints, per call:
+
+```text
+[2] IMPLEMENT
+Provider: claude
+Model: opus
+Authority: edit
+→ running claude...
+  | <the CLI's live output, line by line, verbatim>
+   … still running (30s)
+   … still running (60s)
+✓ completed (72.4s)
+```
+
+The live output is a generic tee of whatever the CLI prints - no provider-specific
+parsing - and is captured into the logs (§21) as before. The heartbeat fires every 30s
+while a call is in flight. Durations are always in seconds, rounded to 0.1s. The redacted
+argv and the working directory are printed only in a failure's message (§23).
+
+On an interactive terminal the same information is rendered with colour, a spinner with
+elapsed time and boxed summaries, using ANSI escapes only (no terminal library);
+the `  | ` prefix becomes a dim `│`. Off a terminal, or with `NO_COLOR`,
+`ORCHESTRATOR_PLAIN` or `TERM=dumb`, the output is the plain text of this section, byte
+for byte.
 
 On failure, the error rendering (§23) includes a `full output: <path>` line pointing at
 the persisted raw stdout/stderr for that call - there is no separate "read the logs at..."
@@ -1927,6 +2008,53 @@ Run fails before repository-changing actions.
 
 Workflow stops and does not invoke additional agents.
 
+### Scenario 10 — interactive manual run
+
+No `--mode`: the workflow is approved, `manual` is chosen, every step is confirmed;
+`run.json` records mode `manual` and status `completed`.
+
+### Scenario 11 — provider error on stdout only
+
+The CLI exits non-zero writing its error to stdout (as `claude --print` does): the message
+carries the stdout text, `failure: exit`, and `stderr:` renders `(empty)` (§23).
+
+### Scenario 12 — LLM decision provider failure
+
+The decision CLI fails: `logs/decide-context.*.log` is written, the error is a
+`DecisionError` wrapping a `ProviderError` with action `decide-context`, exit 3.
+
+### Scenario 13 — timeout while deciding
+
+A decision CLI that hangs past a short `execution.timeout` fails promptly with
+`failure: timeout` (§25), instead of hanging.
+
+### Scenario 14 — unenforceable authority
+
+An action routed to an installed codex fails the fail-fast chain (exit 2) before any Jev
+request or CLI call (§7, §38).
+
+### Scenario 15 — worktree guard
+
+A dirty tree refuses a workflow with implement, but not a read-only one or one with
+`security.require_clean_worktree: false`; a clean run records its restore point; an
+implement that changes a protected path stops the run before `test` runs anything (§38.3).
+
+### Scenario 16 — sandboxed test step
+
+With `test.sandbox: bwrap` the test command runs under bwrap after a probe in the
+fail-fast chain; an unusable bwrap fails fast (§38.3).
+
+### Scenario 20 — chosen stages
+
+`test/integration/scenario20_stage_select_test.go` (§40): review alone on a dirty tree with
+no decision layer; an empty diff fails before the model is called; flag order is
+irrelevant, a test failure fails the run and a review failure completes it; development
+needs a clean tree and a refused run is resumable once it is clean; the fix loop is bounded
+by `max_fix_iterations`; planning alone answers and warns about the missing analysis; both
+spellings of a stage are one step; `--jira` makes the Jira GET the only request; resume
+continues a manual run and decides nothing; a missing executable fails first and `--stage`
+belongs to `run` alone; plan mode shows the stages and stops.
+
 ### Resume scenarios
 
 `test/integration/scenario17_resume_inputs_test.go` and
@@ -1936,6 +2064,22 @@ continues; a protected-path change, a planted `core.fsmonitor` (no `git status` 
 a moved HEAD are refused; a tampered `run.json` or artifact is `corrupt`; implement cannot
 rewrite resume inputs; a completed run is reported; run-ID prefixes resolve or are
 refused; a locked run is `in_use`. No refusal calls a provider or changes `run.json`.
+
+### Scenario 21 — Jev model check
+
+`test/integration/scenario21_jev_model_check_test.go` (§7): an unserved model is exit 2
+with no run, no decision round and no CLI call; a listed alias and an unlisted pinned
+version pass; an unreachable models list warns with `on_failure: ask` and stops with
+`fail` (exit 3, retried once, no run); `validate` prints the model and rejects an
+unserved one; `run --stage` asks nothing. A rejected key is caught by this check, before
+any decision round (`TestDecision_JevAuthFailure`).
+
+### Scenario 22 — decisions report
+
+`test/integration/scenario22_decisions_report_test.go` (§4): with no runs the report says
+so; after an agreeing run, a disagreeing run and a `--stage` run it counts 3 traces, 2
+compared, 1 skipped, 50% agreement and lists the disagreement - without a config file,
+and without calling a CLI or Jev.
 
 ### Jira scenarios
 
@@ -2333,6 +2477,7 @@ fail-fast chain (§7), with the current config
   approval + mode (§37.7)
   → append a Resume record, status running, failure_reason cleared, save
   → no step has run: restore point, head_ref, resume_baseline recorded (§38.3)
+  → restore point pinned under refs/orchestrator/runs/<id> (§38.3)
   → execution.timeout starts, sandbox, step guard, Engine.Run
 ```
 
@@ -2490,9 +2635,8 @@ dependency failures are exit 2, as for `run`.
 * A step interrupted mid-call starts again from the beginning. Provider sessions are not
   resumed.
 * Deferred (`specs/resume/README.md`): a checkpoint per step to show "changed since the
-  stop", review against `head_ref` so a moved HEAD is resumable, pinning `pre_run_ref`
-  under a ref so `git gc` cannot prune it (a pruned snapshot makes the run `corrupt`),
-  and `runs` / `show` commands.
+  stop", review against `head_ref` so a moved HEAD is resumable, and `runs` / `show`
+  commands.
 
 ---
 
@@ -2569,7 +2713,14 @@ human sees and confirms between steps.
   before any approval prompt) unless `security.require_clean_worktree: false`.
 * **Restore point.** Before the first step `run.json` records `pre_run_ref`: HEAD, or on a
   dirty tree a snapshot commit of the whole tree (untracked files included) written through
-  a throwaway index - the working tree, index, stash list and refs are untouched.
+  a throwaway index - the working tree, index and stash list are untouched. Once the run is
+  approved, the restore point is pinned under `refs/orchestrator/runs/<run-id>` (`git
+  update-ref`), the only ref the orchestrator ever writes: outside `refs/heads` and
+  `refs/tags`, so no branch, tag or default push sees it, and `git gc` cannot prune the
+  commit. An approved resume pins it too, so a run recorded before pinning existed gets
+  its ref. A failed pin is a warning, not a failure. The refs are never deleted
+  automatically: `git for-each-ref refs/orchestrator` lists them and
+  `git update-ref -d refs/orchestrator/runs/<run-id>` drops one.
 * **Protected paths.** Around every `implement` call, a snapshot before is compared with
   one after, before the outcome is accepted and so before `test` runs anything: files that
   differ from HEAD or are git-ignored and match `.claude/**`, `.mcp.json`,
@@ -2599,7 +2750,9 @@ human sees and confirms between steps.
   probe run with the same isolation; the authority line shows `test runs (sandboxed)`.
 * **Fenced data.** The git diff (review) and test output (implement retry) are embedded in
   prompts inside a delimiter with a per-prompt random nonce and a line saying the block is
-  data, never instructions. Defense in depth, not a boundary.
+  data, never instructions. The task is embedded the same way in every stage prompt, with
+  a line saying it is the task to carry out but cannot change the prompt's rules (§20).
+  Defense in depth, not a boundary.
 
 ## 38.4 Audit
 
@@ -2766,6 +2919,7 @@ parseArgs                              --jira value; notes = positional text
 loadAndValidateConfig(Jira: true)      the whole fail-fast chain, variables included
 jira.ParseRef                          still no network
 decideCtx starts (execution.timeout)
+checkJevModel                          GET /v1/models, real Jev only (§7)
 repository.Open, IsDirty
 FetchingTicket → Fetch → TicketFetched (→ TicketMoved)
 jira.Render → TaskBlock                the full task, printed before anything is decided
@@ -2836,7 +2990,8 @@ header shows the source line (§27).
 * Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
 * `--jira` on `resume` or `validate`.
 * Deferred (`specs/jira/SPEC.md` §19): an outcome comment or transition at the end of a
-  run, comments and linked issues as sections, fencing the task block in prompts.
+  run, comments and linked issues as sections. (Fencing the task block in prompts is done:
+  §20.)
 
 ---
 

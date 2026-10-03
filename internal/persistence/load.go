@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -117,4 +118,56 @@ func isRunID(name string) bool {
 		}
 	}
 	return true
+}
+
+// RunIDs lists the IDs of every run directory under the base directory, sorted. A missing
+// base directory is no runs.
+func (s *Store) RunIDs() ([]string, error) {
+	entries, err := os.ReadDir(s.baseDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() && isRunID(e.Name()) {
+			ids = append(ids, e.Name())
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
+}
+
+// LoadDecision reads decision.json of a run, strictly as LoadRun reads run.json, and
+// returns it with the time it was written. A run that never got as far as a decision
+// has none: RunStateError not_found.
+func (s *Store) LoadDecision(runID string) (domain.DecisionTrace, time.Time, error) {
+	if !isRunID(runID) {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunNotFound, RunID: runID, Msg: "not a run ID"}
+	}
+	path := filepath.Join(s.runDir(runID), "decision.json")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunNotFound, RunID: runID, Msg: "the run has no decision.json"}
+	}
+	if err != nil {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "cannot read decision.json", Err: err}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "cannot stat decision.json", Err: err}
+	}
+
+	var trace domain.DecisionTrace
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&trace); err != nil {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json is not a valid decision trace", Err: err}
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json has data after the trace object"}
+	}
+	return trace, info.ModTime(), nil
 }

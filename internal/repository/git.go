@@ -1,7 +1,8 @@
 // Package repository wraps the real git executable (via execution.ProcessExecutor) so the
 // orchestrator can inspect the repository it operates on without ever mutating it - it
 // never stashes, resets, checks out, or reverts user files. (SnapshotCommit only writes
-// objects, through a throwaway index; the tree, the index and all refs are untouched.)
+// objects, through a throwaway index; the tree and the index are untouched. The one ref it
+// writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint.)
 package repository
 
 import (
@@ -238,8 +239,8 @@ func isFullSHA(s string) bool {
 // untracked files, minus .gitignore'd ones and the orchestrator's run directory - as a
 // commit on top of HEAD, and returns its ref. It works on a throwaway index, so the
 // working tree, the real index, the stash list and every ref are untouched ("git stash
-// create" would leave untracked files out). The commit is referenced by nothing, so git gc
-// may prune it after its usual grace period.
+// create" would leave untracked files out). The commit is referenced by nothing until
+// PinRestorePoint pins it.
 func (r *Repository) SnapshotCommit(ctx context.Context) (string, error) {
 	tmp, err := os.MkdirTemp("", "orchestrator-index-")
 	if err != nil {
@@ -272,6 +273,29 @@ func (r *Repository) SnapshotCommit(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(commit), nil
+}
+
+// RestorePointRef is the ref that pins a run's restore point. refs/orchestrator/ is
+// outside refs/heads and refs/tags, so no branch, tag or default push sees it; it is shared
+// by every worktree of the repository, and run IDs are unique.
+func RestorePointRef(runID string) string {
+	return "refs/orchestrator/runs/" + runID
+}
+
+// PinRestorePoint points RestorePointRef(runID) at sha, so git gc can never prune the
+// restore point - a snapshot commit is otherwise referenced by nothing, and a HEAD commit
+// stops being referenced once its branch moves on and the reflog expires. Pinning the same
+// commit again is a no-op. runID must be hex and dashes, sha a full commit SHA; anything
+// else is refused without running git.
+func (r *Repository) PinRestorePoint(ctx context.Context, runID, sha string) error {
+	if runID == "" || strings.Trim(runID, "0123456789abcdef-") != "" {
+		return &apperr.RepositoryError{Msg: fmt.Sprintf("cannot pin the restore point: invalid run ID %q", runID)}
+	}
+	if !isFullSHA(sha) {
+		return &apperr.RepositoryError{Msg: fmt.Sprintf("cannot pin the restore point: %q is not a full commit SHA", sha)}
+	}
+	_, err := r.git(ctx, "update-ref", "-m", "orchestrator: restore point of run "+runID, RestorePointRef(runID), sha)
+	return err
 }
 
 // StatusSummary is a short, human-readable list of the uncommitted changes (one

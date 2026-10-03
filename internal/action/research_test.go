@@ -25,7 +25,10 @@ func TestBuildResearchPrompt(t *testing.T) {
 	if !strings.HasPrefix(p, "ACTION: research\n") {
 		t.Errorf("missing routing marker:\n%s", p)
 	}
-	for _, want := range []string{readOnlyRule, `"findings"`, `"recommendation"`, "Task:\nCompare Redis and Memcached"} {
+	if got := taskOf(t, p); got != "Compare Redis and Memcached\n" {
+		t.Errorf("task block = %q", got)
+	}
+	for _, want := range []string{readOnlyRule, `"findings"`, `"recommendation"`} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, p)
 		}
@@ -95,8 +98,8 @@ func TestExecuteResearch_RoutesAndFeedsAnalysis(t *testing.T) {
 	if client.lastReq.Model != "research-model" {
 		t.Errorf("model = %q, want actions.research's", client.lastReq.Model)
 	}
-	if !strings.Contains(client.lastReq.Prompt, "Task:\nсравни Redis и Memcached") {
-		t.Error("stages must get the original request text")
+	if got := taskOf(t, client.lastReq.Prompt); got != "сравни Redis и Memcached\n" {
+		t.Errorf("stages must get the original request text, got %q", got)
 	}
 	if len(writer.calls) != 1 || writer.calls[0].actionType != domain.ActionResearch {
 		t.Fatalf("artifacts = %+v", writer.calls)

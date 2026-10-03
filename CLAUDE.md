@@ -43,6 +43,8 @@ composition point that implements `StepExecutor` using config/provider/repositor
 ## Decision flow (MVP.md §8–§9)
 
 ```
+[real Jev] → GET /v1/models: decision.model served? (jev.CheckModel; failure → exit, no run;
+             on_failure: ask turns an unreachable Jev into a warning)
 [--jira] → fetch the issue, render it as the task  (internal/jira; failure → exit, no run)
 [--stage] → Decision{source: manual} from the flags; the rest of this flow is skipped
 request → translate if ≥30% Cyrillic prose (internal/translate; failure → original + warning)
@@ -100,6 +102,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   present) — the Jira section and its variables; `ValidateAuthorities` checks that each
   route's provider can enforce its authority. A missing executable for an action used later
   (e.g. Codex for `review`) must fail `orchestrator run` before anything is called.
+  `config.Load` parses a version-2 file strictly (unknown keys are an error); a key the
+  validator rejects with its own message (a literal secret) must be declared in the schema.
 - **Least authority, fixed in Go, fail closed** (MVP.md §38, `specs/permissions/`). Every
   provider call carries a `domain.Authority` (`none`, `web`, `read`, `edit`): workflow
   actions from `domain.AuthorityFor`, the translator and the LLM decision provider
@@ -154,8 +158,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   task/prompt — the one documented exception is `test.command`, which is trusted operator
   config and does go through `sh -c` to support shell syntax. User text inside prompts
   (request, project context) is embedded as delimited data that cannot close its block;
-  repository-derived text in action prompts (git diff, test output) goes through
-  `action.fence` (random-nonce delimiter) — defense in depth, never a boundary.
+  the task in every stage prompt goes through `action.taskBlock` and repository-derived
+  text (git diff, test output) through `action.fence` (both random-nonce delimiters) —
+  defense in depth, never a boundary.
 - **Resume continues, never re-decides** (MVP.md §37). `orchestrator resume` reuses the
   persisted decision and workflow. It constructs no translator, decision provider or
   Context Manager, and it validates everything it reads back from the run directory

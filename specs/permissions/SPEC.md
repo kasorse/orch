@@ -257,7 +257,8 @@ directory — built on a throwaway index (`GIT_INDEX_FILE`: `read-tree HEAD`, `a
 `write-tree`, `commit-tree -p HEAD`). The working tree, the real index, the stash list and
 all refs stay untouched. (`git stash create` was rejected: it leaves untracked files out, so
 the "restore point" would silently lose them.) The commit is unreferenced, so `git gc` may
-prune it after its grace period. Persisted in `run.json`, printed as
+prune it after its grace period. (Since pinned under `refs/orchestrator/runs/<id>`,
+MVP.md §38.3.) Persisted in `run.json`, printed as
 `Restore point: <sha>`; failing to record it is a warning, not a failure.
 
 ### 7.3 Protected-path guard after `implement` (F6)

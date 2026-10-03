@@ -35,7 +35,7 @@ type CallObserver interface {
 }
 
 // heartbeatInterval is how often CallObserver.ProviderCallHeartbeat fires while a
-// provider call is in flight (spec §6.4 Q4).
+// provider call is in flight (MVP.md §27).
 const heartbeatInterval = 30 * time.Second
 
 // ArtifactWriter persists one action's structured output to disk. Dispatcher tolerates a

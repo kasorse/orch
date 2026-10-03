@@ -12,7 +12,7 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 12 (SPEC-diagnostics.md): the decision provider's own CLI call fails (an
+// Scenario 12 (MVP.md §23): the decision provider's own CLI call fails (an
 // LLM decision provider, TASKS.md T22). The failure must be logged under
 // logs/decide-context.*.log, tagged with Action == "decide-context", wrapped in a
 // DecisionError, and mapped to the same exitcode.ProviderExecution (3) a workflow-step

@@ -93,6 +93,13 @@ func (j *JiraConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxRetries *int        `yaml:"max_retries"`
 		MaxBytes   *int        `yaml:"max_bytes"`
 		Fields     []JiraField `yaml:"fields"`
+		// The jiraSecretKeys, declared only so a strict decode (Load) accepts them and
+		// validateJira can reject them with its own message; their values are discarded.
+		Token    any `yaml:"token"`
+		APIToken any `yaml:"api_token"`
+		Password any `yaml:"password"`
+		PAT      any `yaml:"pat"`
+		Email    any `yaml:"email"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err

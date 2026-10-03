@@ -10,7 +10,7 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 13 (SPEC-diagnostics.md §6.6): execution.timeout must wrap the decision
+// Scenario 13 (MVP.md §25): execution.timeout must wrap the decision
 // phase, not just the workflow engine. A short timeout plus an LLM decision provider CLI
 // that sleeps well past it must produce a *apperr.ProviderError{Kind: FailureTimeout}
 // promptly, not hang until the test itself times out.

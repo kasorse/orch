@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -161,9 +162,10 @@ func TestScenario19b_JiraOperatorNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Task:\n" + pmc1Rendered(r.jira.URL(), "only the FE part") + "\n"
-	if !strings.Contains(string(prompt), want) {
-		t.Errorf("implement prompt lacks the task ending in the notes:\n%s", prompt)
+	// The rendered ticket, notes last, is the whole content of the task block.
+	block := regexp.MustCompile(`(?s)Task:\n[^\n]*\n<<<(TASK-[A-Z0-9]+)\n(.*?)>>>TASK-`).FindStringSubmatch(string(prompt))
+	if block == nil || block[2] != pmc1Rendered(r.jira.URL(), "only the FE part") {
+		t.Errorf("implement prompt lacks the task block ending in the notes:\n%s", prompt)
 	}
 	if src := loadTaskSource(t, r.repoDir).Task.Source; src == nil || !src.Notes {
 		t.Errorf("task.source = %+v, want notes true", src)

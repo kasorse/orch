@@ -101,6 +101,24 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	}
 }
 
+// A run recorded before restore points were pinned has no ref; an approved resume pins it.
+func TestScenario18_ResumePinsAnUnpinnedRestorePoint(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	decisionEnv(t, repoDir)
+	j := startJev(t, scriptWithPlan())
+	cfg := jevConfig(t, j)
+
+	failed := failedAtImplement(t, repoDir, cfg)
+	assertRestorePointPinned(t, repoDir)
+	if _, err := gitOutput(repoDir, "update-ref", "-d", "refs/orchestrator/runs/"+failed.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := resume(t, repoDir, cfg, failed.ID)
+	mustSucceed(t, stdout, stderr, err)
+	assertRestorePointPinned(t, repoDir)
+}
+
 func TestScenario18_ResumeCountsLimitsOverTheWholeHistory(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, promptsDir := decisionEnv(t, repoDir)

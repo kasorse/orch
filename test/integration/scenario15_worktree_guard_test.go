@@ -87,6 +87,7 @@ func TestScenario15_DirtyTreeAllowedByConfig(t *testing.T) {
 	if files, _ := gitOutput(repoDir, "show", "--name-only", "--format=", ref); !strings.Contains(files, "notes.txt") {
 		t.Errorf("the restore point must hold the uncommitted notes.txt, has:\n%s", files)
 	}
+	assertRestorePointPinned(t, repoDir)
 }
 
 func TestScenario15_CleanRunRecordsRestorePoint(t *testing.T) {
@@ -103,6 +104,7 @@ func TestScenario15_CleanRunRecordsRestorePoint(t *testing.T) {
 	if !strings.Contains(stdout, "Restore point: "+head) {
 		t.Errorf("expected the restore point in the output:\n%s", stdout)
 	}
+	assertRestorePointPinned(t, repoDir)
 }
 
 func TestScenario15_ProtectedPathStopsBeforeTest(t *testing.T) {
@@ -155,6 +157,27 @@ func TestScenario15_ProtectedPathStopsBeforeTest(t *testing.T) {
 				t.Errorf("invocations = %v, want [analyze implement]", got)
 			}
 		})
+	}
+}
+
+// assertRestorePointPinned checks that refs/orchestrator/runs/<id> names the run's
+// pre_run_ref, so git gc cannot prune it.
+func assertRestorePointPinned(t *testing.T, repoDir string) {
+	t.Helper()
+	raw, ok := runFile(t, repoDir, "run.json")
+	if !ok {
+		t.Fatal("run.json was not written")
+	}
+	var run struct {
+		ID        string `json:"id"`
+		PreRunRef string `json:"pre_run_ref"`
+	}
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := gitOutput(repoDir, "rev-parse", "--verify", "refs/orchestrator/runs/"+run.ID)
+	if err != nil || pinned != run.PreRunRef {
+		t.Errorf("refs/orchestrator/runs/%s = %q (%v), want pre_run_ref %s", run.ID, pinned, err, run.PreRunRef)
 	}
 }
 

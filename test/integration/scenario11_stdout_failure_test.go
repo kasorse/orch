@@ -10,8 +10,8 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 11 (SPEC-diagnostics.md): reproduces the originally reported bug directly -
-// `claude --print` writes backend/API errors to stdout, not stderr. Before this spec's
+// Scenario 11 (MVP.md §23): reproduces the originally reported bug directly -
+// `claude --print` writes backend/API errors to stdout, not stderr. Before the
 // fix, ProviderError only carried Stderr, so this exact failure rendered as an
 // information-free "provider execution failed" with a blank stderr. It must now surface
 // the stdout text, classify as a plain exit failure, and render stderr as "(empty)".

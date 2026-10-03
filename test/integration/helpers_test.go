@@ -41,12 +41,15 @@ type configOptions struct {
 	testCommand      string
 	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
 	// via defaultConfigOptions - tests only override it to exercise the run-wide
-	// timeout (SPEC-diagnostics.md §6.6) with a short deadline.
+	// timeout (MVP.md §25) with a short deadline.
 	timeout string
 	// jevURL is decision.jev.base_url - the fake Jev server's URL.
 	jevURL string
 	// onFailure is decision.on_failure: "ask" or "fail".
 	onFailure string
+	// decisionModel overrides decision.model; empty keeps jev-1.13.0 (or "fake" for a CLI
+	// decision provider).
+	decisionModel string
 	// extraYAML is appended to the rendered config verbatim (e.g. a security: block).
 	extraYAML string
 	// jira renders a jira: section when set (specs/jira/SPEC.md §7); nil leaves it out,
@@ -96,6 +99,9 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	decisionModel := "jev-1.13.0"
 	if p.Decision != "jev" {
 		decisionModel = "fake"
+	}
+	if opts.decisionModel != "" {
+		decisionModel = opts.decisionModel
 	}
 	content := fmt.Sprintf(`version: 2
 

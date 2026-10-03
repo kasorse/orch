@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -372,5 +373,47 @@ func TestArtifactRelPath_MatchesSaveArtifact(t *testing.T) {
 	}
 	if filepath.ToSlash(got) != "artifacts/007-plan.json" {
 		t.Errorf("unexpected path %q", got)
+	}
+}
+
+func TestRunIDsAndLoadDecision(t *testing.T) {
+	base := t.TempDir()
+	store := NewStore(base)
+	if ids, err := store.RunIDs(); err != nil || len(ids) != 0 {
+		t.Fatalf("RunIDs of an empty store = %v, %v", ids, err)
+	}
+	if ids, err := NewStore(filepath.Join(base, "missing")).RunIDs(); err != nil || ids != nil {
+		t.Fatalf("RunIDs without a runs directory = %v, %v", ids, err)
+	}
+
+	decided, _ := store.NewRun(domain.Task{Description: "fix"})
+	undecided, _ := store.NewRun(domain.Task{Description: "fix"})
+	tampered, _ := store.NewRun(domain.Task{Description: "fix"})
+	if err := os.Mkdir(filepath.Join(base, "not-a-run"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Model: "jev-1.13.0"}
+	if err := store.SaveDecision(decided.ID, trace); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, tampered.ID, "decision.json"), []byte(`{"request":"fix","surprise":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := store.RunIDs()
+	if err != nil || len(ids) != 3 || !sort.StringsAreSorted(ids) {
+		t.Fatalf("RunIDs = %v, %v; want the three runs, sorted", ids, err)
+	}
+
+	got, at, err := store.LoadDecision(decided.ID)
+	if err != nil || got.Model != "jev-1.13.0" || got.Source != domain.DecisionSourceJev || at.IsZero() {
+		t.Errorf("LoadDecision = %+v, %v, %v", got, at, err)
+	}
+	for id, want := range map[string]apperr.RunStateKind{undecided.ID: apperr.RunNotFound, tampered.ID: apperr.RunCorrupt, "../x": apperr.RunNotFound} {
+		_, _, err := store.LoadDecision(id)
+		var rse *apperr.RunStateError
+		if !errors.As(err, &rse) || rse.Kind != want {
+			t.Errorf("LoadDecision(%s) = %v, want %s", id, err, want)
+		}
 	}
 }

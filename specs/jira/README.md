@@ -65,4 +65,5 @@ first as a fix for `JEV_API_KEY`.
 ## Deferred
 
 See `SPEC.md` §19: an outcome comment or transition, comments and linked issues as
-sections, fencing the task block in prompts, the Data Center Epic Link.
+sections, the Data Center Epic Link. Done since: fencing the task block in prompts
+(`action.taskBlock`, MVP.md §20).

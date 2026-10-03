@@ -367,11 +367,16 @@ func TestDecision_JevAuthFailure(t *testing.T) {
 	if code := exitcode.FromError(err); code != exitcode.ConfigOrDependency {
 		t.Errorf("exit code = %d, want %d", code, exitcode.ConfigOrDependency)
 	}
-	if len(j.Bodies()) != 1 {
-		t.Errorf("Jev got %d requests, want 1 (no retry on 401)", len(j.Bodies()))
+	// The model check (TASKS.md T14) meets the 401 first: one request, never retried, and
+	// no decision round, translation or run follows.
+	if j.ModelRequests() != 1 || len(j.Bodies()) != 0 {
+		t.Errorf("Jev got %d model and %d decision requests, want 1 and 0", j.ModelRequests(), len(j.Bodies()))
 	}
 	if got := invocations(t, invocationsLog); len(got) != 0 {
 		t.Errorf("no stage may run: %v", got)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, ".orchestrator", "runs")); !os.IsNotExist(err) {
+		t.Errorf("a rejected key must create no run (stat: %v)", err)
 	}
 }
 

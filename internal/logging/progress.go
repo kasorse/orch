@@ -24,7 +24,7 @@ import (
 type ConsoleReporter struct {
 	Out io.Writer
 
-	// Verbose switches on the fuller per-call rendering from SPEC-diagnostics.md §6.4
+	// Verbose switches on the fuller per-call rendering from MVP.md §27
 	// (heartbeat lines, a completion line for provider calls). It is the sole
 	// verbosity switch (--verbose/-v flag only, no config key or env var).
 	Verbose bool
@@ -84,7 +84,7 @@ func (r *ConsoleReporter) ProviderCallStarted(providerID, model string) {
 }
 
 // ProviderCallHeartbeat implements action.CallObserver. Printing is suppressed outside
-// --verbose (heartbeat lines are a --verbose-only mechanic per spec §6.4).
+// --verbose (heartbeat lines are a --verbose-only mechanic per MVP.md §27).
 func (r *ConsoleReporter) ProviderCallHeartbeat(elapsed time.Duration) {
 	if !r.Verbose || r.Pretty {
 		return
@@ -108,7 +108,7 @@ func (r *ConsoleReporter) ProviderCallFinished(providerID, model string, duratio
 	fmt.Fprintf(r.Out, "✓ completed (%s)\n", formatDuration(duration))
 }
 
-// formatDuration renders a duration the way SPEC-diagnostics.md's examples do: always in
+// formatDuration renders a duration the way MVP.md §27's examples do: always in
 // seconds (never "1m12.4s" the way time.Duration.String() would render 72.4s), rounded to
 // the nearest 100ms, with the decimal dropped when it lands on a whole second (matching
 // the heartbeat examples "30s"/"60s" alongside completion examples like "12.8s"/"72.4s").
@@ -161,7 +161,7 @@ func (c CallReporter) ProviderCallFinished(providerID, model string, duration ti
 }
 
 // PrefixWriter tees a provider CLI's live combined output to Out, one line at a time, each
-// prefixed with Prefix (spec §6.5: "  | ", --verbose only). It shows whatever the CLI
+// prefixed with Prefix (MVP.md §27: "  | ", --verbose only). It shows whatever the CLI
 // prints verbatim - no provider-specific parsing.
 type PrefixWriter struct {
 	Out    io.Writer
@@ -205,6 +205,23 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
+// JevModelServed reports that Jev serves the configured decision model (validate only;
+// a run stays silent when the check passes).
+func (r *ConsoleReporter) JevModelServed(model string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray("jev serves "+model))
+		return
+	}
+	fmt.Fprintf(r.Out, "✓ jev serves %s\n", model)
+}
+
+// JevModelUnchecked warns that the decision model could not be checked; the run goes on
+// because decision.on_failure is ask.
+func JevModelUnchecked(w io.Writer, err error) {
+	fmt.Fprintf(w, "Warning: could not check decision.model with Jev, continuing (on_failure: ask): %s\n", firstLine(err.Error()))
+}
+
 func (r *ConsoleReporter) Deciding() {
 	if r.Pretty {
 		fmt.Fprintln(r.Out)
@@ -234,6 +251,16 @@ func (r *ConsoleReporter) RestorePointUnavailable(err error) {
 		return
 	}
 	fmt.Fprintf(r.Out, "Warning: no restore point recorded: %s\n", firstLine(err.Error()))
+}
+
+// RestorePointNotPinned reports that the restore point could not be pinned under its ref;
+// the run goes on, but git gc may later prune the restore point.
+func (r *ConsoleReporter) RestorePointNotPinned(err error) {
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ restore point not pinned, git gc may prune it: "+firstLine(err.Error())))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: restore point not pinned, git gc may prune it: %s\n", firstLine(err.Error()))
 }
 
 func DirtyRepoWarning(w io.Writer) {

@@ -189,7 +189,11 @@ Around `implement` the orchestrator itself guards the result, for any provider:
 - Before the first step it records a restore point, printed as `Restore point: <sha>` and
   saved as `pre_run_ref` in `run.json`: HEAD, or on a dirty tree a snapshot commit of
   everything (untracked files included) that leaves your tree, index and stash alone.
-  `git checkout <sha> -- .` brings the files back.
+  `git checkout <sha> -- .` brings the files back. The commit is pinned under
+  `refs/orchestrator/runs/<run-id>` so `git gc` never prunes it; those refs are not
+  branches or tags and are never pushed by default. They are kept until you drop them:
+  `git for-each-ref refs/orchestrator` lists them,
+  `git update-ref -d refs/orchestrator/runs/<run-id>` removes one.
 - After every `implement` call, before anything runs its output, it checks that no protected
   file changed — `.claude/**`, `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`,
   `.envrc`, `.vscode/**`, the config file when it lives in the repository (even if
@@ -333,13 +337,17 @@ orchestrator [--config path] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
+orchestrator decisions report
 ```
 
 - `version` — prints the build version.
 - `validate` — loads and validates the config, including checking that every referenced
   provider CLI is actually resolvable on `PATH`, that the Jev API key is set and, when the
   config has a `jira` section, that its credential variables are set, and reports the
-  result without running anything. Run this first when setting up a new config.
+  result without running anything. With a real (not mock) Jev it also asks Jev whether it
+  serves `decision.model` (`✓ jev serves jev-1.13.0`). Run this first when setting up a new
+  config. Unknown keys in a version-2 config (a typo such as `timout`) are an error, listed
+  with their line numbers.
 - `run "<task>"` — decides the workflow (printing the decision: context depth, complexity,
   who decided, the workflow) and executes it step by step against the repository in the
   current working directory, printing progress as it goes.
@@ -351,18 +359,23 @@ orchestrator [--config path] [--mode m] resume <run-id>
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
+- `decisions report` — compares the two complexity questions (`choice` and `score`) over
+  the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,
+  mean confidence, and the runs where they disagree. Manual (`--stage`) runs, runs chosen by
+  hand, mock answers and runs without the shadow question are skipped. It needs no config and
+  calls nothing. Until there is Jev access, `decision.provider: claude` collects real data.
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
   (and, if the decision provider fails, stops instead of asking you to choose).
 - `--verbose` / `-v` — the sole verbosity switch (no config key or environment variable
-  equivalent). Adds the per-stage decision table (probability, threshold, forced, reason) and,
-  for every provider call including translation and LLM decisions: the redacted command
-  line actually run (the prompt argument is always replaced with `<prompt: N chars>` — the
-  prompt body itself is never printed or logged, anywhere), the working directory, a heartbeat
-  line every 30s while the call is in flight, the child process's live stdout/stderr prefixed
-  with `  | `, and a completion line with byte counts and the log path. Without `--verbose` you
-  only see a `→ running <provider>...` line before each call and a `✓ completed (Ns)` line
-  after it.
+  equivalent). Adds the per-stage decision table (probability, threshold, forced, reason),
+  each AI step's `Authority:` line and, for every provider call including translation and
+  LLM decisions: the child process's live output prefixed with `  | `, a heartbeat line
+  every 30s while the call is in flight, and a `✓ completed (Ns)` line. Without `--verbose`
+  you only see a `→ running <provider>...` line before each call. The redacted command line
+  (the prompt argument is always replaced with `<prompt: N chars>` — the prompt body itself
+  is never printed or logged, anywhere) and the working directory appear in a failure's
+  message, with the path of the full log.
 - **Terminal UI.** When stdout is an interactive terminal, the same information is rendered
   the way agentic CLIs like Claude Code do: a boxed run header, `⏺` blocks with `⎿` details,
   probability bars for the stages, an animated spinner with elapsed time while a model or
@@ -376,7 +389,9 @@ Config loading, structural validation, dependency validation (executables on `PA
 Jev API key) and the authority check (every route's provider can enforce its authority) always
 run to completion, in that order, *before* any AI provider is invoked or any request is sent
 to Jev — a missing executable for an action used later in the workflow (e.g. `codex` for
-`review`) fails `run` immediately. `orchestrator validate` runs the same chain.
+`review`) fails `run` immediately. `orchestrator validate` runs the same chain. With a real
+Jev, `run` then asks Jev whether it serves `decision.model` before anything else; with
+`on_failure: ask`, an unreachable Jev is only a warning there.
 
 `execution.timeout` bounds the entire run, including the decision — not just workflow step
 execution. Each provider/test child process runs in its own process group, so a timeout or

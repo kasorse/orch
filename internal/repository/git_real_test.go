@@ -214,6 +214,57 @@ func TestCommitExists(t *testing.T) {
 	}
 }
 
+func TestPinRestorePoint_SurvivesGC(t *testing.T) {
+	repo, dir := realRepo(t)
+	ctx := context.Background()
+	writeFile(t, filepath.Join(dir, "notes.txt"), "untracked\n")
+	snap, err := repo.SnapshotCommit(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runID = "2f3c1a8b-0000-4000-8000-000000000001"
+	if err := repo.PinRestorePoint(ctx, runID, snap); err != nil {
+		t.Fatalf("PinRestorePoint: %v", err)
+	}
+	if err := repo.PinRestorePoint(ctx, runID, snap); err != nil {
+		t.Fatalf("pinning the same commit again must be a no-op: %v", err)
+	}
+
+	gitCmd(t, dir, "reflog", "expire", "--expire=now", "--all")
+	gitCmd(t, dir, "gc", "-q", "--prune=now")
+	if got := gitOut(t, dir, "rev-parse", RestorePointRef(runID)); got != snap {
+		t.Errorf("%s = %s, want %s", RestorePointRef(runID), got, snap)
+	}
+	if ok, err := repo.CommitExists(ctx, snap); err != nil || !ok {
+		t.Errorf("the pinned snapshot must survive gc: CommitExists = %v, %v", ok, err)
+	}
+	// The pin is the only ref added: no branch, tag or HEAD change.
+	want := gitOut(t, dir, "symbolic-ref", "HEAD") + "\n" + RestorePointRef(runID)
+	if refs := gitOut(t, dir, "for-each-ref", "--sort=refname", "--format=%(refname)"); refs != want {
+		t.Errorf("refs after pinning:\n%s\nwant:\n%s", refs, want)
+	}
+}
+
+func TestPinRestorePoint_RefusesBadInput(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	for _, tc := range []struct{ runID, sha string }{
+		{"", head},
+		{"../../heads/master", head},
+		{"ABC", head},
+		{"2f3c1a8b", "HEAD"},
+		{"2f3c1a8b", head[:12]},
+	} {
+		fake := &execution.FakeProcessExecutor{}
+		repo := &Repository{Dir: t.TempDir(), Executor: fake}
+		if err := repo.PinRestorePoint(context.Background(), tc.runID, tc.sha); err == nil {
+			t.Errorf("PinRestorePoint(%q, %q) = nil, want an error", tc.runID, tc.sha)
+		}
+		if len(fake.Calls) != 0 {
+			t.Errorf("PinRestorePoint(%q, %q) ran git: %v", tc.runID, tc.sha, fake.Calls)
+		}
+	}
+}
+
 func TestGitDirs(t *testing.T) {
 	repo, dir := realRepo(t)
 	got, err := repo.GitDirs(context.Background())

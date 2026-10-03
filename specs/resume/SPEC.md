@@ -63,7 +63,7 @@ code.
 Related, out of scope: a `pre_run_ref` snapshot commit is not referenced by any ref, so
 `git gc` can prune it after `gc.pruneExpire`. Resume does not depend on it, but the
 "Restore point" message would name a missing commit. Pinning it
-(`refs/orchestrator/runs/<id>`) is a separate change.
+(`refs/orchestrator/runs/<id>`) is a separate change (since done: MVP.md §38.3).
 
 ## 4. Principles
 

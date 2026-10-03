@@ -68,6 +68,7 @@ and `resume_baseline` (R04) and denies its runs directory to the file tools (R05
   header can show "changed since the stop" rather than the whole working tree.
 - **Review against `head_ref`** instead of `HEAD`, which would make a moved HEAD resumable
   (Q5).
-- **Pinning `pre_run_ref`** under `refs/orchestrator/runs/<id>` so `git gc` cannot prune the
-  restore point.
 - **`orchestrator runs` / `show`**: listing and inspecting runs.
+
+Done since: pinning `pre_run_ref` under `refs/orchestrator/runs/<id>`, so `git gc` cannot
+prune the restore point (MVP.md §38.3). An approved resume pins an older run's too.

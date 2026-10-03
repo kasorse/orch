@@ -501,5 +501,7 @@ Defaults chosen without asking (change before J01 if wrong):
   answer can contain repository content).
 - Comments (last N, capped) and linked-issue summaries as optional sections.
 - Fencing the task block in action prompts with `action.fence`, for typed and Jira tasks
-  alike. That is a prompt change for every run, so it belongs in its own change.
+  alike. That is a prompt change for every run, so it belongs in its own change. (Since
+  done as `action.taskBlock`, with its own preamble: the task is to be carried out, unlike
+  fenced repository data. MVP.md §20.)
 - The DC Epic Link (D6).

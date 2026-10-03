@@ -1,13 +1,14 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
-// together into the orchestrator's four CLI commands
-// (version, validate, run, resume). This is the composition root - no other package
+// together into the orchestrator's CLI commands
+// (version, validate, run, resume, decisions report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,6 +33,7 @@ import (
 	"orchestrator/internal/provider/claude"
 	"orchestrator/internal/provider/codex"
 	"orchestrator/internal/provider/gemini"
+	"orchestrator/internal/report"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
 	"orchestrator/internal/workflow"
@@ -44,7 +46,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>>`
+	`<version|validate|run [--stage <name>]... "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -70,7 +72,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "orchestrator version %s\n", Version)
 		return nil
 	case "validate":
-		return runValidate(cli.configPath, stdout)
+		return runValidate(ctx, cli.configPath, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
 		if cli.jiraRef == "" && len(rest) < 2 {
@@ -82,6 +84,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.verbose, stdin, stdout, stderr)
+	case "decisions":
+		if len(rest) != 2 || rest[1] != "report" {
+			return &apperr.ConfigError{Msg: "usage: orchestrator decisions report"}
+		}
+		return decisionsReport(stdout)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -228,14 +235,49 @@ func newRegistry(executor execution.ProcessExecutor) *provider.Registry {
 func noJiraDependencies(config.Config) config.DependencyOptions { return config.DependencyOptions{} }
 
 // runValidate checks the Jira variables whenever the section is present, so validate
-// answers "would run --jira work here?".
-func runValidate(configPath string, stdout io.Writer) error {
+// answers "would run --jira work here?", and asks Jev whether it serves decision.model.
+func runValidate(ctx context.Context, configPath string, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
-	_, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, logging.NewTerminalReporter(stdout),
+	reporter := logging.NewTerminalReporter(stdout)
+	cfg, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
+	if err != nil {
+		return err
+	}
+	checked, err := checkJevModel(ctx, cfg, stderr)
+	if checked {
+		reporter.JevModelServed(cfg.Decision.Model)
+	}
 	return err
+}
+
+// decisionsReport compares the two complexity questions over every decision.json under
+// the runs directory (TASKS.md T18, reduced). It needs no configuration: it reads only
+// what runs wrote, and calls nothing.
+func decisionsReport(stdout io.Writer) error {
+	store := persistence.NewStore(runsBaseDir)
+	ids, err := store.RunIDs()
+	if err != nil {
+		return err
+	}
+	var entries []report.Entry
+	var unreadable []report.Unreadable
+	for _, id := range ids {
+		trace, at, err := store.LoadDecision(id)
+		var rse *apperr.RunStateError
+		switch {
+		case errors.As(err, &rse) && rse.Kind == apperr.RunNotFound:
+			// The run stopped before a decision existed: nothing to compare.
+		case err != nil:
+			unreadable = append(unreadable, report.Unreadable{RunID: id, Err: err})
+		default:
+			entries = append(entries, report.Entry{RunID: id, At: at, Trace: trace})
+		}
+	}
+	report.RenderDecisions(stdout, runsBaseDir, report.SummarizeDecisions(entries, unreadable))
+	return nil
 }
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
@@ -269,6 +311,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	started := time.Now()
 	decideCtx, cancelDecide := context.WithTimeout(ctx, cfg.Execution.Timeout)
 	defer cancelDecide()
+
+	// Only when a provider decides: with --stage nothing is asked of Jev. A failure here
+	// creates no run, as a failed fetch of the ticket does.
+	if len(stages) == 0 {
+		if _, err := checkJevModel(decideCtx, cfg, stderr); err != nil {
+			return err
+		}
+	}
 
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -514,6 +564,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 			return err
 		}
 	}
+	// Pinned on every approved run and resume, so a run recorded before pinning existed
+	// gets its ref too.
+	pinRestorePoint(ctx, s.repo, run, s.reporter)
 
 	runCtx, cancelRun := opts.engineContext()
 	defer cancelRun()
@@ -574,6 +627,18 @@ func recordRestorePoint(ctx context.Context, repo *repository.Repository, run *d
 	}
 	run.PreRunRef = ref
 	reporter.RestorePoint(ref)
+}
+
+// pinRestorePoint keeps git gc from pruning run.PreRunRef (repository.PinRestorePoint).
+// Like recording it, failing to pin is reported, not fatal: the restore point is still
+// there now, it is only not protected from a later gc.
+func pinRestorePoint(ctx context.Context, repo *repository.Repository, run *domain.Run, reporter *logging.ConsoleReporter) {
+	if run.PreRunRef == "" {
+		return
+	}
+	if err := repo.PinRestorePoint(ctx, run.ID, run.PreRunRef); err != nil {
+		reporter.RestorePointNotPinned(err)
+	}
 }
 
 // recordBaseline sets run.HeadRef and run.ResumeBaseline before the first step
@@ -662,7 +727,7 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 			fmt.Fprintln(stderr, "Warning: decision.jev.mock is on - decisions come from an offline keyword heuristic, not from Jev.")
 			client = jev.NewMockClient()
 		} else {
-			client = jev.NewHTTPClient(jev.Options{BaseURL: d.Jev.BaseURL, Timeout: d.Timeout, MaxRetries: d.Jev.MaxRetries}, os.Getenv(d.Jev.APIKeyEnv))
+			client = newJevHTTPClient(d)
 		}
 		p, err := jev.NewProvider(client, d.Model, sources)
 		if err != nil {
@@ -679,6 +744,36 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
 		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Deciding the workflow"}, Stream: stream,
 	}, nil
+}
+
+// newJevHTTPClient builds the client of the real Jev API. The key is read from the
+// environment here and handed only to the client's constructor.
+func newJevHTTPClient(d config.DecisionConfig) jev.Client {
+	return jev.NewHTTPClient(jev.Options{BaseURL: d.Jev.BaseURL, Timeout: d.Timeout, MaxRetries: d.Jev.MaxRetries}, os.Getenv(d.Jev.APIKeyEnv))
+}
+
+// checkJevModel runs jev.CheckModel against the real Jev API (TASKS.md T14), after the
+// fail-fast chain and before anything is decided. The mock and the CLI providers have
+// nothing to check: checked is false.
+//
+// An unserved model, a rejected key and a cancellation always stop. Any other failure to
+// check - Jev unreachable, overloaded, or answering /v1/models in an unexpected shape -
+// stops only with on_failure: fail; with ask it is a warning on stderr, because the
+// decision rounds fall back to the manual choice anyway, and the shape of the models
+// answer has not been verified against the real API yet.
+func checkJevModel(ctx context.Context, cfg config.Config, stderr io.Writer) (checked bool, err error) {
+	d := cfg.Decision
+	if !d.UsesJev() || d.Jev.Mock {
+		return false, nil
+	}
+	err = jev.CheckModel(ctx, newJevHTTPClient(d), d.Model)
+	var derr *apperr.DecisionError
+	if errors.As(err, &derr) && derr.Kind != apperr.DecisionAuth && derr.Kind != apperr.DecisionCancelled &&
+		d.OnFailure == config.OnFailureAsk {
+		logging.JevModelUnchecked(stderr, err)
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // engineContext is the workflow's share of execution.timeout. Without a manual choice
