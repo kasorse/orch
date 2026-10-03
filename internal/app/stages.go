@@ -63,12 +63,7 @@ func decideManual(stages []domain.Stage, task string, reporter *logging.ConsoleR
 	return decisionOutcome{
 		decision: dec,
 		trace: func(wf domain.Workflow) domain.DecisionTrace {
-			return domain.DecisionTrace{
-				Request:  task,
-				Source:   dec.Source,
-				Stages:   dec.Stages.Stages,
-				Workflow: workflowActions(wf),
-			}
+			return domain.ManualTrace(task, dec, wf)
 		},
 		announce: func(wf domain.Workflow, stderr io.Writer) {
 			reporter.ManualStages(dec.Stages.EnabledStages())
@@ -77,14 +72,6 @@ func decideManual(stages []domain.Stage, task string, reporter *logging.ConsoleR
 			}
 		},
 	}, nil
-}
-
-func workflowActions(wf domain.Workflow) []domain.ActionType {
-	out := make([]domain.ActionType, len(wf.Steps))
-	for i, s := range wf.Steps {
-		out[i] = s.Action
-	}
-	return out
 }
 
 // decideWithProvider is the decision layer: translation, pre-check, project context and

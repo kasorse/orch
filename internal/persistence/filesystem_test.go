@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/workflow"
 )
 
 func TestNewRun_CreatesDirectoryStructureAndRunJSON(t *testing.T) {
@@ -242,5 +243,50 @@ func TestSaveTicket(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ticket.json decodes to\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+// A run whose decision is manual survives save -> load and still verifies: resume
+// rebuilds the workflow from decision.stages (specs/stage-select/SPEC.md §12).
+func TestManualRun_RoundTripsAndVerifies(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "review my change"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := domain.ManualDecision([]domain.Stage{domain.StageReview, domain.StageTesting})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := workflow.Build(dec.Stages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Decision, run.Workflow = &dec, &wf
+	if err := store.SaveRun(run); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveDecision(run.ID, domain.ManualTrace(run.Task.Description, dec, wf)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveProjectContext(run.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(store.runDir(run.ID), "project_context.json")); !os.IsNotExist(err) {
+		t.Errorf("project_context.json written for a manual run: %v", err)
+	}
+
+	got, err := store.LoadRun(run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Decision.Source != domain.DecisionSourceManual {
+		t.Errorf("source = %q", got.Decision.Source)
+	}
+	if err := workflow.Verify(got); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !reflect.DeepEqual(got.Workflow.Steps, wf.Steps) {
+		t.Errorf("workflow = %+v, want %+v", got.Workflow.Steps, wf.Steps)
 	}
 }

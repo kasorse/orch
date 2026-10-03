@@ -228,7 +228,9 @@ func executionChain(st style, execs []domain.StepExecution) string {
 func (r *ConsoleReporter) prettyDecided(t domain.DecisionTrace) {
 	st := r.st()
 	meta := ""
-	if t.Source == domain.DecisionSourceUser {
+	if t.Source == domain.DecisionSourceManual {
+		meta = "manual (--stage)"
+	} else if t.Source == domain.DecisionSourceUser {
 		meta = "chosen by you"
 	} else {
 		model := t.Model
@@ -298,6 +300,9 @@ func (r *ConsoleReporter) rows(rows [][2]string) {
 func (r *ConsoleReporter) prettyComplexity(t domain.DecisionTrace) string {
 	st := r.st()
 	c := t.Complexity
+	if t.Source == domain.DecisionSourceManual {
+		return st.gray("—")
+	}
 	sel := st.bold(string(c.Selected))
 	if t.Source == domain.DecisionSourceUser {
 		return sel

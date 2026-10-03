@@ -45,7 +45,9 @@ func RenderDecision(w io.Writer, t domain.DecisionTrace, verbose bool) {
 
 	fmt.Fprintf(w, "complexity: %s\n", complexityLine(t))
 
-	if t.Source == domain.DecisionSourceUser {
+	if t.Source == domain.DecisionSourceManual {
+		fmt.Fprintln(w, "decision: manual (--stage)")
+	} else if t.Source == domain.DecisionSourceUser {
 		fmt.Fprintf(w, "decision: chosen by user (%s)\n", firstLine(t.DecisionError))
 	} else {
 		model := t.Model
@@ -78,6 +80,9 @@ func RenderDecision(w io.Writer, t domain.DecisionTrace, verbose bool) {
 // flagged, since that is what the choice-vs-score experiment is watching for.
 func complexityLine(t domain.DecisionTrace) string {
 	c := t.Complexity
+	if t.Source == domain.DecisionSourceManual {
+		return "—"
+	}
 	if t.Source == domain.DecisionSourceUser {
 		return fmt.Sprintf("%s (chosen by user)", c.Selected)
 	}

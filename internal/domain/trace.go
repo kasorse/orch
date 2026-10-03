@@ -56,3 +56,20 @@ type DecisionLatency struct {
 	ClassificationMS int64 `json:"classification_ms"`
 	ManualChoiceMS   int64 `json:"manual_choice_ms,omitempty"`
 }
+
+// ManualTrace is decision.json for stages the operator named with --stage
+// (specs/stage-select/SPEC.md §5): no provider, model, context, complexity or latency,
+// because nothing was asked.
+func ManualTrace(request string, d Decision, wf Workflow) DecisionTrace {
+	actions := make([]ActionType, len(wf.Steps))
+	for i, s := range wf.Steps {
+		actions[i] = s.Action
+	}
+	return DecisionTrace{
+		Request:     request,
+		Translation: TranslationTrace{},
+		Source:      d.Source,
+		Stages:      d.Stages.Stages,
+		Workflow:    actions,
+	}
+}

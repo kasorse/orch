@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"os"
 	"path/filepath"
@@ -80,6 +81,10 @@ func TestRenderDecision_Golden(t *testing.T) {
 		Workflow: []domain.ActionType{domain.ActionAnalyze, domain.ActionImplement},
 	}
 
+	dec, _ := domain.ManualDecision([]domain.Stage{domain.StageTesting, domain.StageReview})
+	manualWF := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionTest}, {Action: domain.ActionReview}}}
+	manual := domain.ManualTrace("run the tests and review", dec, manualWF)
+
 	cases := []struct {
 		name    string
 		trace   domain.DecisionTrace
@@ -88,6 +93,7 @@ func TestRenderDecision_Golden(t *testing.T) {
 		{"decision_jev_verbose", jevTrace(), true},
 		{"decision_disagree_limited", disagree, false},
 		{"decision_user", user, true},
+		{"decision_manual_text", manual, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,5 +131,32 @@ func TestRenderManualStages_Golden(t *testing.T) {
 	}
 	if buf.String() != string(want) {
 		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestManualTrace_JSONGolden(t *testing.T) {
+	dec, _ := domain.ManualDecision([]domain.Stage{domain.StageReview, domain.StageTesting})
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionTest}, {Action: domain.ActionReview}}}
+	raw, err := json.MarshalIndent(domain.ManualTrace("run the tests and review", dec, wf), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw = append(raw, '\n')
+	path := filepath.Join("testdata", "decision_manual.golden")
+	if *update {
+		if err := os.WriteFile(path, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != string(want) {
+		t.Errorf("differs from %s:\n%s", path, raw)
+	}
+	var back domain.DecisionTrace
+	if err := json.Unmarshal(raw, &back); err != nil || back.Source != domain.DecisionSourceManual {
+		t.Errorf("round trip: %v %+v", err, back)
 	}
 }

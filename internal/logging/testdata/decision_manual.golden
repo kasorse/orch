@@ -1,0 +1,66 @@
+{
+  "request": "run the tests and review",
+  "translation": {
+    "detected": "",
+    "cyrillic_share": 0,
+    "translated": false,
+    "failed": false
+  },
+  "source": "manual",
+  "provider": "",
+  "context_limited": false,
+  "complexity": {
+    "primary": "",
+    "sources": null,
+    "selected": "",
+    "agree": false
+  },
+  "stages": [
+    {
+      "stage": "research",
+      "forced": false,
+      "enabled": false,
+      "reason": "not selected"
+    },
+    {
+      "stage": "analysis",
+      "forced": false,
+      "enabled": false,
+      "reason": "not selected"
+    },
+    {
+      "stage": "planning",
+      "forced": false,
+      "enabled": false,
+      "reason": "not selected"
+    },
+    {
+      "stage": "development",
+      "forced": false,
+      "enabled": false,
+      "reason": "not selected"
+    },
+    {
+      "stage": "testing",
+      "forced": false,
+      "enabled": true,
+      "reason": "selected with --stage"
+    },
+    {
+      "stage": "review",
+      "forced": false,
+      "enabled": true,
+      "reason": "selected with --stage"
+    }
+  ],
+  "workflow": [
+    "test",
+    "review"
+  ],
+  "latency": {
+    "translation_ms": 0,
+    "pre_check_ms": 0,
+    "context_ms": 0,
+    "classification_ms": 0
+  }
+}

@@ -1,0 +1,10 @@
+complexity: —
+decision: manual (--stage)
+workflow: test → review
+stages:
+  research     off  not selected
+  analysis     off  not selected
+  planning     off  not selected
+  development  off  not selected
+  testing      on   selected with --stage
+  review       on   selected with --stage
