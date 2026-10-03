@@ -15,7 +15,12 @@ import (
 // resume on, so it ends the run as a hard error rather than being treated as a
 // retryable "fail" (MVP.md §19, mirroring the classifier's strictness).
 func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
-	diff, err := d.Repo.Diff(ctx)
+	// The runs directory is the orchestrator's own bookkeeping, not a change to review.
+	var exclude []string
+	if d.RunsDir != "" {
+		exclude = append(exclude, d.RunsDir)
+	}
+	diff, err := d.Repo.Diff(ctx, exclude...)
 	if err != nil {
 		return workflow.StepOutcome{}, err
 	}

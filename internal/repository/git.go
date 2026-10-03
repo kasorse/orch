@@ -55,9 +55,17 @@ func (r *Repository) IsDirty(ctx context.Context) (bool, error) {
 }
 
 // Diff returns the diff of tracked changes against HEAD, plus a note listing any untracked
-// files (which "git diff" does not show).
-func (r *Repository) Diff(ctx context.Context) (string, error) {
-	diffResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"diff", "HEAD"}, WorkingDir: r.Dir})
+// files (which "git diff" does not show). exclude are repository-relative paths left out
+// of both, e.g. the orchestrator's own runs directory, which is not the operator's change.
+func (r *Repository) Diff(ctx context.Context, exclude ...string) (string, error) {
+	var pathspec []string
+	if len(exclude) > 0 {
+		pathspec = append(pathspec, "--", ".")
+		for _, p := range exclude {
+			pathspec = append(pathspec, ":(exclude)"+p)
+		}
+	}
+	diffResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: append([]string{"diff", "HEAD"}, pathspec...), WorkingDir: r.Dir})
 	if err != nil {
 		return "", &apperr.RepositoryError{Msg: "failed to run git diff", Err: err}
 	}
@@ -65,7 +73,7 @@ func (r *Repository) Diff(ctx context.Context) (string, error) {
 		return "", &apperr.RepositoryError{Msg: "git diff failed: " + diffResult.Stderr}
 	}
 
-	statusResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"status", "--porcelain"}, WorkingDir: r.Dir})
+	statusResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: append([]string{"status", "--porcelain"}, pathspec...), WorkingDir: r.Dir})
 	if err != nil {
 		return "", &apperr.RepositoryError{Msg: "failed to run git status", Err: err}
 	}

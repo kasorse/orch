@@ -174,3 +174,20 @@ func TestChangedFiles_ParsesPorcelainZ(t *testing.T) {
 		t.Errorf("files = %q", files)
 	}
 }
+
+func TestDiff_ExcludesPaths(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}, {}}}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	if _, err := repo.Diff(context.Background(), ".orchestrator/runs"); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range exec.Calls {
+		if got := strings.Join(call.Args, " "); !strings.HasSuffix(got, "-- . :(exclude).orchestrator/runs") {
+			t.Errorf("git %s lacks the exclude pathspec", got)
+		}
+	}
+	if len(exec.Calls) != 2 {
+		t.Errorf("calls = %d, want git diff and git status", len(exec.Calls))
+	}
+}
