@@ -166,6 +166,7 @@ Implement these commands:
 ```bash
 orchestrator run "<task>"
 orchestrator run --jira <KEY|URL> ["notes"]
+orchestrator run --stage <name> [--stage <name> ...] "<task>"
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
@@ -177,6 +178,9 @@ orchestrator version
 the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator
 notes appended to the ticket. `--jira` is valid only with `run`, and giving it twice or
 empty is a usage error (exit 2). Details in §39.
+
+`run --stage` names the stages to run and skips the decision layer. It is repeatable, valid
+only with `run`, and combines with `--jira`. Details in §40.
 
 Support configuration file selection, for example:
 
@@ -479,6 +483,9 @@ request
   → workflow
 ```
 
+With `run --stage` none of this runs: the operator's stages become the decision and the
+flow continues at the workflow builder (§40).
+
 ## 8.1 Translation
 
 The questions are asked in English. A request whose prose letters are at least 30%
@@ -599,7 +606,8 @@ review      → review
 ```
 
 The workflow builder filters that order by the enabled stages. The same decision always
-produces the same workflow.
+produces the same workflow. A decision with `source: manual` (§40) carries the operator's
+stages and no probabilities; the builder treats it the same way.
 
 Do not ask an LLM to generate arbitrary workflow graphs, and do not let a decision
 provider choose stages or their order - it only estimates probabilities.
@@ -2829,3 +2837,75 @@ header shows the source line (§27).
 * `--jira` on `resume` or `validate`.
 * Deferred (`specs/jira/SPEC.md` §19): an outcome comment or transition at the end of a
   run, comments and linked issues as sections, fencing the task block in prompts.
+
+---
+
+# 40. Run chosen stages
+
+Normative. Design record, decisions and the plan as built: `specs/stage-select/`
+(`SPEC.md`, `tasks/`).
+
+`orchestrator run --stage <name> [--stage <name> ...] "<task>"` lets the operator name the
+stages instead of asking a decision provider. Which stages run is the operator's choice;
+their order, the transitions, authorities, the guard and resume are unchanged.
+
+## 40.1 CLI
+
+```bash
+orchestrator run --stage review "review my change"
+orchestrator run --stage testing --stage review "check the hand edit"
+orchestrator run --stage plan "plan the cache"
+orchestrator run --stage review --jira PMC-2789
+```
+
+* `--stage X` and `--stage=X`, in any position, repeatable; one stage per flag (a comma is a
+  usage error). Valid only with `run` (`--stage is only valid with run`, exit 2).
+* A task is required, as for any `run`; with `--jira` the ticket is the task.
+* Names are the six stages (`research`, `analysis`, `planning`, `development`, `testing`,
+  `review`) and the action names as aliases (`analyze`, `plan`, `implement`, `test`),
+  case-insensitive. An unknown name is a usage error listing the valid ones. Duplicates
+  collapse. `domain.ParseStageFlag` parses; `ParseStage` stays strict for persisted data.
+
+## 40.2 The decision
+
+`domain.ManualDecision` builds `Decision{Source: manual}` from the flags: context depth
+`none`, no complexity, one outcome per stage in `StageOrder` (`selected with --stage` /
+`not selected`) with no probability or threshold. `policy.stages.force` is not applied.
+`workflow.Build` runs on it as usual, and `workflow.Verify` accepts it on resume.
+
+No translator, decision provider or Context Manager is constructed and no project context
+is collected. The fail-fast chain (§7) is unchanged and still checks every executable
+the config declares, including the decision provider's and the Jev key. `decision.json` has
+`source: manual`, the request, the stages and the workflow, and empty provider, model and
+latencies; `project_context.json` is not written.
+
+## 40.3 Console and gap warnings
+
+Instead of the decision box the console prints `Stages (manual): testing → review`, then
+the authority line and the mode prompt. A stage whose usual input was not selected gets a
+one-line warning on stderr, never a refusal (`workflow.Gaps`): planning without analysis;
+development without a plan (naming analysis too if it is also missing). Testing and review
+never warn: testing runs the command on the current tree and review reads the real diff.
+
+## 40.4 Review
+
+`review` reads the working tree against `HEAD`, excluding the orchestrator's own runs
+directory. If that diff is empty the step fails the run before the model is called:
+`nothing to review: the working tree has no changes against HEAD`. This applies to every
+run, not only `--stage`.
+
+## 40.5 Unchanged rules
+
+* A selection with `development` needs a clean worktree (§38.3); one without never does.
+* Retries follow §11: a failing test or review goes back to `implement` only if it is in the
+  workflow; otherwise a test failure fails the run and a review failure completes it with
+  the verdict. `max_steps` and `max_fix_iterations` bound loops.
+* `--mode plan` works as for a decided run. `resume` continues the persisted stages and
+  builds no decision provider.
+
+## 40.6 Not covered
+
+* A stage order or repeat count chosen by the operator; `--skip-stage`.
+* `--base <ref>` and reviewing committed history.
+* Per-stage provider or model flags; a config key for default stages.
+* A partial decision (stages from flags, complexity from a provider).

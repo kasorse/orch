@@ -331,6 +331,7 @@ orchestrator [--config path] version
 orchestrator [--config path] validate
 orchestrator [--config path] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
+orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
 ```
 
@@ -344,6 +345,9 @@ orchestrator [--config path] [--mode m] resume <run-id>
   current working directory, printing progress as it goes.
 - `run --jira <KEY|URL> ["notes"]` — takes the task from a Jira ticket. See
   [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket).
+- `run --stage <name> [--stage <name> ...] "<task>"` — runs exactly the stages you name and
+  skips the decision layer (no translation, Jev or LLM call, project context). See
+  [Choosing the stages yourself](#choosing-the-stages-yourself).
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
@@ -417,6 +421,31 @@ A resume refuses, before anything runs:
 Your own edits to other files between the stop and the resume are fine. They show up in the
 working tree listing, and `review` sees them in the diff. A completed run is just reported
 (with its answer, for a read-only workflow). Details: `MVP.md` §37 and `specs/resume/`.
+
+### Choosing the stages yourself
+
+```
+orchestrator run --stage review "review my change"
+orchestrator run --stage testing --stage review "check the hand edit"
+orchestrator run --stage plan "plan the cache"
+orchestrator run --stage review --jira PMC-2789
+```
+
+Use it when you already know what you need: review code you changed by hand, just run the
+tests, plan without implementing. Names are `research`, `analysis`, `planning`,
+`development`, `testing`, `review`, plus the aliases `analyze`, `plan`, `implement`, `test`.
+Repeat `--stage` for several; one stage per flag. The order is always the fixed one, whatever
+order you give them in, and the retry rules, permissions, test command and resume are the same
+as for a decided run. `decision.json` records `source: manual`.
+
+* A stage whose usual input you skipped (planning without analysis, development without a
+  plan) prints a warning and still runs. Testing and review never warn.
+* `review` looks at your uncommitted changes against `HEAD`. With no changes it fails with
+  `nothing to review` before calling the model.
+* `development` still needs a clean worktree (or `security.require_clean_worktree: false`);
+  without it a dirty tree only prints the usual warning.
+* The config must still be valid and every executable it names present, including the
+  decision provider's and the Jev key, even though they are not called.
 
 ### Taking the task from a Jira ticket
 

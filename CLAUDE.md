@@ -10,7 +10,9 @@ decision layer in detail: `specs/JEV integration/SPEC.md` (normative) and
 the permission model: MVP.md §38, with its design record in `specs/permissions/`;
 resume: MVP.md §37, with its design record in `specs/resume/`;
 the task from a Jira ticket (`run --jira`): MVP.md §39, with its design record in
-`specs/jira/`.
+`specs/jira/`;
+the stages chosen by the operator (`run --stage`): MVP.md §40, with its design record in
+`specs/stage-select/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -42,6 +44,7 @@ composition point that implements `StepExecutor` using config/provider/repositor
 
 ```
 [--jira] → fetch the issue, render it as the task  (internal/jira; failure → exit, no run)
+[--stage] → Decision{source: manual} from the flags; the rest of this flow is skipped
 request → translate if ≥30% Cyrillic prose (internal/translate; failure → original + warning)
         → pre-check: P(none), P(project)              (decision.Provider.ContextDepth)
         → policy: project if P(project) ≥ project_threshold
@@ -126,7 +129,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
 - **Decision providers return probabilities; Go decides** (MVP.md §31.2). Never let a
   provider's own pick (e.g. Jev's `choice` field), an LLM, or a caller choose stages or their
   order. Every provider answer is strictly validated; anything unexpected is an
-  `InvalidResponse`.
+  `InvalidResponse`. The one case where the stage set does not come from a provider is
+  `run --stage` (MVP.md §40): the operator names it, `domain.ManualDecision` records it as
+  `source: manual`, and it is still never an LLM and never the order.
 - **Static provider routing** (MVP.md §31.1): provider/model per action — and the decision
   provider — come from config. No automatic "best model" selection or fallback; a failing
   decision provider leads to the user's manual choice, never to another provider.
@@ -197,7 +202,7 @@ live permission suite is separate and spends real calls:
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), the
-append-only `resumes`, and each execution's `provider.authority` and `attempt`), `decision.json` (full trace:
+append-only `resumes`, and each execution's `provider.authority` and `attempt`), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,

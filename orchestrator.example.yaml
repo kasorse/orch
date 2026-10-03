@@ -93,6 +93,9 @@ security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
   protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
 
+# `orchestrator run --stage <name> [--stage <name> ...] "<task>"` skips the decision section
+# above (MVP.md §40); the config must still be valid, but nothing in it is called.
+
 # Optional: where `run --jira <KEY|URL>` reads the task from (MVP.md §39). Only run --jira
 # needs the credential variables; a plain run and resume work without them.
 # jira:
