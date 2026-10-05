@@ -80,8 +80,9 @@ type ActionsConfig struct {
 
 type TestConfig struct {
 	Command string `yaml:"command"`
-	// Sandbox is "none" (or empty) or "bwrap": run the command under bubblewrap with the
-	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8).
+	// Sandbox is "bwrap" (or empty, the default): run the command under bubblewrap with the
+	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8) -
+	// or "none", written out, to run it unsandboxed.
 	Sandbox string `yaml:"sandbox"`
 	// ROBinds and RWBinds re-expose paths inside the sandbox - absolute or "~/"-relative,
 	// e.g. a module cache read-only and a build cache writable. Only valid with bwrap.
@@ -93,11 +94,17 @@ type TestConfig struct {
 	EnvPass []string `yaml:"env_pass"`
 }
 
-// SandboxBwrap is the one sandbox test.sandbox currently supports.
-const SandboxBwrap = "bwrap"
+// SandboxBwrap is the one sandbox test.sandbox currently supports, and the default;
+// SandboxNone runs the test command unsandboxed and must be written out
+// (specs/hardening/SPEC.md §6.3).
+const (
+	SandboxBwrap = "bwrap"
+	SandboxNone  = "none"
+)
 
-// Sandboxed reports whether the test command runs under a sandbox.
-func (t TestConfig) Sandboxed() bool { return t.Sandbox == SandboxBwrap }
+// Sandboxed reports whether the test command runs under a sandbox: unless test.sandbox
+// is explicitly none, it does.
+func (t TestConfig) Sandboxed() bool { return t.Sandbox == "" || t.Sandbox == SandboxBwrap }
 
 // ResolveBinds expands "~/" against home and cleans every bind path.
 func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {

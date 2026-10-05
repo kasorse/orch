@@ -26,7 +26,7 @@ review model. This phase fixes all of it without widening any authority.
 | [H02](tasks/TASK-H02-bounded-test-output.md) | `limits.prompt`, bounded test output ✓ | S1 | S | — |
 | [H03](tasks/TASK-H03-review-diff.md) | review diff: new files, deny list, summarize, budget ✓ | S1 | M | H02 |
 | [H04](tasks/TASK-H04-test-env-allowlist.md) | test environment allowlist, `test.env_pass` ✓ | S2 | M | — |
-| [H05](tasks/TASK-H05-sandbox-default.md) | sandbox on by default, explicit `none` warns | S2 | S | H04 |
+| [H05](tasks/TASK-H05-sandbox-default.md) | sandbox on by default, explicit `none` warns ✓ | S2 | S | H04 |
 | [H06](tasks/TASK-H06-cli-version-check.md) | provider CLI version check, override, record | S3 | M | H01 |
 | [H07](tasks/TASK-H07-pre-run-test.md) | pre-run test (`test.baseline`) | S4 | M | H04, H05 |
 | [H08](tasks/TASK-H08-secretscan-package.md) | `internal/secretscan` rules and golden tests | S5 | M | — |

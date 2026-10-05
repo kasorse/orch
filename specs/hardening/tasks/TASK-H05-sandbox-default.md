@@ -43,3 +43,21 @@
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. As planned, with these details:
+
+- `config.SandboxNone` joins `SandboxBwrap`; `Sandboxed()` is true for `""` and `bwrap`.
+  Binds without an explicit `none` are now valid (the sandbox is the default); with `none`
+  they are still an error.
+- The dependency error and the probe's remedy both say the sandbox is the default and offer
+  `test.sandbox: none to run tests unsandboxed`, naming what that exposes.
+- The warning text is one constant (`logging.notSandboxed`): the plain authority line
+  appends it after the command, the pretty one shows it in yellow instead of `(sandboxed)`.
+- Integration configs write `sandbox: none` explicitly (`helpers_test.go`);
+  `withTestSandbox` now swaps that line for `bwrap`. New scenarios: 16c — no `test.sandbox`
+  key + a bwrap that cannot sandbox → exit 2 before any call, both remedies named; 16d — an
+  explicit `none` is announced in the authority line.
+- `orchestrator.example.yaml` has `sandbox: bwrap` uncommented with the macOS / `none` note.
+  README is left to H11 (documentation).

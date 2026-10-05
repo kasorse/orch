@@ -126,7 +126,7 @@ func withTestSandbox(t *testing.T, configPath string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := strings.Replace(string(data), "test:\n  command:", "test:\n  sandbox: bwrap\n  command:", 1)
+	out := strings.Replace(string(data), "test:\n  sandbox: none\n", "test:\n  sandbox: bwrap\n", 1)
 	if out == string(data) {
 		t.Fatal("no test block to rewrite")
 	}
@@ -147,4 +147,51 @@ func bwrapCalls(t *testing.T, log string) [][]string {
 		calls = append(calls, strings.Split(strings.TrimSuffix(block, "\n"), "\n"))
 	}
 	return calls
+}
+
+// 16c (specs/hardening/SPEC.md §6.3): without test.sandbox the test command is sandboxed - a
+// host whose bwrap cannot sandbox fails fast, and the refusal offers test.sandbox: none.
+func TestScenario16_SandboxIsTheDefault(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	invocationsLog, _ := decisionEnv(t, repoDir)
+	installFakeBwrap(t, true)
+	j := startJev(t, scriptBugfixMedium())
+	cfg := jevConfig(t, j)
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutKey := strings.Replace(string(data), "  sandbox: none\n", "", 1)
+	if withoutKey == string(data) {
+		t.Fatal("no sandbox key to remove")
+	}
+	if err := os.WriteFile(cfg, []byte(withoutKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
+	var depErr *apperr.DependencyError
+	if !errors.As(err, &depErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency {
+		t.Fatalf("expected a DependencyError (exit 2), got %T: %v", err, err)
+	}
+	for _, want := range []string{"test.sandbox: bwrap, the default", "set test.sandbox: none to run tests unsandboxed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if got := invocations(t, invocationsLog); len(got) != 0 {
+		t.Errorf("no AI call may happen, got %v", got)
+	}
+}
+
+// 16d: test.sandbox: none is announced in the authority line of every run.
+func TestScenario16_ExplicitNoneWarns(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	decisionEnv(t, repoDir)
+	j := startJev(t, scriptBugfixMedium())
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+	if !strings.Contains(stdout, "NOT sandboxed: network, $HOME and your files are reachable") {
+		t.Errorf("the authority line does not warn about test.sandbox: none:\n%s", stdout)
+	}
 }

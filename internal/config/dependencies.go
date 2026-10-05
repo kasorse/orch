@@ -135,7 +135,8 @@ func cliDisplayName(providerID string) string {
 	}
 }
 
-// sandboxDependencyProblems checks, for test.sandbox: bwrap, that bwrap is on PATH and that
+// sandboxDependencyProblems checks, when the test command is sandboxed (test.sandbox: bwrap,
+// the default), that bwrap is on PATH and that
 // every bind exists. Whether bwrap can actually create a sandbox on this host is probed
 // separately (testexec.Probe), right after this check.
 func sandboxDependencyProblems(t TestConfig, checker DependencyChecker) []string {
@@ -144,8 +145,10 @@ func sandboxDependencyProblems(t TestConfig, checker DependencyChecker) []string
 	}
 	var problems []string
 	if _, err := checker.LookPath("bwrap"); err != nil {
-		problems = append(problems, "test.sandbox is bwrap, but executable \"bwrap\" was not found in PATH.\n\n"+
-			"Install bubblewrap (e.g. apt install bubblewrap) or set test.sandbox: none.")
+		problems = append(problems, "the test command runs under bwrap (test.sandbox: bwrap, the default), but executable "+
+			"\"bwrap\" was not found in PATH.\n\n"+
+			"Install bubblewrap (e.g. apt install bubblewrap), or set test.sandbox: none to run tests unsandboxed: "+
+			"the code under test, which a model wrote, then reaches the network, $HOME and your files.")
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

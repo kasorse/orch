@@ -212,12 +212,12 @@ func envPassProblems(cfg Config) []string {
 func sandboxProblems(t TestConfig) []string {
 	var problems []string
 	switch t.Sandbox {
-	case "", "none", SandboxBwrap:
+	case "", SandboxNone, SandboxBwrap:
 	default:
-		problems = append(problems, fmt.Sprintf("test.sandbox must be none or bwrap, got %q", t.Sandbox))
+		problems = append(problems, fmt.Sprintf("test.sandbox must be bwrap (the default) or none, got %q", t.Sandbox))
 	}
 	if !t.Sandboxed() && len(t.ROBinds)+len(t.RWBinds) > 0 {
-		problems = append(problems, "test.ro_binds / test.rw_binds only apply with test.sandbox: bwrap")
+		problems = append(problems, "test.ro_binds / test.rw_binds only apply under the sandbox (test.sandbox: bwrap, the default), not with none")
 	}
 	for _, set := range []struct {
 		key   string

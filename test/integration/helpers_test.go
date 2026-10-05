@@ -166,6 +166,7 @@ actions:
     model: fake
 
 test:
+  sandbox: none
   command: %q
 %s
 limits:

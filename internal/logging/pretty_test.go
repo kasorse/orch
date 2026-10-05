@@ -185,3 +185,22 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+func TestPretty_AuthorityWarnsWithoutSandbox(t *testing.T) {
+	wf := domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionTest}}}
+	for _, tc := range []struct {
+		sandboxed bool
+		want      string
+		not       string
+	}{
+		{true, "$ npm test (sandboxed)", "NOT sandboxed"},
+		{false, "NOT sandboxed: network, $HOME and your files are reachable", "(sandboxed)"},
+	} {
+		var buf bytes.Buffer
+		r := &ConsoleReporter{Out: &buf, Pretty: true}
+		r.Authority(wf, "npm test", tc.sandboxed)
+		if out := buf.String(); !strings.Contains(out, tc.want) || strings.Contains(out, tc.not) {
+			t.Errorf("sandboxed=%v: got %q", tc.sandboxed, out)
+		}
+	}
+}

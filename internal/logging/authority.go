@@ -19,12 +19,17 @@ func (r *ConsoleReporter) Authority(wf domain.Workflow, testCommand string, sand
 	RenderAuthority(r.Out, wf, testCommand, sandboxed)
 }
 
+// notSandboxed follows the test command when test.sandbox is none: every run says what
+// that costs (specs/hardening/SPEC.md §6.3).
+const notSandboxed = "— NOT sandboxed: network, $HOME and your files are reachable"
+
 // RenderAuthority renders the authority line, e.g.
 //
 //	authority: analyze=read, implement=edit, review=read; test runs: go test ./...
 //
 // The test step makes no AI call - the orchestrator runs the command itself - so it is
-// shown as the command, not as an authority, marked "(sandboxed)" under test.sandbox.
+// shown as the command, not as an authority, marked "(sandboxed)" under the sandbox and
+// with a warning without it.
 func RenderAuthority(w io.Writer, wf domain.Workflow, testCommand string, sandboxed bool) {
 	var steps []string
 	runsTest := false
@@ -43,7 +48,7 @@ func RenderAuthority(w io.Writer, wf domain.Workflow, testCommand string, sandbo
 		if sandboxed {
 			line += "test runs (sandboxed): " + testCommand
 		} else {
-			line += "test runs: " + testCommand
+			line += "test runs: " + testCommand + " " + notSandboxed
 		}
 	}
 	fmt.Fprintln(w, line)

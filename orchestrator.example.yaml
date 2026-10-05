@@ -72,10 +72,13 @@ actions:
 
 test:
   command: "go test ./..."
-  # Run the test command - which executes code the model wrote - under bubblewrap:
+  # The test command - which executes code the model wrote - runs under bubblewrap:
   # filesystem read-only, repository writable, $HOME hidden, no network (MVP.md §38.3).
-  # Needs bwrap (and on Ubuntu 24.04+ an AppArmor profile for it, see README).
-  # sandbox: bwrap
+  # This is the default and needs bwrap (on Ubuntu 24.04+ also an AppArmor profile for it,
+  # see README). Without bwrap (macOS, a host that cannot sandbox) write `sandbox: none`:
+  # the tests then reach the network, $HOME and your files, and every run says so.
+  sandbox: bwrap
+  # Re-expose caches inside the sandbox, e.g. for Go:
   # ro_binds: [~/go/pkg/mod]        # module cache, read-only
   # rw_binds: [~/.cache/go-build]   # build cache, writable
   # The test command inherits only an allowlist of the environment: PATH, HOME, locale,

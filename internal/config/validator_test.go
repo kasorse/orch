@@ -181,6 +181,8 @@ func TestValidate_TestSandbox(t *testing.T) {
 		{Command: "go test ./..."},
 		{Command: "go test ./...", Sandbox: "none"},
 		{Command: "go test ./...", Sandbox: "bwrap", ROBinds: []string{"~/go/pkg/mod"}, RWBinds: []string{"/var/cache/x"}},
+		// The sandbox is the default: binds need no explicit bwrap.
+		{Command: "go test ./...", ROBinds: []string{"~/go/pkg/mod"}},
 	}
 	for _, tc := range valid {
 		cfg := validConfig()
@@ -194,8 +196,8 @@ func TestValidate_TestSandbox(t *testing.T) {
 		test TestConfig
 		want string
 	}{
-		{TestConfig{Command: "x", Sandbox: "docker"}, `test.sandbox must be none or bwrap, got "docker"`},
-		{TestConfig{Command: "x", ROBinds: []string{"~/go"}}, "only apply with test.sandbox: bwrap"},
+		{TestConfig{Command: "x", Sandbox: "docker"}, `test.sandbox must be bwrap (the default) or none, got "docker"`},
+		{TestConfig{Command: "x", Sandbox: "none", ROBinds: []string{"~/go"}}, "only apply under the sandbox"},
 		{TestConfig{Command: "x", Sandbox: "bwrap", ROBinds: []string{"go/pkg"}}, `test.ro_binds[0] "go/pkg": must be absolute or start with ~/`},
 		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/../etc"}}, `test.rw_binds[0] "~/../etc": must not contain ..`},
 		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/"}}, "must not be the root or the home directory itself"},
@@ -309,5 +311,13 @@ func TestValidate_EnvPass(t *testing.T) {
 				t.Fatalf("want an error containing %q, got %v", tc.want, err)
 			}
 		})
+	}
+}
+
+func TestTestConfig_SandboxedByDefault(t *testing.T) {
+	for sandbox, want := range map[string]bool{"": true, "bwrap": true, "none": false} {
+		if got := (TestConfig{Sandbox: sandbox}).Sandboxed(); got != want {
+			t.Errorf("Sandboxed() with test.sandbox %q = %v, want %v", sandbox, got, want)
+		}
 	}
 }
