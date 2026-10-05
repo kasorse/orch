@@ -172,6 +172,7 @@ Implement these commands:
 orchestrator run "<task>"
 orchestrator run --jira <KEY|URL> ["notes"]
 orchestrator run --stage <name> [--stage <name> ...] "<task>"
+orchestrator run --allow-red-tests "<task>"
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
@@ -195,6 +196,10 @@ empty is a usage error (exit 2). Details in §39.
 
 `run --stage` names the stages to run and skips the decision layer. It is repeatable, valid
 only with `run`, and combines with `--jira`. Details in §40.
+
+`run --allow-red-tests` is for a task that is about making failing tests pass: the tests
+already failing before any change do not stop the run (§41.5). Valid only with `run`; it
+combines with `--stage` and `--jira`.
 
 Support configuration file selection, for example:
 
@@ -287,19 +292,29 @@ actions:
 
 test:
   command: "go test ./..."
+  sandbox: bwrap             # the default (§38.3); none must be written out (§41.3)
+  # ro_binds: [~/go/pkg/mod] / rw_binds: [~/.cache/go-build]  re-expose caches
+  env_pass: []               # variables beyond the test allowlist; no credentials (§41.3)
+  baseline: require_green    # run the tests before any change; off skips it (§41.5)
 
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  prompt:                    # optional bounds on repository data in prompts (§41.2)
+    max_test_output_bytes: 32768
+    max_diff_bytes: 262144
+    diff_summarize: []
 
 execution:
   timeout: 15m
 
-# test.sandbox: bwrap runs the test command under bubblewrap (§38.3), with
-# test.ro_binds / test.rw_binds re-exposing caches
 security:                      # optional (§38); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
   protected_paths: []          # extra patterns implement must not change
+  allow_unverified_cli: false  # run on a provider CLI outside the verified range (§41.4)
+  secret_scan:                 # what implement and the tests add (§41.6)
+    mode: stop                 # stop | warn | off
+    allow_paths: []
 
 # jira:                        # optional; needed only for run --jira (§39)
 #   base_url: https://example.atlassian.net   # DC: with any context path
@@ -486,6 +501,14 @@ remedy: route review to a provider that supports it: claude (actions.review.prov
 codex and gemini currently support no authority (their flags are unverified, §38), so any
 route to them fails here even when their executable is installed. `orchestrator validate`
 runs the same chain.
+
+### Provider CLI version and the test sandbox
+
+Right after `ValidateAuthorities`, every routed provider CLI's version is checked against
+the range its permission flags were verified on (§41.4); outside it the run stops (exit 2)
+unless `security.allow_unverified_cli: true`. The test sandbox is on unless
+`test.sandbox: none` (§41.3), so `ValidateDependencies` checks `bwrap` and its binds and the
+chain probes it by default.
 
 ### Jev model check
 
@@ -1053,6 +1076,13 @@ The next implementation prompt must contain:
 
 Then run tests again.
 
+The test command runs with an allowlisted environment and, unless `test.sandbox: none`,
+under bwrap (§41.3). The stdout/stderr in the retry prompt are bounded by
+`limits.prompt.max_test_output_bytes`, keeping the failure lines (§41.2); the artifact and
+the step log keep everything. A workflow with `implement` and `test` also runs the command
+once before the first step and refuses a red suite unless the run was started with
+`--allow-red-tests` (§41.5).
+
 ---
 
 # 19. Review
@@ -1065,7 +1095,9 @@ Review input should contain:
 * analysis or plan where available;
 * implementation summary;
 * latest test result;
-* current Git diff.
+* current Git diff - new files with their content, deny-listed files by name only, lock
+  files as a stat line, within `limits.prompt.max_diff_bytes`, and redacted by the secret
+  scan (§41.2, §41.6).
 
 Require structured output:
 
@@ -1410,7 +1442,8 @@ provider: claude
 action: implement
 model: opus
 failure: exit (the CLI ran and exited non-zero)
-command: claude --print --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus <prompt: 1832 chars>
+command: claude --print --input-format text --output-format stream-json --verbose --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus
+prompt: 1832 bytes on stdin
 working dir: /home/user/repo
 exit code: 1
 duration: 2.4s
@@ -1424,9 +1457,9 @@ stderr:
 full output: .orchestrator/runs/2f3c.../logs/001-implement.stdout.log
 ```
 
-`command:` renders the real argv verbatim except the prompt element, which is always
-replaced with `<prompt: N chars>` - the prompt body itself is never echoed or logged
-anywhere. Do not dump secrets or complete environment variables.
+`command:` renders the real argv verbatim; the prompt is not in it (it goes on stdin,
+§41.1), and `prompt: N bytes on stdin` gives its size - the prompt body itself is never
+echoed or logged anywhere. Do not dump secrets or complete environment variables.
 
 `full output:` is only present once the failing call's raw stdout/stderr has actually
 been persisted (see §21) - it points at the exact file to read for output longer than
@@ -2041,8 +2074,9 @@ implement that changes a protected path stops the run before `test` runs anythin
 
 ### Scenario 16 — sandboxed test step
 
-With `test.sandbox: bwrap` the test command runs under bwrap after a probe in the
-fail-fast chain; an unusable bwrap fails fast (§38.3).
+With `test.sandbox: bwrap` - or no key at all, the default - the test command runs under
+bwrap after a probe in the fail-fast chain; an unusable bwrap fails fast naming
+`test.sandbox: none`, and an explicit `none` is announced on every run (§38.3, §41.3).
 
 ### Scenario 20 — chosen stages
 
@@ -2080,6 +2114,16 @@ any decision round (`TestDecision_JevAuthFailure`).
 so; after an agreeing run, a disagreeing run and a `--stage` run it counts 3 traces, 2
 compared, 1 skipped, 50% agreement and lists the disagreement - without a config file,
 and without calling a CLI or Jev.
+
+### Hardening scenarios
+
+§41: scenario 16c/16d (the sandbox is the default; `none` is announced), 23 (a 300 KiB task
+reaches the CLI on stdin), 24 (an unverified CLI is refused before any call; the override
+runs and records), 25 (the test command's allowlisted environment; a credential-like
+`env_pass` is refused), 26 (the pre-run test: a red suite stops the run, `--allow-red-tests`,
+green, `off`, the guard, resume), 27 (the secret scan: stop, warn with redaction, a key
+written by the tests, a dirty-start baseline, off), 28 (what review and a retried implement
+are shown: new files, lock files, the deny list, both budgets).
 
 ### Jira scenarios
 
@@ -2478,7 +2522,9 @@ fail-fast chain (§7), with the current config
   → append a Resume record, status running, failure_reason cleared, save
   → no step has run: restore point, head_ref, resume_baseline recorded (§38.3)
   → restore point pinned under refs/orchestrator/runs/<id> (§38.3)
-  → execution.timeout starts, sandbox, step guard, Engine.Run
+  → execution.timeout starts, sandbox, step guard
+  → no step has run: pre-run test (§41.5), secret-scan baseline (§41.6)
+  → Engine.Run
 ```
 
 `run` and `resume` share everything after the decision (`executeWorkflow` in
@@ -2685,8 +2731,10 @@ human sees and confirms between steps.
 * claude (verified on 2.1.283): `--print --restricted --permission-mode dontAsk
   --permission-prompts none --strict-mcp-config --setting-sources ""`, the authority's
   `--tools` and `--allowed-tools`, `--settings` with `Read(...)` deny rules for the secret
-  deny list (§8.3's list, one source: `projectctx.DenyPatterns`), then `--model` and the
-  prompt last. The target repository's settings, hooks and MCP servers never load.
+  deny list (§8.3's list, one source: `projectctx.DenyPatterns`), `--input-format text`,
+  then `--model`; the prompt goes on stdin (§41.1). The target repository's settings, hooks
+  and MCP servers never load. The CLI's version must be inside the range these flags were
+  verified on (§41.4).
 * codex and gemini support no authority until their flags are verified.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
@@ -2696,16 +2744,16 @@ human sees and confirms between steps.
   also blocks Edit and Write on that path. This keeps other runs' prompts and context away
   from the file tools, and keeps a step from writing what a resume reads back (§37).
   Verified live on claude 2.1.285.
-* Provider CLIs and the test command get `execution.ScrubbedEnv()`: the inherited
+* Provider CLIs get `execution.ScrubbedEnv()`: the inherited
   environment minus the variables through which a launching agent session reaches its
   children (`CLAUDECODE`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_PID`), and minus the
   credential variables the config names: `decision.jev.api_key_env` (whatever the decision
   provider) and, with a `jira` section, `jira.token_env` and `jira.email_env`
   (`Config.CredentialEnvNames`, registered through `execution.ScrubCredentials` right
-  after `Validate`). The orchestrator reads those itself; no child needs them, and the test
-  command runs code a model wrote. Names are exact, never prefixes. git keeps the full
-  environment.
+  after `Validate`). The orchestrator reads those itself; no child needs them. Names are
+  exact, never prefixes. The test command, which runs code a model wrote, gets the narrower
+  `execution.TestEnv()` allowlist instead (§41.3). git keeps the full environment.
 
 ## 38.3 Guards around implement
 
@@ -2743,11 +2791,15 @@ human sees and confirms between steps.
   baseline, fingerprint first, before anything runs (§37.8).
 * **The test step.** The same guard runs around the test command, which executes code the
   model wrote; the guard compares the git fingerprint before running `git status`, which
-  would itself run a planted `core.fsmonitor`. With `test.sandbox: bwrap` the command runs
-  under bubblewrap: filesystem read-only, the repository and a private `/tmp` writable, the
+  would itself run a planted `core.fsmonitor`. Unless `test.sandbox: none` (the sandbox is
+  the default, §41.3) the command runs under bubblewrap: filesystem read-only, the repository and a private `/tmp` writable, the
   git directories read-only, `$HOME` an empty tmpfs, no network, only `test.ro_binds` /
   `test.rw_binds` re-exposed. The fail-fast chain checks `bwrap` on PATH, the binds, and one
-  probe run with the same isolation; the authority line shows `test runs (sandboxed)`.
+  probe run with the same isolation; the authority line shows `test runs (sandboxed)`, or a
+  warning with `none`. The pre-run test (§41.5) runs under the same guard.
+* **Secret scan.** After the guard check of every `implement` and `test`, what the tree adds
+  is scanned for likely secrets; a new finding stops the step (`mode: stop`, the default) or
+  is recorded and redacted from the review prompt (`warn`) (§41.6).
 * **Fenced data.** The git diff (review) and test output (implement retry) are embedded in
   prompts inside a delimiter with a per-prompt random nonce and a line saying the block is
   data, never instructions. The task is embedded the same way in every stage prompt, with
@@ -2757,16 +2809,18 @@ human sees and confirms between steps.
 ## 38.4 Audit
 
 `run.json` records each AI step's `provider.authority`, the run's `pre_run_ref`,
-`head_ref` and `resume_baseline`, and, per resume, a `resumes` record and each new step's
-`attempt`. The `authority:` line and the `Restore point:` line are printed in every mode
+`head_ref` and `resume_baseline`, the provider CLI versions (`provider_cli`), the pre-run
+test, the secret-scan baseline and any `secret_findings`, and, per resume, a `resumes`
+record (with its own `provider_cli`) and each new step's `attempt`. The `authority:` line and the `Restore point:` line are printed in every mode
 (§27), and again before a resume's approval.
 
 ## 38.5 Not protected
 
-* Without `test.sandbox: bwrap`, code the model writes runs in `test` with the operator's
-  authority; reviewing the changes in `manual` mode before `test` is then the mitigation.
-  With it, the test can still read what the operator can read outside `$HOME`, and write
-  anything inside the repository.
+* With `test.sandbox: none`, code the model writes runs in `test` with the operator's
+  filesystem and network (its environment is still the allowlist); reviewing the changes in
+  `manual` mode before `test` is then the mitigation. Under the sandbox, the test can still
+  read what the operator can read outside `$HOME`, and write anything inside the repository
+  (the secret scan looks at what it added).
 * Repository content goes to the model provider - that is the job; only the secret deny
   list is withheld from the file tools, matched case-sensitively.
 * Prompt injection is reduced, not eliminated; its effects are bounded by the step's
@@ -3064,3 +3118,141 @@ run, not only `--stage`.
 * `--base <ref>` and reviewing committed history.
 * Per-stage provider or model flags; a config key for default stages.
 * A partial decision (stages from flags, complexity from a provider).
+
+---
+
+# 41. Hardening: reliable prompts and safe defaults
+
+Normative. Design record, the owner's answers (Q1-Q12), defaults and the plan as built:
+`specs/hardening/` (`SPEC.md`, `tasks/`). Nothing here widens an authority; every rule
+narrows or bounds.
+
+## 41.1 Prompt delivery
+
+The claude adapter passes every prompt on stdin (`--input-format text`), never in argv:
+Linux limits one argument to 128 KiB, and a prompt carrying a diff or a test log can exceed
+it. argv ends with `--model <model>`; a `ProviderError` shows the argv and
+`prompt: N bytes on stdin`, never the text. codex and gemini keep the prompt in argv until
+their own specs adopt stdin (they support no authority yet).
+
+## 41.2 Bounded prompt content
+
+```yaml
+limits:
+  prompt:                        # optional; artifacts and logs always keep everything
+    max_test_output_bytes: 32768 # 4096..1048576
+    max_diff_bytes: 262144       # 16384..4194304
+    diff_summarize: []           # extra globs shown to review as a stat line only
+```
+
+* **Test output** in the implement retry prompt (and a red pre-run test's, §41.5) is cut by
+  `action.BoundTestOutput`: stdout and stderr share the budget, a stream within its share is
+  unchanged, a longer one keeps its beginning, the lines that look like failures (`--- FAIL`,
+  `panic:`, `Error`, pytest `E   `, jest `●`, `Traceback`, `x_test.go:42:`, ...) and its end,
+  on line boundaries, with `[... N lines, B bytes omitted ...]` at each cut. The prompt says
+  it was shortened. The cut depends only on the input, so a resume rebuilds the same prompt.
+* **The review diff** is `Repository.ReviewDiff`: a list of every changed file with
+  `+added -deleted` and how it is shown, then the full diffs in git's order while they fit
+  `max_diff_bytes`. New (untracked, not ignored) files are shown with their content. A file
+  matching the secret deny list (§8.3, tracked or not) is named only; binaries and new
+  symlinks are named; lock and minified files (`go.sum`, `package-lock.json`, `yarn.lock`,
+  `pnpm-lock.yaml`, `Cargo.lock`, `poetry.lock`, `*.min.js`, ... plus `diff_summarize`) get
+  a stat line - manifests such as `go.mod` stay visible; a file over the budget gets a stat
+  line and later, smaller ones still get their chance; the list itself takes at most half
+  the budget and more than 500 untracked files are counted, not listed. git runs with
+  `--no-ext-diff --no-textconv`. The prompt tells the reviewer which files it may Read
+  itself. The review result records `diff: {bytes, files, shown, summarized, withheld,
+  truncated}`; a `diff` the model writes is discarded.
+
+## 41.3 The test command's environment and sandbox
+
+* Every process that runs `test.command` (the test step, the pre-run test, the bwrap probe)
+  gets `execution.TestEnv()`, an allowlist: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, the
+  locale variables, `TERM`, `TZ`, `TMPDIR`, `CI`, and toolchain variables (`GOPATH`,
+  `GOROOT`, `GOFLAGS`, `GOCACHE`, `GOMODCACHE`, `GOTOOLCHAIN`, `CGO_ENABLED`, `CARGO_HOME`,
+  `RUSTUP_HOME`, `JAVA_HOME`, `VIRTUAL_ENV`, `PYTHONPATH`, `NODE_OPTIONS`,
+  `XDG_CACHE_HOME`). Proxies are not in it: a proxy URL can carry credentials.
+  `test.env_pass` adds exact names; a name that looks like a credential (`TOKEN`, `SECRET`,
+  `PASSWORD`, `PASSWD`, `CREDENTIAL`, `APIKEY`, `PRIVATEKEY` anywhere, or a whole `AUTH`,
+  `KEY`, `KEYS`, `PASS`, `COOKIE` segment), a declared credential or a parent-session
+  variable is a validation error, with no override. Provider CLIs keep
+  `execution.ScrubbedEnv()` (§38.2).
+* `test.sandbox` absent means `bwrap` (§38.3). `none` must be written out; the authority
+  line then ends with `— NOT sandboxed: network, $HOME and your files are reachable` on
+  every run. A host without a working bwrap fails fast, naming both remedies.
+
+## 41.4 Provider CLI version
+
+Each adapter that supports an authority declares the CLI versions its flags were verified
+on (`provider.VersionVerifier`); claude: `>= 2.1.283, < 2.2.0`. Right after
+`ValidateAuthorities`, for every provider the config routes (actions, translator, LLM
+decision provider), the fail-fast chain runs `<cli> --version` (10 s). A version outside
+the range, or one that cannot be parsed, stops before any call (exit 2) naming the range,
+the live suite to run, and `security.allow_unverified_cli: true`, which turns the refusal
+into a red warning in every run header and is recorded. A CLI that cannot be executed is
+refused regardless. `run.json` records `provider_cli: {<provider>: {version, verified}}`
+and each resume its own in `resumes[].provider_cli`; `validate` prints the version and the
+range. Extending the range needs a green `go test -tags security ./test/security/...` on
+that version and an entry in `specs/permissions/DECISIONS.md`.
+
+## 41.5 Pre-run test
+
+When the workflow contains both `implement` and `test`, `test.baseline` is not `off`
+(`require_green` is the default) and no step has run yet, the test command runs once after
+approval, right before the engine - same runner, sandbox, environment and guard as the test
+step, inside `execution.timeout`. It is not an execution.
+
+* Exit 0: `run.json: pre_run_test` (the whole `TestResult`), console `pre-run test: passed`.
+* Non-zero: the run fails before any AI step (exit 4), naming the log
+  (`logs/pre-run-test.{stdout,stderr}.log`) and the ways out: fix the tests, start the run
+  with `--allow-red-tests`, or set `test.baseline: off`. A resume re-runs it.
+* `run --allow-red-tests` (valid with `run` only, recorded as `allow_red_tests`): the task is
+  to make failing tests pass. A red pre-run test is recorded and the run goes on; the first
+  implement prompt gets its bounded output ("already FAILS before any change, and the
+  operator expects that") until the first test step has run, also after a resume. The run
+  still ends green or not by the test step's exit code.
+
+## 41.6 Secret scan
+
+```yaml
+security:
+  secret_scan:
+    mode: stop            # stop (default) | warn | off
+    allow_paths: []       # protected_paths-style patterns, e.g. [testdata/**]
+```
+
+* `internal/secretscan` (standard library only) finds cloud and service tokens (AWS, GitHub,
+  GitLab, Slack, Anthropic, OpenAI, Stripe), private keys, JWTs, passwords in URLs and
+  high-entropy assignments to secret-like names, and skips documentation examples,
+  placeholders and environment lookups. A finding is a rule, a line and a fingerprint
+  (`sha256(rule, path, sha256(value))`) - never the value.
+* After every `implement` and `test` step (after its guard check), what the working tree
+  adds against HEAD is scanned (`Repository.AddedContent`): the `+` lines of tracked files
+  and the whole of untracked, not ignored files up to 1 MiB, the runs directory excluded,
+  no deny list (the scan is local). Findings under `allow_paths` are dropped.
+* Before the first step (after the pre-run test) the same scan records
+  `run.json: secret_scan_baseline`; only findings outside it, and not already recorded,
+  count. A resume keeps the baseline.
+* `stop`: the step fails (exit 4) with `file:line (rule)` per finding, the restore point and
+  both ways out; nothing has sent the value on. `warn`: each new finding is printed and
+  appended to `secret_findings: [{step_index, file, line, rule, fingerprint}]`. `off`: the run
+  says `Secret scan: off`.
+* While the scan is on, the review diff goes through `secretscan.Redact`: every matched value
+  becomes `[REDACTED:<rule>]` (a private key as a whole block), baseline findings included.
+
+## 41.7 Persistence
+
+`run.json` gains, each validated strictly on load (§37.4): `provider_cli`,
+`resumes[].provider_cli`, `allow_red_tests`, `pre_run_test` (`success` must match
+`exit_code == 0`), `secret_scan_baseline` (hex sha256, at most 10 000),
+`secret_findings` (known rule, clean relative path, line ≥ 1, step in range). The review
+result gains `diff`. Logs gain `logs/pre-run-test.{stdout,stderr}.log`.
+
+## 41.8 Not covered
+
+* Secrets in model prose (artifacts, provider output logs), in ignored files, split across
+  lines or encoded.
+* `PATH` entries inside the repository; macOS sandboxing; codex/gemini stdin delivery.
+* Comparing failing test names between the pre-run test and the test step: a red suite is
+  either refused or the task.
+* Files the tests create that are not ignored appear in the review diff.

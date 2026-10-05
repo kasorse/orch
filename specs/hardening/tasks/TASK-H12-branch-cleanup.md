@@ -28,3 +28,8 @@ Remove the branches already merged into master, locally and on origin (answer Q1
 ## Acceptance
 
 No merged branch left locally or on origin; nothing unmerged deleted.
+
+## As built
+
+Done by the owner before 2026-10-06; `git fetch --prune` and `git branch -a` then showed only
+`master` and the phase's own `feature/hardening`.

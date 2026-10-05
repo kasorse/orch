@@ -1,7 +1,10 @@
 # Hardening — reliable prompts and safe defaults (phase 0)
 
-Status: **ready for implementation** (2026-10-05). The design questions are answered
-(`SPEC.md` §13); the author's defaults are in §14. Covers TODO.md phase 0 (S1–S6).
+Status: **implemented** (2026-10-06): H01–H12 done (H12 by the owner); H13 (weekly live
+check in CI) is optional. MVP.md §41 is the normative home; this
+folder is the design record. The design questions are answered (`SPEC.md` §13, Q1–Q12) and
+the author's defaults are in §14. What was built differently, and why, is in each task's
+"As built" section. Covers TODO.md phase 0 (S1–S6).
 
 | document | role |
 |---|---|
@@ -32,8 +35,8 @@ review model. This phase fixes all of it without widening any authority.
 | [H08](tasks/TASK-H08-secretscan-package.md) | `internal/secretscan` rules and tests ✓ | S5 | M | — |
 | [H09](tasks/TASK-H09-secret-scan-wiring.md) | secret scan in the run: baseline, stop/warn, redaction ✓ | S5 | M | H03, H07, H08 |
 | [H10](tasks/TASK-H10-integration.md) | integration scenarios ✓ | — | M | H01–H09 |
-| [H11](tasks/TASK-H11-documentation.md) | MVP.md, CLAUDE.md, README, example config, TODO.md | — | S | H10 |
-| [H12](tasks/TASK-H12-branch-cleanup.md) | delete merged branches (local + origin) | S6 | S | — |
+| [H11](tasks/TASK-H11-documentation.md) | MVP.md, CLAUDE.md, README, example config, TODO.md ✓ | — | S | H10 |
+| [H12](tasks/TASK-H12-branch-cleanup.md) | delete merged branches (local + origin) ✓ | S6 | S | — |
 | [H13](tasks/TASK-H13-weekly-live-check.md) | weekly live permission check in CI (optional) | S3 | S | H06 |
 
 ```

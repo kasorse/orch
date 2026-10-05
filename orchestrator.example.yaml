@@ -110,6 +110,9 @@ execution:
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
   protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+  # Every run checks the provider CLI's version against the range its permission flags were
+  # verified on (MVP.md §41.4) and refuses one outside it; true goes on, with a red warning.
+  # allow_unverified_cli: false
   # What implement and the test command add is scanned for likely secrets (cloud and service
   # tokens, private keys, JWTs, passwords in URLs, high-entropy assignments). stop (default)
   # ends the run before anything sends the value on; warn records it (file, line, rule - never

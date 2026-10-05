@@ -1,9 +1,8 @@
 # Spec: Hardening — reliable prompts and safe defaults (phase 0)
 
-Status: **ready for implementation** (2026-10-05). The design questions are answered (§13);
-the defaults in §14 are the author's and may be overridden before the task that uses them
-starts. MVP.md becomes the normative home once the documentation task (H11) lands; until
-then this file is.
+Status: **implemented** (2026-10-06). The design questions are answered (§13), the defaults
+in §14 were kept, and MVP.md §41 is now the normative home; this file is the design record.
+What was built differently is in each task's "As built" section.
 Scope: TODO.md phase 0 (S1–S6). How a prompt reaches the provider CLI and how much
 repository data goes into it; what the test command's environment is and whether it is
 sandboxed by default; which provider CLI versions the orchestrator trusts; a test run before
