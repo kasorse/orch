@@ -113,6 +113,46 @@ func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
 type LimitsConfig struct {
 	MaxSteps         int `yaml:"max_steps"`
 	MaxFixIterations int `yaml:"max_fix_iterations"`
+	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
+	// The section and each key are optional.
+	Prompt PromptLimitsConfig `yaml:"prompt"`
+}
+
+// Defaults and ranges of limits.prompt (specs/hardening/SPEC.md §5.1).
+const (
+	DefaultMaxDiffBytes       = 262144
+	MinMaxDiffBytes           = 16 << 10
+	MaxMaxDiffBytes           = 4 << 20
+	DefaultMaxTestOutputBytes = 32768
+	MinMaxTestOutputBytes     = 4 << 10
+	MaxMaxTestOutputBytes     = 1 << 20
+)
+
+// PromptLimitsConfig is limits.prompt. The byte limits are pointers so an absent key (nil)
+// takes the default while an explicit 0 is still refused as out of range; read them through
+// DiffBytes and TestOutputBytes.
+type PromptLimitsConfig struct {
+	MaxDiffBytes       *int `yaml:"max_diff_bytes"`
+	MaxTestOutputBytes *int `yaml:"max_test_output_bytes"`
+	// DiffSummarize adds globs to the files the review diff shows as a stat line only.
+	DiffSummarize []string `yaml:"diff_summarize"`
+}
+
+// DiffBytes is the review diff's budget: max_diff_bytes, or its default.
+func (p PromptLimitsConfig) DiffBytes() int {
+	if p.MaxDiffBytes == nil {
+		return DefaultMaxDiffBytes
+	}
+	return *p.MaxDiffBytes
+}
+
+// TestOutputBytes is the budget for a failing test's output in the implement prompt:
+// max_test_output_bytes, or its default.
+func (p PromptLimitsConfig) TestOutputBytes() int {
+	if p.MaxTestOutputBytes == nil {
+		return DefaultMaxTestOutputBytes
+	}
+	return *p.MaxTestOutputBytes
 }
 
 // ExecutionConfig.Timeout is parsed from a duration string like "15m" via a custom

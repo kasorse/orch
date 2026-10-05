@@ -312,3 +312,23 @@ func TestLoad_EmptyFile(t *testing.T) {
 		t.Error("an empty config must fail Validate")
 	}
 }
+
+func TestLoad_PromptLimits(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""),
+		"limits: {max_steps: 12, max_fix_iterations: 2}",
+		"limits:\n  max_steps: 12\n  max_fix_iterations: 2\n  prompt:\n    max_test_output_bytes: 8192\n    diff_summarize: [\"*.pb.go\"]", 1)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	p := cfg.Limits.Prompt
+	if p.TestOutputBytes() != 8192 || p.DiffBytes() != DefaultMaxDiffBytes || len(p.DiffSummarize) != 1 {
+		t.Errorf("limits.prompt = %+v (test output %d, diff %d)", p, p.TestOutputBytes(), p.DiffBytes())
+	}
+
+	_, err = Load(writeTempConfig(t, strings.Replace(validV2(""),
+		"limits: {max_steps: 12, max_fix_iterations: 2}",
+		"limits: {max_steps: 12, max_fix_iterations: 2, prompt: {max_diff: 1}}", 1)))
+	if err == nil || !strings.Contains(err.Error(), "max_diff") {
+		t.Errorf("an unknown key under limits.prompt must be rejected, got %v", err)
+	}
+}

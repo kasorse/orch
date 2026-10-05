@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 
@@ -49,6 +50,8 @@ func Validate(cfg Config) error {
 	if cfg.Limits.MaxFixIterations <= 0 {
 		problems = append(problems, fmt.Sprintf("limits.max_fix_iterations must be positive, got %d", cfg.Limits.MaxFixIterations))
 	}
+
+	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
@@ -122,6 +125,33 @@ func supportedProviderNames() string {
 		names[i] = string(id)
 	}
 	return strings.Join(names, ", ")
+}
+
+func promptLimitProblems(p PromptLimitsConfig) []string {
+	var problems []string
+	for _, l := range []struct {
+		key      string
+		value    *int
+		min, max int
+	}{
+		{"limits.prompt.max_diff_bytes", p.MaxDiffBytes, MinMaxDiffBytes, MaxMaxDiffBytes},
+		{"limits.prompt.max_test_output_bytes", p.MaxTestOutputBytes, MinMaxTestOutputBytes, MaxMaxTestOutputBytes},
+	} {
+		if l.value != nil && (*l.value < l.min || *l.value > l.max) {
+			problems = append(problems, fmt.Sprintf("%s must be between %d and %d, got %d", l.key, l.min, l.max, *l.value))
+		}
+	}
+	for i, g := range p.DiffSummarize {
+		if strings.TrimSpace(g) == "" {
+			problems = append(problems, fmt.Sprintf("limits.prompt.diff_summarize[%d] must not be empty", i))
+			continue
+		}
+		// path.Match reports a malformed pattern even when the name does not match.
+		if _, err := path.Match(g, ""); err != nil {
+			problems = append(problems, fmt.Sprintf("limits.prompt.diff_summarize[%d] %q: %v", i, g, err))
+		}
+	}
+	return problems
 }
 
 func sandboxProblems(t TestConfig) []string {

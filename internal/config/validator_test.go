@@ -235,3 +235,45 @@ func TestValidate_Effort(t *testing.T) {
 		t.Errorf("effort on gemini not refused: %v", err)
 	}
 }
+
+func TestPromptLimits_Defaults(t *testing.T) {
+	var p PromptLimitsConfig
+	if p.DiffBytes() != DefaultMaxDiffBytes || p.TestOutputBytes() != DefaultMaxTestOutputBytes {
+		t.Errorf("absent keys: got %d / %d, want the defaults", p.DiffBytes(), p.TestOutputBytes())
+	}
+	diff, out := 65536, 8192
+	p = PromptLimitsConfig{MaxDiffBytes: &diff, MaxTestOutputBytes: &out}
+	if p.DiffBytes() != diff || p.TestOutputBytes() != out {
+		t.Errorf("set keys: got %d / %d", p.DiffBytes(), p.TestOutputBytes())
+	}
+}
+
+func TestValidate_PromptLimits(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	for name, tc := range map[string]struct {
+		prompt PromptLimitsConfig
+		want   string // "" = valid
+	}{
+		"absent":            {PromptLimitsConfig{}, ""},
+		"bounds inclusive":  {PromptLimitsConfig{MaxDiffBytes: intPtr(MinMaxDiffBytes), MaxTestOutputBytes: intPtr(MaxMaxTestOutputBytes)}, ""},
+		"diff zero":         {PromptLimitsConfig{MaxDiffBytes: intPtr(0)}, "limits.prompt.max_diff_bytes must be between 16384 and 4194304, got 0"},
+		"diff too large":    {PromptLimitsConfig{MaxDiffBytes: intPtr(MaxMaxDiffBytes + 1)}, "limits.prompt.max_diff_bytes must be between"},
+		"test output small": {PromptLimitsConfig{MaxTestOutputBytes: intPtr(MinMaxTestOutputBytes - 1)}, "limits.prompt.max_test_output_bytes must be between 4096 and 1048576"},
+		"test output large": {PromptLimitsConfig{MaxTestOutputBytes: intPtr(MaxMaxTestOutputBytes + 1)}, "limits.prompt.max_test_output_bytes must be between"},
+		"globs":             {PromptLimitsConfig{DiffSummarize: []string{"*.pb.go", "gen/*.ts"}}, ""},
+		"bad glob":          {PromptLimitsConfig{DiffSummarize: []string{"*.go", "gen/[a"}}, `limits.prompt.diff_summarize[1] "gen/[a": syntax error in pattern`},
+		"empty glob":        {PromptLimitsConfig{DiffSummarize: []string{" "}}, "limits.prompt.diff_summarize[0] must not be empty"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Limits.Prompt = tc.prompt
+			err := Validate(cfg)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("want valid, got %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}

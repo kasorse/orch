@@ -23,6 +23,7 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,
 		ReviewIssues:           d.pendingReviewIssues,
+		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
 	})
 
 	// Fail closed: without a guard nothing would stop a write that turns into execution
