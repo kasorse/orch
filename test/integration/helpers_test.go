@@ -41,6 +41,10 @@ type configOptions struct {
 	testCommand      string
 	// testEnvPass renders test.env_pass when set.
 	testEnvPass []string
+	// testBaseline is test.baseline. defaultConfigOptions sets "off": most scenarios fix the
+	// fixture's failing test, which a pre-run test would refuse (specs/hardening/SPEC.md §8);
+	// the pre-run test scenarios set it back.
+	testBaseline string
 	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
 	// via defaultConfigOptions - tests only override it to exercise the run-wide
 	// timeout (MVP.md §25) with a short deadline.
@@ -86,6 +90,7 @@ func defaultConfigOptions() configOptions {
 		maxSteps:         12,
 		maxFixIterations: 2,
 		testCommand:      "go test ./...",
+		testBaseline:     "off",
 		timeout:          "30s",
 		jevURL:           "http://127.0.0.1:1", // tests using Jev replace it with their server's
 		onFailure:        "fail",
@@ -167,6 +172,7 @@ actions:
 
 test:
   sandbox: none
+  baseline: %s
   command: %q
 %s
 limits:
@@ -177,7 +183,7 @@ execution:
   timeout: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
-		opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
+		opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
 	content += opts.jira.yaml()
 
 	path := filepath.Join(dir, "orchestrator.yaml")

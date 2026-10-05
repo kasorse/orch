@@ -277,3 +277,52 @@ func TestRestore_ResumedImplementPromptBoundsTheSameWay(t *testing.T) {
 		t.Errorf("the test output was not bounded (prompt %d bytes)", len(a))
 	}
 }
+
+func TestPreRunFailure_ShownToImplementUntilTheFirstTest(t *testing.T) {
+	red := domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "--- FAIL: TestAdd\n"}
+	client := &fakeClient{output: `{"summary":"fixed","changed_files":[],"tests_added":[]}`}
+	d := newDispatcher(client)
+	d.applyPreRunTest(red)
+
+	run := &domain.Run{ID: "r", Task: domain.Task{Description: "make TestAdd pass"}}
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(client.lastReq.Prompt, "The test command already FAILS before any change") ||
+		!strings.Contains(client.lastReq.Prompt, "--- FAIL: TestAdd") {
+		t.Errorf("first implement lacks the red pre-run test:\n%s", client.lastReq.Prompt)
+	}
+
+	// After a test step its own result speaks; the pre-run output is not repeated.
+	d.applyTest(domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "--- FAIL: TestOther\n"})
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(client.lastReq.Prompt, "already FAILS before any change") {
+		t.Error("the pre-run output was repeated after a test step")
+	}
+
+	// A green pre-run test shows nothing.
+	d2 := newDispatcher(client)
+	d2.applyPreRunTest(domain.TestResult{Command: "go test ./...", Success: true})
+	if _, err := d2.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(client.lastReq.Prompt, "already FAILS") {
+		t.Error("a green pre-run test was shown to implement")
+	}
+}
+
+func TestRestore_KeepsTheRedPreRunTest(t *testing.T) {
+	red := &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL"}
+	run := &domain.Run{ID: "r", PreRunTest: red, AllowRedTests: true, Executions: []domain.StepExecution{
+		{Index: 0, Action: domain.ActionAnalyze, Status: domain.StepCompleted},
+	}}
+	d := &Dispatcher{}
+	if err := d.Restore(run, memReader{memKey(0, domain.ActionAnalyze): `{"summary":"a","root_cause":"","affected_files":null,"recommendation":"","risks":null}`}); err != nil {
+		t.Fatal(err)
+	}
+	if d.preRunFailureForImplement() == nil {
+		t.Error("a resumed run lost the red pre-run test its first implement needs")
+	}
+}

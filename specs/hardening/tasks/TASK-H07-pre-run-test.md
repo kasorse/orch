@@ -54,3 +54,37 @@ a red suite stops the run before `implement` is blamed for it (`SPEC.md` §8).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. Built with one addition the owner chose during the task (`SPEC.md` Q12)
+and these differences:
+
+- **`run --allow-red-tests`.** Under `require_green` the most common task — "fix the bug
+  this failing test shows", "make the tests pass" — would always be refused, and the only way
+  out (`test.baseline: off`) turns the check off for every run. With the flag, a red pre-run
+  test is recorded and the run goes on; the first implement prompt gets the bounded output
+  ("The test command already FAILS before any change, and the operator expects that"),
+  until the first test step has run. The flag is valid with `run` only and recorded as
+  `run.json: allow_red_tests`; a resume continues with it.
+- **`pre_run_test` holds the whole `TestResult`** (command, exit code, stdout, stderr,
+  duration, sandboxed), not only `{exit_code, duration, sandboxed}`: a run resumed after its
+  first step but before implement must still show implement the red output, and `Restore`
+  rebuilds it from `run.json`, as it does for test steps. Validation: `success` must match
+  `exit_code == 0`, duration ≥ 0.
+- The sandbox and guard setup needed no reordering: they already sat right before
+  `engine.Run`; the pre-run test is inserted between them and the engine, inside the
+  engine context (it counts toward `execution.timeout`).
+- `executeTest` and `PreRunTest` share `Dispatcher.guardedTest`; a guard violation names
+  the step `pre-run test`. The guard-less refusal now reads "running the test command
+  requires a guard" for both.
+- Logs go through `Store.AppendCallLog` (`logs/pre-run-test.{stdout,stderr}.log`, like the
+  translate and decision calls), written when the suite is red or the guard tripped.
+- Console: a spinner while it runs, then `pre-run test ✓ passed (1.2s)` or `⚠ failed (exit
+  1, …)` with either "the run stops before any change" or "going on: --allow-red-tests".
+- Integration configs default to `test.baseline: off` (the fixture's test is red until Add
+  is fixed, which is what most scenarios do); scenario 26 sets `require_green` and covers:
+  red → exit 4 before any call, with logs and both ways out named; `--allow-red-tests` →
+  implement sees the red output and the run completes; green → recorded; `off` → skipped;
+  a pre-run test that writes `.git/hooks` → guard violation; resume after the suite is fixed
+  → pre-run test passes and the workflow runs from the first step.

@@ -22,3 +22,24 @@ func TestValidateProviderCLI(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRun_PreRunTest(t *testing.T) {
+	run := func(r *domain.TestResult) *domain.Run {
+		return &domain.Run{ID: "r", Status: domain.RunFailed, PreRunTest: r}
+	}
+	if err := validateRun(run(&domain.TestResult{ExitCode: 1}), "r"); err != nil {
+		t.Errorf("a red pre-run test is valid: %v", err)
+	}
+	if err := validateRun(run(&domain.TestResult{ExitCode: 0, Success: true}), "r"); err != nil {
+		t.Errorf("a green pre-run test is valid: %v", err)
+	}
+	for name, r := range map[string]*domain.TestResult{
+		"success with a failing exit": {ExitCode: 2, Success: true},
+		"failure with exit 0":         {ExitCode: 0},
+		"negative duration":           {ExitCode: 1, Duration: -1},
+	} {
+		if err := validateRun(run(r), "r"); err == nil || !strings.Contains(err.Error(), "pre_run_test") {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}

@@ -445,3 +445,43 @@ func (r *ConsoleReporter) RunFinished(run *domain.Run) {
 		fmt.Fprintf(r.Out, "\nRun stopped.\nReason: %s\n", run.FailureReason)
 	}
 }
+
+// PreRunTestStarted announces the test command's run before the first step
+// (specs/hardening/SPEC.md §8).
+func (r *ConsoleReporter) PreRunTestStarted() {
+	if r.Pretty {
+		r.startSpin("Running the tests before any change", "")
+		return
+	}
+	fmt.Fprintln(r.Out, "\nPre-run test: running the tests before any change...")
+}
+
+// PreRunTestFinished reports the pre-run test: passed, failed and stopping the run, or
+// failed and going on because the run was started with --allow-red-tests. A nil result
+// (the command never ran) only ends the progress display.
+func (r *ConsoleReporter) PreRunTestFinished(result *domain.TestResult, allowRed bool) {
+	r.stopSpin()
+	if result == nil {
+		return
+	}
+	took := result.Duration.Round(100 * time.Millisecond)
+	var text string
+	switch {
+	case result.Success:
+		text = fmt.Sprintf("passed (%s)", took)
+	case allowRed:
+		text = fmt.Sprintf("failed (exit %d, %s) - going on: --allow-red-tests, the task is to make them pass", result.ExitCode, took)
+	default:
+		text = fmt.Sprintf("failed (exit %d, %s) - the run stops before any change", result.ExitCode, took)
+	}
+	if r.Pretty {
+		st := r.st()
+		mark := st.green("✓")
+		if !result.Success {
+			mark = st.yellow("⚠")
+		}
+		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "pre-run test")), mark, text)
+		return
+	}
+	fmt.Fprintf(r.Out, "Pre-run test: %s\n", text)
+}

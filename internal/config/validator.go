@@ -63,6 +63,11 @@ func Validate(cfg Config) error {
 
 	problems = append(problems, sandboxProblems(cfg.Test)...)
 	problems = append(problems, envPassProblems(cfg)...)
+	switch cfg.Test.Baseline {
+	case "", BaselineRequireGreen, BaselineOff:
+	default:
+		problems = append(problems, fmt.Sprintf("test.baseline must be require_green (the default) or off, got %q", cfg.Test.Baseline))
+	}
 
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {

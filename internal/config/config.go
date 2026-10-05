@@ -92,7 +92,21 @@ type TestConfig struct {
 	// allowlist (execution.TestEnv; specs/hardening/SPEC.md §6.2). Exact names; a name that
 	// looks like a credential is refused.
 	EnvPass []string `yaml:"env_pass"`
+	// Baseline is require_green (or empty, the default) or off: whether a workflow with
+	// implement and test runs the test command once before the first step and refuses a red
+	// suite (specs/hardening/SPEC.md §8). Read it through PreRunTest.
+	Baseline string `yaml:"baseline"`
 }
+
+// test.baseline values.
+const (
+	BaselineRequireGreen = "require_green"
+	BaselineOff          = "off"
+)
+
+// PreRunTest reports whether the test command runs before the first step of a workflow
+// that implements and tests: unless test.baseline is off, it does.
+func (t TestConfig) PreRunTest() bool { return t.Baseline != BaselineOff }
 
 // SandboxBwrap is the one sandbox test.sandbox currently supports, and the default;
 // SandboxNone runs the test command unsandboxed and must be written out

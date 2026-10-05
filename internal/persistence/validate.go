@@ -44,6 +44,9 @@ func validateRun(run *domain.Run, runID string) error {
 	if err := validateProviderCLI(run.ProviderCLI); err != nil {
 		return fmt.Errorf("provider_cli: %w", err)
 	}
+	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
+		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)

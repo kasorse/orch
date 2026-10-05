@@ -22,6 +22,7 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		Plan:                   d.lastPlan,
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,
+		PreRunFailure:          d.preRunFailureForImplement(),
 		ReviewIssues:           d.pendingReviewIssues,
 		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
 	})
@@ -102,4 +103,13 @@ func parseImplementation(output string) domain.ImplementationArtifact {
 		}
 	}
 	return domain.ImplementationArtifact{Summary: output}
+}
+
+// preRunFailureForImplement is the red pre-run test implement should see: only until the
+// first test step has run, whose result then speaks for itself.
+func (d *Dispatcher) preRunFailureForImplement() *domain.TestResult {
+	if d.lastTest != nil {
+		return nil
+	}
+	return d.preRunFailure
 }

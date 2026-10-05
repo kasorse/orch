@@ -47,7 +47,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -67,6 +67,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
 	}
+	if cli.allowRedTests && rest[0] != "run" {
+		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
+	}
 
 	switch rest[0] {
 	case "version":
@@ -79,7 +82,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cli.jiraRef == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.mode, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -109,12 +112,15 @@ type cliArgs struct {
 	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
 	// §4); empty means the decision layer chooses.
 	stages []domain.Stage
+	// allowRedTests is --allow-red-tests: the task is to make failing tests pass, so a red
+	// pre-run test does not stop the run (specs/hardening/SPEC.md §8.4).
+	allowRedTests bool
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X, the repeatable
-// --stage/--stage=X and --verbose/-v out of args, in any position, and returns them with the remaining
+// --stage/--stage=X, --allow-red-tests and --verbose/-v out of args, in any position, and returns them with the remaining
 // positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
 	cli := cliArgs{configPath: defaultConfigPath}
@@ -169,6 +175,8 @@ func parseArgs(args []string) (cliArgs, error) {
 			if !slices.Contains(cli.stages, parsed[0]) {
 				cli.stages = append(cli.stages, parsed[0])
 			}
+		case arg == "--allow-red-tests":
+			cli.allowRedTests = true
 		case arg == "--verbose" || arg == "-v":
 			cli.verbose = true
 		default:
@@ -344,7 +352,7 @@ func decisionsReport(stdout io.Writer) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -427,6 +435,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	run.ProviderCLI = clis
+	run.AllowRedTests = allowRedTests
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)
@@ -686,6 +695,12 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	// every step and so cannot be part of the baseline.
 	s.dispatcher.Guard = action.NewRepoGuard(s.repo, slices.Concat(s.protected, action.RunDirPatterns(s.runsRel)))
 
+	if needsPreRunTest(*cfg, run) {
+		if err := preRunTest(runCtx, s); err != nil {
+			return failRun(store, run, err)
+		}
+	}
+
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
 	observer := &runObserver{reporter: s.reporter, store: store}
@@ -712,6 +727,42 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		s.reporter.Answer(answer)
 	}
 	return nil
+}
+
+// needsPreRunTest reports whether the test command runs before the first step
+// (specs/hardening/SPEC.md §8.1): the workflow implements and tests, test.baseline is not
+// off, and no step has run yet - a fresh run, or a resume of one that never got that far.
+func needsPreRunTest(cfg config.Config, run *domain.Run) bool {
+	return cfg.Test.PreRunTest() && len(run.Executions) == 0 && run.Workflow != nil &&
+		run.Workflow.Contains(domain.ActionImplement) && run.Workflow.Contains(domain.ActionTest)
+}
+
+// preRunTest runs the test command once before the first step and records the result. A
+// red suite stops the run - implement would be sent to fix failures it did not cause -
+// unless the operator started it with --allow-red-tests, which makes the failure part of
+// the task (§8.4). Only the exit code decides.
+func preRunTest(ctx context.Context, s *session) error {
+	run := s.run
+	s.reporter.PreRunTestStarted()
+	result, err := s.dispatcher.PreRunTest(ctx, run)
+	s.reporter.PreRunTestFinished(result, run.AllowRedTests)
+	if result != nil {
+		run.PreRunTest = result
+		if !result.Success || err != nil {
+			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stdout", result.Stdout)
+			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stderr", result.Stderr)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if !result.Success && !run.AllowRedTests {
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("tests fail before any change (pre-run test exited %d; output in %s)\n\n"+
+			"Fix them first. If the task is to make them pass, run it again with --allow-red-tests; "+
+			"to skip this check for every run, set test.baseline: off.",
+			result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test", "stdout"))}
+	}
+	return s.store.SaveRun(run)
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

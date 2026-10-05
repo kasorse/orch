@@ -39,6 +39,15 @@ func (d *Dispatcher) applyTest(r domain.TestResult) {
 	}
 }
 
+// applyPreRunTest remembers a red pre-run test for implement; a green one clears it.
+func (d *Dispatcher) applyPreRunTest(r domain.TestResult) {
+	if r.Success {
+		d.preRunFailure = nil
+	} else {
+		d.preRunFailure = &r
+	}
+}
+
 func (d *Dispatcher) applyReview(r domain.ReviewResult) {
 	if r.Decide() == domain.ReviewFail {
 		d.pendingReviewIssues = r.Issues
@@ -65,7 +74,10 @@ type ArtifactReader interface {
 // rather than continuing with a thinner prompt.
 func (d *Dispatcher) Restore(run *domain.Run, r ArtifactReader) error {
 	d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest = nil, nil, nil, nil, nil
-	d.pendingTestFailure, d.pendingReviewIssues = nil, nil
+	d.pendingTestFailure, d.pendingReviewIssues, d.preRunFailure = nil, nil, nil
+	if run.PreRunTest != nil {
+		d.applyPreRunTest(*run.PreRunTest)
+	}
 
 	for _, exec := range run.Executions {
 		if exec.Status != domain.StepCompleted {

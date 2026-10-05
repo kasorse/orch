@@ -90,6 +90,10 @@ type Dispatcher struct {
 	// transition table never has a test failure and a review failure pending at once.
 	pendingTestFailure  *domain.TestResult
 	pendingReviewIssues []domain.ReviewIssue
+
+	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
+	// is shown to implement until the first test step has run.
+	preRunFailure *domain.TestResult
 }
 
 func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repository, runner *testexec.Runner) *Dispatcher {

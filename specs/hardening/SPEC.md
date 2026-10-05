@@ -297,9 +297,14 @@ execution: `run.Executions`, `max_steps` and `max_fix_iterations` are untouched.
 - Exit 0 → `run.json: pre_run_test {exit_code: 0, duration, sandboxed}`, a console line
   `pre-run test: passed (12.3s)`, and the engine starts.
 - Non-zero → the run fails before the engine starts: status `failed`, reason
-  `tests fail before any change (pre-run test exited N); fix them first, or set
-  test.baseline: off for a task that is about the failing tests`, exit code 4. Its stdout and
+  `tests fail before any change (pre-run test exited N; output in <log>)`, naming
+  `--allow-red-tests` and `test.baseline: off` as the ways out, exit code 4. Its stdout and
   stderr go to `logs/pre-run-test.{stdout,stderr}.log`.
+- Non-zero with `run --allow-red-tests` (Q12) → the run goes on: the task is to make the
+  failing tests pass. `run.json` records `allow_red_tests: true` and the red `pre_run_test`;
+  the first implement prompt gets its bounded output ("already FAILS before any change"),
+  until the first test step runs. The run still ends green or not by the test step's exit
+  code. The flag is valid with `run` only; a resume continues what the run recorded.
 - Such a run is resumable (no executions): a resume re-runs the pre-run test, which
   overwrites `pre_run_test`.
 
@@ -459,6 +464,7 @@ The review artifact gains `diff` (§5.3). Logs gain `logs/pre-run-test.{stdout,s
 | Q9 | scanner engine | **built-in rules**; gitleaks later, separately |
 | Q10 | merged branches | **delete locally and on origin** (H12) |
 | Q11 | language of the spec | English, like the other specs |
+| Q12 | a task that is about failing tests, under `require_green` (asked during H07) | **`run --allow-red-tests`** for that one run; the red output goes to the first implement |
 
 ## 14. Defaults chosen by the author
 

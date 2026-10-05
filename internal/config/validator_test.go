@@ -321,3 +321,21 @@ func TestTestConfig_SandboxedByDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_TestBaseline(t *testing.T) {
+	for _, ok := range []string{"", BaselineRequireGreen, BaselineOff} {
+		cfg := validConfig()
+		cfg.Test.Baseline = ok
+		if err := Validate(cfg); err != nil {
+			t.Errorf("test.baseline %q: %v", ok, err)
+		}
+	}
+	cfg := validConfig()
+	cfg.Test.Baseline = "warn"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), `test.baseline must be require_green (the default) or off, got "warn"`) {
+		t.Errorf("got %v", err)
+	}
+	if !(TestConfig{}).PreRunTest() || (TestConfig{Baseline: BaselineOff}).PreRunTest() {
+		t.Error("PreRunTest disagrees with test.baseline")
+	}
+}

@@ -117,7 +117,13 @@ type Run struct {
 	// ProviderCLI is the CLI version of each routed provider at run start.
 	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
 	// Resumes is append-only: one entry per `orchestrator resume` of this run.
-	Resumes       []Resume        `json:"resumes,omitempty"`
+	Resumes []Resume `json:"resumes,omitempty"`
+	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its
+	// output goes to the first implement instead (specs/hardening/SPEC.md §8.4).
+	AllowRedTests bool `json:"allow_red_tests,omitempty"`
+	// PreRunTest is the test command's result before the first step, when the workflow
+	// implements and tests (specs/hardening/SPEC.md §8). It is not an execution.
+	PreRunTest    *TestResult     `json:"pre_run_test,omitempty"`
 	Executions    []StepExecution `json:"executions"`
 	Status        RunStatus       `json:"status"`
 	FailureReason string          `json:"failure_reason,omitempty"`

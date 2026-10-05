@@ -28,7 +28,7 @@ review model. This phase fixes all of it without widening any authority.
 | [H04](tasks/TASK-H04-test-env-allowlist.md) | test environment allowlist, `test.env_pass` ✓ | S2 | M | — |
 | [H05](tasks/TASK-H05-sandbox-default.md) | sandbox on by default, explicit `none` warns ✓ | S2 | S | H04 |
 | [H06](tasks/TASK-H06-cli-version-check.md) | provider CLI version check, override, record | S3 | M | H01 |
-| [H07](tasks/TASK-H07-pre-run-test.md) | pre-run test (`test.baseline`) | S4 | M | H04, H05 |
+| [H07](tasks/TASK-H07-pre-run-test.md) | pre-run test (`test.baseline`, `--allow-red-tests`) ✓ | S4 | M | H04, H05 |
 | [H08](tasks/TASK-H08-secretscan-package.md) | `internal/secretscan` rules and golden tests | S5 | M | — |
 | [H09](tasks/TASK-H09-secret-scan-wiring.md) | secret scan in the run: baseline, stop/warn, redaction | S5 | M | H03, H07, H08 |
 | [H10](tasks/TASK-H10-integration.md) | integration scenarios | — | M | H01–H09 |
