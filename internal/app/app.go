@@ -422,7 +422,8 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	}
 	// The review screen shows the stages itself, editable; the decision block above it
 	// then leaves its read-only stage table out.
-	editable := mode != domain.ModeAuto && reporter.Pretty && isTerminal(stdin) && run.Decision.Source != domain.DecisionSourceManual
+	editable := mode != domain.ModeAuto && reporter.Pretty && reviewScreenAvailable(stdin) &&
+		run.Decision.Source != domain.DecisionSourceManual
 	reporter.ReviewForm = editable
 	out.announce(wf, stderr)
 
@@ -985,4 +986,12 @@ func firstMode(modes ...domain.RunMode) domain.RunMode {
 		}
 	}
 	return ""
+}
+
+// reviewScreenAvailable reports whether the review screen can take stdin over (a terminal
+// raw mode works on), so the decision block only leaves its stage table out when the
+// form that replaces it will really be shown.
+func reviewScreenAvailable(stdin io.Reader) bool {
+	f, ok := stdin.(*os.File)
+	return ok && tui.Supported(f)
 }
