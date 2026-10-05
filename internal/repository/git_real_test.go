@@ -276,3 +276,35 @@ func TestGitDirs(t *testing.T) {
 		t.Errorf("GitDirs = %q, want [%s]", got, want)
 	}
 }
+
+// TestWorktreeTreeDiff: the before/after trees of a step diff to exactly what it changed,
+// untracked files included, the (git-ignored) run directory excluded, and nothing in the
+// real index or worktree touched.
+func TestWorktreeTreeDiff(t *testing.T) {
+	r, dir := realRepo(t)
+	ctx := context.Background()
+	writeFile(t, filepath.Join(dir, ".gitignore"), ".orchestrator/\n")
+	gitCmd(t, dir, "add", ".gitignore")
+	gitCmd(t, dir, "commit", "-qm", "ignore")
+	writeFile(t, filepath.Join(dir, ".orchestrator", "runs", "x", "run.json"), "{}")
+
+	before, err := r.WorktreeTree(ctx)
+	if err != nil || before == "" {
+		t.Fatalf("before: %q %v", before, err)
+	}
+	writeFile(t, filepath.Join(dir, "added.go"), "package x\n")
+	after, err := r.WorktreeTree(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	diff, err := r.DiffTrees(ctx, before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "+++ b/added.go") || strings.Contains(diff, ".orchestrator") {
+		t.Errorf("unexpected diff:\n%s", diff)
+	}
+	if files, _ := r.ChangedFiles(ctx); len(files) != 1 || files[0] != "added.go" {
+		t.Errorf("the real index must be untouched, status: %q", files)
+	}
+}

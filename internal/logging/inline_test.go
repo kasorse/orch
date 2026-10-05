@@ -91,3 +91,52 @@ func TestRich_Demo(t *testing.T) {
 	f.writeText(&buf, "Recommendation", "Edit `docs/orders/export.md` only, and keep hand-written sections outside the \"AUTO-GENERATED\" markers.\n\n1. Add a 'Technical Landscape' section. State plainly that the scanner app is separate.\n2. Add a **Product Feature to Codebase Map** table.\n   - Journeys map to `export-plan`.\n   - Issues map to src/issues and the task issue-table.\n```\nGET /api/v1/export/slot/reassign\n```")
 	os.Stdout.WriteString("\n" + buf.String() + "\n")
 }
+
+const sampleDiff = `diff --git a/internal/repository/git.go b/internal/repository/git.go
+index 1111111..2222222 100644
+--- a/internal/repository/git.go
++++ b/internal/repository/git.go
+@@ -15,7 +15,9 @@ import (
+ 	"os"
+ 	"path/filepath"
+ 	"slices"
++	"strconv"
+ 	"strings"
++	"time"
+ 
+ 	"orchestrator/internal/apperr"
+@@ -266,3 +268,2 @@ func x() {
+ 	return strings.TrimSpace(commit), nil
+ }
+-// StatusSummary is a short, human-readable list of the uncommitted changes (one
+diff --git a/new.go b/new.go
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/new.go
+@@ -0,0 +1,2 @@
++func add(a, b int) int { return a + b } // sum
++var s = "hi"
+`
+
+func TestRenderDiff(t *testing.T) {
+	r := &ConsoleReporter{Pretty: true}
+	out := r.renderDiff(sampleDiff)
+	plain := ansiRE.ReplaceAllString(out, "")
+	for _, want := range []string{
+		"╭─ diff · internal/repository/git.go +2 -1",
+		`│  18+   "strconv"`,
+		`│  20+   "time"`,
+		"│ 268- // StatusSummary",
+		"├─ diff · new.go (new) +2 -0",
+		"│ 1+ func add(a, b int) int { return a + b } // sum",
+		"╰─ (+4 -1 total, 2 files)",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected %q in:\n%s", want, plain)
+		}
+	}
+	if os.Getenv("ORCHESTRATOR_DEMO") != "" {
+		os.Stdout.WriteString("\n" + out + "\n")
+	}
+}

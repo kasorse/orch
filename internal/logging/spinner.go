@@ -24,6 +24,8 @@ type spinner struct {
 	mu    sync.Mutex
 	label string
 	hint  string
+	// detail is what the model is doing right now ("Read src/app.ts"), shown after ⎿.
+	detail string
 
 	stopOnce sync.Once
 	stop     chan struct{}
@@ -56,13 +58,20 @@ func (s *spinner) loop() {
 // SetLabel changes what the spinner says without restarting its clock.
 func (s *spinner) SetLabel(label, hint string) {
 	s.mu.Lock()
-	s.label, s.hint = label, hint
+	s.label, s.hint, s.detail = label, hint, ""
+	s.mu.Unlock()
+}
+
+// SetDetail shows what is happening inside the current call.
+func (s *spinner) SetDetail(detail string) {
+	s.mu.Lock()
+	s.detail = detail
 	s.mu.Unlock()
 }
 
 func (s *spinner) draw(i int) {
 	s.mu.Lock()
-	label, hint := s.label, s.hint
+	label, hint, detail := s.label, s.hint, s.detail
 	s.mu.Unlock()
 	frame := s.st.accent(spinnerFrames[i%len(spinnerFrames)])
 	meta := formatElapsed(time.Since(s.start))
@@ -70,7 +79,16 @@ func (s *spinner) draw(i int) {
 		meta = hint + " · " + meta
 	}
 	meta += " · ctrl+c to cancel"
-	fmt.Fprintf(s.out, "\r\x1b[2K%s %s %s", frame, s.st.accent(label+"…"), s.st.gray("("+meta+")"))
+	line := frame + " " + s.st.accent(label+"…") + " " + s.st.gray("("+meta+")")
+	if detail != "" {
+		line += s.st.gray("  ⎿ ") + detail
+	}
+	// One terminal row: a wrapped spinner line could not be redrawn in place.
+	if w := termWidth() - 1; visibleWidth(line) > w {
+		plain := ansiRE.ReplaceAllString(line, "")
+		line = s.st.gray(truncateVisible(plain, w))
+	}
+	fmt.Fprintf(s.out, "\r\x1b[2K%s", line)
 }
 
 // Stop ends the animation and clears its line. Safe to call more than once.

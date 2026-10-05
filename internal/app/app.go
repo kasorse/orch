@@ -373,6 +373,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 			return failRun(store, run, err)
 		}
 	}
+	if reporter.Pretty {
+		reporter.SetRepoInfo(repoInfo(decideCtx, repo))
+	}
 	reporter.RunHeader(run.ID, store.RunDir(run.ID))
 
 	// One prompter for every question on stdin: it buffers input, so a second reader
@@ -584,9 +587,13 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
+	observer := &runObserver{reporter: s.reporter, store: store}
+	if s.reporter.Pretty {
+		observer.repo = s.repo
+	}
 	engine := &workflow.Engine{
 		Executor: s.dispatcher,
-		Observer: &runObserver{reporter: s.reporter, store: store},
+		Observer: observer,
 		Persist:  store.SaveRun,
 		Limits:   limitsView(*cfg),
 	}
@@ -788,6 +795,26 @@ func engineContext(ctx, decideCtx context.Context, timeout, elapsed, userTime ti
 }
 
 // newReporter is the run/resume console reporter: pretty on an interactive terminal,
+// repoInfo gathers the repository card for the pretty header: branch, the last few
+// commits and how many files have uncommitted changes. Failures just leave parts empty.
+func repoInfo(ctx context.Context, repo *repository.Repository) logging.RepoInfo {
+	const shown = 4
+	var info logging.RepoInfo
+	info.Branch, _ = repo.Branch(ctx)
+	commits, total, _ := repo.RecentCommits(ctx, shown)
+	for _, c := range commits {
+		info.Commits = append(info.Commits, logging.CommitInfo{Hash: c.Hash, Subject: c.Subject, When: c.When})
+	}
+	if total > len(commits) {
+		info.MoreCommits = total - len(commits)
+	}
+	if changed, err := repo.ChangedFiles(ctx); err == nil {
+		info.Changed = len(changed)
+	}
+	return info
+}
+
+// newReporter is the run/resume console reporter: pretty on an interactive terminal,
 // the spec's plain text anywhere else.
 func newReporter(stdout io.Writer, verbose bool) *logging.ConsoleReporter {
 	r := logging.NewTerminalReporter(stdout)
@@ -821,9 +848,19 @@ func failRun(store *persistence.Store, run *domain.Run, err error) error {
 type runObserver struct {
 	reporter *logging.ConsoleReporter
 	store    *persistence.Store
+	// repo, when set (pretty renderer), lets the observer show what implement changed:
+	// the worktree is snapshotted as a tree before the step and diffed after it.
+	repo      *repository.Repository
+	beforeImp string
 }
 
 func (o *runObserver) StepStarted(run *domain.Run, index int, action domain.ActionType) {
+	o.beforeImp = ""
+	if o.repo != nil && action == domain.ActionImplement {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		o.beforeImp, _ = o.repo.WorktreeTree(ctx)
+		cancel()
+	}
 	o.reporter.StepStarted(run, index, action)
 }
 
@@ -833,6 +870,17 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 	}
 	if outcome.RawStderr != "" {
 		_ = o.store.AppendLog(run.ID, index, exec.Action, "stderr", outcome.RawStderr)
+	}
+	// Only after a completed implement: the step guard has already checked that nothing
+	// protected (git config, hooks) changed, so running git here is safe.
+	if o.beforeImp != "" && exec.Action == domain.ActionImplement && exec.Status == domain.StepCompleted {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if after, err := o.repo.WorktreeTree(ctx); err == nil && after != o.beforeImp {
+			if diff, err := o.repo.DiffTrees(ctx, o.beforeImp, after); err == nil {
+				o.reporter.SetStepDiff(diff)
+			}
+		}
+		cancel()
 	}
 	o.reporter.StepFinished(run, index, exec, outcome)
 }

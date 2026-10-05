@@ -79,6 +79,7 @@ func (r *ConsoleReporter) prettyRunHeader(runID, dir string) {
 	}
 	lines = append(lines, st.gray("run   ")+runID, st.gray("dir   ")+shortenHome(dir))
 	fmt.Fprint(r.Out, box(st, st.accent, lines, 44))
+	printPanels(r.Out, r.repoPanel())
 }
 
 func (r *ConsoleReporter) prettyProviderCallStarted(providerID, model string) {
@@ -102,6 +103,7 @@ func (r *ConsoleReporter) prettyStepStarted(index int, action domain.ActionType)
 	}
 	fmt.Fprintln(r.Out)
 	r.bullet(st.accent, titleCase(string(action)), meta)
+	r.stepUsage = domain.Usage{}
 	if action == domain.ActionTest {
 		r.startSpin(actionVerbs[action], r.TestCommand)
 	}
@@ -129,7 +131,14 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 		default:
 			r.detail(st.green("✓ Done") + " " + st.gray("("+who+took+")"))
 		}
+		r.stepUsageLine()
 		r.printResult(exec, outcome)
+		if r.stepDiff != "" {
+			if card := r.renderDiff(r.stepDiff); card != "" {
+				fmt.Fprintf(r.Out, "\n%s", card)
+			}
+			r.stepDiff = ""
+		}
 	case workflow.OutcomeFailure:
 		switch exec.Action {
 		case domain.ActionTest:
@@ -153,6 +162,19 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 			r.detail(st.red("✗ Failed") + " " + st.gray("("+took+")"))
 		}
 	}
+	// The checklist shows where the run is; the final summary has its own chain.
+	if next := len(run.Executions); next > 0 && outcome.Outcome != "" {
+		printPanels(r.Out, "\n", r.workflowPanel(run))
+	}
+}
+
+// stepUsageLine prints what the step's model calls cost, when the provider reported it.
+func (r *ConsoleReporter) stepUsageLine() {
+	u := r.stepUsage
+	if u.PromptTokens() == 0 && u.OutputTokens == 0 {
+		return
+	}
+	fmt.Fprintf(r.Out, "     %s\n", r.usageLine(u))
 }
 
 func (r *ConsoleReporter) prettyFixNotice(run *domain.Run) {
@@ -208,6 +230,7 @@ func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 	lines = append(lines, st.gray(stats))
 	fmt.Fprintln(r.Out)
 	fmt.Fprint(r.Out, box(st, border, lines, 44))
+	printPanels(r.Out, r.usagePanel(), r.limitsPanel(r.runUsage.Limits))
 }
 
 // executionChain renders the steps that ran, in order, each marked by how it ended:
@@ -227,6 +250,11 @@ func executionChain(st style, execs []domain.StepExecution) string {
 
 func (r *ConsoleReporter) prettyDecided(t domain.DecisionTrace) {
 	st := r.st()
+	defer func() {
+		if r.hasUsage {
+			fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "usage")), r.usageLine(r.runUsage))
+		}
+	}()
 	meta := ""
 	if t.Source == domain.DecisionSourceManual {
 		meta = "manual (--stage)"

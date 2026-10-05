@@ -26,6 +26,9 @@ type Request struct {
 	// Stream is an optional live sink for the CLI's combined output as it arrives
 	// (--verbose only). Nil means capture-only - no behavior change.
 	Stream io.Writer
+	// Activity, if set, is told what the model is doing as it happens ("Read
+	// src/app.ts"), for a progress display. Adapters that cannot tell never call it.
+	Activity func(string)
 }
 
 type Result struct {
@@ -33,6 +36,34 @@ type Result struct {
 	Stderr   string
 	ExitCode int
 	Duration time.Duration
+	// Usage is the call's token/cost/rate-limit report, nil when the CLI gives none.
+	Usage *domain.Usage
+}
+
+// UsageObserver is implemented by progress observers that want each call's Usage. Call
+// sites check for it with a type assertion, so observers that don't care need nothing.
+type UsageObserver interface {
+	ProviderUsage(u domain.Usage)
+}
+
+// ActivityObserver is implemented by progress observers that show live model activity.
+type ActivityObserver interface {
+	ProviderActivity(what string)
+}
+
+// ActivityHook returns observer's ProviderActivity, or nil when it has none.
+func ActivityHook(observer any) func(string) {
+	if a, ok := observer.(ActivityObserver); ok {
+		return a.ProviderActivity
+	}
+	return nil
+}
+
+// ReportUsage hands res.Usage to observer when both exist.
+func ReportUsage(observer any, res Result) {
+	if u, ok := observer.(UsageObserver); ok && res.Usage != nil {
+		u.ProviderUsage(*res.Usage)
+	}
 }
 
 type Client interface {

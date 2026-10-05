@@ -44,6 +44,14 @@ type ConsoleReporter struct {
 	// action is the step in flight, for the spinner's label; spin the running spinner.
 	action domain.ActionType
 	spin   *spinner
+
+	// Pretty-only extras: the repository card, and token/cost/limit totals.
+	repo      *RepoInfo
+	stepUsage domain.Usage
+	runUsage  domain.Usage
+	hasUsage  bool
+	// stepDiff is what the finishing implement step changed (unified diff).
+	stepDiff string
 }
 
 func NewConsoleReporter(out io.Writer) *ConsoleReporter {
