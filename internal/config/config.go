@@ -87,6 +87,10 @@ type TestConfig struct {
 	// e.g. a module cache read-only and a build cache writable. Only valid with bwrap.
 	ROBinds []string `yaml:"ro_binds"`
 	RWBinds []string `yaml:"rw_binds"`
+	// EnvPass names environment variables the test command inherits on top of the default
+	// allowlist (execution.TestEnv; specs/hardening/SPEC.md §6.2). Exact names; a name that
+	// looks like a credential is refused.
+	EnvPass []string `yaml:"env_pass"`
 }
 
 // SandboxBwrap is the one sandbox test.sandbox currently supports.

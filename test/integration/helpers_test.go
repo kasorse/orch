@@ -39,6 +39,8 @@ type configOptions struct {
 	maxSteps         int
 	maxFixIterations int
 	testCommand      string
+	// testEnvPass renders test.env_pass when set.
+	testEnvPass []string
 	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
 	// via defaultConfigOptions - tests only override it to exercise the run-wide
 	// timeout (MVP.md §25) with a short deadline.
@@ -93,6 +95,14 @@ func defaultConfigOptions() configOptions {
 // writeConfig renders a version 2 orchestrator.yaml matching internal/config's schema
 // and returns its absolute path. It deliberately does not import internal/config, to
 // keep these as true black-box tests driven only through app.Run's public surface.
+// envPassYAML renders test.env_pass, or nothing.
+func envPassYAML(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return "  env_pass: [" + strings.Join(names, ", ") + "]\n"
+}
+
 func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	t.Helper()
 	p := opts.providers
@@ -157,7 +167,7 @@ actions:
 
 test:
   command: %q
-
+%s
 limits:
   max_steps: %d
   max_fix_iterations: %d
@@ -166,7 +176,7 @@ execution:
   timeout: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
-		opts.testCommand, opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
+		opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.timeout, opts.extraYAML)
 	content += opts.jira.yaml()
 
 	path := filepath.Join(dir, "orchestrator.yaml")

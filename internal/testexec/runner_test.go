@@ -84,3 +84,19 @@ func TestRunner_ScrubsParentSessionEnv(t *testing.T) {
 		t.Error("the test command must not inherit CLAUDE_CODE_MESSAGING_TOKEN")
 	}
 }
+
+func TestRunner_UsesTheTestAllowlist(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-planted")
+	t.Setenv("GOFLAGS", "-count=1")
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+	if _, err := New(exec).Run(context.Background(), "go test ./...", "/repo"); err != nil {
+		t.Fatal(err)
+	}
+	env := exec.Calls[0].Env
+	if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") }) {
+		t.Error("the test command inherited ANTHROPIC_API_KEY")
+	}
+	if !slices.Contains(env, "GOFLAGS=-count=1") {
+		t.Error("the test command lost an allowlisted toolchain variable")
+	}
+}

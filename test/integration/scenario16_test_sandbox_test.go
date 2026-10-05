@@ -15,10 +15,14 @@ import (
 // fakeBwrap records its argv (one argument per line, "---" after each call), then skips
 // bwrap's own options - honouring --chdir - and executes the command, unsandboxed. With
 // FAKE_BWRAP_FAIL set it fails the way AppArmor makes the real one fail.
+// fakeBwrap takes its log path and whether to fail as literals: the probe and the test
+// run get only the test command's allowlisted environment (specs/hardening/SPEC.md §6.1),
+// so a variable set by the test would never reach it.
 const fakeBwrap = `#!/bin/sh
-printf '%s\n' "$@" >> "$FAKE_BWRAP_LOG"
-echo --- >> "$FAKE_BWRAP_LOG"
-if [ -n "${FAKE_BWRAP_FAIL:-}" ]; then
+log='{{LOG}}'
+printf '%s\n' "$@" >> "$log"
+echo --- >> "$log"
+if [ '{{FAIL}}' = 1 ]; then
   echo "bwrap: setting up uid map: Permission denied" >&2
   exit 1
 fi
@@ -38,7 +42,7 @@ done
 func TestScenario16_TestRunsSandboxed(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	bwrapLog := installFakeBwrap(t)
+	bwrapLog := installFakeBwrap(t, false)
 	j := startJev(t, scriptBugfixMedium())
 	cfg := withTestSandbox(t, jevConfig(t, j))
 
@@ -79,8 +83,7 @@ func TestScenario16_TestRunsSandboxed(t *testing.T) {
 func TestScenario16_UnusableSandboxFailsFast(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	installFakeBwrap(t)
-	t.Setenv("FAKE_BWRAP_FAIL", "1")
+	installFakeBwrap(t, true)
 	j := startJev(t, scriptBugfixMedium())
 	cfg := withTestSandbox(t, jevConfig(t, j))
 
@@ -100,14 +103,19 @@ func TestScenario16_UnusableSandboxFailsFast(t *testing.T) {
 	}
 }
 
-// installFakeBwrap puts fakeBwrap first on PATH and returns the log it writes.
-func installFakeBwrap(t *testing.T) string {
+// installFakeBwrap puts fakeBwrap first on PATH and returns the log it writes; with fail
+// every call fails as an AppArmor-blocked bwrap does.
+func installFakeBwrap(t *testing.T, fail bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	fakeexec.WriteExecutable(t, dir, "bwrap", fakeBwrap)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	log := filepath.Join(t.TempDir(), "bwrap.log")
-	t.Setenv("FAKE_BWRAP_LOG", log)
+	failFlag := "0"
+	if fail {
+		failFlag = "1"
+	}
+	script := strings.NewReplacer("{{LOG}}", log, "{{FAIL}}", failFlag).Replace(fakeBwrap)
+	fakeexec.WriteExecutable(t, dir, "bwrap", script)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log
 }
 

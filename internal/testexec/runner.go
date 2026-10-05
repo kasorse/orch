@@ -24,10 +24,11 @@ func New(executor execution.ProcessExecutor) *Runner {
 }
 
 func (r *Runner) Run(ctx context.Context, command string, workingDir string) (domain.TestResult, error) {
-	// The test command runs code a model may have written, so it must not inherit a
-	// parent agent session's IPC channel either (specs/permissions/SPEC.md §7.1).
+	// The test command runs code a model may have written, so it gets only the allowlisted
+	// environment: no credential, no parent agent session's IPC channel
+	// (specs/hardening/SPEC.md §6.1, specs/permissions/SPEC.md §7.1).
 	spec := execution.Spec{
-		Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir, Env: execution.ScrubbedEnv(),
+		Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir, Env: execution.TestEnv(),
 	}
 	if r.Sandbox != nil {
 		spec.Executable, spec.Args, spec.Env = "bwrap", r.Sandbox.args(workingDir, command), r.Sandbox.env()

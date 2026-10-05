@@ -78,6 +78,11 @@ test:
   # sandbox: bwrap
   # ro_binds: [~/go/pkg/mod]        # module cache, read-only
   # rw_binds: [~/.cache/go-build]   # build cache, writable
+  # The test command inherits only an allowlist of the environment: PATH, HOME, locale,
+  # TERM, TZ, TMPDIR, CI and common toolchain variables (GOPATH, GOFLAGS, CARGO_HOME,
+  # JAVA_HOME, VIRTUAL_ENV, ...). No proxies, no credentials. Name anything else it needs;
+  # a name that looks like a credential (TOKEN, SECRET, PASSWORD, _KEY, _AUTH, ...) is refused.
+  # env_pass: [GOPROXY, DATABASE_URL]
 
 limits:
   max_steps: 12

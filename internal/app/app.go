@@ -199,6 +199,8 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
+	// What the test command may inherit beyond the default allowlist (test.env_pass).
+	execution.AllowTestEnv(cfg.Test.EnvPass...)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
 		return config.Config{}, nil, err
 	}

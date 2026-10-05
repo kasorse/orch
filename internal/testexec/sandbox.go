@@ -59,11 +59,11 @@ func (s *Sandbox) args(workingDir, command string) []string {
 	return append(argv, "--chdir", workingDir, "sh", "-c", command)
 }
 
-// env is the scrubbed environment with TMPDIR pointing at the private /tmp: an inherited
-// TMPDIR under /tmp no longer exists inside the sandbox.
+// env is the test environment (execution.TestEnv) with TMPDIR pointing at the private
+// /tmp: an inherited TMPDIR under /tmp no longer exists inside the sandbox.
 func (s *Sandbox) env() []string {
 	var env []string
-	for _, kv := range execution.ScrubbedEnv() {
+	for _, kv := range execution.TestEnv() {
 		if !strings.HasPrefix(kv, "TMPDIR=") {
 			env = append(env, kv)
 		}
@@ -81,7 +81,7 @@ func ProbeArgs() []string {
 
 // Probe runs ProbeArgs and turns a failure into a DependencyError naming the usual cause.
 func Probe(ctx context.Context, executor execution.ProcessExecutor) error {
-	res, err := executor.Run(ctx, execution.Spec{Executable: "bwrap", Args: ProbeArgs(), Env: execution.ScrubbedEnv()})
+	res, err := executor.Run(ctx, execution.Spec{Executable: "bwrap", Args: ProbeArgs(), Env: execution.TestEnv()})
 	if err == nil && res.ExitCode == 0 {
 		return nil
 	}

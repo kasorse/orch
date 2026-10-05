@@ -50,3 +50,30 @@ environment; the developer's credentials never reach model-written code (`SPEC.m
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. As planned, with these differences:
+
+- **Names:** `execution.AllowTestEnv` (not `SetTestEnvPass`: the set is add-only, like
+  `ScrubCredentials`) and `execution.IsParentSessionVar`, which config validation uses so the
+  parent-session list stays in one place. `config` now imports `execution` (no cycle:
+  `execution` imports nothing internal).
+- **Credential-like names are matched by substring _and_ by segment.** `TOKEN`, `SECRET`,
+  `PASSWORD`, `PASSWD`, `CREDENTIAL`, `APIKEY`, `PRIVATEKEY` anywhere in the upper-cased
+  name; `AUTH`, `KEY`, `KEYS`, `PASS`, `COOKIE` only as a whole `_`-separated segment. The
+  spec's plain "contains AUTH" would have refused `GIT_AUTHOR_NAME`; segments still catch
+  `SSH_AUTH_SOCK`, `MY_AUTH_HEADER`, `STRIPE_KEY`, `AWS_ACCESS_KEY_ID`, `DB_PASS`. `PWD` is
+  allowed (it is the working directory).
+- **The bwrap probe uses `TestEnv()` too**, as specified. Integration scenario 16's fake bwrap
+  read `FAKE_BWRAP_LOG`/`FAKE_BWRAP_FAIL` from the environment, which no longer reaches it;
+  the fake now gets the log path and the failure flag baked into the script
+  (`installFakeBwrap(t, fail)`), rather than loosening the allowlist for a test.
+- Scenario 19g's test command took its output path from `$ENV_OUT`; the path is now in the
+  command itself. New scenario 25: the test command sees `PATH`, `HOME`, `TZ` and an
+  `env_pass` name but not `ANTHROPIC_API_KEY` or an unrelated variable, while the provider CLI
+  still sees both; a credential-like `env_pass` name is refused before any call.
+- The live sandbox check (`test/security/sandbox_test.go`) now also asserts that the test
+  command cannot read `ANTHROPIC_API_KEY` and still has `PATH`, with and without bwrap; it
+  ran green on this host (real bwrap, no model calls).
+- `orchestrator.example.yaml` documents the allowlist and `env_pass` under `test:`.

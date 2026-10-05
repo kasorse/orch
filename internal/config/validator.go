@@ -3,11 +3,13 @@ package config
 import (
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
 
@@ -60,6 +62,7 @@ func Validate(cfg Config) error {
 	problems = append(problems, decisionProblems(cfg)...)
 
 	problems = append(problems, sandboxProblems(cfg.Test)...)
+	problems = append(problems, envPassProblems(cfg)...)
 
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
@@ -149,6 +152,58 @@ func promptLimitProblems(p PromptLimitsConfig) []string {
 		// path.Match reports a malformed pattern even when the name does not match.
 		if _, err := path.Match(g, ""); err != nil {
 			problems = append(problems, fmt.Sprintf("limits.prompt.diff_summarize[%d] %q: %v", i, g, err))
+		}
+	}
+	return problems
+}
+
+// envNameRE is a portable environment variable name.
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// credentialSubstrings and credentialSegments make a test.env_pass name look like a
+// credential (specs/hardening/SPEC.md §6.2): a substring anywhere in the upper-cased name,
+// or a whole "_"-separated segment. AUTH, KEY and PASS are segments only, so GIT_AUTHOR_NAME
+// or KEYBOARD_LAYOUT pass while SSH_AUTH_SOCK, STRIPE_KEY and DB_PASS do not. There is no
+// override: a test that needs a credential does not belong in a run that executes
+// model-written code.
+var (
+	credentialSubstrings = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "APIKEY", "PRIVATEKEY"}
+	credentialSegments   = []string{"AUTH", "KEY", "KEYS", "PASS", "COOKIE"}
+)
+
+// credentialLike returns why name looks like a credential, or "".
+func credentialLike(name string) string {
+	upper := strings.ToUpper(name)
+	for _, sub := range credentialSubstrings {
+		if strings.Contains(upper, sub) {
+			return "contains " + sub
+		}
+	}
+	for _, seg := range strings.Split(upper, "_") {
+		if slices.Contains(credentialSegments, seg) {
+			return "has the segment " + seg
+		}
+	}
+	return ""
+}
+
+func envPassProblems(cfg Config) []string {
+	var problems []string
+	credentials := cfg.CredentialEnvNames()
+	for i, name := range cfg.Test.EnvPass {
+		key := fmt.Sprintf("test.env_pass[%d] %q", i, name)
+		switch {
+		case !envNameRE.MatchString(name):
+			problems = append(problems, key+": must be an exact environment variable name (letters, digits, _; no wildcards)")
+		case slices.Contains(credentials, name):
+			problems = append(problems, key+": is a credential this config names; the test command never gets it")
+		case execution.IsParentSessionVar(name):
+			problems = append(problems, key+": belongs to the agent session that launched the orchestrator; no child process gets it")
+		default:
+			if why := credentialLike(name); why != "" {
+				problems = append(problems, key+": looks like a credential ("+why+"); the test command runs model-written "+
+					"code and never gets credentials")
+			}
 		}
 	}
 	return problems

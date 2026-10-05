@@ -5,6 +5,7 @@ package security
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -36,7 +37,10 @@ func TestTestSandbox(t *testing.T) {
 		f := newFixture(t)
 		repo, home, outside = f.dir, t.TempDir(), filepath.Join(t.TempDir(), "outside")
 		t.Setenv("HOME", home)
-		script := fmt.Sprintf(`touch inside
+		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-live-planted")
+		script := fmt.Sprintf(`printenv ANTHROPIC_API_KEY > env-key || true
+printenv PATH > env-path || true
+touch inside
 touch "$HOME/home-marker"
 touch %s
 touch .git/hooks/pre-commit
@@ -63,7 +67,21 @@ exit 0`, outside)
 		}
 	}
 
+	// The environment is the allowlist with or without the sandbox (specs/hardening/SPEC.md
+	// §6.1): PATH is there, the API key is not.
+	checkEnv := func(repo string) {
+		t.Helper()
+		if data, _ := os.ReadFile(filepath.Join(repo, "env-key")); len(data) != 0 {
+			t.Errorf("the test command could read ANTHROPIC_API_KEY: %q", data)
+		}
+		if data, _ := os.ReadFile(filepath.Join(repo, "env-path")); len(data) == 0 {
+			t.Error("the test command lost PATH")
+		}
+	}
+	checkEnv(repo)
+
 	repo, home, outside = run(t, true)
+	checkEnv(repo)
 	if !exists(filepath.Join(repo, "inside")) {
 		t.Error("the sandboxed test could not write inside the repository")
 	}

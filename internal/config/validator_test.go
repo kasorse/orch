@@ -277,3 +277,37 @@ func TestValidate_PromptLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestValidate_EnvPass(t *testing.T) {
+	for name, tc := range map[string]struct {
+		pass []string
+		want string // "" = valid
+	}{
+		"empty":               {nil, ""},
+		"plain names":         {[]string{"GOPROXY", "DATABASE_URL", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "PWD"}, ""},
+		"token":               {[]string{"GITLAB_TOKEN"}, `test.env_pass[0] "GITLAB_TOKEN": looks like a credential (contains TOKEN)`},
+		"glued api key":       {[]string{"OPENAIAPIKEY"}, "contains APIKEY"},
+		"auth segment":        {[]string{"MY_AUTH_HEADER"}, "has the segment AUTH"},
+		"ssh agent":           {[]string{"SSH_AUTH_SOCK"}, "has the segment AUTH"},
+		"key segment":         {[]string{"STRIPE_KEY"}, "has the segment KEY"},
+		"access key id":       {[]string{"AWS_ACCESS_KEY_ID"}, "has the segment KEY"},
+		"pass segment":        {[]string{"DB_PASS"}, "has the segment PASS"},
+		"lower case":          {[]string{"db_password"}, "contains PASSWORD"},
+		"bad name":            {[]string{"db-url"}, `test.env_pass[0] "db-url": must be an exact environment variable name`},
+		"wildcard":            {[]string{"GO*"}, "no wildcards"},
+		"declared credential": {[]string{"JEV_API_KEY"}, "is a credential this config names"},
+		"parent session":      {[]string{"CLAUDECODE"}, "belongs to the agent session"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Test.EnvPass = tc.pass
+			err := Validate(cfg)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("want valid, got %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}

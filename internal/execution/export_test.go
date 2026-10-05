@@ -7,3 +7,9 @@ func resetCredentialVarsForTest() {
 	defer credentialMu.Unlock()
 	credentialVars = map[string]bool{}
 }
+
+func resetTestEnvPassForTest() {
+	testEnvMu.Lock()
+	defer testEnvMu.Unlock()
+	testEnvPass = map[string]bool{}
+}
