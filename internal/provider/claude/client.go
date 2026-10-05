@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -44,8 +43,9 @@ var toolSets = map[domain.Authority]toolSet{
 	domain.AuthorityEdit: {tools: "Read,Grep,Glob,Edit,Write", allowed: "Edit,Write"},
 }
 
-// args builds the argv for one call; buildArgs and redactedArgs both go through it, so the
-// command line in an error message is always the one that ran. Flags common to every
+// buildArgs builds the argv for one call. The prompt is not in it: it goes on stdin
+// (--input-format text), so no prompt can reach Linux's 128 KiB per-argument limit and the
+// command line in an error message is exactly the one that ran. Flags common to every
 // authority:
 //
 //   - --restricted: removes the shell and code-running tools and WebFetch unless --tools
@@ -58,10 +58,7 @@ var toolSets = map[domain.Authority]toolSet{
 //   - --strict-mcp-config (no MCP config is passed, so no MCP servers) and
 //     --setting-sources "": the target repository's hooks, MCP servers and settings never
 //     load.
-//
-// --tools and --allowed-tools take a variable number of values and would swallow a prompt
-// that followed them, so the prompt is always last and directly preceded by --model.
-func args(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, prompt string) []string {
+func buildArgs(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions) []string {
 	set := toolSets[a]
 	// --restricted also ignores every settings file, so the operator's opt-in to their own
 	// settings (plugins, skills, hooks) runs without it. What --restricted otherwise adds
@@ -78,6 +75,7 @@ func args(a domain.Authority, denyRead []string, model, effort string, ext provi
 		"--print",
 		// One JSON event per line: the answer plus tool calls, usage and rate limits
 		// (stream.go). --verbose is required by the CLI for stream-json under --print.
+		"--input-format", "text",
 		"--output-format", "stream-json",
 		"--verbose",
 	}
@@ -109,7 +107,7 @@ func args(a domain.Authority, denyRead []string, model, effort string, ext provi
 	if effort != "" {
 		argv = append(argv, "--effort", effort)
 	}
-	return append(argv, "--model", model, prompt)
+	return append(argv, "--model", model)
 }
 
 func nonEmptyList(csv string) []string {
@@ -137,16 +135,6 @@ func denySettings(patterns []string) string {
 	return string(data)
 }
 
-func buildArgs(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, prompt string) []string {
-	return args(a, denyRead, model, effort, ext, prompt)
-}
-
-// redactedArgs is buildArgs with the prompt replaced by its length, so
-// apperr.ProviderError never has to know or receive the real prompt text.
-func redactedArgs(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, promptLen int) []string {
-	return args(a, denyRead, model, effort, ext, fmt.Sprintf("<prompt: %d chars>", promptLen))
-}
-
 // Supports reports every defined authority as enforceable: each has a flag set verified
 // against claude 2.1.283 (specs/permissions/SPEC.md §11). A live check that fails flips
 // its authority to unsupported here until fixed.
@@ -166,9 +154,11 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 
+	argv := buildArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions)
 	spec := execution.Spec{
 		Executable: executable,
-		Args:       buildArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, req.Prompt),
+		Args:       argv,
+		Stdin:      req.Prompt,
 		WorkingDir: req.WorkingDir,
 		Env:        execution.ScrubbedEnv(),
 	}
@@ -220,32 +210,34 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		// Action is left blank here - the action dispatcher fills it in, since it is
 		// the only layer that knows which action invoked this provider call.
 		return result, &apperr.ProviderError{
-			Provider:   string(provider.Claude),
-			Model:      req.Model,
-			Kind:       kind,
-			Executable: executable,
-			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, len(req.Prompt)),
-			WorkingDir: req.WorkingDir,
-			ExitCode:   res.ExitCode,
-			Duration:   res.Duration,
-			Stdout:     stdout,
-			Stderr:     res.Stderr,
-			Err:        err,
+			Provider:    string(provider.Claude),
+			Model:       req.Model,
+			Kind:        kind,
+			Executable:  executable,
+			Args:        argv,
+			PromptBytes: len(req.Prompt),
+			WorkingDir:  req.WorkingDir,
+			ExitCode:    res.ExitCode,
+			Duration:    res.Duration,
+			Stdout:      stdout,
+			Stderr:      res.Stderr,
+			Err:         err,
 		}
 	}
 
 	if res.ExitCode != 0 {
 		return result, &apperr.ProviderError{
-			Provider:   string(provider.Claude),
-			Model:      req.Model,
-			Kind:       apperr.FailureExit,
-			Executable: executable,
-			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, len(req.Prompt)),
-			WorkingDir: req.WorkingDir,
-			ExitCode:   res.ExitCode,
-			Duration:   res.Duration,
-			Stdout:     stdout,
-			Stderr:     res.Stderr,
+			Provider:    string(provider.Claude),
+			Model:       req.Model,
+			Kind:        apperr.FailureExit,
+			Executable:  executable,
+			Args:        argv,
+			PromptBytes: len(req.Prompt),
+			WorkingDir:  req.WorkingDir,
+			ExitCode:    res.ExitCode,
+			Duration:    res.Duration,
+			Stdout:      stdout,
+			Stderr:      res.Stderr,
 		}
 	}
 

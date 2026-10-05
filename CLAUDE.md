@@ -12,7 +12,10 @@ resume: MVP.md §37, with its design record in `specs/resume/`;
 the task from a Jira ticket (`run --jira`): MVP.md §39, with its design record in
 `specs/jira/`;
 the stages chosen by the operator (`run --stage`): MVP.md §40, with its design record in
-`specs/stage-select/`.
+`specs/stage-select/`;
+hardening - prompts on stdin and bounded, the test environment and default sandbox, the CLI
+version check, the pre-run test, the secret scan: MVP.md §41, with its design record in
+`specs/hardening/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -100,7 +103,10 @@ history, otherwise the state the history and the transition table give (MVP.md �
   decision provider's executable, and the Jev API key, and — only with
   `DependencyOptions{Jira: true}` (`run --jira`, and `validate` when the section is
   present) — the Jira section and its variables; `ValidateAuthorities` checks that each
-  route's provider can enforce its authority. A missing executable for an action used later
+  route's provider can enforce its authority; right after it, every routed provider CLI's
+  `--version` must be inside the range its adapter verified (`provider.VersionVerifier`;
+  outside it only `security.allow_unverified_cli: true` lets a run go on, recorded and
+  warned). A missing executable for an action used later
   (e.g. Codex for `review`) must fail `orchestrator run` before anything is called.
   `config.Load` parses a version-2 file strictly (unknown keys are an error); a key the
   validator rejects with its own message (a literal secret) must be declared in the schema.
@@ -121,11 +127,19 @@ history, otherwise the state the history and the transition table give (MVP.md �
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
-  required — `implement` and `test` refuse without one. Provider CLIs and `test` run with
+  required — `implement` and `test` refuse without one. Provider CLIs run with
   `execution.ScrubbedEnv()`, which also drops the credential variables the config names
-  (`Config.CredentialEnvNames`, registered right after `Validate`); git keeps the full
-  environment. `test.sandbox: bwrap`
-  (`testexec.Sandbox`) is probed in the fail-fast chain; its mount order is load-bearing.
+  (`Config.CredentialEnvNames`, registered right after `Validate`); every process that runs
+  `test.command` gets the narrower `execution.TestEnv()` allowlist (plus `test.env_pass`,
+  which refuses credential-like names); git keeps the full environment. The test command
+  runs under bwrap unless `test.sandbox: none` is written out (`testexec.Sandbox`, probed in
+  the fail-fast chain; its mount order is load-bearing). A workflow with `implement` and
+  `test` runs the tests once before the first step and refuses a red suite unless
+  `run --allow-red-tests` (MVP.md §41.5). After the guard check of every `implement` and
+  `test`, what the tree adds is scanned (`internal/secretscan`, stdlib only): a finding
+  outside the run-start baseline stops the step (`security.secret_scan.mode: stop`) or is
+  recorded (`warn`); the review diff is redacted; a secret's value is never printed, logged,
+  persisted or put in a prompt.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
   `git diff`, not just an implementation summary. Never parse phrases like "all tests should
@@ -156,7 +170,11 @@ history, otherwise the state the history and the transition table give (MVP.md �
   learns where the task came from, and `resume` builds no Jira client.
 - Provider CLI invocation is argv-only (`exec.CommandContext`), never `sh -c`, for the user's
   task/prompt — the one documented exception is `test.command`, which is trusted operator
-  config and does go through `sh -c` to support shell syntax. User text inside prompts
+  config and does go through `sh -c` to support shell syntax. The prompt itself goes on
+  stdin, never in argv (MVP.md §41.1). Repository data in a prompt is bounded
+  (`limits.prompt`): test output by `action.BoundTestOutput`, the review diff by
+  `Repository.ReviewDiff` (new files included, deny-listed files by name only); artifacts
+  and logs keep everything. User text inside prompts
   (request, project context) is embedded as delimited data that cannot close its block;
   the task in every stage prompt goes through `action.taskBlock` and repository-derived
   text (git diff, test output) through `action.fence` (both random-nonce delimiters) —
@@ -200,17 +218,22 @@ Jev (`test/integration/jev_test.go`) and a fake Jira (`test/integration/jira_tes
 live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
 `go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
-`go test ./internal/jira -update`.
+`go test ./internal/jira -update`. Never commit a token-shaped literal (an `AKIA…` key, a
+`ghp_…` token): secret scanners and push protection would flag the repository itself;
+tests assemble such values at run time (`internal/secretscan`, scenario 27).
 
 ## Run artifacts
 
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
 `run --jira` task, the `decision`,
-`pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), the
-append-only `resumes`, and each execution's `provider.authority` and `attempt`), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
+`pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
+`allow_red_tests`, `pre_run_test`, `secret_scan_baseline`, `secret_findings` (never a
+value), the append-only `resumes` (each with its `provider_cli`), and each execution's
+`provider.authority` and `attempt`; a review result also records its `diff` summary), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
 `artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log`, and for calls
-outside steps `logs/translate.*` and `logs/decide-{context,classify}.*`.
+outside steps `logs/translate.*`, `logs/decide-{context,classify}.*` and
+`logs/pre-run-test.*`.

@@ -22,7 +22,9 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		Plan:                   d.lastPlan,
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,
+		PreRunFailure:          d.preRunFailureForImplement(),
 		ReviewIssues:           d.pendingReviewIssues,
+		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
 	})
 
 	// Fail closed: without a guard nothing would stop a write that turns into execution
@@ -64,6 +66,9 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if len(changed) > 0 {
 		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
 	}
+	if err := d.scanSecrets(ctx, run, domain.ActionImplement); err != nil {
+		return outcome, err
+	}
 	return outcome, nil
 }
 
@@ -101,4 +106,13 @@ func parseImplementation(output string) domain.ImplementationArtifact {
 		}
 	}
 	return domain.ImplementationArtifact{Summary: output}
+}
+
+// preRunFailureForImplement is the red pre-run test implement should see: only until the
+// first test step has run, whose result then speaks for itself.
+func (d *Dispatcher) preRunFailureForImplement() *domain.TestResult {
+	if d.lastTest != nil {
+		return nil
+	}
+	return d.preRunFailure
 }

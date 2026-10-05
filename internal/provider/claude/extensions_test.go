@@ -20,7 +20,7 @@ func flag(args []string, name string) (string, bool) {
 
 // No extensions: the argv is exactly the restricted one it always was.
 func TestArgs_NoExtensionsIsUnchanged(t *testing.T) {
-	got := buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{}, "p")
+	got := buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{})
 	if !slices.Contains(got, "--restricted") || slices.Contains(got, "--mcp-config") {
 		t.Errorf("unexpected argv %q", got)
 	}
@@ -32,7 +32,7 @@ func TestArgs_NoExtensionsIsUnchanged(t *testing.T) {
 // MCP servers stay under --restricted; their allowlisted tools join the authority's own.
 func TestArgs_MCPKeepsRestrictedAndAllowlists(t *testing.T) {
 	ext := provider.Extensions{MCPConfig: `{"mcpServers":{"graphify":{}}}`, MCPTools: []string{"mcp__graphify__query_graph"}}
-	got := buildArgs(domain.AuthorityEdit, nil, "opus", "", ext, "p")
+	got := buildArgs(domain.AuthorityEdit, nil, "opus", "", ext)
 	if !slices.Contains(got, "--restricted") || !slices.Contains(got, "--strict-mcp-config") {
 		t.Errorf("must stay restricted and strict: %q", got)
 	}
@@ -45,15 +45,15 @@ func TestArgs_MCPKeepsRestrictedAndAllowlists(t *testing.T) {
 	if v, _ := flag(got, "--tools"); v != "Read,Grep,Glob,Edit,Write" {
 		t.Errorf("built-in tools must not change: %q", v)
 	}
-	if n := len(got); got[n-3] != "--model" || got[n-1] != "p" {
-		t.Errorf("the prompt must stay last: %q", got)
+	if n := len(got); got[n-2] != "--model" {
+		t.Errorf("--model must stay last (the prompt is on stdin): %q", got)
 	}
 }
 
 // User settings drop --restricted (it ignores settings files) and load user settings
 // only; the tool list, dontAsk and strict MCP stay.
 func TestArgs_UserSettings(t *testing.T) {
-	got := buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{UserSettings: true}, "p")
+	got := buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{UserSettings: true})
 	if slices.Contains(got, "--restricted") {
 		t.Errorf("--restricted ignores settings files and must be dropped: %q", got)
 	}

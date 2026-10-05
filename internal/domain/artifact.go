@@ -52,6 +52,21 @@ type ReviewResult struct {
 	Status  ReviewStatus  `json:"status"`
 	Summary string        `json:"summary"`
 	Issues  []ReviewIssue `json:"issues"`
+	// Diff records what the reviewer was shown (specs/hardening/SPEC.md §5.3). The
+	// orchestrator sets it after parsing; whatever the model wrote there is replaced.
+	Diff *ReviewDiffSummary `json:"diff,omitempty"`
+}
+
+// ReviewDiffSummary counts the files of the review diff by how they were shown. Files
+// counts every changed file; Truncated is true when any text file's diff was left out for
+// the budget or the file was not even listed.
+type ReviewDiffSummary struct {
+	Bytes      int  `json:"bytes"`
+	Files      int  `json:"files"`
+	Shown      int  `json:"shown"`
+	Summarized int  `json:"summarized"`
+	Withheld   int  `json:"withheld"`
+	Truncated  bool `json:"truncated"`
 }
 
 // Decide computes the authoritative pass/fail outcome: critical or high severity issues
@@ -72,6 +87,12 @@ func (r ReviewResult) Validate() error {
 	for _, issue := range r.Issues {
 		if !validSeverities[issue.Severity] {
 			return fmt.Errorf("unsupported review issue severity %q", issue.Severity)
+		}
+	}
+	if d := r.Diff; d != nil {
+		if d.Bytes < 0 || d.Files < 0 || d.Shown < 0 || d.Summarized < 0 || d.Withheld < 0 ||
+			d.Shown+d.Summarized+d.Withheld > d.Files {
+			return fmt.Errorf("inconsistent review diff counts %+v", *d)
 		}
 	}
 	return nil

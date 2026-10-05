@@ -424,11 +424,11 @@ func (r *ConsoleReporter) prettyAuthority(wf domain.Workflow, testCommand string
 	var parts []string
 	for _, s := range wf.Steps {
 		if s.Action == domain.ActionTest {
-			cmd := "$ " + testCommand
-			if sandboxed {
-				cmd += " (sandboxed)"
+			cmd := st.gray("$ " + testCommand + " (sandboxed)")
+			if !sandboxed {
+				cmd = st.gray("$ "+testCommand) + " " + st.yellow(notSandboxed)
 			}
-			parts = append(parts, "test "+st.gray(cmd))
+			parts = append(parts, "test "+cmd)
 			continue
 		}
 		parts = append(parts, string(s.Action)+" "+st.gray(string(domain.AuthorityFor(s.Action))))

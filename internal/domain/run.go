@@ -81,6 +81,16 @@ type Resume struct {
 	Entry      ActionType `json:"entry"`
 	Why        string     `json:"why"`
 	Mode       RunMode    `json:"mode"`
+	// ProviderCLI is what the fail-fast version check saw in this process: the CLI may
+	// have been updated since the run started (specs/hardening/SPEC.md §7.3).
+	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
+}
+
+// ProviderCLI is one provider CLI as the version check found it: the version string the
+// CLI reported and whether it lies in the range its permission flags were verified on.
+type ProviderCLI struct {
+	Version  string `json:"version"`
+	Verified bool   `json:"verified"`
 }
 
 type Run struct {
@@ -104,13 +114,38 @@ type Run struct {
 	// anything runs (specs/resume/SPEC.md §9.1). Its shape belongs to the guard, not to
 	// domain.
 	ResumeBaseline json.RawMessage `json:"resume_baseline,omitempty"`
+	// ProviderCLI is the CLI version of each routed provider at run start.
+	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
 	// Resumes is append-only: one entry per `orchestrator resume` of this run.
-	Resumes       []Resume        `json:"resumes,omitempty"`
-	Executions    []StepExecution `json:"executions"`
-	Status        RunStatus       `json:"status"`
-	FailureReason string          `json:"failure_reason,omitempty"`
-	TotalSteps    int             `json:"total_steps"`
-	FixIterations int             `json:"fix_iterations"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	Resumes []Resume `json:"resumes,omitempty"`
+	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its
+	// output goes to the first implement instead (specs/hardening/SPEC.md §8.4).
+	AllowRedTests bool `json:"allow_red_tests,omitempty"`
+	// PreRunTest is the test command's result before the first step, when the workflow
+	// implements and tests (specs/hardening/SPEC.md §8). It is not an execution.
+	// SecretScanBaseline are the fingerprints of what looked like secrets in the working
+	// tree when the run started; only findings not among them count (specs/hardening/SPEC.md
+	// §9.4).
+	SecretScanBaseline []string `json:"secret_scan_baseline,omitempty"`
+	// SecretFindings are the new findings a run with security.secret_scan.mode: warn went on
+	// with. Never the value.
+	SecretFindings []SecretFinding `json:"secret_findings,omitempty"`
+	PreRunTest     *TestResult     `json:"pre_run_test,omitempty"`
+	Executions     []StepExecution `json:"executions"`
+	Status         RunStatus       `json:"status"`
+	FailureReason  string          `json:"failure_reason,omitempty"`
+	TotalSteps     int             `json:"total_steps"`
+	FixIterations  int             `json:"fix_iterations"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
+// SecretFinding is one likely secret a step added: where, which rule, and the fingerprint
+// that identifies it across steps and resumes (secretscan.Finding). Never the value.
+type SecretFinding struct {
+	StepIndex   int    `json:"step_index"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	Rule        string `json:"rule"`
+	Fingerprint string `json:"fingerprint"`
 }

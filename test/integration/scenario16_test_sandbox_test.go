@@ -15,10 +15,14 @@ import (
 // fakeBwrap records its argv (one argument per line, "---" after each call), then skips
 // bwrap's own options - honouring --chdir - and executes the command, unsandboxed. With
 // FAKE_BWRAP_FAIL set it fails the way AppArmor makes the real one fail.
+// fakeBwrap takes its log path and whether to fail as literals: the probe and the test
+// run get only the test command's allowlisted environment (specs/hardening/SPEC.md §6.1),
+// so a variable set by the test would never reach it.
 const fakeBwrap = `#!/bin/sh
-printf '%s\n' "$@" >> "$FAKE_BWRAP_LOG"
-echo --- >> "$FAKE_BWRAP_LOG"
-if [ -n "${FAKE_BWRAP_FAIL:-}" ]; then
+log='{{LOG}}'
+printf '%s\n' "$@" >> "$log"
+echo --- >> "$log"
+if [ '{{FAIL}}' = 1 ]; then
   echo "bwrap: setting up uid map: Permission denied" >&2
   exit 1
 fi
@@ -38,7 +42,7 @@ done
 func TestScenario16_TestRunsSandboxed(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	bwrapLog := installFakeBwrap(t)
+	bwrapLog := installFakeBwrap(t, false)
 	j := startJev(t, scriptBugfixMedium())
 	cfg := withTestSandbox(t, jevConfig(t, j))
 
@@ -79,8 +83,7 @@ func TestScenario16_TestRunsSandboxed(t *testing.T) {
 func TestScenario16_UnusableSandboxFailsFast(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	installFakeBwrap(t)
-	t.Setenv("FAKE_BWRAP_FAIL", "1")
+	installFakeBwrap(t, true)
 	j := startJev(t, scriptBugfixMedium())
 	cfg := withTestSandbox(t, jevConfig(t, j))
 
@@ -100,14 +103,19 @@ func TestScenario16_UnusableSandboxFailsFast(t *testing.T) {
 	}
 }
 
-// installFakeBwrap puts fakeBwrap first on PATH and returns the log it writes.
-func installFakeBwrap(t *testing.T) string {
+// installFakeBwrap puts fakeBwrap first on PATH and returns the log it writes; with fail
+// every call fails as an AppArmor-blocked bwrap does.
+func installFakeBwrap(t *testing.T, fail bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	fakeexec.WriteExecutable(t, dir, "bwrap", fakeBwrap)
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	log := filepath.Join(t.TempDir(), "bwrap.log")
-	t.Setenv("FAKE_BWRAP_LOG", log)
+	failFlag := "0"
+	if fail {
+		failFlag = "1"
+	}
+	script := strings.NewReplacer("{{LOG}}", log, "{{FAIL}}", failFlag).Replace(fakeBwrap)
+	fakeexec.WriteExecutable(t, dir, "bwrap", script)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log
 }
 
@@ -118,7 +126,7 @@ func withTestSandbox(t *testing.T, configPath string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := strings.Replace(string(data), "test:\n  command:", "test:\n  sandbox: bwrap\n  command:", 1)
+	out := strings.Replace(string(data), "test:\n  sandbox: none\n", "test:\n  sandbox: bwrap\n", 1)
 	if out == string(data) {
 		t.Fatal("no test block to rewrite")
 	}
@@ -139,4 +147,51 @@ func bwrapCalls(t *testing.T, log string) [][]string {
 		calls = append(calls, strings.Split(strings.TrimSuffix(block, "\n"), "\n"))
 	}
 	return calls
+}
+
+// 16c (specs/hardening/SPEC.md §6.3): without test.sandbox the test command is sandboxed - a
+// host whose bwrap cannot sandbox fails fast, and the refusal offers test.sandbox: none.
+func TestScenario16_SandboxIsTheDefault(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	invocationsLog, _ := decisionEnv(t, repoDir)
+	installFakeBwrap(t, true)
+	j := startJev(t, scriptBugfixMedium())
+	cfg := jevConfig(t, j)
+	data, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withoutKey := strings.Replace(string(data), "  sandbox: none\n", "", 1)
+	if withoutKey == string(data) {
+		t.Fatal("no sandbox key to remove")
+	}
+	if err := os.WriteFile(cfg, []byte(withoutKey), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
+	var depErr *apperr.DependencyError
+	if !errors.As(err, &depErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency {
+		t.Fatalf("expected a DependencyError (exit 2), got %T: %v", err, err)
+	}
+	for _, want := range []string{"test.sandbox: bwrap, the default", "set test.sandbox: none to run tests unsandboxed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+	if got := invocations(t, invocationsLog); len(got) != 0 {
+		t.Errorf("no AI call may happen, got %v", got)
+	}
+}
+
+// 16d: test.sandbox: none is announced in the authority line of every run.
+func TestScenario16_ExplicitNoneWarns(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	decisionEnv(t, repoDir)
+	j := startJev(t, scriptBugfixMedium())
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+	if !strings.Contains(stdout, "NOT sandboxed: network, $HOME and your files are reachable") {
+		t.Errorf("the authority line does not warn about test.sandbox: none:\n%s", stdout)
+	}
 }

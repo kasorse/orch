@@ -278,3 +278,25 @@ func TestValidateDependencies_JiraAggregatesWithExecutables(t *testing.T) {
 		}
 	}
 }
+
+// The sandbox is the default (specs/hardening/SPEC.md §6.3): a config without test.sandbox
+// needs bwrap, and the refusal names both remedies; an explicit none needs nothing.
+func TestValidateDependencies_SandboxByDefault(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	cfg := validConfig()
+	cfg.Test = TestConfig{Command: "go test ./..."}
+	err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"bwrap": true}}, DependencyOptions{})
+	if err == nil {
+		t.Fatal("a config without test.sandbox must need bwrap")
+	}
+	for _, want := range []string{"test.sandbox: bwrap, the default", "apt install bubblewrap", "set test.sandbox: none to run tests unsandboxed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected %q in:\n%v", want, err)
+		}
+	}
+
+	cfg.Test.Sandbox = SandboxNone
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{Missing: map[string]bool{"bwrap": true}}, DependencyOptions{}); err != nil {
+		t.Errorf("test.sandbox: none needs no bwrap, got: %v", err)
+	}
+}

@@ -68,3 +68,45 @@ func TestScrubbedEnv_CredentialVarsRegisteredLater(t *testing.T) {
 		t.Error("a registered credential variable was inherited")
 	}
 }
+
+func TestTestEnv_Allowlist(t *testing.T) {
+	t.Cleanup(resetCredentialVarsForTest)
+	t.Cleanup(resetTestEnvPassForTest)
+	ScrubCredentials("JIRA_API_TOKEN")
+
+	environ := []string{
+		"PATH=/usr/bin", "HOME=/home/op", "GOFLAGS=-mod=mod", "LC_ALL=C.UTF-8", "CI=true",
+		"ANTHROPIC_API_KEY=sk-ant-x", "AWS_SECRET_ACCESS_KEY=x", "GITHUB_TOKEN=ghp_x", "SSH_AUTH_SOCK=/run/agent",
+		"GOPROXY=https://user:pw@proxy", "HTTPS_PROXY=http://p", "JIRA_API_TOKEN=secret", "CLAUDECODE=1",
+		"FOO_BAR=1", "LC_FAKE=1", "PATHX=/x",
+	}
+	want := []string{"PATH=/usr/bin", "HOME=/home/op", "GOFLAGS=-mod=mod", "LC_ALL=C.UTF-8", "CI=true"}
+	if got := testEnv(environ); !slices.Equal(got, want) {
+		t.Errorf("testEnv =\n%q\nwant\n%q", got, want)
+	}
+
+	// test.env_pass adds exact names; a credential or session variable stays out.
+	AllowTestEnv("GOPROXY", "JIRA_API_TOKEN", "CLAUDECODE", "")
+	want = []string{"PATH=/usr/bin", "HOME=/home/op", "GOFLAGS=-mod=mod", "LC_ALL=C.UTF-8", "CI=true", "GOPROXY=https://user:pw@proxy"}
+	if got := testEnv(environ); !slices.Equal(got, want) {
+		t.Errorf("with env_pass:\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A provider CLI keeps ScrubbedEnv's denylist (DECISIONS.md D7): only the test command
+// gets the allowlist.
+func TestTestEnv_ProvidersKeepTheirEnvironment(t *testing.T) {
+	t.Setenv("ORCH_UNRELATED_VAR", "1")
+	if !slices.Contains(ScrubbedEnv(), "ORCH_UNRELATED_VAR=1") {
+		t.Error("ScrubbedEnv lost an unrelated variable")
+	}
+	if slices.Contains(TestEnv(), "ORCH_UNRELATED_VAR=1") {
+		t.Error("TestEnv passed a variable outside the allowlist")
+	}
+}
+
+func TestIsParentSessionVar(t *testing.T) {
+	if !IsParentSessionVar("CLAUDECODE") || IsParentSessionVar("PATH") {
+		t.Error("IsParentSessionVar disagrees with parentSessionVars")
+	}
+}

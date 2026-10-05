@@ -33,7 +33,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
+	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	opts := tailOptions{
 		mode:        mode,
 		defaultMode: resumeDefaultMode(run.Mode),
-		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason},
+		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis},
 		// execution.timeout is a fresh budget for this process's steps (SPEC §8); there
 		// is no decision phase to discount.
 		engineContext: func() (context.Context, context.CancelFunc) {

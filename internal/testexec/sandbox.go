@@ -59,11 +59,11 @@ func (s *Sandbox) args(workingDir, command string) []string {
 	return append(argv, "--chdir", workingDir, "sh", "-c", command)
 }
 
-// env is the scrubbed environment with TMPDIR pointing at the private /tmp: an inherited
-// TMPDIR under /tmp no longer exists inside the sandbox.
+// env is the test environment (execution.TestEnv) with TMPDIR pointing at the private
+// /tmp: an inherited TMPDIR under /tmp no longer exists inside the sandbox.
 func (s *Sandbox) env() []string {
 	var env []string
-	for _, kv := range execution.ScrubbedEnv() {
+	for _, kv := range execution.TestEnv() {
 		if !strings.HasPrefix(kv, "TMPDIR=") {
 			env = append(env, kv)
 		}
@@ -81,7 +81,7 @@ func ProbeArgs() []string {
 
 // Probe runs ProbeArgs and turns a failure into a DependencyError naming the usual cause.
 func Probe(ctx context.Context, executor execution.ProcessExecutor) error {
-	res, err := executor.Run(ctx, execution.Spec{Executable: "bwrap", Args: ProbeArgs(), Env: execution.ScrubbedEnv()})
+	res, err := executor.Run(ctx, execution.Spec{Executable: "bwrap", Args: ProbeArgs(), Env: execution.TestEnv()})
 	if err == nil && res.ExitCode == 0 {
 		return nil
 	}
@@ -90,7 +90,8 @@ func Probe(ctx context.Context, executor execution.ProcessExecutor) error {
 		detail = err.Error()
 	}
 	return apperr.NewDependencyError(fmt.Sprintf(
-		"test.sandbox is bwrap, but bubblewrap cannot create a sandbox on this host:\n  %s\n\n"+
+		"the test command runs under bwrap (test.sandbox: bwrap, the default), but bubblewrap cannot\n"+
+			"create a sandbox on this host:\n  %s\n\n"+
 			"On Ubuntu 24.04 and later AppArmor blocks unprivileged user namespaces; allow them for\n"+
 			"bwrap with a profile (see Claude Code's sandboxing docs, \"Ubuntu 24.04 and later\"):\n\n"+
 			"  /etc/apparmor.d/bwrap:\n"+
@@ -100,5 +101,6 @@ func Probe(ctx context.Context, executor execution.ProcessExecutor) error {
 			"      userns,\n"+
 			"    }\n"+
 			"  then: sudo systemctl reload apparmor\n\n"+
-			"or set test.sandbox: none.", detail), err)
+			"or set test.sandbox: none to run tests unsandboxed: the code under test, which a model\n"+
+			"wrote, then reaches the network, $HOME and your files.", detail), err)
 }

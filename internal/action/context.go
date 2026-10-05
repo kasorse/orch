@@ -78,6 +78,9 @@ type Dispatcher struct {
 	// has no business reading other runs' prompts and context, or writing what a resume
 	// reads back (specs/resume/SPEC.md §9.3).
 	RunsDir string
+	// OnSecret, if set, is told of each new likely secret a step added when
+	// security.secret_scan.mode is warn (file, line and rule - never the value).
+	OnSecret func(step domain.ActionType, file string, line int, rule string)
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
@@ -90,6 +93,10 @@ type Dispatcher struct {
 	// transition table never has a test failure and a review failure pending at once.
 	pendingTestFailure  *domain.TestResult
 	pendingReviewIssues []domain.ReviewIssue
+
+	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
+	// is shown to implement until the first test step has run.
+	preRunFailure *domain.TestResult
 }
 
 func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repository, runner *testexec.Runner) *Dispatcher {

@@ -17,6 +17,7 @@ import (
 // common is the prefix every authority shares (specs/permissions/SPEC.md §6.2).
 var common = []string{
 	"--print",
+	"--input-format", "text",
 	"--output-format", "stream-json",
 	"--verbose",
 	"--restricted",
@@ -52,7 +53,7 @@ func TestClient_BuildsExpectedArgsPerAuthority(t *testing.T) {
 			if call.Executable != "claude" || call.WorkingDir != "/tmp/repo" {
 				t.Errorf("unexpected call %+v", call)
 			}
-			want := append(append(append([]string{}, common...), tc.profile...), "--model", "opus", "do the thing")
+			want := append(append(append([]string{}, common...), tc.profile...), "--model", "opus")
 			if !slices.Equal(call.Args, want) {
 				t.Errorf("args =\n  %q\nwant\n  %q", call.Args, want)
 			}
@@ -69,23 +70,31 @@ func TestClient_DenyReadBecomesSettings(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	settings := `{"permissions":{"deny":["Read(**/.env)","Read(**/.env/**)","Read(**/*.pem)","Read(**/*.pem/**)"]}}`
-	want := append(append([]string{}, common...), "--settings", settings, "--tools", "Read,Grep,Glob", "--model", "opus", "p")
+	want := append(append([]string{}, common...), "--settings", settings, "--tools", "Read,Grep,Glob", "--model", "opus")
 	if got := fake.Calls[0].Args; !slices.Equal(got, want) {
 		t.Errorf("args =\n  %q\nwant\n  %q", got, want)
 	}
 }
 
-// TestRedactedArgsMirrorBuildArgs: the argv in an error message is the one that ran, with
-// only the prompt replaced.
-func TestRedactedArgsMirrorBuildArgs(t *testing.T) {
-	deny := []string{".env"}
-	built := buildArgs(domain.AuthorityEdit, deny, "opus", "high", provider.Extensions{}, "secret prompt")
-	redacted := redactedArgs(domain.AuthorityEdit, deny, "opus", "high", provider.Extensions{}, len("secret prompt"))
-	if !slices.Equal(built[:len(built)-1], redacted[:len(redacted)-1]) {
-		t.Errorf("redactedArgs diverged from buildArgs:\n  %q\n  %q", built, redacted)
+// TestClient_PromptOnStdin: a prompt far over the per-argument limit travels on stdin and
+// no argv element comes near it.
+func TestClient_PromptOnStdin(t *testing.T) {
+	prompt := strings.Repeat("x", 1<<20)
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	_, err := New(fake).Execute(context.Background(), provider.Request{
+		Prompt: prompt, Model: "opus", Authority: domain.AuthorityRead,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := redacted[len(redacted)-1]; got != "<prompt: 13 chars>" {
-		t.Errorf("last redacted arg = %q", got)
+	call := fake.Calls[0]
+	if call.Stdin != prompt {
+		t.Errorf("Stdin is not the prompt (len %d)", len(call.Stdin))
+	}
+	for _, a := range call.Args {
+		if len(a) > 4096 {
+			t.Errorf("argv element of %d bytes", len(a))
+		}
 	}
 }
 
@@ -243,12 +252,12 @@ func TestClient_ScrubsParentSessionEnv(t *testing.T) {
 }
 
 func TestEffortFlagOnlyWhenSet(t *testing.T) {
-	with := buildArgs(domain.AuthorityRead, nil, "opus", "high", provider.Extensions{}, "p")
+	with := buildArgs(domain.AuthorityRead, nil, "opus", "high", provider.Extensions{})
 	i := slices.Index(with, "--effort")
 	if i < 0 || with[i+1] != "high" || with[len(with)-3] != "--effort" && with[i+2] != "--model" {
 		t.Errorf("effort flag missing or misplaced: %q", with)
 	}
-	if slices.Contains(buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{}, "p"), "--effort") {
+	if slices.Contains(buildArgs(domain.AuthorityRead, nil, "opus", "", provider.Extensions{}), "--effort") {
 		t.Error("--effort passed with no effort configured")
 	}
 }

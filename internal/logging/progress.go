@@ -238,6 +238,39 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
+// ProviderCLIUnverified warns, in every run's header, that a provider CLI outside its
+// verified version range runs because security.allow_unverified_cli is set.
+func (r *ConsoleReporter) ProviderCLIUnverified(id, version, verifiedRange string) {
+	msg := fmt.Sprintf("%s %s is outside the verified range %s (security.allow_unverified_cli)", id, version, verifiedRange)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().red("⚠ "+msg))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", msg)
+}
+
+// ProviderCLIVersion reports a provider CLI's version and range (validate only).
+func (r *ConsoleReporter) ProviderCLIVersion(id, version, verifiedRange string, verified bool) {
+	text := fmt.Sprintf("%s %s (verified range %s)", id, version, verifiedRange)
+	if !verified {
+		text = fmt.Sprintf("%s %s (outside the verified range %s, allowed by security.allow_unverified_cli)", id, version, verifiedRange)
+	}
+	if r.Pretty {
+		st := r.st()
+		mark := st.green("✓")
+		if !verified {
+			mark = st.red("⚠")
+		}
+		fmt.Fprintln(r.Out, mark+" "+st.gray(text))
+		return
+	}
+	mark := "✓"
+	if !verified {
+		mark = "⚠"
+	}
+	fmt.Fprintf(r.Out, "%s %s\n", mark, text)
+}
+
 // JevModelServed reports that Jev serves the configured decision model (validate only;
 // a run stays silent when the check passes).
 func (r *ConsoleReporter) JevModelServed(model string) {
@@ -411,4 +444,66 @@ func (r *ConsoleReporter) RunFinished(run *domain.Run) {
 	case domain.RunStopped:
 		fmt.Fprintf(r.Out, "\nRun stopped.\nReason: %s\n", run.FailureReason)
 	}
+}
+
+// PreRunTestStarted announces the test command's run before the first step
+// (specs/hardening/SPEC.md §8).
+func (r *ConsoleReporter) PreRunTestStarted() {
+	if r.Pretty {
+		r.startSpin("Running the tests before any change", "")
+		return
+	}
+	fmt.Fprintln(r.Out, "\nPre-run test: running the tests before any change...")
+}
+
+// PreRunTestFinished reports the pre-run test: passed, failed and stopping the run, or
+// failed and going on because the run was started with --allow-red-tests. A nil result
+// (the command never ran) only ends the progress display.
+func (r *ConsoleReporter) PreRunTestFinished(result *domain.TestResult, allowRed bool) {
+	r.stopSpin()
+	if result == nil {
+		return
+	}
+	took := result.Duration.Round(100 * time.Millisecond)
+	var text string
+	switch {
+	case result.Success:
+		text = fmt.Sprintf("passed (%s)", took)
+	case allowRed:
+		text = fmt.Sprintf("failed (exit %d, %s) - going on: --allow-red-tests, the task is to make them pass", result.ExitCode, took)
+	default:
+		text = fmt.Sprintf("failed (exit %d, %s) - the run stops before any change", result.ExitCode, took)
+	}
+	if r.Pretty {
+		st := r.st()
+		mark := st.green("✓")
+		if !result.Success {
+			mark = st.yellow("⚠")
+		}
+		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "pre-run test")), mark, text)
+		return
+	}
+	fmt.Fprintf(r.Out, "Pre-run test: %s\n", text)
+}
+
+// SecretScanOff says, before approval, that security.secret_scan.mode is off.
+func (r *ConsoleReporter) SecretScanOff() {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "secret scan")), st.yellow("off: what steps add is not checked for secrets"))
+		return
+	}
+	fmt.Fprintln(r.Out, "Secret scan: off - what steps add is not checked for secrets")
+}
+
+// SecretFound reports a likely secret a step added, under security.secret_scan.mode:
+// warn: where and which rule, never the value.
+func (r *ConsoleReporter) SecretFound(step domain.ActionType, file string, line int, rule string) {
+	r.stopSpin()
+	text := fmt.Sprintf("%s added what looks like a secret: %s:%d (%s); recorded, not sent to review", step, file, line, rule)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ "+text))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", text)
 }

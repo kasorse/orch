@@ -56,8 +56,8 @@ func PrependPath(t *testing.T, dir string) {
 //     <dir>/<action>.txt (the last call of an action wins), so tests can assert what
 //     text a step was given.
 //   - FAKE_ARGS_DIR: if set, the argv of each call is saved to <dir>/<action>.args, one
-//     argument per line with the prompt replaced by "<prompt>" (the last call of an
-//     action wins), so tests can assert the flags a step ran with.
+//     argument per line (a prompt in argv, codex/gemini, shows as "<prompt>"; claude's is
+//     on stdin and not in the file; the last call of an action wins), so tests can assert the flags a step ran with.
 //   - FAKE_ENV_DIR: if set, the environment of each call is saved to
 //     <dir>/<action>.env (the output of env), so tests can assert what a provider CLI
 //     inherits.
@@ -74,8 +74,16 @@ func PrependPath(t *testing.T, dir string) {
 // (e.g. codex/gemini put it second), so only scanning the last argument would miss it.
 const ProviderScript = `#!/bin/sh
 
+if [ "$1" = "--version" ]; then
+  echo "${FAKE_CLI_VERSION:-2.1.289 (Claude Code)}"
+  exit 0
+fi
+
+# The claude adapter sends the prompt on stdin; codex and gemini put it in argv. Read stdin
+# once (a CLI whose prompt is in argv gets none, and /dev/null never blocks it).
+prompt=$(cat)
 action=""
-for arg in "$@"; do
+for arg in "$prompt" "$@"; do
   case "$arg" in
     "ACTION: translate"*)       action="translate" ;;
     "ACTION: decide-context"*)  action="decide-context" ;;
@@ -101,9 +109,9 @@ if [ -n "${INVOCATIONS_LOG:-}" ]; then
 fi
 
 if [ -n "${FAKE_PROMPTS_DIR:-}" ]; then
-  for arg in "$@"; do
+  for arg in "$prompt" "$@"; do
     case "$arg" in
-      "ACTION: "*) printf '%s' "$arg" > "$FAKE_PROMPTS_DIR/$action.txt" ;;
+      "ACTION: "*) printf '%s' "$arg" > "$FAKE_PROMPTS_DIR/$action.txt"; break ;;
     esac
   done
 fi

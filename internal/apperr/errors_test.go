@@ -43,21 +43,23 @@ func TestProviderError_TruncatesLongStderr(t *testing.T) {
 
 func TestProviderError_RendersFailureKindAndCommand(t *testing.T) {
 	err := &ProviderError{
-		Provider:   "claude",
-		Action:     "implement",
-		Model:      "opus",
-		Kind:       FailureExit,
-		Executable: "claude",
-		Args:       []string{"--print", "<prompt: 42 chars>"},
-		WorkingDir: "/repo",
-		ExitCode:   1,
-		Stdout:     "API Error: Connection error.",
-		LogPath:    ".orchestrator/runs/abc/logs/000-implement.stdout.log",
+		Provider:    "claude",
+		Action:      "implement",
+		Model:       "opus",
+		Kind:        FailureExit,
+		Executable:  "claude",
+		Args:        []string{"--print"},
+		PromptBytes: 42,
+		WorkingDir:  "/repo",
+		ExitCode:    1,
+		Stdout:      "API Error: Connection error.",
+		LogPath:     ".orchestrator/runs/abc/logs/000-implement.stdout.log",
 	}
 	msg := err.Error()
 	for _, want := range []string{
 		"failure: exit (the CLI ran and exited non-zero)",
-		"command: claude --print <prompt: 42 chars>",
+		"command: claude --print",
+		"prompt: 42 bytes on stdin",
 		"working dir: /repo",
 		"stdout:\nAPI Error: Connection error.",
 		"stderr:\n(empty)",

@@ -29,7 +29,7 @@ type Spec struct {
 	WorkingDir string
 	// Env is the child's environment. nil means inherit the orchestrator's environment
 	// unchanged - git calls rely on that, so nil must keep meaning "inherit", never
-	// "empty". Provider and test processes pass ScrubbedEnv().
+	// "empty". Provider processes pass ScrubbedEnv(), test-command processes TestEnv().
 	Env        []string
 	StdoutSink io.Writer
 	StderrSink io.Writer

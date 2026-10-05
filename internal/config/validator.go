@@ -2,11 +2,14 @@ package config
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 )
 
@@ -50,6 +53,8 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Sprintf("limits.max_fix_iterations must be positive, got %d", cfg.Limits.MaxFixIterations))
 	}
 
+	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
+
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
 	}
@@ -57,6 +62,23 @@ func Validate(cfg Config) error {
 	problems = append(problems, decisionProblems(cfg)...)
 
 	problems = append(problems, sandboxProblems(cfg.Test)...)
+	problems = append(problems, envPassProblems(cfg)...)
+	switch cfg.Test.Baseline {
+	case "", BaselineRequireGreen, BaselineOff:
+	default:
+		problems = append(problems, fmt.Sprintf("test.baseline must be require_green (the default) or off, got %q", cfg.Test.Baseline))
+	}
+
+	switch cfg.Security.SecretScan.Mode {
+	case "", SecretScanStop, SecretScanWarn, SecretScanOff:
+	default:
+		problems = append(problems, fmt.Sprintf("security.secret_scan.mode must be stop (the default), warn or off, got %q", cfg.Security.SecretScan.Mode))
+	}
+	for i, p := range cfg.Security.SecretScan.AllowPaths {
+		if err := domain.ValidateProtectedPattern(p); err != nil {
+			problems = append(problems, fmt.Sprintf("security.secret_scan.allow_paths[%d] %q: %v", i, p, err))
+		}
+	}
 
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
@@ -124,15 +146,94 @@ func supportedProviderNames() string {
 	return strings.Join(names, ", ")
 }
 
+func promptLimitProblems(p PromptLimitsConfig) []string {
+	var problems []string
+	for _, l := range []struct {
+		key      string
+		value    *int
+		min, max int
+	}{
+		{"limits.prompt.max_diff_bytes", p.MaxDiffBytes, MinMaxDiffBytes, MaxMaxDiffBytes},
+		{"limits.prompt.max_test_output_bytes", p.MaxTestOutputBytes, MinMaxTestOutputBytes, MaxMaxTestOutputBytes},
+	} {
+		if l.value != nil && (*l.value < l.min || *l.value > l.max) {
+			problems = append(problems, fmt.Sprintf("%s must be between %d and %d, got %d", l.key, l.min, l.max, *l.value))
+		}
+	}
+	for i, g := range p.DiffSummarize {
+		if strings.TrimSpace(g) == "" {
+			problems = append(problems, fmt.Sprintf("limits.prompt.diff_summarize[%d] must not be empty", i))
+			continue
+		}
+		// path.Match reports a malformed pattern even when the name does not match.
+		if _, err := path.Match(g, ""); err != nil {
+			problems = append(problems, fmt.Sprintf("limits.prompt.diff_summarize[%d] %q: %v", i, g, err))
+		}
+	}
+	return problems
+}
+
+// envNameRE is a portable environment variable name.
+var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// credentialSubstrings and credentialSegments make a test.env_pass name look like a
+// credential (specs/hardening/SPEC.md §6.2): a substring anywhere in the upper-cased name,
+// or a whole "_"-separated segment. AUTH, KEY and PASS are segments only, so GIT_AUTHOR_NAME
+// or KEYBOARD_LAYOUT pass while SSH_AUTH_SOCK, STRIPE_KEY and DB_PASS do not. There is no
+// override: a test that needs a credential does not belong in a run that executes
+// model-written code.
+var (
+	credentialSubstrings = []string{"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "APIKEY", "PRIVATEKEY"}
+	credentialSegments   = []string{"AUTH", "KEY", "KEYS", "PASS", "COOKIE"}
+)
+
+// credentialLike returns why name looks like a credential, or "".
+func credentialLike(name string) string {
+	upper := strings.ToUpper(name)
+	for _, sub := range credentialSubstrings {
+		if strings.Contains(upper, sub) {
+			return "contains " + sub
+		}
+	}
+	for _, seg := range strings.Split(upper, "_") {
+		if slices.Contains(credentialSegments, seg) {
+			return "has the segment " + seg
+		}
+	}
+	return ""
+}
+
+func envPassProblems(cfg Config) []string {
+	var problems []string
+	credentials := cfg.CredentialEnvNames()
+	for i, name := range cfg.Test.EnvPass {
+		key := fmt.Sprintf("test.env_pass[%d] %q", i, name)
+		switch {
+		case !envNameRE.MatchString(name):
+			problems = append(problems, key+": must be an exact environment variable name (letters, digits, _; no wildcards)")
+		case slices.Contains(credentials, name):
+			problems = append(problems, key+": is a credential this config names; the test command never gets it")
+		case execution.IsParentSessionVar(name):
+			problems = append(problems, key+": belongs to the agent session that launched the orchestrator; no child process gets it")
+		default:
+			if why := credentialLike(name); why != "" {
+				problems = append(problems, key+": looks like a credential ("+why+"); the test command runs model-written "+
+					"code and never gets credentials")
+			}
+		}
+	}
+	return problems
+}
+
 func sandboxProblems(t TestConfig) []string {
 	var problems []string
 	switch t.Sandbox {
-	case "", "none", SandboxBwrap:
+	case "", SandboxNone, SandboxBwrap:
 	default:
-		problems = append(problems, fmt.Sprintf("test.sandbox must be none or bwrap, got %q", t.Sandbox))
+		problems = append(problems, fmt.Sprintf("test.sandbox must be bwrap (the default) or none, got %q", t.Sandbox))
 	}
 	if !t.Sandboxed() && len(t.ROBinds)+len(t.RWBinds) > 0 {
-		problems = append(problems, "test.ro_binds / test.rw_binds only apply with test.sandbox: bwrap")
+		problems = append(problems, "test.ro_binds / test.rw_binds only apply under the sandbox (test.sandbox: bwrap, the default), not with none")
 	}
 	for _, set := range []struct {
 		key   string

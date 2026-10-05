@@ -44,6 +44,14 @@ func DenyPatterns(extra []string) []string {
 	return out
 }
 
+// DenyMatcher reports whether a repository-relative, slash-separated path matches the
+// secret deny list (built-in patterns plus extra), exactly as the Context Manager decides
+// it - for callers outside this package, such as the review diff, which must withhold the
+// same files.
+func DenyMatcher(extra []string) func(rel string) bool {
+	return newDenyList(extra).denied
+}
+
 func newDenyList(extra []string) denyList {
 	var d denyList
 	for _, p := range DenyPatterns(extra) {

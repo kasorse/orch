@@ -80,20 +80,45 @@ type ActionsConfig struct {
 
 type TestConfig struct {
 	Command string `yaml:"command"`
-	// Sandbox is "none" (or empty) or "bwrap": run the command under bubblewrap with the
-	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8).
+	// Sandbox is "bwrap" (or empty, the default): run the command under bubblewrap with the
+	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8) -
+	// or "none", written out, to run it unsandboxed.
 	Sandbox string `yaml:"sandbox"`
 	// ROBinds and RWBinds re-expose paths inside the sandbox - absolute or "~/"-relative,
 	// e.g. a module cache read-only and a build cache writable. Only valid with bwrap.
 	ROBinds []string `yaml:"ro_binds"`
 	RWBinds []string `yaml:"rw_binds"`
+	// EnvPass names environment variables the test command inherits on top of the default
+	// allowlist (execution.TestEnv; specs/hardening/SPEC.md §6.2). Exact names; a name that
+	// looks like a credential is refused.
+	EnvPass []string `yaml:"env_pass"`
+	// Baseline is require_green (or empty, the default) or off: whether a workflow with
+	// implement and test runs the test command once before the first step and refuses a red
+	// suite (specs/hardening/SPEC.md §8). Read it through PreRunTest.
+	Baseline string `yaml:"baseline"`
 }
 
-// SandboxBwrap is the one sandbox test.sandbox currently supports.
-const SandboxBwrap = "bwrap"
+// test.baseline values.
+const (
+	BaselineRequireGreen = "require_green"
+	BaselineOff          = "off"
+)
 
-// Sandboxed reports whether the test command runs under a sandbox.
-func (t TestConfig) Sandboxed() bool { return t.Sandbox == SandboxBwrap }
+// PreRunTest reports whether the test command runs before the first step of a workflow
+// that implements and tests: unless test.baseline is off, it does.
+func (t TestConfig) PreRunTest() bool { return t.Baseline != BaselineOff }
+
+// SandboxBwrap is the one sandbox test.sandbox currently supports, and the default;
+// SandboxNone runs the test command unsandboxed and must be written out
+// (specs/hardening/SPEC.md §6.3).
+const (
+	SandboxBwrap = "bwrap"
+	SandboxNone  = "none"
+)
+
+// Sandboxed reports whether the test command runs under a sandbox: unless test.sandbox
+// is explicitly none, it does.
+func (t TestConfig) Sandboxed() bool { return t.Sandbox == "" || t.Sandbox == SandboxBwrap }
 
 // ResolveBinds expands "~/" against home and cleans every bind path.
 func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
@@ -113,6 +138,46 @@ func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
 type LimitsConfig struct {
 	MaxSteps         int `yaml:"max_steps"`
 	MaxFixIterations int `yaml:"max_fix_iterations"`
+	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
+	// The section and each key are optional.
+	Prompt PromptLimitsConfig `yaml:"prompt"`
+}
+
+// Defaults and ranges of limits.prompt (specs/hardening/SPEC.md §5.1).
+const (
+	DefaultMaxDiffBytes       = 262144
+	MinMaxDiffBytes           = 16 << 10
+	MaxMaxDiffBytes           = 4 << 20
+	DefaultMaxTestOutputBytes = 32768
+	MinMaxTestOutputBytes     = 4 << 10
+	MaxMaxTestOutputBytes     = 1 << 20
+)
+
+// PromptLimitsConfig is limits.prompt. The byte limits are pointers so an absent key (nil)
+// takes the default while an explicit 0 is still refused as out of range; read them through
+// DiffBytes and TestOutputBytes.
+type PromptLimitsConfig struct {
+	MaxDiffBytes       *int `yaml:"max_diff_bytes"`
+	MaxTestOutputBytes *int `yaml:"max_test_output_bytes"`
+	// DiffSummarize adds globs to the files the review diff shows as a stat line only.
+	DiffSummarize []string `yaml:"diff_summarize"`
+}
+
+// DiffBytes is the review diff's budget: max_diff_bytes, or its default.
+func (p PromptLimitsConfig) DiffBytes() int {
+	if p.MaxDiffBytes == nil {
+		return DefaultMaxDiffBytes
+	}
+	return *p.MaxDiffBytes
+}
+
+// TestOutputBytes is the budget for a failing test's output in the implement prompt:
+// max_test_output_bytes, or its default.
+func (p PromptLimitsConfig) TestOutputBytes() int {
+	if p.MaxTestOutputBytes == nil {
+		return DefaultMaxTestOutputBytes
+	}
+	return *p.MaxTestOutputBytes
 }
 
 // ExecutionConfig.Timeout is parsed from a duration string like "15m" via a custom
@@ -173,7 +238,36 @@ type SecurityConfig struct {
 	// ProtectedPaths extends domain.DefaultProtectedPaths: patterns an implement step must
 	// not change.
 	ProtectedPaths []string `yaml:"protected_paths"`
+	// AllowUnverifiedCLI lets a run proceed on a provider CLI version outside the range its
+	// permission flags were verified on; the run records and warns about it
+	// (specs/hardening/SPEC.md §7.2). A CLI that cannot be executed is refused regardless.
+	AllowUnverifiedCLI bool `yaml:"allow_unverified_cli"`
+	// SecretScan is what happens when implement or the test command adds what looks like a
+	// secret to the working tree (specs/hardening/SPEC.md §9).
+	SecretScan SecretScanConfig `yaml:"secret_scan"`
 }
+
+// SecretScanConfig is security.secret_scan.
+type SecretScanConfig struct {
+	// Mode is stop (or empty, the default), warn or off.
+	Mode string `yaml:"mode"`
+	// AllowPaths are protected_paths-style patterns whose findings are ignored, e.g.
+	// testdata/** for fixtures that hold fake keys on purpose.
+	AllowPaths []string `yaml:"allow_paths"`
+}
+
+// security.secret_scan.mode values.
+const (
+	SecretScanStop = "stop"
+	SecretScanWarn = "warn"
+	SecretScanOff  = "off"
+)
+
+// Enabled reports whether the scan runs at all.
+func (s SecretScanConfig) Enabled() bool { return s.Mode != SecretScanOff }
+
+// Stops reports whether a new finding stops the run (the default) rather than warning.
+func (s SecretScanConfig) Stops() bool { return s.Mode == "" || s.Mode == SecretScanStop }
 
 // CleanWorktreeRequired reports whether a workflow with implement must start on a clean
 // worktree - true unless security.require_clean_worktree is explicitly false.

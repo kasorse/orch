@@ -47,7 +47,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -67,6 +67,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
 	}
+	if cli.allowRedTests && rest[0] != "run" {
+		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
+	}
 
 	switch rest[0] {
 	case "version":
@@ -79,7 +82,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cli.jiraRef == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.mode, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -109,12 +112,15 @@ type cliArgs struct {
 	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
 	// §4); empty means the decision layer chooses.
 	stages []domain.Stage
+	// allowRedTests is --allow-red-tests: the task is to make failing tests pass, so a red
+	// pre-run test does not stop the run (specs/hardening/SPEC.md §8.4).
+	allowRedTests bool
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X, the repeatable
-// --stage/--stage=X and --verbose/-v out of args, in any position, and returns them with the remaining
+// --stage/--stage=X, --allow-red-tests and --verbose/-v out of args, in any position, and returns them with the remaining
 // positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
 	cli := cliArgs{configPath: defaultConfigPath}
@@ -169,6 +175,8 @@ func parseArgs(args []string) (cliArgs, error) {
 			if !slices.Contains(cli.stages, parsed[0]) {
 				cli.stages = append(cli.stages, parsed[0])
 			}
+		case arg == "--allow-red-tests":
+			cli.allowRedTests = true
 		case arg == "--verbose" || arg == "-v":
 			cli.verbose = true
 		default:
@@ -186,21 +194,23 @@ const sandboxProbeTimeout = 10 * time.Second
 // ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, error) {
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
+	// What the test command may inherit beyond the default allowlist (test.env_pass).
+	execution.AllowTestEnv(cfg.Test.EnvPass...)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
@@ -209,17 +219,70 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 		err := testexec.Probe(probeCtx, executor)
 		cancel()
 		if err != nil {
-			return config.Config{}, err
+			return config.Config{}, nil, err
 		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
 	if err := config.ValidateAuthorities(cfg, registry); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
+	}
+
+	// The last check of the chain: it runs each routed CLI once (--version), which is
+	// not an AI call, and only after everything that needs no process at all.
+	clis, err := checkProviderCLIs(context.Background(), cfg, registry, reporter)
+	if err != nil {
+		return config.Config{}, nil, err
 	}
 
 	reporter.ConfigValid()
-	return cfg, nil
+	return cfg, clis, nil
+}
+
+// checkProviderCLIs asks every routed provider whose adapter can tell (provider.
+// VersionVerifier) for its CLI version (specs/hardening/SPEC.md §7.2). A version outside
+// the verified range is refused unless security.allow_unverified_cli is set, in which
+// case it is warned about and recorded; a CLI that cannot be run is refused regardless.
+func checkProviderCLIs(ctx context.Context, cfg config.Config, registry *provider.Registry, reporter *logging.ConsoleReporter) (map[string]domain.ProviderCLI, error) {
+	found := map[string]domain.ProviderCLI{}
+	for _, id := range config.ProvidersInUse(cfg) {
+		client, err := registry.Resolve(id)
+		if err != nil {
+			continue
+		}
+		verifier, ok := client.(provider.VersionVerifier)
+		if !ok {
+			continue
+		}
+		version, verified, err := verifier.CLIVersion(ctx)
+		if err != nil {
+			return nil, apperr.NewDependencyError(fmt.Sprintf("cannot determine the version of %s: %v", id, err), err)
+		}
+		if !verified && !cfg.Security.AllowUnverifiedCLI {
+			return nil, apperr.NewDependencyError(fmt.Sprintf(
+				"%s %s has not been verified with this orchestrator's permission flags (verified: %s).\n"+
+					"Run go test -tags security ./test/security/... on this version and extend the range, or set "+
+					"security.allow_unverified_cli: true to run anyway.",
+				id, version, verifier.VerifiedRange()), nil)
+		}
+		if !verified {
+			reporter.ProviderCLIUnverified(id, version, verifier.VerifiedRange())
+		}
+		found[id] = domain.ProviderCLI{Version: version, Verified: verified}
+	}
+	return found, nil
+}
+
+// providerCLIRange is the verified range the provider's adapter declares, "" if none.
+func providerCLIRange(registry *provider.Registry, id string) string {
+	client, err := registry.Resolve(id)
+	if err != nil {
+		return ""
+	}
+	if v, ok := client.(provider.VersionVerifier); ok {
+		return v.VerifiedRange()
+	}
+	return ""
 }
 
 // newRegistry registers every supported provider adapter with executor.
@@ -240,12 +303,18 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 func runValidate(ctx context.Context, configPath string, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
-	cfg, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, reporter,
+	registry := newRegistry(executor)
+	cfg, clis, err := loadAndValidateConfig(configPath, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
 	if err != nil {
 		return err
+	}
+	for _, id := range config.ProvidersInUse(cfg) {
+		if cli, ok := clis[id]; ok {
+			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
+		}
 	}
 	checked, err := checkJevModel(ctx, cfg, stderr)
 	if checked {
@@ -283,7 +352,7 @@ func decisionsReport(stdout io.Writer) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -296,7 +365,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -365,6 +434,8 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	if err != nil {
 		return err
 	}
+	run.ProviderCLI = clis
+	run.AllowRedTests = allowRedTests
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)
@@ -548,6 +619,9 @@ type tailOptions struct {
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
+	if !cfg.Security.SecretScan.Enabled() {
+		s.reporter.SecretScanOff()
+	}
 	if len(run.Executions) > 0 && run.PreRunRef != "" {
 		s.reporter.RestorePoint(run.PreRunRef)
 	}
@@ -624,6 +698,26 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	// every step and so cannot be part of the baseline.
 	s.dispatcher.Guard = action.NewRepoGuard(s.repo, slices.Concat(s.protected, action.RunDirPatterns(s.runsRel)))
 
+	if needsPreRunTest(*cfg, run) {
+		if err := preRunTest(runCtx, s); err != nil {
+			return failRun(store, run, err)
+		}
+	}
+	// What already looks like a secret before the first step - a dirty start, fixtures the
+	// pre-run test generated - is not the run's doing (specs/hardening/SPEC.md §9.4). A
+	// resume of a run that has executed a step keeps the baseline it started with.
+	if len(run.Executions) == 0 && cfg.Security.SecretScan.Enabled() {
+		baseline, err := s.dispatcher.SecretBaseline(runCtx)
+		if err != nil {
+			return failRun(store, run, err)
+		}
+		run.SecretScanBaseline = baseline
+		if err := store.SaveRun(run); err != nil {
+			return err
+		}
+	}
+	s.dispatcher.OnSecret = s.reporter.SecretFound
+
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
 	observer := &runObserver{reporter: s.reporter, store: store}
@@ -650,6 +744,42 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		s.reporter.Answer(answer)
 	}
 	return nil
+}
+
+// needsPreRunTest reports whether the test command runs before the first step
+// (specs/hardening/SPEC.md §8.1): the workflow implements and tests, test.baseline is not
+// off, and no step has run yet - a fresh run, or a resume of one that never got that far.
+func needsPreRunTest(cfg config.Config, run *domain.Run) bool {
+	return cfg.Test.PreRunTest() && len(run.Executions) == 0 && run.Workflow != nil &&
+		run.Workflow.Contains(domain.ActionImplement) && run.Workflow.Contains(domain.ActionTest)
+}
+
+// preRunTest runs the test command once before the first step and records the result. A
+// red suite stops the run - implement would be sent to fix failures it did not cause -
+// unless the operator started it with --allow-red-tests, which makes the failure part of
+// the task (§8.4). Only the exit code decides.
+func preRunTest(ctx context.Context, s *session) error {
+	run := s.run
+	s.reporter.PreRunTestStarted()
+	result, err := s.dispatcher.PreRunTest(ctx, run)
+	s.reporter.PreRunTestFinished(result, run.AllowRedTests)
+	if result != nil {
+		run.PreRunTest = result
+		if !result.Success || err != nil {
+			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stdout", result.Stdout)
+			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stderr", result.Stderr)
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if !result.Success && !run.AllowRedTests {
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("tests fail before any change (pre-run test exited %d; output in %s)\n\n"+
+			"Fix them first. If the task is to make them pass, run it again with --allow-red-tests; "+
+			"to skip this check for every run, set test.baseline: off.",
+			result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test", "stdout"))}
+	}
+	return s.store.SaveRun(run)
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

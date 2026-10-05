@@ -2,6 +2,7 @@ package execution
 
 import (
 	"os"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -65,6 +66,72 @@ func scrub(environ []string) []string {
 	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
 		if !parentSessionVars[name] && !credentialVars[name] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+// testEnvBase and testEnvToolchain are the variables the test command - which runs code a
+// model wrote - inherits by default (specs/hardening/SPEC.md §6.1); everything else is
+// dropped unless the operator names it in test.env_pass. Unlike a provider CLI, the test
+// command is a shell: whatever reaches it, the code under test can read, print or send.
+// So it gets an allowlist, not ScrubbedEnv's denylist (DECISIONS.md D7 covers providers
+// only). Proxies (GOPROXY, HTTP_PROXY, ...) are absent on purpose: a proxy URL can carry
+// credentials. Exact names, as everywhere in this file.
+var (
+	testEnvBase = []string{
+		"PATH", "HOME", "USER", "LOGNAME", "SHELL",
+		"LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_NUMERIC", "LC_TIME",
+		"TERM", "TZ", "TMPDIR", "CI",
+	}
+	testEnvToolchain = []string{
+		"GOPATH", "GOROOT", "GOFLAGS", "GOCACHE", "GOMODCACHE", "GOTOOLCHAIN", "CGO_ENABLED",
+		"CARGO_HOME", "RUSTUP_HOME", "JAVA_HOME", "VIRTUAL_ENV", "PYTHONPATH", "NODE_OPTIONS", "XDG_CACHE_HOME",
+	}
+)
+
+// testEnvPass is test.env_pass. Process-wide and add-only for the same reason as
+// credentialVars: the test runner exists before the config is loaded.
+var (
+	testEnvMu   sync.RWMutex
+	testEnvPass = map[string]bool{}
+)
+
+// AllowTestEnv adds exact variable names to those TestEnv passes (test.env_pass). A
+// credential or parent-session variable stays removed even if named here. Empty names are
+// ignored.
+func AllowTestEnv(names ...string) {
+	testEnvMu.Lock()
+	defer testEnvMu.Unlock()
+	for _, n := range names {
+		if n != "" {
+			testEnvPass[n] = true
+		}
+	}
+}
+
+// IsParentSessionVar reports whether name is one of the variables through which a parent
+// agent session reaches its children, which no child process may inherit.
+func IsParentSessionVar(name string) bool { return parentSessionVars[name] }
+
+// TestEnv returns the environment of every process that runs the test command: the
+// variables of the default allowlist and test.env_pass that are set, in the orchestrator's
+// order, without any credential or parent-session variable.
+func TestEnv() []string {
+	return testEnv(os.Environ())
+}
+
+func testEnv(environ []string) []string {
+	credentialMu.RLock()
+	defer credentialMu.RUnlock()
+	testEnvMu.RLock()
+	defer testEnvMu.RUnlock()
+	out := make([]string, 0, len(testEnvBase)+len(testEnvToolchain)+len(testEnvPass))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		allowed := testEnvPass[name] || slices.Contains(testEnvBase, name) || slices.Contains(testEnvToolchain, name)
+		if allowed && !parentSessionVars[name] && !credentialVars[name] {
 			out = append(out, kv)
 		}
 	}

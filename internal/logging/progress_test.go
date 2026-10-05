@@ -51,10 +51,10 @@ func TestRenderAuthority(t *testing.T) {
 	}{
 		{
 			steps(domain.ActionResearch, domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest, domain.ActionReview),
-			"authority: research=web, analyze=read, implement=edit, review=read; test runs: go test ./...\n",
+			"authority: research=web, analyze=read, implement=edit, review=read; test runs: go test ./... " + notSandboxed + "\n",
 		},
 		{steps(domain.ActionAnalyze), "authority: analyze=read\n"},
-		{steps(domain.ActionTest), "authority: test runs: go test ./...\n"},
+		{steps(domain.ActionTest), "authority: test runs: go test ./... — NOT sandboxed: network, $HOME and your files are reachable\n"},
 	}
 	var sandboxed bytes.Buffer
 	RenderAuthority(&sandboxed, steps(domain.ActionImplement, domain.ActionTest), "go test ./...", true)

@@ -181,6 +181,8 @@ func TestValidate_TestSandbox(t *testing.T) {
 		{Command: "go test ./..."},
 		{Command: "go test ./...", Sandbox: "none"},
 		{Command: "go test ./...", Sandbox: "bwrap", ROBinds: []string{"~/go/pkg/mod"}, RWBinds: []string{"/var/cache/x"}},
+		// The sandbox is the default: binds need no explicit bwrap.
+		{Command: "go test ./...", ROBinds: []string{"~/go/pkg/mod"}},
 	}
 	for _, tc := range valid {
 		cfg := validConfig()
@@ -194,8 +196,8 @@ func TestValidate_TestSandbox(t *testing.T) {
 		test TestConfig
 		want string
 	}{
-		{TestConfig{Command: "x", Sandbox: "docker"}, `test.sandbox must be none or bwrap, got "docker"`},
-		{TestConfig{Command: "x", ROBinds: []string{"~/go"}}, "only apply with test.sandbox: bwrap"},
+		{TestConfig{Command: "x", Sandbox: "docker"}, `test.sandbox must be bwrap (the default) or none, got "docker"`},
+		{TestConfig{Command: "x", Sandbox: "none", ROBinds: []string{"~/go"}}, "only apply under the sandbox"},
 		{TestConfig{Command: "x", Sandbox: "bwrap", ROBinds: []string{"go/pkg"}}, `test.ro_binds[0] "go/pkg": must be absolute or start with ~/`},
 		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/../etc"}}, `test.rw_binds[0] "~/../etc": must not contain ..`},
 		{TestConfig{Command: "x", Sandbox: "bwrap", RWBinds: []string{"~/"}}, "must not be the root or the home directory itself"},
@@ -233,5 +235,129 @@ func TestValidate_Effort(t *testing.T) {
 	cfg.Actions.Plan.Effort, cfg.Actions.Plan.Provider = "high", "gemini"
 	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "only supported with provider claude") {
 		t.Errorf("effort on gemini not refused: %v", err)
+	}
+}
+
+func TestPromptLimits_Defaults(t *testing.T) {
+	var p PromptLimitsConfig
+	if p.DiffBytes() != DefaultMaxDiffBytes || p.TestOutputBytes() != DefaultMaxTestOutputBytes {
+		t.Errorf("absent keys: got %d / %d, want the defaults", p.DiffBytes(), p.TestOutputBytes())
+	}
+	diff, out := 65536, 8192
+	p = PromptLimitsConfig{MaxDiffBytes: &diff, MaxTestOutputBytes: &out}
+	if p.DiffBytes() != diff || p.TestOutputBytes() != out {
+		t.Errorf("set keys: got %d / %d", p.DiffBytes(), p.TestOutputBytes())
+	}
+}
+
+func TestValidate_PromptLimits(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+	for name, tc := range map[string]struct {
+		prompt PromptLimitsConfig
+		want   string // "" = valid
+	}{
+		"absent":            {PromptLimitsConfig{}, ""},
+		"bounds inclusive":  {PromptLimitsConfig{MaxDiffBytes: intPtr(MinMaxDiffBytes), MaxTestOutputBytes: intPtr(MaxMaxTestOutputBytes)}, ""},
+		"diff zero":         {PromptLimitsConfig{MaxDiffBytes: intPtr(0)}, "limits.prompt.max_diff_bytes must be between 16384 and 4194304, got 0"},
+		"diff too large":    {PromptLimitsConfig{MaxDiffBytes: intPtr(MaxMaxDiffBytes + 1)}, "limits.prompt.max_diff_bytes must be between"},
+		"test output small": {PromptLimitsConfig{MaxTestOutputBytes: intPtr(MinMaxTestOutputBytes - 1)}, "limits.prompt.max_test_output_bytes must be between 4096 and 1048576"},
+		"test output large": {PromptLimitsConfig{MaxTestOutputBytes: intPtr(MaxMaxTestOutputBytes + 1)}, "limits.prompt.max_test_output_bytes must be between"},
+		"globs":             {PromptLimitsConfig{DiffSummarize: []string{"*.pb.go", "gen/*.ts"}}, ""},
+		"bad glob":          {PromptLimitsConfig{DiffSummarize: []string{"*.go", "gen/[a"}}, `limits.prompt.diff_summarize[1] "gen/[a": syntax error in pattern`},
+		"empty glob":        {PromptLimitsConfig{DiffSummarize: []string{" "}}, "limits.prompt.diff_summarize[0] must not be empty"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Limits.Prompt = tc.prompt
+			err := Validate(cfg)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("want valid, got %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestValidate_EnvPass(t *testing.T) {
+	for name, tc := range map[string]struct {
+		pass []string
+		want string // "" = valid
+	}{
+		"empty":               {nil, ""},
+		"plain names":         {[]string{"GOPROXY", "DATABASE_URL", "GIT_AUTHOR_NAME", "KEYBOARD_LAYOUT", "PWD"}, ""},
+		"token":               {[]string{"GITLAB_TOKEN"}, `test.env_pass[0] "GITLAB_TOKEN": looks like a credential (contains TOKEN)`},
+		"glued api key":       {[]string{"OPENAIAPIKEY"}, "contains APIKEY"},
+		"auth segment":        {[]string{"MY_AUTH_HEADER"}, "has the segment AUTH"},
+		"ssh agent":           {[]string{"SSH_AUTH_SOCK"}, "has the segment AUTH"},
+		"key segment":         {[]string{"STRIPE_KEY"}, "has the segment KEY"},
+		"access key id":       {[]string{"AWS_ACCESS_KEY_ID"}, "has the segment KEY"},
+		"pass segment":        {[]string{"DB_PASS"}, "has the segment PASS"},
+		"lower case":          {[]string{"db_password"}, "contains PASSWORD"},
+		"bad name":            {[]string{"db-url"}, `test.env_pass[0] "db-url": must be an exact environment variable name`},
+		"wildcard":            {[]string{"GO*"}, "no wildcards"},
+		"declared credential": {[]string{"JEV_API_KEY"}, "is a credential this config names"},
+		"parent session":      {[]string{"CLAUDECODE"}, "belongs to the agent session"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Test.EnvPass = tc.pass
+			err := Validate(cfg)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Fatalf("want valid, got %v", err)
+			case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestTestConfig_SandboxedByDefault(t *testing.T) {
+	for sandbox, want := range map[string]bool{"": true, "bwrap": true, "none": false} {
+		if got := (TestConfig{Sandbox: sandbox}).Sandboxed(); got != want {
+			t.Errorf("Sandboxed() with test.sandbox %q = %v, want %v", sandbox, got, want)
+		}
+	}
+}
+
+func TestValidate_TestBaseline(t *testing.T) {
+	for _, ok := range []string{"", BaselineRequireGreen, BaselineOff} {
+		cfg := validConfig()
+		cfg.Test.Baseline = ok
+		if err := Validate(cfg); err != nil {
+			t.Errorf("test.baseline %q: %v", ok, err)
+		}
+	}
+	cfg := validConfig()
+	cfg.Test.Baseline = "warn"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), `test.baseline must be require_green (the default) or off, got "warn"`) {
+		t.Errorf("got %v", err)
+	}
+	if !(TestConfig{}).PreRunTest() || (TestConfig{Baseline: BaselineOff}).PreRunTest() {
+		t.Error("PreRunTest disagrees with test.baseline")
+	}
+}
+
+func TestValidate_SecretScan(t *testing.T) {
+	for _, mode := range []string{"", SecretScanStop, SecretScanWarn, SecretScanOff} {
+		cfg := validConfig()
+		cfg.Security.SecretScan = SecretScanConfig{Mode: mode, AllowPaths: []string{"testdata/**", "fixtures/*.pem"}}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("mode %q: %v", mode, err)
+		}
+	}
+	cfg := validConfig()
+	cfg.Security.SecretScan = SecretScanConfig{Mode: "log", AllowPaths: []string{"/abs/**", "bad[", ""}}
+	err := Validate(cfg)
+	for _, want := range []string{`security.secret_scan.mode must be stop (the default), warn or off, got "log"`,
+		`allow_paths[0] "/abs/**": must be relative`, `allow_paths[1] "bad["`, `allow_paths[2] "": must not be empty`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q in %v", want, err)
+		}
+	}
+	if !(SecretScanConfig{}).Stops() || !(SecretScanConfig{}).Enabled() || (SecretScanConfig{Mode: SecretScanWarn}).Stops() || (SecretScanConfig{Mode: SecretScanOff}).Enabled() {
+		t.Error("Stops/Enabled disagree with the mode")
 	}
 }

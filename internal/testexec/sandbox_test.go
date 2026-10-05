@@ -69,6 +69,10 @@ func TestSandboxEnv(t *testing.T) {
 	if slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "ORCH_SANDBOX_TEST_TOKEN=") }) {
 		t.Error("the sandboxed environment must not carry a credential variable")
 	}
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "planted")
+	if slices.ContainsFunc(testSandbox().env(), func(kv string) bool { return strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") }) {
+		t.Error("the sandboxed environment must be the allowlist, not the scrubbed environment")
+	}
 }
 
 func TestRunner_WithoutSandboxIsUnchanged(t *testing.T) {

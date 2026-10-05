@@ -28,6 +28,12 @@ by the real exit code of your test command, never by anything a model says.
   without one (see below).
 - Only for `run --jira`: a `jira` section in the config and the Jira credentials in the
   environment variables it names (see [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket)).
+- `claude` within the version range its permission flags were verified on (today
+  `>= 2.1.283, < 2.2.0`); outside it the run refuses to start, see
+  [Security model](#security-model).
+- [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`): the test command runs
+  sandboxed by default. Linux only; on macOS, or a host where bwrap cannot sandbox, set
+  `test.sandbox: none` (see [Sandboxing the test step](#sandboxing-the-test-step)).
 
 ## Building
 
@@ -88,10 +94,17 @@ actions:
 
 test:
   command: "go test ./..."
+  sandbox: bwrap             # the default; none must be written out
+  env_pass: []               # variables the tests need beyond the allowlist
+  baseline: require_green    # run the tests before any change; off skips it
 
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  prompt:                    # optional bounds on repository data in prompts
+    max_test_output_bytes: 32768
+    max_diff_bytes: 262144
+    diff_summarize: []
 
 execution:
   timeout: 15m
@@ -99,6 +112,10 @@ execution:
 security:
   require_clean_worktree: true
   protected_paths: []
+  allow_unverified_cli: false
+  secret_scan:
+    mode: stop               # stop | warn | off
+    allow_paths: []
 ```
 
 - **`decision`** chooses who estimates the probabilities, like an action chooses its
@@ -134,17 +151,25 @@ security:
   action's authority: `codex` and `gemini` currently cannot, so routing an action (or the
   translator, or the decision provider) to them fails validation with exit 2.
 - `test.command` runs via `sh -c` in the target repository (the one place a shell is used —
-  it's trusted operator configuration, not user input). `test.sandbox: bwrap` runs it under
-  bubblewrap — see [Security model](#security-model); `test.ro_binds` / `test.rw_binds`
-  re-expose paths such as a module cache (read-only) and a build cache (writable).
+  it's trusted operator configuration, not user input). It runs under bubblewrap unless
+  `test.sandbox: none` — see [Sandboxing the test step](#sandboxing-the-test-step);
+  `test.ro_binds` / `test.rw_binds` re-expose paths such as a module cache (read-only) and a
+  build cache (writable). It inherits only an allowlist of your environment; `test.env_pass`
+  adds names (never credentials). `test.baseline` (default `require_green`) runs the tests
+  once before any change in a workflow that implements and tests, see
+  [Tests that already fail](#tests-that-already-fail).
 - `limits.max_steps` bounds total workflow steps; `limits.max_fix_iterations` bounds how many
   times a failing test or review can send the workflow back to `implement` — both exist purely
-  to guarantee termination.
+  to guarantee termination. `limits.prompt` bounds what goes into a prompt: a failing test's
+  output in the implement retry (keeping the failure lines) and the diff review sees (lock
+  files as a stat line, the rest in full while it fits). Artifacts and logs keep everything.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the
   decision — except the time you spend on a manual choice.
 - **`security`** (optional) never widens what a step may do. `require_clean_worktree`
   (default `true`) makes a workflow with `implement` refuse to start on a dirty worktree;
-  `protected_paths` adds patterns `implement` must not change. See
+  `protected_paths` adds patterns `implement` must not change; `allow_unverified_cli` lets a
+  run go on with a provider CLI outside the verified version range (warned and recorded);
+  `secret_scan` decides what happens when a step adds what looks like a secret. See
   [Security model](#security-model).
 - **`jira`** (optional) is where `run --jira` reads a ticket from. It is validated whenever
   present, but its credential variables are needed only by `run --jira` (and checked by
@@ -171,7 +196,12 @@ granted is denied on the spot, never prompted, so no mode can hang on a permissi
 the table above; they differ only in how much you see and confirm between steps.
 
 For `claude` that means `--restricted --permission-mode dontAsk --permission-prompts none
---strict-mcp-config --setting-sources ""` plus the authority's `--tools`. Consequences:
+--strict-mcp-config --setting-sources ""` plus the authority's `--tools`, with the prompt on
+stdin. Those flags were verified on specific CLI versions, so every run first checks
+`claude --version`: outside the verified range (`>= 2.1.283, < 2.2.0` today) it refuses
+before any call, rather than risk flags that silently mean something else. Run
+`go test -tags security ./test/security/...` on the new version and extend the range, or set
+`security.allow_unverified_cli: true` to go on with a red warning. Consequences:
 
 - The target repository's `.claude/settings.json` hooks, `.mcp.json` servers and settings are
   never loaded.
@@ -208,11 +238,19 @@ Around `implement` the orchestrator itself guards the result, for any provider:
   that plants a hook, CI file or agent setting stops the run too. `.git` is compared before
   the orchestrator runs `git status`, which would otherwise execute a planted
   `core.fsmonitor`.
+- After every `implement` and test step, what the working tree adds is scanned for likely
+  secrets (cloud and service tokens, private keys, JWTs, passwords in URLs, high-entropy
+  assignments). With `security.secret_scan.mode: stop` (the default) a new one stops the run
+  (exit 4) naming `file:line (rule)` — never the value; `warn` records it in `run.json` and
+  goes on; `off` skips it. What was already there when the run started does not count, and
+  `allow_paths` (e.g. `testdata/**`) exempts fixtures. While the scan is on, the diff sent
+  to `review` has every match replaced by `[REDACTED:<rule>]`, and it never includes the
+  content of a file on the deny list.
 
 ### Sandboxing the test step
 
-With `test.sandbox: bwrap` the test command runs under
-[bubblewrap](https://github.com/containers/bubblewrap):
+The test command runs under [bubblewrap](https://github.com/containers/bubblewrap) by
+default (`test.sandbox: bwrap`, or no key at all):
 
 | | access |
 |---|---|
@@ -236,9 +274,10 @@ test:
 ```
 
 Tests that need the network or outside services (a database, docker) fail in the sandbox;
-keep `sandbox: none` for them. Linux only. `run` and `validate` probe bwrap before any AI
-call; on Ubuntu 24.04 and later AppArmor blocks bwrap's user namespaces until you install a
-profile for it:
+write `sandbox: none` for them — every run then says `NOT sandboxed: network, $HOME and your
+files are reachable`. Linux only: on macOS write `sandbox: none`. `run` and `validate` probe
+bwrap before any AI call and refuse to start when it cannot sandbox; on Ubuntu 24.04 and
+later AppArmor blocks bwrap's user namespaces until you install a profile for it:
 
 ```bash
 sudo tee /etc/apparmor.d/bwrap > /dev/null <<'PROFILE'
@@ -251,11 +290,21 @@ PROFILE
 sudo systemctl reload apparmor
 ```
 
-Provider CLIs and the test command also do not inherit the variables through which a Claude
-Code session you launched the orchestrator from reaches its children (`CLAUDECODE`,
-`CLAUDE_CODE_MESSAGING_*`, …), nor the credential variables your config names — the one in
-`decision.jev.api_key_env` and, with a `jira` section, `jira.token_env` and
-`jira.email_env`. The orchestrator reads those itself; a test the model wrote cannot.
+The test command — sandboxed or not — inherits only an allowlist of your environment:
+`PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, the locale, `TERM`, `TZ`, `TMPDIR`, `CI`, and
+toolchain variables (`GOPATH`, `GOROOT`, `GOFLAGS`, `GOCACHE`, `GOMODCACHE`, `GOTOOLCHAIN`,
+`CGO_ENABLED`, `CARGO_HOME`, `RUSTUP_HOME`, `JAVA_HOME`, `VIRTUAL_ENV`, `PYTHONPATH`,
+`NODE_OPTIONS`, `XDG_CACHE_HOME`). No `ANTHROPIC_API_KEY`, `AWS_*`, `GITHUB_TOKEN`,
+`SSH_AUTH_SOCK` and no proxies (a proxy URL can carry credentials). Name what your tests need
+in `test.env_pass`; a name that looks like a credential (`TOKEN`, `SECRET`, `PASSWORD`, a
+`_KEY` or `_AUTH` segment, …) is refused — a run that executes model-written code never gets
+one.
+
+Provider CLIs keep the rest of your environment, but do not inherit the variables through
+which a Claude Code session you launched the orchestrator from reaches its children
+(`CLAUDECODE`, `CLAUDE_CODE_MESSAGING_*`, …), nor the credential variables your config names
+— the one in `decision.jev.api_key_env` and, with a `jira` section, `jira.token_env` and
+`jira.email_env`. The orchestrator reads those itself.
 
 ### Extensions: your MCP servers, plugins and hooks (opt-in)
 
@@ -295,18 +344,21 @@ Extensions are only supported with provider `claude`; `validate` refuses them el
 
 ### What is not protected
 
-- **Without `test.sandbox: bwrap`, code the model writes runs in `test`** with your
-  permissions — a test file can do anything your user can; reviewing the changes in `manual`
-  mode before `test` is then the only mitigation. With the sandbox, a test can still read
-  what your user can read outside `$HOME`, and change anything inside the repository.
+- **With `test.sandbox: none`, code the model writes runs in `test`** with your filesystem
+  and network (its environment is still the allowlist) — reviewing the changes in `manual`
+  mode before `test` is then the main mitigation. With the sandbox, a test can still read
+  what your user can read outside `$HOME`, and change anything inside the repository (the
+  secret scan looks at what it added).
+- **The secret scan is a set of patterns**, not a guarantee: a secret split across lines,
+  encoded, written into a git-ignored file or into a model's prose is not caught.
 - **Your repository goes to the model provider** — that is the job. Only the deny list above
   is withheld, and only from the file tools.
 - **Prompt injection is reduced, not eliminated.** Text in the repository or the diff can
   still mislead a step; what it can make that step do is bounded by the table above, and the
   guard, `review` and the diff expose the result.
 - **`test.command` is trusted configuration** run through `sh -c`. For a repository you do not
-  control, pass `--config` from outside it, use `test.sandbox: bwrap`, keep `manual` mode,
-  and run the whole thing in a container.
+  control, pass `--config` from outside it, keep the sandbox on, keep `manual` mode, and run
+  the whole thing in a container.
 - **A Jira ticket is task text written by whoever can edit it.** With `run --jira` it is
   treated exactly like text you typed: printed in full before anything is decided, kept
   verbatim in `run.json` and `ticket.json`, and given no extra authority — but also no
@@ -408,10 +460,10 @@ orchestrator decisions report
   each AI step's `Authority:` line and, for every provider call including translation and
   LLM decisions: the child process's live output prefixed with `  | `, a heartbeat line
   every 30s while the call is in flight, and a `✓ completed (Ns)` line. Without `--verbose`
-  you only see a `→ running <provider>...` line before each call. The redacted command line
-  (the prompt argument is always replaced with `<prompt: N chars>` — the prompt body itself
-  is never printed or logged, anywhere) and the working directory appear in a failure's
-  message, with the path of the full log.
+  you only see a `→ running <provider>...` line before each call. The command line (the
+  prompt is never in it: it goes on stdin, and the message says `prompt: N bytes on stdin` —
+  the prompt body itself is never printed or logged, anywhere) and the working directory
+  appear in a failure's message, with the path of the full log.
 - **Terminal UI.** When stdout is an interactive terminal, the same information is rendered
   the way agentic CLIs like Claude Code do: a boxed run header, `⏺` blocks with `⎿` details,
   probability bars for the stages, an animated spinner with elapsed time while a model or
@@ -496,6 +548,26 @@ A resume refuses, before anything runs:
 Your own edits to other files between the stop and the resume are fine. They show up in the
 working tree listing, and `review` sees them in the diff. A completed run is just reported
 (with its answer, for a read-only workflow). Details: `MVP.md` §37 and `specs/resume/`.
+
+### Tests that already fail
+
+A workflow that implements and tests first runs `test.command` once, before any change
+(`pre-run test` in the output). If the tests already fail, the run stops before `implement`
+(exit 4) — otherwise `implement` would be sent to fix failures it did not cause:
+
+```
+tests fail before any change (pre-run test exited 1; output in .orchestrator/runs/<id>/logs/pre-run-test.stdout.log)
+```
+
+When the task *is* to make failing tests pass, say so for that run:
+
+```bash
+orchestrator run --allow-red-tests "fix the bug TestParseDate shows"
+```
+
+The run goes on, the first `implement` is shown what failed, and the run still succeeds only
+if the test step ends green. A run stopped this way resumes once the tests pass
+(`orchestrator resume <run-id>`). `test.baseline: off` skips the check for every run.
 
 ### Choosing the stages yourself
 
@@ -582,7 +654,9 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   run.json              # the task (with task.source for run --jira), run status, the
                         # decision, step history (with each AI step's
                         # provider.authority and attempt), limits/iteration counters,
-                        # pre_run_ref, head_ref, resume_baseline, resumes
+                        # pre_run_ref, head_ref, resume_baseline, resumes, provider_cli
+                        # (CLI versions), allow_red_tests, pre_run_test,
+                        # secret_scan_baseline, secret_findings (never a value)
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
@@ -591,7 +665,11 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   logs/<NNN>-<action>.{stdout,stderr}.log  # raw provider/test output per step
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls
+  logs/pre-run-test.{stdout,stderr}.log    # the tests before any change, when red
 ```
+
+A review artifact also records what the reviewer was shown: `diff: {bytes, files, shown,
+summarized, withheld, truncated}`.
 
 `decision.json` answers "why did this run have these stages?": the request and its
 translation, who decided (`jev`, `llm`, or `user` with the provider's error), the model
@@ -617,7 +695,8 @@ provider: claude
 action: implement
 model: opus
 failure: exit (the CLI ran and exited non-zero)
-command: claude --print --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus <prompt: 1832 chars>
+command: claude --print --input-format text --output-format stream-json --verbose --restricted --permission-mode dontAsk --permission-prompts none --strict-mcp-config --setting-sources '' --settings '{"permissions":{"deny":["Read(**/.env)",...]}}' --tools Read,Grep,Glob,Edit,Write --allowed-tools Edit,Write --model opus
+prompt: 1832 bytes on stdin
 working dir: /home/user/repo
 exit code: 1
 duration: 2.4s
@@ -648,8 +727,23 @@ missing issue or a redirect, 3 when Jira is down or answers unexpectedly, and cr
   `(empty)` rather than nothing, so you can tell "no output" from "output not captured".
 - `stdout:`/`stderr:` are each truncated to their last 4000 bytes in this message. The
   `full output:` line, when present, points at the untruncated file on disk.
-- `command:` is the real argv that ran, except the prompt argument, which always renders as
-  `<prompt: N chars>` — the prompt text itself is never printed or written to any log file.
+- `command:` is the real argv that ran; the prompt is not in it — it goes on stdin, and the
+  message says `prompt: N bytes on stdin`. The prompt text itself is never printed or written
+  to any log file.
+
+Phase-0 safety stops read like this (all before or instead of the step that would have gone
+on):
+
+- `claude 2.2.1 has not been verified ... verified: >=2.1.283 <2.2.0` (exit 2) — see
+  [Security model](#security-model).
+- `the test command runs under bwrap (test.sandbox: bwrap, the default), but bubblewrap
+  cannot create a sandbox on this host` (exit 2) — install the AppArmor profile above, or
+  write `test.sandbox: none`.
+- `tests fail before any change (pre-run test exited 1; output in …)` (exit 4) — see
+  [Tests that already fail](#tests-that-already-fail).
+- `implement added what looks like a secret; the run stops before anything sends it on:
+  pkg/cfg.go:12 (aws-access-key-id)` (exit 4) — remove it, exempt a fixture with
+  `security.secret_scan.allow_paths`, or switch to `mode: warn`.
 
 ## Testing
 

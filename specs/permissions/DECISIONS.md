@@ -172,6 +172,14 @@ predates that numbering.
 
 ---
 
+## D15 — Prompt on stdin (hardening H01)
+
+2026-10-05, claude 2.1.289: every call passes `--input-format text` and the prompt on
+stdin; argv ends with `--model <model>`. Live suite
+(`go test -tags security ./test/security/...`): all authorities hold, 12/12. One earlier run
+failed `TestRead_DenyListHidesSecrets` once, the model declining the probing prompt; it
+passed on rerun and in the full rerun.
+
 ## Fate of v1
 
 | v1 | fate in v2 |

@@ -13,12 +13,13 @@ import (
 func TestScenario19g_CredentialsScrubbed(t *testing.T) {
 	envOut := filepath.Join(t.TempDir(), "test.env")
 	envDir := t.TempDir()
-	t.Setenv("ENV_OUT", envOut)
 	t.Setenv("FAKE_ENV_DIR", envDir)
 
 	r := newJiraRun(t)
 	cfg := jevConfig(t, r.jev, func(o *configOptions) {
-		o.testCommand = `env > "$ENV_OUT"`
+		// The path is in the command itself: the test command inherits only allowlisted
+		// variables (specs/hardening/SPEC.md §6.1).
+		o.testCommand = "env > '" + envOut + "'"
 		o.jira = &jiraOptions{baseURL: r.jira.URL()}
 	})
 

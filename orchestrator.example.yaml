@@ -72,16 +72,34 @@ actions:
 
 test:
   command: "go test ./..."
-  # Run the test command - which executes code the model wrote - under bubblewrap:
+  # The test command - which executes code the model wrote - runs under bubblewrap:
   # filesystem read-only, repository writable, $HOME hidden, no network (MVP.md §38.3).
-  # Needs bwrap (and on Ubuntu 24.04+ an AppArmor profile for it, see README).
-  # sandbox: bwrap
+  # This is the default and needs bwrap (on Ubuntu 24.04+ also an AppArmor profile for it,
+  # see README). Without bwrap (macOS, a host that cannot sandbox) write `sandbox: none`:
+  # the tests then reach the network, $HOME and your files, and every run says so.
+  sandbox: bwrap
+  # Re-expose caches inside the sandbox, e.g. for Go:
   # ro_binds: [~/go/pkg/mod]        # module cache, read-only
   # rw_binds: [~/.cache/go-build]   # build cache, writable
+  # The test command inherits only an allowlist of the environment: PATH, HOME, locale,
+  # TERM, TZ, TMPDIR, CI and common toolchain variables (GOPATH, GOFLAGS, CARGO_HOME,
+  # JAVA_HOME, VIRTUAL_ENV, ...). No proxies, no credentials. Name anything else it needs;
+  # a name that looks like a credential (TOKEN, SECRET, PASSWORD, _KEY, _AUTH, ...) is refused.
+  # env_pass: [GOPROXY, DATABASE_URL]
+  # A workflow that implements and tests runs the tests once before any change and stops if
+  # they already fail, so implement is not sent to fix what it did not break. For a task that
+  # is about making failing tests pass, start it with `run --allow-red-tests`.
+  # baseline: require_green          # require_green (default) | off
 
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
+  # prompt:
+  #   max_test_output_bytes: 32768  # a failing test's output in the implement retry prompt
+  #                                 # (beginning, failure lines, end); 4096..1048576
+  #   max_diff_bytes: 262144        # the review diff; 16384..4194304
+  #   diff_summarize: []            # extra globs shown to review as a stat line only
 
 execution:
   timeout: 15m
@@ -92,6 +110,16 @@ execution:
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
   protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+  # Every run checks the provider CLI's version against the range its permission flags were
+  # verified on (MVP.md §41.4) and refuses one outside it; true goes on, with a red warning.
+  # allow_unverified_cli: false
+  # What implement and the test command add is scanned for likely secrets (cloud and service
+  # tokens, private keys, JWTs, passwords in URLs, high-entropy assignments). stop (default)
+  # ends the run before anything sends the value on; warn records it (file, line, rule - never
+  # the value) and redacts it from the review prompt; off does nothing.
+  # secret_scan:
+  #   mode: stop
+  #   allow_paths: [testdata/**]     # fixtures that hold fake keys on purpose
 
 # `orchestrator run --stage <name> [--stage <name> ...] "<task>"` skips the decision section
 # above (MVP.md §40); the config must still be valid, but nothing in it is called.

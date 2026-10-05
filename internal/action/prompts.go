@@ -112,6 +112,12 @@ type ImplementPromptInput struct {
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
+	// PreRunFailure is the test command's red result before any change, when the operator
+	// started the run with --allow-red-tests (specs/hardening/SPEC.md §8.4).
+	PreRunFailure *domain.TestResult
+	// MaxTestOutput bounds LastTestResult's stdout and stderr together, in bytes
+	// (limits.prompt.max_test_output_bytes; BoundTestOutput). 0 embeds them whole.
+	MaxTestOutput int
 }
 
 func BuildImplementPrompt(in ImplementPromptInput) string {
@@ -133,13 +139,17 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		fmt.Fprintf(&b, "Previous implementation attempt:\n%s\n\n", in.PreviousImplementation.Summary)
 	}
 
+	if in.PreRunFailure != nil && in.LastTestResult == nil {
+		b.WriteString("The test command already FAILS before any change, and the operator expects that: the task is " +
+			"to make it pass. Its output from before the change:\n\n")
+		fmt.Fprintf(&b, "Test command: %s\nExit code: %d\n\n", in.PreRunFailure.Command, in.PreRunFailure.ExitCode)
+		writeTestOutput(&b, *in.PreRunFailure, in.MaxTestOutput)
+	}
+
 	if in.LastTestResult != nil {
 		b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
 		fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", in.LastTestResult.Command, in.LastTestResult.ExitCode)
-		b.WriteString(fence("stdout", "the test command's stdout", in.LastTestResult.Stdout))
-		b.WriteString("\n")
-		b.WriteString(fence("stderr", "the test command's stderr", in.LastTestResult.Stderr))
-		b.WriteString("\n")
+		writeTestOutput(&b, *in.LastTestResult, in.MaxTestOutput)
 	}
 
 	if len(in.ReviewIssues) > 0 {
@@ -153,6 +163,25 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	return b.String()
 }
 
+// writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
+// bounded by maxBytes (BoundTestOutput; 0 embeds them whole), and says so when it cut.
+func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int) {
+	stdout, stderr := r.Stdout, r.Stderr
+	var omitted Omitted
+	if maxBytes > 0 {
+		stdout, stderr, omitted = BoundTestOutput(stdout, stderr, maxBytes)
+	}
+	b.WriteString(fence("stdout", "the test command's stdout", stdout))
+	b.WriteString("\n")
+	b.WriteString(fence("stderr", "the test command's stderr", stderr))
+	b.WriteString("\n")
+	if omitted.Any() {
+		fmt.Fprintf(b, "The test output above was shortened to fit this prompt: %d lines (%d bytes) were left out "+
+			"where the \"omitted\" markers are. What is kept is the beginning, the lines that look like failures, "+
+			"and the end.\n\n", omitted.Lines, omitted.Bytes)
+	}
+}
+
 type ReviewPromptInput struct {
 	Task           string
 	Analysis       *domain.AnalysisArtifact
@@ -160,6 +189,9 @@ type ReviewPromptInput struct {
 	Implementation *domain.ImplementationArtifact
 	TestResult     *domain.TestResult
 	GitDiff        string
+	// DiffPartial is true when some changed file's content is not in GitDiff (summarized,
+	// withheld, binary, over the budget, or not listed).
+	DiffPartial bool
 }
 
 // reviewSeverityRubric tells the reviewer what each severity means and what it causes,
@@ -199,7 +231,13 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	}
 
 	b.WriteString("Git diff:\n")
-	b.WriteString(fence("diff", "the git diff of the working tree", in.GitDiff))
+	if in.DiffPartial {
+		b.WriteString("The diff starts with every changed file and how it is shown. Not every file's content is " +
+			"in it: read a file that is summarized, binary or not shown for the diff budget in the repository " +
+			"when its content matters to the review. A withheld file matches the secret deny list; you cannot " +
+			"read it, so judge the change by the rest.\n")
+	}
+	b.WriteString(fence("diff", "the git diff of the working tree, new files included", in.GitDiff))
 
 	return b.String()
 }
