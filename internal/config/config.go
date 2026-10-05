@@ -242,7 +242,32 @@ type SecurityConfig struct {
 	// permission flags were verified on; the run records and warns about it
 	// (specs/hardening/SPEC.md §7.2). A CLI that cannot be executed is refused regardless.
 	AllowUnverifiedCLI bool `yaml:"allow_unverified_cli"`
+	// SecretScan is what happens when implement or the test command adds what looks like a
+	// secret to the working tree (specs/hardening/SPEC.md §9).
+	SecretScan SecretScanConfig `yaml:"secret_scan"`
 }
+
+// SecretScanConfig is security.secret_scan.
+type SecretScanConfig struct {
+	// Mode is stop (or empty, the default), warn or off.
+	Mode string `yaml:"mode"`
+	// AllowPaths are protected_paths-style patterns whose findings are ignored, e.g.
+	// testdata/** for fixtures that hold fake keys on purpose.
+	AllowPaths []string `yaml:"allow_paths"`
+}
+
+// security.secret_scan.mode values.
+const (
+	SecretScanStop = "stop"
+	SecretScanWarn = "warn"
+	SecretScanOff  = "off"
+)
+
+// Enabled reports whether the scan runs at all.
+func (s SecretScanConfig) Enabled() bool { return s.Mode != SecretScanOff }
+
+// Stops reports whether a new finding stops the run (the default) rather than warning.
+func (s SecretScanConfig) Stops() bool { return s.Mode == "" || s.Mode == SecretScanStop }
 
 // CleanWorktreeRequired reports whether a workflow with implement must start on a clean
 // worktree - true unless security.require_clean_worktree is explicitly false.

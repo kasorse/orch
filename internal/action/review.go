@@ -9,6 +9,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/projectctx"
 	"orchestrator/internal/repository"
+	"orchestrator/internal/secretscan"
 	"orchestrator/internal/workflow"
 )
 
@@ -46,6 +47,12 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 
 	if diff.Empty() {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "nothing to review: the working tree has no changes against HEAD"}
+	}
+	// What looks like a secret is not sent to the review model: a finding recorded under
+	// mode warn, or one already in the tree when the run started (specs/hardening/SPEC.md
+	// §9.5). Under mode stop a new finding never gets this far.
+	if d.Config.Security.SecretScan.Enabled() {
+		diff.Text = secretscan.Redact(diff.Text)
 	}
 
 	prompt := BuildReviewPrompt(ReviewPromptInput{

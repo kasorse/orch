@@ -3,11 +3,14 @@ package persistence
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"slices"
+	"strings"
 	"unicode"
 
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
+	"orchestrator/internal/secretscan"
 )
 
 // validateRun applies the structural checks of specs/resume/SPEC.md §6.3 to a decoded
@@ -43,6 +46,9 @@ func validateRun(run *domain.Run, runID string) error {
 
 	if err := validateProviderCLI(run.ProviderCLI); err != nil {
 		return fmt.Errorf("provider_cli: %w", err)
+	}
+	if err := validateSecretScan(run); err != nil {
+		return err
 	}
 	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
 		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
@@ -128,4 +134,48 @@ func validateProviderCLI(m map[string]domain.ProviderCLI) error {
 		}
 	}
 	return nil
+}
+
+// maxSecretBaseline bounds secret_scan_baseline: a run.json is not a place for an unbounded
+// list, and no real working tree starts with this many likely secrets.
+const maxSecretBaseline = 10000
+
+// validateSecretScan checks secret_scan_baseline and secret_findings
+// (specs/hardening/SPEC.md §11): fingerprints are hex sha256, a finding names a known rule,
+// a clean relative path, a line, and a step that exists or is the one being run.
+func validateSecretScan(run *domain.Run) error {
+	if len(run.SecretScanBaseline) > maxSecretBaseline {
+		return fmt.Errorf("secret_scan_baseline: %d entries, at most %d", len(run.SecretScanBaseline), maxSecretBaseline)
+	}
+	for i, f := range run.SecretScanBaseline {
+		if !isSHA256Hex(f) {
+			return fmt.Errorf("secret_scan_baseline[%d]: not a fingerprint", i)
+		}
+	}
+	rules := secretscan.RuleIDs()
+	for i, f := range run.SecretFindings {
+		switch {
+		case !slices.Contains(rules, f.Rule):
+			return fmt.Errorf("secret_findings[%d]: unknown rule %q", i, f.Rule)
+		case !isSHA256Hex(f.Fingerprint):
+			return fmt.Errorf("secret_findings[%d]: not a fingerprint", i)
+		case f.Line < 1 || f.StepIndex < 0 || f.StepIndex > len(run.Executions):
+			return fmt.Errorf("secret_findings[%d]: line %d / step %d out of range", i, f.Line, f.StepIndex)
+		case f.File == "" || path.IsAbs(f.File) || path.Clean(f.File) != f.File || f.File == ".." || strings.HasPrefix(f.File, "../"):
+			return fmt.Errorf("secret_findings[%d]: file %q is not a clean repository-relative path", i, f.File)
+		}
+	}
+	return nil
+}
+
+func isSHA256Hex(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

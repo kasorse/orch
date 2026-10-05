@@ -485,3 +485,25 @@ func (r *ConsoleReporter) PreRunTestFinished(result *domain.TestResult, allowRed
 	}
 	fmt.Fprintf(r.Out, "Pre-run test: %s\n", text)
 }
+
+// SecretScanOff says, before approval, that security.secret_scan.mode is off.
+func (r *ConsoleReporter) SecretScanOff() {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "secret scan")), st.yellow("off: what steps add is not checked for secrets"))
+		return
+	}
+	fmt.Fprintln(r.Out, "Secret scan: off - what steps add is not checked for secrets")
+}
+
+// SecretFound reports a likely secret a step added, under security.secret_scan.mode:
+// warn: where and which rule, never the value.
+func (r *ConsoleReporter) SecretFound(step domain.ActionType, file string, line int, rule string) {
+	r.stopSpin()
+	text := fmt.Sprintf("%s added what looks like a secret: %s:%d (%s); recorded, not sent to review", step, file, line, rule)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ "+text))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", text)
+}

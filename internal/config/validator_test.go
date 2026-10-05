@@ -339,3 +339,25 @@ func TestValidate_TestBaseline(t *testing.T) {
 		t.Error("PreRunTest disagrees with test.baseline")
 	}
 }
+
+func TestValidate_SecretScan(t *testing.T) {
+	for _, mode := range []string{"", SecretScanStop, SecretScanWarn, SecretScanOff} {
+		cfg := validConfig()
+		cfg.Security.SecretScan = SecretScanConfig{Mode: mode, AllowPaths: []string{"testdata/**", "fixtures/*.pem"}}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("mode %q: %v", mode, err)
+		}
+	}
+	cfg := validConfig()
+	cfg.Security.SecretScan = SecretScanConfig{Mode: "log", AllowPaths: []string{"/abs/**", "bad[", ""}}
+	err := Validate(cfg)
+	for _, want := range []string{`security.secret_scan.mode must be stop (the default), warn or off, got "log"`,
+		`allow_paths[0] "/abs/**": must be relative`, `allow_paths[1] "bad["`, `allow_paths[2] "": must not be empty`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q in %v", want, err)
+		}
+	}
+	if !(SecretScanConfig{}).Stops() || !(SecretScanConfig{}).Enabled() || (SecretScanConfig{Mode: SecretScanWarn}).Stops() || (SecretScanConfig{Mode: SecretScanOff}).Enabled() {
+		t.Error("Stops/Enabled disagree with the mode")
+	}
+}

@@ -86,6 +86,9 @@ func testConfig() *config.Config {
 			Review:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 		},
 		Test: config.TestConfig{Command: "go test ./..."},
+		// The secret scan reads the real working tree; the tests that cover it (secrets_test.go)
+		// turn it on over a real repository.
+		Security: config.SecurityConfig{SecretScan: config.SecretScanConfig{Mode: config.SecretScanOff}},
 	}
 }
 

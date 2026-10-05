@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,6 +41,34 @@ func TestValidateRun_PreRunTest(t *testing.T) {
 	} {
 		if err := validateRun(run(r), "r"); err == nil || !strings.Contains(err.Error(), "pre_run_test") {
 			t.Errorf("%s: got %v", name, err)
+		}
+	}
+}
+
+func TestValidateRun_SecretScan(t *testing.T) {
+	fp := strings.Repeat("ab", 32)
+	ok := &domain.Run{ID: "r", Status: domain.RunRunning, SecretScanBaseline: []string{fp},
+		Executions:     []domain.StepExecution{{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted}},
+		SecretFindings: []domain.SecretFinding{{StepIndex: 1, File: "pkg/cfg.go", Line: 3, Rule: "aws-access-key-id", Fingerprint: fp}}}
+	if err := validateRun(ok, "r"); err != nil {
+		t.Fatalf("valid run: %v", err)
+	}
+	for name, edit := range map[string]func(r *domain.Run){
+		"baseline not hex":  func(r *domain.Run) { r.SecretScanBaseline = []string{"zz"} },
+		"unknown rule":      func(r *domain.Run) { r.SecretFindings[0].Rule = "magic" },
+		"absolute file":     func(r *domain.Run) { r.SecretFindings[0].File = "/etc/passwd" },
+		"escaping file":     func(r *domain.Run) { r.SecretFindings[0].File = "../x" },
+		"unclean file":      func(r *domain.Run) { r.SecretFindings[0].File = "a/../b" },
+		"line zero":         func(r *domain.Run) { r.SecretFindings[0].Line = 0 },
+		"step out of range": func(r *domain.Run) { r.SecretFindings[0].StepIndex = 5 },
+		"bad fingerprint":   func(r *domain.Run) { r.SecretFindings[0].Fingerprint = "x" },
+	} {
+		r := *ok
+		r.SecretScanBaseline = slices.Clone(ok.SecretScanBaseline)
+		r.SecretFindings = slices.Clone(ok.SecretFindings)
+		edit(&r)
+		if err := validateRun(&r, "r"); err == nil {
+			t.Errorf("%s: accepted", name)
 		}
 	}
 }

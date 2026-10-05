@@ -619,6 +619,9 @@ type tailOptions struct {
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
+	if !cfg.Security.SecretScan.Enabled() {
+		s.reporter.SecretScanOff()
+	}
 	if len(run.Executions) > 0 && run.PreRunRef != "" {
 		s.reporter.RestorePoint(run.PreRunRef)
 	}
@@ -700,6 +703,20 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 			return failRun(store, run, err)
 		}
 	}
+	// What already looks like a secret before the first step - a dirty start, fixtures the
+	// pre-run test generated - is not the run's doing (specs/hardening/SPEC.md §9.4). A
+	// resume of a run that has executed a step keeps the baseline it started with.
+	if len(run.Executions) == 0 && cfg.Security.SecretScan.Enabled() {
+		baseline, err := s.dispatcher.SecretBaseline(runCtx)
+		if err != nil {
+			return failRun(store, run, err)
+		}
+		run.SecretScanBaseline = baseline
+		if err := store.SaveRun(run); err != nil {
+			return err
+		}
+	}
+	s.dispatcher.OnSecret = s.reporter.SecretFound
 
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 

@@ -22,6 +22,10 @@ func (d *Dispatcher) executeTest(ctx context.Context, run *domain.Run) (workflow
 		}
 		return workflow.StepOutcome{TestResult: result, RawStdout: result.Stdout, RawStderr: result.Stderr}, err
 	}
+	// The tests ran code a model wrote, which may have written files too.
+	if err := d.scanSecrets(ctx, run, domain.ActionTest); err != nil {
+		return workflow.StepOutcome{TestResult: result, RawStdout: result.Stdout, RawStderr: result.Stderr}, err
+	}
 
 	d.applyTest(*result)
 	path := d.saveArtifact(run, domain.ActionTest, *result)

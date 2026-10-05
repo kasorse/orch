@@ -66,6 +66,9 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if len(changed) > 0 {
 		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
 	}
+	if err := d.scanSecrets(ctx, run, domain.ActionImplement); err != nil {
+		return outcome, err
+	}
 	return outcome, nil
 }
 

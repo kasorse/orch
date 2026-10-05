@@ -123,12 +123,29 @@ type Run struct {
 	AllowRedTests bool `json:"allow_red_tests,omitempty"`
 	// PreRunTest is the test command's result before the first step, when the workflow
 	// implements and tests (specs/hardening/SPEC.md §8). It is not an execution.
-	PreRunTest    *TestResult     `json:"pre_run_test,omitempty"`
-	Executions    []StepExecution `json:"executions"`
-	Status        RunStatus       `json:"status"`
-	FailureReason string          `json:"failure_reason,omitempty"`
-	TotalSteps    int             `json:"total_steps"`
-	FixIterations int             `json:"fix_iterations"`
-	CreatedAt     time.Time       `json:"created_at"`
-	UpdatedAt     time.Time       `json:"updated_at"`
+	// SecretScanBaseline are the fingerprints of what looked like secrets in the working
+	// tree when the run started; only findings not among them count (specs/hardening/SPEC.md
+	// §9.4).
+	SecretScanBaseline []string `json:"secret_scan_baseline,omitempty"`
+	// SecretFindings are the new findings a run with security.secret_scan.mode: warn went on
+	// with. Never the value.
+	SecretFindings []SecretFinding `json:"secret_findings,omitempty"`
+	PreRunTest     *TestResult     `json:"pre_run_test,omitempty"`
+	Executions     []StepExecution `json:"executions"`
+	Status         RunStatus       `json:"status"`
+	FailureReason  string          `json:"failure_reason,omitempty"`
+	TotalSteps     int             `json:"total_steps"`
+	FixIterations  int             `json:"fix_iterations"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
+// SecretFinding is one likely secret a step added: where, which rule, and the fingerprint
+// that identifies it across steps and resumes (secretscan.Finding). Never the value.
+type SecretFinding struct {
+	StepIndex   int    `json:"step_index"`
+	File        string `json:"file"`
+	Line        int    `json:"line"`
+	Rule        string `json:"rule"`
+	Fingerprint string `json:"fingerprint"`
 }

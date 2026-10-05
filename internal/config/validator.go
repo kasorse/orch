@@ -69,6 +69,17 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Sprintf("test.baseline must be require_green (the default) or off, got %q", cfg.Test.Baseline))
 	}
 
+	switch cfg.Security.SecretScan.Mode {
+	case "", SecretScanStop, SecretScanWarn, SecretScanOff:
+	default:
+		problems = append(problems, fmt.Sprintf("security.secret_scan.mode must be stop (the default), warn or off, got %q", cfg.Security.SecretScan.Mode))
+	}
+	for i, p := range cfg.Security.SecretScan.AllowPaths {
+		if err := domain.ValidateProtectedPattern(p); err != nil {
+			problems = append(problems, fmt.Sprintf("security.secret_scan.allow_paths[%d] %q: %v", i, p, err))
+		}
+	}
+
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
 			problems = append(problems, fmt.Sprintf("security.protected_paths[%d] %q: %v", i, p, err))

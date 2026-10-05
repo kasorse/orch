@@ -63,3 +63,32 @@ the run (`mode: stop`) or is recorded and redacted from the review prompt (`mode
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. As planned, with these differences:
+
+- **Each recorded finding keeps its fingerprint** (`secret_findings[].fingerprint`). Kept
+  in memory only, a resume would record the same finding again; the fingerprint is a hash
+  of rule, path and the value's hash, not the value, so it is safe in `run.json`. Dedup is
+  against the baseline plus every recorded finding.
+- **`repository.AddedContent`** parses `git diff HEAD -U0 --no-color --no-ext-diff
+  --no-textconv`: the `+++` path is C-unquoted when git quotes it, and git's trailing tab
+  after a name with a space is dropped (found by a test: `+++ b/with space.txt\t`). Deleted
+  files and binary patches add nothing; untracked files are read whole up to 1 MiB (symlinks,
+  non-regular, binary and larger files are `Skipped`); ignored files and the runs directory
+  are left out. The deny list is not applied: the scan is local.
+- **`allow_paths` uses `domain.MatchProtected`**, so a pattern matches at any depth
+  (`testdata/**` also covers `pkg/testdata/…`), and `ValidateProtectedPattern` validates it.
+- **Redaction of the review diff is unconditional when the scan is on** (stop and warn), so
+  a secret that was in the tree at start (baseline) is not sent to the review model either.
+- Warnings go through `Dispatcher.OnSecret`, wired to `ConsoleReporter.SecretFound`; mode
+  `off` prints `Secret scan: off` under the authority line.
+- The `internal/action` unit tests' shared config turns the scan off (they run over a
+  repository stub); `secrets_test.go` covers it over a real repository: stop message
+  (file:line (rule), restore point, both ways out, no value), baseline incl. a moved line,
+  `allow_paths`, a copy in another file counts, warn records once and redacts review, off.
+- Integration scenario 27: stop after implement (no review call, value nowhere in the run
+  directory); warn (recorded, console warning, review prompt redacted); a test command that
+  writes a key (stopped after the test step); a dirty start with a key (baseline, completes);
+  off (announced).

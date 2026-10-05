@@ -110,6 +110,13 @@ execution:
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
   protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+  # What implement and the test command add is scanned for likely secrets (cloud and service
+  # tokens, private keys, JWTs, passwords in URLs, high-entropy assignments). stop (default)
+  # ends the run before anything sends the value on; warn records it (file, line, rule - never
+  # the value) and redacts it from the review prompt; off does nothing.
+  # secret_scan:
+  #   mode: stop
+  #   allow_paths: [testdata/**]     # fixtures that hold fake keys on purpose
 
 # `orchestrator run --stage <name> [--stage <name> ...] "<task>"` skips the decision section
 # above (MVP.md §40); the config must still be valid, but nothing in it is called.

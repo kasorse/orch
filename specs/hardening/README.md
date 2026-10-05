@@ -30,7 +30,7 @@ review model. This phase fixes all of it without widening any authority.
 | [H06](tasks/TASK-H06-cli-version-check.md) | provider CLI version check, override, record | S3 | M | H01 |
 | [H07](tasks/TASK-H07-pre-run-test.md) | pre-run test (`test.baseline`, `--allow-red-tests`) ✓ | S4 | M | H04, H05 |
 | [H08](tasks/TASK-H08-secretscan-package.md) | `internal/secretscan` rules and tests ✓ | S5 | M | — |
-| [H09](tasks/TASK-H09-secret-scan-wiring.md) | secret scan in the run: baseline, stop/warn, redaction | S5 | M | H03, H07, H08 |
+| [H09](tasks/TASK-H09-secret-scan-wiring.md) | secret scan in the run: baseline, stop/warn, redaction ✓ | S5 | M | H03, H07, H08 |
 | [H10](tasks/TASK-H10-integration.md) | integration scenarios | — | M | H01–H09 |
 | [H11](tasks/TASK-H11-documentation.md) | MVP.md, CLAUDE.md, README, example config, TODO.md | — | S | H10 |
 | [H12](tasks/TASK-H12-branch-cleanup.md) | delete merged branches (local + origin) | S6 | S | — |
