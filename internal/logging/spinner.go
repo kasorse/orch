@@ -3,6 +3,7 @@ package logging
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,11 +85,22 @@ func (s *spinner) draw(i int) {
 		line += s.st.gray("  ⎿ ") + detail
 	}
 	// One terminal row: a wrapped spinner line could not be redrawn in place.
-	if w := termWidth() - 1; visibleWidth(line) > w {
+	w := termWidth() - 1
+	if visibleWidth(line) > w {
 		plain := ansiRE.ReplaceAllString(line, "")
 		line = s.st.gray(truncateVisible(plain, w))
 	}
-	fmt.Fprintf(s.out, "\r\x1b[2K%s", line)
+	fmt.Fprintf(s.out, "\r%s%s", line, clearRest(visibleWidth(line), w))
+}
+
+// clearRest blanks the rest of the transcript column after used cells. With the sidebar
+// open it pads with spaces, since erase-to-end-of-line would also wipe the sidebar's part
+// of the row; without it, erase-to-end-of-line is enough.
+func clearRest(used, width int) string {
+	if reservedCols.Load() == 0 {
+		return "\x1b[K"
+	}
+	return strings.Repeat(" ", max(width-used, 0))
 }
 
 // Stop ends the animation and clears its line. Safe to call more than once.
@@ -99,7 +111,7 @@ func (s *spinner) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stop)
 		<-s.stopped
-		fmt.Fprint(s.out, "\r\x1b[2K\x1b[?25h")
+		fmt.Fprint(s.out, "\r"+clearRest(0, termWidth()-1)+"\r\x1b[?25h")
 	})
 }
 

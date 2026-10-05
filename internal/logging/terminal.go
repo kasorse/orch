@@ -57,6 +57,12 @@ type pausingPrompter struct {
 
 func (p pausingPrompter) Ask(prompt string) (string, error) {
 	p.r.stopSpin()
+	// The terminal echoes the typed answer and Enter itself, which can scroll; the
+	// sidebar steps aside for the question and comes back after it.
+	if p.r.dock != nil {
+		p.r.dock.hide()
+		defer p.r.dock.show()
+	}
 	return p.inner.Ask(p.r.stylePrompt(prompt))
 }
 

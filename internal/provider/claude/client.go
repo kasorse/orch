@@ -61,31 +61,62 @@ var toolSets = map[domain.Authority]toolSet{
 //
 // --tools and --allowed-tools take a variable number of values and would swallow a prompt
 // that followed them, so the prompt is always last and directly preceded by --model.
-func args(a domain.Authority, denyRead []string, model, effort, prompt string) []string {
+func args(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, prompt string) []string {
 	set := toolSets[a]
+	// --restricted also ignores every settings file, so the operator's opt-in to their own
+	// settings (plugins, skills, hooks) runs without it. What --restricted otherwise adds
+	// is kept by the rest of the argv: --tools still lists the only built-in tools there
+	// are (no shell), dontAsk denies anything not pre-approved, and the file tools stay
+	// confined to the working directory (verified against claude 2.1.287: a Read of
+	// /etc/hosts is denied either way). Only user settings are loaded, never the
+	// repository's own .claude/ settings or hooks.
+	sources, restricted := "", true
+	if ext.UserSettings {
+		sources, restricted = "user", false
+	}
 	argv := []string{
 		"--print",
 		// One JSON event per line: the answer plus tool calls, usage and rate limits
 		// (stream.go). --verbose is required by the CLI for stream-json under --print.
 		"--output-format", "stream-json",
 		"--verbose",
-		"--restricted",
+	}
+	if restricted {
+		argv = append(argv, "--restricted")
+	}
+	argv = append(argv,
 		"--permission-mode", "dontAsk",
 		"--permission-prompts", "none",
 		"--strict-mcp-config",
-		"--setting-sources", "",
+		"--setting-sources", sources,
+	)
+	// Only the servers in this document exist (--strict-mcp-config), and of their tools
+	// only the allowlisted ones may run (dontAsk denies the rest).
+	if ext.MCPConfig != "" {
+		argv = append(argv, "--mcp-config", ext.MCPConfig)
 	}
 	if len(denyRead) > 0 {
 		argv = append(argv, "--settings", denySettings(denyRead))
 	}
 	argv = append(argv, "--tools", set.tools)
-	if set.allowed != "" {
-		argv = append(argv, "--allowed-tools", set.allowed)
+	allowed := set.allowed
+	if len(ext.MCPTools) > 0 {
+		allowed = strings.Join(append(nonEmptyList(set.allowed), ext.MCPTools...), ",")
+	}
+	if allowed != "" {
+		argv = append(argv, "--allowed-tools", allowed)
 	}
 	if effort != "" {
 		argv = append(argv, "--effort", effort)
 	}
 	return append(argv, "--model", model, prompt)
+}
+
+func nonEmptyList(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+	return strings.Split(csv, ",")
 }
 
 // denySettings renders the read deny list as a --settings JSON document. Each pattern is
@@ -106,14 +137,14 @@ func denySettings(patterns []string) string {
 	return string(data)
 }
 
-func buildArgs(a domain.Authority, denyRead []string, model, effort, prompt string) []string {
-	return args(a, denyRead, model, effort, prompt)
+func buildArgs(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, prompt string) []string {
+	return args(a, denyRead, model, effort, ext, prompt)
 }
 
 // redactedArgs is buildArgs with the prompt replaced by its length, so
 // apperr.ProviderError never has to know or receive the real prompt text.
-func redactedArgs(a domain.Authority, denyRead []string, model, effort string, promptLen int) []string {
-	return args(a, denyRead, model, effort, fmt.Sprintf("<prompt: %d chars>", promptLen))
+func redactedArgs(a domain.Authority, denyRead []string, model, effort string, ext provider.Extensions, promptLen int) []string {
+	return args(a, denyRead, model, effort, ext, fmt.Sprintf("<prompt: %d chars>", promptLen))
 }
 
 // Supports reports every defined authority as enforceable: each has a flag set verified
@@ -137,7 +168,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 
 	spec := execution.Spec{
 		Executable: executable,
-		Args:       buildArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Prompt),
+		Args:       buildArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, req.Prompt),
 		WorkingDir: req.WorkingDir,
 		Env:        execution.ScrubbedEnv(),
 	}
@@ -193,7 +224,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			Model:      req.Model,
 			Kind:       kind,
 			Executable: executable,
-			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, len(req.Prompt)),
+			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, len(req.Prompt)),
 			WorkingDir: req.WorkingDir,
 			ExitCode:   res.ExitCode,
 			Duration:   res.Duration,
@@ -209,7 +240,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			Model:      req.Model,
 			Kind:       apperr.FailureExit,
 			Executable: executable,
-			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, len(req.Prompt)),
+			Args:       redactedArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions, len(req.Prompt)),
 			WorkingDir: req.WorkingDir,
 			ExitCode:   res.ExitCode,
 			Duration:   res.Duration,

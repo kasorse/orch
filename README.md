@@ -257,6 +257,42 @@ Code session you launched the orchestrator from reaches its children (`CLAUDECOD
 `decision.jev.api_key_env` and, with a `jira` section, `jira.token_env` and
 `jira.email_env`. The orchestrator reads those itself; a test the model wrote cannot.
 
+### Extensions: your MCP servers, plugins and hooks (opt-in)
+
+By default no step sees your Claude setup. With an `extensions` section you choose what it
+does see:
+
+```yaml
+extensions:
+  mcp:
+    graphify:                     # a code knowledge graph instead of grep-only search
+      command: graphify-mcp
+      args: ["{repo}/graphify-out/graph.json"]   # {repo} = the repository root
+      tools: [query_graph, get_node, get_neighbors, shortest_path]   # or ["*"]
+      actions: [analyze, plan, implement, review]                    # default: analyze, plan, review
+  user_settings: true             # ~/.claude/settings.json: plugins, skills, hooks
+  user_settings_actions: [implement, review]                         # default: every model step
+```
+
+- **`mcp`** passes only the listed servers (`--mcp-config` with `--strict-mcp-config`).
+  - Only the listed tools are allowed; any other tool of the server is denied.
+  - Only the listed actions get the server.
+  - Steps keep `--restricted`, so the file tools and the authority table stay as above.
+  - The step's prompt names the extra tools, so the model uses them rather than defaulting
+    to grep.
+  - The server runs with your permissions, like any MCP server you use with Claude.
+- **`user_settings`** loads your **user** settings only (`--setting-sources user`): your
+  plugins, skills and hooks, such as writing a session to memory.
+  - The repository's own `.claude/` settings and hooks still never load.
+  - claude's `--restricted` ignores settings files, so these steps run without it.
+  - What it would add is kept by the rest of the command line: `--tools` lists the same
+    built-in tools (no shell), anything not pre-approved is denied, and the file tools stay
+    confined to the repository (checked against claude 2.1.287).
+  - **Your hooks run your code with your permissions** on every such step. Enable this for
+    hooks you trust, ideally only on the actions that need them.
+
+Extensions are only supported with provider `claude`; `validate` refuses them elsewhere.
+
 ### What is not protected
 
 - **Without `test.sandbox: bwrap`, code the model writes runs in `test`** with your
@@ -384,6 +420,30 @@ orchestrator decisions report
   plain text described above, byte for byte. `NO_COLOR=1` or `ORCHESTRATOR_PLAIN=1` forces
   plain text on a terminal too. Preview it without running a model:
   `ORCHESTRATOR_DEMO=1 go test ./internal/logging -run TestPretty_FullRun -v`.
+- **Sidebar.** On a terminal at least 120 columns wide and 20 rows tall, the context lives
+  in a sidebar pinned to the top right, out of the transcript. It shows the workflow
+  checklist (the running step marked), usage and cost so far, the 5-hour and weekly rate
+  limits, and the repository's branch and recent commits. It updates live. The transcript
+  stays ordinary scrolling output: copy, scrollback and prompts work as usual, the sidebar
+  steps aside while a question waits for an answer, and it never scrolls into the
+  scrollback. When the run ends it closes, and the summary prints usage and limits
+  inline. On narrower terminals a single dim status line between steps takes its place
+  (`▸ test · 1/2 steps · 32k tok · $0.053 · 5h 95%`). `ORCHESTRATOR_SIDEBAR=off` keeps that
+  layout on wide terminals too. Code diffs always stay in the transcript.
+- **Review screen.** On an interactive terminal (macOS, Linux, BSD), the approval is a
+  keyboard form instead of a typed `[a]pprove / [c]ancel`. In it you can:
+  - toggle stages: `↑↓` and `space`, or the digits `1`-`6`;
+  - override the complexity with `←→`. Picking one switches on the stages
+    `policy.stages.force` forces for it, and switching a forced stage off is marked as an
+    override;
+  - pick the mode when no `--mode` was given;
+  - press **Run** or **Cancel**: `Enter` runs, `Esc` cancels, `Tab` moves between rows.
+
+  The workflow line under the form previews exactly what will run. An edit is recorded as
+  `decision.edit` in `run.json` and `decision.json`, holding the complexity and the stages
+  as decided, and a resume continues the edited workflow. A resume shows the same screen
+  without the editing. Piped input, `--mode auto` and other terminals keep the line
+  prompts.
 
 Config loading, structural validation, dependency validation (executables on `PATH`, the
 Jev API key) and the authority check (every route's provider can enforce its authority) always

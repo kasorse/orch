@@ -36,6 +36,7 @@ import (
 	"orchestrator/internal/report"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
+	"orchestrator/internal/tui"
 	"orchestrator/internal/workflow"
 )
 
@@ -284,7 +285,10 @@ func decisionsReport(stdout io.Writer) error {
 // (run --jira), the operator's notes on the ticket, which may be empty.
 func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
-	defer reporter.Pause()
+	defer reporter.Finish()
+	// Warnings on stderr go to the same terminal; routed through the reporter they stop
+	// the spinner and step around the sidebar.
+	stderr = reporter.Wrap(stderr)
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -402,6 +406,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// and can be resumed once the tree is clean (specs/resume/SPEC.md G10).
 	run.Decision = &out.decision
 	run.Workflow = &wf
+	reporter.SetRun(run)
 	if err := store.SaveDecision(run.ID, out.trace(wf)); err != nil {
 		return err
 	}
@@ -415,12 +420,40 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	if err := checkWorktree(cfg, wf, dirty, stderr); err != nil {
 		return failRun(store, run, err)
 	}
+	// The review screen shows the stages itself, editable; the decision block above it
+	// then leaves its read-only stage table out.
+	editable := mode != domain.ModeAuto && reporter.Pretty && reviewScreenAvailable(stdin) &&
+		run.Decision.Source != domain.DecisionSourceManual
+	reporter.ReviewForm = editable
 	out.announce(wf, stderr)
 
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
+	s.stdin = stdin
 	return executeWorkflow(ctx, s, tailOptions{
-		mode:  mode,
-		dirty: dirty,
+		mode:     mode,
+		dirty:    dirty,
+		editable: editable,
+		// An edit on the review screen replaces the decision before anything ran: the
+		// workflow is rebuilt from it, the worktree rule re-checked (adding implement can
+		// make a dirty tree a refusal), and run.json and decision.json rewritten, so a
+		// resume continues exactly what was approved.
+		onEdit: func(d domain.Decision) error {
+			nwf, err := workflow.Build(d.Stages)
+			if err != nil {
+				return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the edited workflow", Err: err})
+			}
+			if err := checkWorktree(cfg, nwf, dirty, stderr); err != nil {
+				return failRun(store, run, err)
+			}
+			run.Decision, run.Workflow = &d, &nwf
+			trace := out.trace(nwf)
+			trace.Complexity, trace.Stages, trace.Edit = d.Complexity, d.Stages.Stages, d.Edit
+			if err := store.SaveDecision(run.ID, trace); err != nil {
+				return err
+			}
+			reporter.SetRun(run)
+			return store.SaveRun(run)
+		},
 		engineContext: func() (context.Context, context.CancelFunc) {
 			return engineContext(ctx, decideCtx, cfg.Execution.Timeout, time.Since(started), out.manualChoice)
 		},
@@ -447,13 +480,15 @@ func checkWorktree(cfg config.Config, wf domain.Workflow, dirty bool, stderr io.
 // session is what the part of a run after the decision needs. run and resume each build
 // one, and both hand it to executeWorkflow.
 type session struct {
-	cfg        *config.Config
-	repo       *repository.Repository
-	store      *persistence.Store
-	run        *domain.Run
-	reporter   *logging.ConsoleReporter
-	prompter   interaction.Prompter
-	stdout     io.Writer
+	cfg      *config.Config
+	repo     *repository.Repository
+	store    *persistence.Store
+	run      *domain.Run
+	reporter *logging.ConsoleReporter
+	prompter interaction.Prompter
+	stdout   io.Writer
+	// stdin feeds the review screen; it is drawn only when stdin is a terminal.
+	stdin      io.Reader
 	runner     *testexec.Runner
 	dispatcher *action.Dispatcher
 	// protected are the patterns the run must never change: security.protected_paths and
@@ -490,6 +525,10 @@ func newSession(ctx context.Context, cfg *config.Config, configPath string, regi
 type tailOptions struct {
 	// mode is --mode; empty asks.
 	mode domain.RunMode
+	// editable lets the review screen change stages and complexity (a fresh run with a
+	// decided workflow). onEdit applies such a change: rebuild, re-check, persist.
+	editable bool
+	onEdit   func(domain.Decision) error
 	// defaultMode is what an empty answer to the mode prompt picks; empty has no default.
 	defaultMode domain.RunMode
 	// dirty is whether a run without executions starts on uncommitted changes, which
@@ -515,7 +554,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 
 	mode := opts.mode
 	if mode != domain.ModeAuto {
-		resolvedMode, approved, err := interaction.ReviewAndSelectMode(s.prompter, s.stdout, mode, opts.defaultMode)
+		resolvedMode, approved, err := review(s, mode, opts)
 		if err != nil {
 			if opts.resume != nil {
 				return err
@@ -887,4 +926,72 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 
 func (o *runObserver) RunFinished(run *domain.Run) {
 	o.reporter.RunFinished(run)
+}
+
+// review asks the operator to approve the workflow and resolves the mode. On an
+// interactive terminal it is the review screen (logging.Review): stages and complexity
+// editable on a fresh run, buttons instead of typed answers. Anywhere else - a pipe, a
+// test, an unsupported terminal - it is the line prompt it always was.
+func review(s *session, pinnedMode domain.RunMode, opts tailOptions) (domain.RunMode, bool, error) {
+	run := s.run
+	if s.stdin != nil && run.Decision != nil {
+		res, err := s.reporter.Review(s.stdin, logging.ReviewInput{
+			Decision:    *run.Decision,
+			Policy:      s.cfg.DecisionPolicy(),
+			AskMode:     pinnedMode == "",
+			DefaultMode: firstMode(opts.defaultMode, domain.ModeAcceptEdits),
+			Editable:    opts.editable && opts.onEdit != nil,
+			Build: func(sel domain.StageSelection) ([]domain.ActionType, error) {
+				wf, err := workflow.Build(sel)
+				if err != nil {
+					return nil, err
+				}
+				out := make([]domain.ActionType, len(wf.Steps))
+				for i, st := range wf.Steps {
+					out[i] = st.Action
+				}
+				return out, nil
+			},
+		})
+		switch {
+		case errors.Is(err, logging.ErrReviewUnavailable):
+			// fall through to the line prompt
+		case errors.Is(err, tui.ErrInterrupted):
+			return "", false, nil
+		case err != nil:
+			return "", false, err
+		default:
+			if !res.Approved {
+				return "", false, nil
+			}
+			if res.Decision.Edit != nil {
+				if err := opts.onEdit(res.Decision); err != nil {
+					return "", false, err
+				}
+			}
+			mode := pinnedMode
+			if mode == "" {
+				mode = res.Mode
+			}
+			return mode, true, nil
+		}
+	}
+	return interaction.ReviewAndSelectMode(s.prompter, s.stdout, pinnedMode, opts.defaultMode)
+}
+
+func firstMode(modes ...domain.RunMode) domain.RunMode {
+	for _, m := range modes {
+		if m != "" {
+			return m
+		}
+	}
+	return ""
+}
+
+// reviewScreenAvailable reports whether the review screen can take stdin over (a terminal
+// raw mode works on), so the decision block only leaves its stage table out when the
+// form that replaces it will really be shown.
+func reviewScreenAvailable(stdin io.Reader) bool {
+	f, ok := stdin.(*os.File)
+	return ok && tui.Supported(f)
 }

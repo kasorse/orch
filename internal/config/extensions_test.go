@@ -1,0 +1,29 @@
+package config
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestValidateExtensions(t *testing.T) {
+	claude := map[string]string{"research": "claude", "analyze": "claude", "plan": "claude", "implement": "claude", "review": "claude"}
+	ok := ExtensionsConfig{MCP: map[string]MCPServerConfig{"graphify": {Command: "graphify-mcp", Tools: []string{"query_graph"}}}}
+	if p := validateExtensions(ok, claude); len(p) != 0 {
+		t.Errorf("valid config rejected: %v", p)
+	}
+	bad := ExtensionsConfig{MCP: map[string]MCPServerConfig{
+		"no tools":  {Command: "x"},
+		"both":      {Command: "x", URL: "http://y", Tools: []string{"t"}},
+		"badaction": {Command: "x", Tools: []string{"t"}, Actions: []string{"deploy"}},
+	}, UserSettingsActions: []string{"analyze"}}
+	got := strings.Join(validateExtensions(bad, claude), "\n")
+	for _, want := range []string{"letters, digits", "tools: list the tools", "not both", `"deploy" is not an action`, "user_settings is false"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected %q in:\n%s", want, got)
+		}
+	}
+	codex := map[string]string{"analyze": "codex", "plan": "claude", "review": "claude"}
+	if p := strings.Join(validateExtensions(ok, codex), "\n"); !strings.Contains(p, "only supported with provider claude") {
+		t.Errorf("a non-claude action must be refused: %s", p)
+	}
+}

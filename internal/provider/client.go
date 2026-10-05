@@ -29,6 +29,20 @@ type Request struct {
 	// Activity, if set, is told what the model is doing as it happens ("Read
 	// src/app.ts"), for a progress display. Adapters that cannot tell never call it.
 	Activity func(string)
+	// Extensions are the operator's opt-in MCP servers and user settings for this call
+	// (config.ExtensionsConfig, resolved for the action). Zero means none.
+	Extensions Extensions
+}
+
+// Extensions is what one call may use beyond its authority's built-in tools.
+type Extensions struct {
+	// MCPConfig is the --mcp-config JSON document ({"mcpServers": {...}}), "" for none.
+	MCPConfig string
+	// MCPTools are the fully qualified MCP tool names the model may call
+	// ("mcp__graphify__query_graph", or "mcp__graphify" for every tool of a server).
+	MCPTools []string
+	// UserSettings loads the operator's user-level settings: plugins, skills, hooks.
+	UserSettings bool
 }
 
 type Result struct {

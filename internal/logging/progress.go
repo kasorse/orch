@@ -52,6 +52,18 @@ type ConsoleReporter struct {
 	hasUsage  bool
 	// stepDiff is what the finishing implement step changed (unified diff).
 	stepDiff string
+
+	// dock is the right-hand sidebar on wide terminals (dock.go); rawOut the terminal
+	// writer Out wrapped when it opened. run is the run the sidebar describes, inStep
+	// whether r.action is executing right now.
+	dock   *dock
+	rawOut io.Writer
+	run    *domain.Run
+	inStep bool
+
+	// ReviewForm is set when the review screen will follow the decision: the decision
+	// block then leaves the stage table to the form, which shows it editable.
+	ReviewForm bool
 }
 
 func NewConsoleReporter(out io.Writer) *ConsoleReporter {
@@ -68,6 +80,19 @@ func NewTerminalReporter(out io.Writer) *ConsoleReporter {
 // next provider call starts a new one.
 func (r *ConsoleReporter) Pause() {
 	r.stopSpin()
+}
+
+// Finish ends everything live on the terminal - the spinner and the sidebar - so whatever
+// is printed after the run (an error from main) gets the full width. Safe to call twice.
+func (r *ConsoleReporter) Finish() {
+	r.stopSpin()
+	r.CloseDock()
+}
+
+// SetRun names the run the sidebar describes, once its workflow is known.
+func (r *ConsoleReporter) SetRun(run *domain.Run) {
+	r.run = run
+	r.refreshDock()
 }
 
 // RunHeader prints the run header line once the run ID and directory are known (right

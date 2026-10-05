@@ -109,6 +109,7 @@ func (r *ConsoleReporter) ProviderUsage(u domain.Usage) {
 	r.stepUsage.Add(u)
 	r.runUsage.Add(u)
 	r.hasUsage = true
+	r.refreshDock()
 }
 
 // CallReporter forwards both to its ConsoleReporter.
@@ -249,6 +250,104 @@ func printPanels(w io.Writer, panels ...string) {
 			fmt.Fprint(w, p)
 		}
 	}
+}
+
+// sideBySide lays cards out in a row when they fit in width, else stacked; every line
+// is indented by two columns.
+func sideBySide(width int, cards ...[]string) string {
+	var cs [][]string
+	total := 0
+	for _, c := range cards {
+		if len(c) > 0 {
+			cs = append(cs, c)
+			total += dockWidth + 1
+		}
+	}
+	var b strings.Builder
+	if len(cs) == 0 {
+		return ""
+	}
+	if total+2 > width {
+		for _, c := range cs {
+			for _, l := range c {
+				b.WriteString("  " + l + "\n")
+			}
+		}
+		return b.String()
+	}
+	rows := 0
+	for _, c := range cs {
+		rows = max(rows, len(c))
+	}
+	for i := 0; i < rows; i++ {
+		line := " "
+		for _, c := range cs {
+			cell := strings.Repeat(" ", dockWidth)
+			if i < len(c) {
+				cell = c[i]
+			}
+			line += " " + cell
+		}
+		b.WriteString(strings.TrimRight(line, " ") + "\n")
+	}
+	return b.String()
+}
+
+// besideRight prints left as is and right aligned to the terminal's right edge on the
+// same rows, like the sidebar during the run. When both do not fit side by side, right
+// follows left, indented.
+func besideRight(width int, left, right []string) string {
+	lw := 0
+	for _, l := range left {
+		lw = max(lw, visibleWidth(l))
+	}
+	rw := 0
+	for _, l := range right {
+		rw = max(rw, visibleWidth(l))
+	}
+	var b strings.Builder
+	if len(right) == 0 || lw+dockGap+rw > width-1 {
+		for _, l := range left {
+			b.WriteString(l + "\n")
+		}
+		for _, l := range right {
+			b.WriteString("  " + l + "\n")
+		}
+		return b.String()
+	}
+	col := width - rw // right column starts here (0-based), flush with the right edge
+	for i := 0; i < max(len(left), len(right)); i++ {
+		l := ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i >= len(right) {
+			b.WriteString(l + "\n")
+			continue
+		}
+		b.WriteString(l + strings.Repeat(" ", max(col-visibleWidth(l), dockGap)) + right[i] + "\n")
+	}
+	return b.String()
+}
+
+// repoLine is the repository card squeezed into one dim line for narrow terminals:
+// "  master · 2a1b3c4 Fix login · clean".
+func (r *ConsoleReporter) repoLine(info RepoInfo) string {
+	st := r.st()
+	var parts []string
+	if info.Branch != "" {
+		parts = append(parts, st.cyan(info.Branch))
+	}
+	if len(info.Commits) > 0 {
+		c := info.Commits[0]
+		parts = append(parts, st.yellow(c.Hash)+" "+st.gray(truncateVisible(c.Subject, 40)))
+	}
+	if info.Changed > 0 {
+		parts = append(parts, st.yellow(countOf(info.Changed, "uncommitted change")))
+	} else {
+		parts = append(parts, st.green("clean"))
+	}
+	return "  " + strings.Join(parts, st.gray(" · "))
 }
 
 // workflowPanel is the plan as a checklist, like an agent's todo list: what ran (✓/✗),
