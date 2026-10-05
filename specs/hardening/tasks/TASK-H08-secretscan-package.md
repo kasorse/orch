@@ -54,3 +54,35 @@ and a stable fingerprint — never the value (`SPEC.md` §9.2).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. API as planned (`Scan`, `ScanLines`, `Redact`, `RuleIDs`, `Finding` with
+`String() = "line N (rule)"`), rules as in `SPEC.md` §9.2, with these differences:
+
+- **No `testdata/` golden files.** Realistic tokens (`AKIA…`, `ghp_…`, `glpat-…`, `sk-ant-…`)
+  committed to the repository would trip secret scanning and GitHub push protection on this
+  very repository. The test secrets are assembled at run time from harmless pieces
+  (`"AK" + "IA" + …`) and the expected findings are a table in `scan_test.go`: every rule has
+  at least two positives and two near-miss negatives, and `TestScan_EveryRuleHasCases` fails
+  if a new rule has none. There is no `-update` flag.
+- **One finding per value.** Rules run specific-first, and a value one rule reported is not
+  reported again by a later one on the same line: `aws_secret_access_key = "…"` is one
+  `aws-secret-key` finding, not also `generic-assignment`; an Anthropic key is not also an
+  OpenAI key.
+- **Speed.** Each rule runs on a line only when one of its hints occurs in it (`hints`,
+  optionally case-folded). `generic-assignment` also has a hand-written shape check
+  (`assignmentShape`: keyword, name characters, optional quote, `=` / `:=` / `:`, quote)
+  before its pattern — the capturing pattern alone cost ~7 µs per line. 1 MiB of the worst
+  ordinary line (several hints, a quoted call) scans in ~25 ms (benchmark
+  `BenchmarkScan1MiB`); `FuzzAssignmentShape` (60 s, ~486k execs) checks the shape check never
+  rejects a line the pattern matches.
+- **Exclusions** beyond the spec: `url-credentials` ignores common documentation passwords
+  (`password`, `pass`, `secret`, `test`, `admin`, `root`, `postgres`, …) and placeholders;
+  the placeholder words include `redacted`, `your_`, `your-`; env lookups include
+  `os.LookupEnv(`, `os.getenv(`, `System.getenv(`, `ENV[`. The JWT rule requires the
+  `eyJ….eyJ…` header and payload shape.
+- **`Redact` handles a private key as a block**: from `BEGIN … PRIVATE KEY` to its `END`
+  line, or to the end of the text when the block is cut off (a bounded diff).
+- The value never leaves the package: `Finding` holds no matched text, and a test formats
+  findings with `%v`, `%+v`, `%#v` and `%s` and checks no value appears.
