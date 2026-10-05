@@ -22,16 +22,16 @@ review model. This phase fixes all of it without widening any authority.
 
 | task | title | TODO | size | depends on |
 |---|---|---|---|---|
-| [H01](tasks/TASK-H01-prompt-on-stdin.md) | prompt on stdin, fake CLI reads stdin | S1 | S | — |
+| [H01](tasks/TASK-H01-prompt-on-stdin.md) | prompt on stdin, fake CLI reads stdin ✓ | S1 | S | — |
 | [H02](tasks/TASK-H02-bounded-test-output.md) | `limits.prompt`, bounded test output ✓ | S1 | S | — |
 | [H03](tasks/TASK-H03-review-diff.md) | review diff: new files, deny list, summarize, budget ✓ | S1 | M | H02 |
 | [H04](tasks/TASK-H04-test-env-allowlist.md) | test environment allowlist, `test.env_pass` ✓ | S2 | M | — |
 | [H05](tasks/TASK-H05-sandbox-default.md) | sandbox on by default, explicit `none` warns ✓ | S2 | S | H04 |
-| [H06](tasks/TASK-H06-cli-version-check.md) | provider CLI version check, override, record | S3 | M | H01 |
+| [H06](tasks/TASK-H06-cli-version-check.md) | provider CLI version check, override, record ✓ | S3 | M | H01 |
 | [H07](tasks/TASK-H07-pre-run-test.md) | pre-run test (`test.baseline`, `--allow-red-tests`) ✓ | S4 | M | H04, H05 |
 | [H08](tasks/TASK-H08-secretscan-package.md) | `internal/secretscan` rules and tests ✓ | S5 | M | — |
 | [H09](tasks/TASK-H09-secret-scan-wiring.md) | secret scan in the run: baseline, stop/warn, redaction ✓ | S5 | M | H03, H07, H08 |
-| [H10](tasks/TASK-H10-integration.md) | integration scenarios | — | M | H01–H09 |
+| [H10](tasks/TASK-H10-integration.md) | integration scenarios ✓ | — | M | H01–H09 |
 | [H11](tasks/TASK-H11-documentation.md) | MVP.md, CLAUDE.md, README, example config, TODO.md | — | S | H10 |
 | [H12](tasks/TASK-H12-branch-cleanup.md) | delete merged branches (local + origin) | S6 | S | — |
 | [H13](tasks/TASK-H13-weekly-live-check.md) | weekly live permission check in CI (optional) | S3 | S | H06 |

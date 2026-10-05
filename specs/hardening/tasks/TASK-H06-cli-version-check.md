@@ -58,3 +58,14 @@ not verified on, unless the operator explicitly overrides; the version is record
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05 in a parallel session (commit a44462d, together with H01); checked against
+this task's acceptance in H10. `internal/provider/claude/version.go` holds the range
+(`verifiedMin` 2.1.283, `verifiedMaxExclusive` 2.2.0) and `CLIVersion`; `provider` declares
+the optional `VersionVerifier`; `config.ProvidersInUse` lists every routed provider. The
+check runs in the fail-fast chain after `ValidateAuthorities`; `security.allow_unverified_cli`
+turns the refusal into a warning; `run.json: provider_cli` and `resumes[].provider_cli`
+record what was seen, validated on load. Scenario 24 covers the refusal before any call, the
+override, the recorded version, and a resume that records its own.

@@ -39,3 +39,32 @@ old scenarios still pass unchanged in behavior.
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. Most rows were written with their task, under the next free scenario
+number, so the ids differ from the table:
+
+| row | scenario |
+|---|---|
+| 23a | 23 (`scenario23_large_prompt_test.go`, H01) |
+| 23b, 23c, 23d, 23e | **28** (`scenario28_bounded_prompts_test.go`, this task) |
+| 23f | 25 (H04) |
+| 23g | 16c (H05: a bwrap that cannot sandbox, rather than a missing one - the integration harness uses the real `LookPath`) |
+| 23h | 24 (H06) |
+| 23i, 23j, 23k | 26 (H07) |
+| 23l, 23m, 23n | 27 (H09) |
+
+Scenario 28 runs `run --stage review` over hand-made changes (a review-only workflow may
+start dirty) to see what the review prompt holds: a new file's `+` lines, `go.sum` as
+`summarized` with `go.mod` in full, a deny-listed `config/secrets.yaml` withheld, and the
+artifact's diff counts; a ~430 KiB change under `max_diff_bytes: 65536` (prompt < 80 KiB,
+`not shown: diff budget`, `truncated: true`); and a ~1 MB failing test output whose
+`--- FAIL` line in the middle survives into the retried implement prompt (< 48 KiB, cut
+marked) while the step log keeps all of it. The config helper gained `promptLimits`.
+
+Older scenarios changed only where phase 0 changed what they rely on: explicit
+`test.sandbox: none` and `test.baseline: off` in the helper config (H05, H07), argv without
+the prompt (H01), scenario 19g's output path in the command instead of `$ENV_OUT` (H04),
+scenario 16's fake bwrap with its settings baked in (H04), and scenario 4's simulated
+`ls-files` failure narrowed to the Context Manager's call (H03).

@@ -52,3 +52,15 @@ Every claude call gets its prompt on stdin, never in argv, so no prompt can hit 
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty ·
 `go test -tags security ./test/security/...`
+
+## As built
+
+Done 2026-10-05 in a parallel session (commit a44462d, together with H06); checked against
+this task's acceptance in H10. The claude adapter passes the prompt as `Spec.Stdin` with
+`--input-format text`, argv ends with `--model <model>`, and `apperr.ProviderError` shows
+`prompt: N bytes on stdin` (`PromptBytes`), never the text. The fake CLI reads the prompt
+from stdin and keeps scanning argv as a fallback. The live permission suite was re-run on
+claude 2.1.289 (`specs/permissions/DECISIONS.md` D15). Scenario 23 sends a 300 KiB task
+(already over the 128 KiB per-argument limit) and checks no argv element exceeds 4 KiB; the
+1 MiB size in the task list was not needed to prove the point, since `runOrchestrator` calls
+`app.Run` in process and the limit only applies to the provider CLI's argv.
