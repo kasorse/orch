@@ -3,12 +3,25 @@ package action
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"slices"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/projectctx"
+	"orchestrator/internal/repository"
 	"orchestrator/internal/workflow"
 )
+
+// DefaultDiffSummarize are the files the review diff always shows as a stat line only:
+// lock files and minified or generated output, whose content a reviewer cannot judge and
+// which can dwarf the real change (specs/hardening/SPEC.md §5.3.1). Manifests (go.mod,
+// package.json, ...) are deliberately absent: a dependency change stays visible.
+// limits.prompt.diff_summarize adds to this list, never removes from it.
+var DefaultDiffSummarize = []string{
+	"go.sum", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb",
+	"Cargo.lock", "poetry.lock", "uv.lock", "Pipfile.lock", "composer.lock", "Gemfile.lock",
+	"*.min.js", "*.min.css", "*.map",
+}
 
 // executeReview requires strict, well-formed structured output - unlike
 // research/analyze/plan/implement, a malformed review has no actionable severity to safely
@@ -20,12 +33,18 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	if d.RunsDir != "" {
 		exclude = append(exclude, d.RunsDir)
 	}
-	diff, err := d.Repo.Diff(ctx, exclude...)
+	limits := d.Config.Limits.Prompt
+	diff, err := d.Repo.ReviewDiff(ctx, repository.ReviewDiffOptions{
+		Exclude:   exclude,
+		Denied:    projectctx.DenyMatcher(d.Config.Context.ExtraDeny),
+		Summarize: append(slices.Clone(DefaultDiffSummarize), limits.DiffSummarize...),
+		MaxBytes:  limits.DiffBytes(),
+	})
 	if err != nil {
-		return workflow.StepOutcome{}, err
+		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to collect the diff to review", Err: err}
 	}
 
-	if strings.TrimSpace(diff) == "" {
+	if diff.Empty() {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "nothing to review: the working tree has no changes against HEAD"}
 	}
 
@@ -35,7 +54,8 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		Plan:           d.lastPlan,
 		Implementation: d.lastImpl,
 		TestResult:     d.lastTest,
-		GitDiff:        diff,
+		GitDiff:        diff.Text,
+		DiffPartial:    diff.Count(repository.TreatFull) < len(diff.Files) || diff.Unlisted > 0,
 	})
 
 	result, ref, err := d.call(ctx, run, d.Config.Actions.Review.ProviderModel, domain.ActionReview, prompt)
@@ -48,6 +68,14 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}
 	}
 
+	review.Diff = &domain.ReviewDiffSummary{
+		Bytes:      len(diff.Text),
+		Files:      len(diff.Files) + diff.Unlisted,
+		Shown:      diff.Count(repository.TreatFull),
+		Summarized: diff.Count(repository.TreatSummarized),
+		Withheld:   diff.Count(repository.TreatWithheld),
+		Truncated:  diff.Truncated,
+	}
 	path := d.saveArtifact(run, domain.ActionReview, review)
 
 	d.applyReview(review)
@@ -74,6 +102,9 @@ func parseReviewStrict(output string) (domain.ReviewResult, error) {
 	if err := json.Unmarshal([]byte(obj), &review); err != nil {
 		return domain.ReviewResult{}, err
 	}
+	// The diff summary is the orchestrator's record, set after parsing; a model that
+	// writes one of its own must not fail the review over it.
+	review.Diff = nil
 	if err := review.Validate(); err != nil {
 		return domain.ReviewResult{}, err
 	}

@@ -219,10 +219,11 @@ func TestDecision_ContextFailureContinuesLimited(t *testing.T) {
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixLow())
 
-	// A git that fails only the file listing the Context Manager relies on.
+	// A git that fails only the file listing the Context Manager relies on (ls-files with
+	// --cached); review's listing of untracked files must still work.
 	wrapperDir := t.TempDir()
 	fakeexec.WriteExecutable(t, wrapperDir, "git", "#!/bin/sh\n"+
-		"if [ \"$1\" = \"ls-files\" ]; then echo 'fatal: simulated ls-files failure' >&2; exit 128; fi\n"+
+		"if [ \"$1\" = \"ls-files\" ]; then case \" $* \" in *\" --cached \"*) echo 'fatal: simulated ls-files failure' >&2; exit 128;; esac; fi\n"+
 		"exec "+realGit+" \"$@\"\n")
 	fakeexec.PrependPath(t, wrapperDir)
 

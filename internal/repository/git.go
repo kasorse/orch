@@ -57,47 +57,6 @@ func (r *Repository) IsDirty(ctx context.Context) (bool, error) {
 	return strings.TrimSpace(result.Stdout) != "", nil
 }
 
-// Diff returns the diff of tracked changes against HEAD, plus a note listing any untracked
-// files (which "git diff" does not show). exclude are repository-relative paths left out
-// of both, e.g. the orchestrator's own runs directory, which is not the operator's change.
-func (r *Repository) Diff(ctx context.Context, exclude ...string) (string, error) {
-	var pathspec []string
-	if len(exclude) > 0 {
-		pathspec = append(pathspec, "--", ".")
-		for _, p := range exclude {
-			pathspec = append(pathspec, ":(exclude)"+p)
-		}
-	}
-	diffResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: append([]string{"diff", "HEAD"}, pathspec...), WorkingDir: r.Dir})
-	if err != nil {
-		return "", &apperr.RepositoryError{Msg: "failed to run git diff", Err: err}
-	}
-	if diffResult.ExitCode != 0 {
-		return "", &apperr.RepositoryError{Msg: "git diff failed: " + diffResult.Stderr}
-	}
-
-	statusResult, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: append([]string{"status", "--porcelain"}, pathspec...), WorkingDir: r.Dir})
-	if err != nil {
-		return "", &apperr.RepositoryError{Msg: "failed to run git status", Err: err}
-	}
-	if statusResult.ExitCode != 0 {
-		return "", &apperr.RepositoryError{Msg: "git status failed: " + statusResult.Stderr}
-	}
-
-	var untracked []string
-	for _, line := range strings.Split(statusResult.Stdout, "\n") {
-		if strings.HasPrefix(line, "?? ") {
-			untracked = append(untracked, strings.TrimPrefix(line, "?? "))
-		}
-	}
-
-	diff := diffResult.Stdout
-	if len(untracked) > 0 {
-		diff += "\n\nUntracked files (not shown in diff above):\n  " + strings.Join(untracked, "\n  ")
-	}
-	return diff, nil
-}
-
 // ListFiles returns every file git would consider part of the project: tracked files
 // plus untracked ones not excluded by .gitignore, as slash-separated paths relative to
 // Dir. Ignored files never appear, so callers get .gitignore handling for free.

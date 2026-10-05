@@ -68,3 +68,32 @@ Review prompt golden test updated; review artifact carries `diff`.
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-05. As planned, with these differences:
+
+- **New files are rendered in Go, not by `git diff --no-index`.** One git process per
+  untracked file (up to 500) was needless, and the patch is trivial to produce: header,
+  `new file mode 100644|100755`, one `@@ -0,0 +1,N @@` hunk, `\ No newline at end of file`
+  when it applies. An untracked file over 16 MiB is not read: listed as `not shown: diff
+  budget` (or by its deny-list / binary / summarize treatment).
+- **The diff commands run with `--no-color --no-ext-diff --no-textconv`**, so a diff driver
+  or textconv filter configured in the repository never runs and the reviewer sees the bytes
+  on disk.
+- **The file list is bounded too**: it gets at most half of `max_diff_bytes`; files beyond
+  that (and beyond 500 untracked) are counted in the heading as `... and N more files,
+  neither listed nor shown` (`ReviewDiff.Unlisted`) and make the diff `truncated`.
+- **The summary lives on `domain.ReviewResult.Diff`** (`ReviewDiffSummary`), so `run.json`
+  and the artifact carry the same value and `Restore`'s artifact comparison still holds. A
+  `diff` field the model writes is discarded before validation, so it cannot fail the review;
+  `ReviewResult.Validate` checks the counts (non-negative, shown + summarized + withheld ≤
+  files) on anything read back.
+- **`Repository.Diff` is removed**: review was its only caller. Its unit tests became
+  `TestReviewDiff_GitFailure` and `TestReviewDiff_ExcludesPathsAndExternalDrivers`.
+- `projectctx.DenyMatcher(extra)` exposes the Context Manager's own matcher (including its
+  `.git` / `.orchestrator` directory rule); `repository` takes it as a function and imports
+  nothing new. The default summarize list is `action.DefaultDiffSummarize`.
+- Integration scenario 4 (`TestDecision_ContextFailureContinuesLimited`) failed every
+  `git ls-files`; it now fails only the Context Manager's listing (`--cached`), since review
+  lists untracked files with `ls-files` too.

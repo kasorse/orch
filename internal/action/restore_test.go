@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -114,9 +115,7 @@ func TestRestore_MatchesLiveContextAfterEveryStep(t *testing.T) {
 	testRuns := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{
 		{Stderr: "FAIL", ExitCode: 1}, {Stdout: "PASS"}, {Stdout: "PASS"},
 	}}
-	repoExec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{
-		{Stdout: "diff"}, {}, {Stdout: "diff"}, {},
-	}}
+	repoExec := &execution.FakeProcessExecutor{Results: slices.Concat(reviewChange("diff"), reviewChange("diff"))}
 	live := New(testConfig(), registry, &repository.Repository{Dir: "/repo", Executor: repoExec}, testexec.New(testRuns))
 	live.Guard = &fakeGuard{}
 	live.Artifacts = store

@@ -173,6 +173,9 @@ type ReviewPromptInput struct {
 	Implementation *domain.ImplementationArtifact
 	TestResult     *domain.TestResult
 	GitDiff        string
+	// DiffPartial is true when some changed file's content is not in GitDiff (summarized,
+	// withheld, binary, over the budget, or not listed).
+	DiffPartial bool
 }
 
 // reviewSeverityRubric tells the reviewer what each severity means and what it causes,
@@ -212,7 +215,13 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	}
 
 	b.WriteString("Git diff:\n")
-	b.WriteString(fence("diff", "the git diff of the working tree", in.GitDiff))
+	if in.DiffPartial {
+		b.WriteString("The diff starts with every changed file and how it is shown. Not every file's content is " +
+			"in it: read a file that is summarized, binary or not shown for the diff budget in the repository " +
+			"when its content matters to the review. A withheld file matches the secret deny list; you cannot " +
+			"read it, so judge the change by the rest.\n")
+	}
+	b.WriteString(fence("diff", "the git diff of the working tree, new files included", in.GitDiff))
 
 	return b.String()
 }

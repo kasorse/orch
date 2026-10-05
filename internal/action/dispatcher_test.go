@@ -279,22 +279,32 @@ func TestExecuteTest_Failure(t *testing.T) {
 	}
 }
 
-func reviewRepo(t *testing.T, diffOutput, statusOutput string) *repository.Repository {
-	t.Helper()
-	exec := &execution.FakeProcessExecutor{
-		Results: []execution.ProcessResult{
-			{Stdout: diffOutput, ExitCode: 0},
-			{Stdout: statusOutput, ExitCode: 0},
-		},
+// reviewChange scripts the git calls of Repository.ReviewDiff for one changed tracked
+// file whose patch carries change: numstat, the patch, the untracked list.
+func reviewChange(change string) []execution.ProcessResult {
+	return []execution.ProcessResult{
+		{Stdout: "1\t0\ta.go\x00"},
+		{Stdout: "diff --git a/a.go b/a.go\n+" + change + "\n"},
+		{Stdout: ""},
 	}
-	return &repository.Repository{Dir: "/repo", Executor: exec}
+}
+
+// reviewRepo is a repository whose working tree has change in a.go, or no change at all
+// when change is empty.
+func reviewRepo(t *testing.T, change string) *repository.Repository {
+	t.Helper()
+	results := reviewChange(change)
+	if change == "" {
+		results = []execution.ProcessResult{{Stdout: ""}, {Stdout: ""}} // numstat, untracked list
+	}
+	return &repository.Repository{Dir: "/repo", Executor: &execution.FakeProcessExecutor{Results: results}}
 }
 
 func TestExecuteReview_Pass(t *testing.T) {
 	client := &fakeClient{output: `{"status":"pass","summary":"looks good","issues":[]}`}
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(testConfig(), registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	outcome, err := d.Execute(context.Background(), domain.ActionReview, run)
@@ -316,7 +326,7 @@ func TestExecuteReview_FailOnHighSeverity(t *testing.T) {
 	client := &fakeClient{output: `{"status":"fail","summary":"bad","issues":[{"severity":"high","file":"a.go","description":"bug"}]}`}
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(testConfig(), registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	outcome, err := d.Execute(context.Background(), domain.ActionReview, run)
@@ -335,7 +345,7 @@ func TestExecuteReview_MalformedOutput_HardError(t *testing.T) {
 	client := &fakeClient{output: "not json"}
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(testConfig(), registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	_, err := d.Execute(context.Background(), domain.ActionReview, run)
@@ -378,7 +388,7 @@ func TestExecuteReview_ActionTimeout_FiresIndependentlyOfParentContext(t *testin
 	registry.Register(provider.Claude, client)
 	cfg := testConfig()
 	cfg.Actions.Review.Timeout = 10 * time.Millisecond
-	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(cfg, registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	// context.Background() has no deadline of its own - if the action's own timeout
@@ -407,7 +417,7 @@ func TestExecute_ActionTimeout_NeverExceedsParentDeadline(t *testing.T) {
 	parentCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(cfg, registry, reviewRepo(t, "diff content"), nil)
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	_, err := d.Execute(parentCtx, domain.ActionReview, run)
 	if err == nil {
@@ -424,7 +434,7 @@ func TestExecute_ProviderError_ConfiguredTimeoutFilledInFromActionOverride(t *te
 	registry.Register(provider.Claude, client)
 	cfg := testConfig()
 	cfg.Actions.Review.Timeout = 5 * time.Minute
-	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(cfg, registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	_, err := d.Execute(context.Background(), domain.ActionReview, run)
@@ -456,7 +466,7 @@ func TestExecute_ProviderError_ConfiguredTimeoutUnsetWhenParentDeadlineIsTighter
 	parentCtx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	d := New(cfg, registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(cfg, registry, reviewRepo(t, "diff content"), nil)
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	_, err := d.Execute(parentCtx, domain.ActionReview, run)
 	if err == nil {
@@ -586,7 +596,7 @@ func TestExecuteReview_ProviderFailure_PopulatesRawOutput(t *testing.T) {
 	}
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, reviewRepo(t, "diff content", ""), nil)
+	d := New(testConfig(), registry, reviewRepo(t, "diff content"), nil)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	outcome, err := d.Execute(context.Background(), domain.ActionReview, run)
@@ -730,7 +740,7 @@ func TestCall_DeniesTheRunsDirectory(t *testing.T) {
 			client := &fakeClient{output: `{"status":"pass","summary":"s","issues":[]}`}
 			registry := provider.NewRegistry()
 			registry.Register(provider.Claude, client)
-			d := New(testConfig(), registry, reviewRepo(t, "diff", ""), nil)
+			d := New(testConfig(), registry, reviewRepo(t, "diff"), nil)
 			d.Guard = &fakeGuard{}
 			d.RunsDir = "sub/.orchestrator/runs"
 
@@ -762,7 +772,7 @@ func TestExecuteReview_EmptyDiff_FailsBeforeProviderCall(t *testing.T) {
 	client := &fakeClient{output: `{"status":"pass","summary":"ok","issues":[]}`}
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, reviewRepo(t, " \n", ""), nil)
+	d := New(testConfig(), registry, reviewRepo(t, ""), nil)
 	writer := &fakeArtifactWriter{}
 	d.Artifacts = writer
 

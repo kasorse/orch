@@ -92,43 +92,6 @@ func TestIsDirty_Dirty(t *testing.T) {
 	}
 }
 
-func TestDiff_IncludesUntrackedFiles(t *testing.T) {
-	exec := &execution.FakeProcessExecutor{
-		Results: []execution.ProcessResult{
-			{Stdout: "diff --git a/foo.go b/foo.go\n+added line\n", ExitCode: 0},
-			{Stdout: "?? new_file.go\n M tracked.go\n", ExitCode: 0},
-		},
-	}
-	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
-
-	diff, err := repo.Diff(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(diff, "+added line") {
-		t.Errorf("expected diff to contain tracked changes, got: %s", diff)
-	}
-	if !strings.Contains(diff, "new_file.go") {
-		t.Errorf("expected diff to mention untracked file, got: %s", diff)
-	}
-}
-
-func TestDiff_GitDiffFailure(t *testing.T) {
-	exec := &execution.FakeProcessExecutor{
-		Results: []execution.ProcessResult{{ExitCode: 1, Stderr: "fatal: bad revision"}},
-	}
-	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
-
-	_, err := repo.Diff(context.Background())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	var repoErr *apperr.RepositoryError
-	if !errors.As(err, &repoErr) {
-		t.Fatalf("expected *apperr.RepositoryError, got %T", err)
-	}
-}
-
 func TestListFiles_SplitsNULAndDedupes(t *testing.T) {
 	exec := &execution.FakeProcessExecutor{
 		Results: []execution.ProcessResult{{Stdout: "a.go\x00dir/with space.go\x00a.go\x00", ExitCode: 0}},
@@ -175,19 +138,38 @@ func TestChangedFiles_ParsesPorcelainZ(t *testing.T) {
 	}
 }
 
-func TestDiff_ExcludesPaths(t *testing.T) {
-	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}, {}}}
+func TestReviewDiff_GitFailure(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{ExitCode: 128, Stderr: "fatal: bad revision 'HEAD'"}},
+	}
 	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
 
-	if _, err := repo.Diff(context.Background(), ".orchestrator/runs"); err != nil {
+	_, err := repo.ReviewDiff(context.Background(), ReviewDiffOptions{MaxBytes: 1 << 16})
+	var repoErr *apperr.RepositoryError
+	if !errors.As(err, &repoErr) {
+		t.Fatalf("expected *apperr.RepositoryError, got %T (%v)", err, err)
+	}
+}
+
+func TestReviewDiff_ExcludesPathsAndExternalDrivers(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{
+		{Stdout: "1\t0\ta.go\x00"}, {Stdout: "diff --git a/a.go b/a.go\n+x\n"}, {},
+	}}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	if _, err := repo.ReviewDiff(context.Background(), ReviewDiffOptions{Exclude: []string{".orchestrator/runs"}, MaxBytes: 1 << 16}); err != nil {
 		t.Fatal(err)
 	}
-	for _, call := range exec.Calls {
-		if got := strings.Join(call.Args, " "); !strings.HasSuffix(got, "-- . :(exclude).orchestrator/runs") {
+	if len(exec.Calls) != 3 {
+		t.Fatalf("calls = %d, want numstat, patch and the untracked list", len(exec.Calls))
+	}
+	for i, call := range exec.Calls {
+		got := strings.Join(call.Args, " ")
+		if !strings.HasSuffix(got, "-- . :(exclude).orchestrator/runs") {
 			t.Errorf("git %s lacks the exclude pathspec", got)
 		}
-	}
-	if len(exec.Calls) != 2 {
-		t.Errorf("calls = %d, want git diff and git status", len(exec.Calls))
+		if i < 2 && !strings.Contains(got, "--no-ext-diff --no-textconv") {
+			t.Errorf("git %s may run a configured diff driver", got)
+		}
 	}
 }
