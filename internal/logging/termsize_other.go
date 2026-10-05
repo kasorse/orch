@@ -2,4 +2,4 @@
 
 package logging
 
-func ttyWidth(fd uintptr) int { return 0 }
+func ttySize(fd uintptr) (rows, cols int) { return 0, 0 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -78,15 +79,39 @@ func truncateVisible(s string, n int) string {
 	return string(r[:n-1]) + "…"
 }
 
-// termWidth is the terminal's width (asked from stdout's tty), else $COLUMNS, else 100.
+// termWidth is the width the transcript may use: the terminal's (asked from stdout's
+// tty, else $COLUMNS, else 100) minus the columns the sidebar holds, if it is open.
 func termWidth() int {
-	if n := ttyWidth(os.Stdout.Fd()); n >= 40 {
+	return fullWidth() - int(reservedCols.Load())
+}
+
+func fullWidth() int {
+	if _, n := ttySize(os.Stdout.Fd()); n >= 40 {
 		return n
 	}
 	if n, err := strconv.Atoi(os.Getenv("COLUMNS")); err == nil && n >= 40 {
 		return n
 	}
 	return 100
+}
+
+// termSize is the terminal's rows and columns, zeros when stdout is not a terminal.
+func termSize() (rows, cols int) {
+	return ttySize(os.Stdout.Fd())
+}
+
+// lockedWriter makes every Write atomic with respect to the others, so the spinner, the
+// dock and the main output - written from different goroutines - never interleave
+// mid-sequence.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 // box draws lines inside a rounded border, sized to the widest line (at least minWidth,

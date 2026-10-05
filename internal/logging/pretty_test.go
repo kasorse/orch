@@ -163,7 +163,7 @@ func TestSpinnerStopClearsLine(t *testing.T) {
 	s.Stop()
 	s.Stop() // idempotent
 	out := buf.String()
-	if !strings.Contains(out, "Analyzing…") || !strings.HasSuffix(out, "\r\x1b[2K\x1b[?25h") {
+	if !strings.Contains(out, "Analyzing…") || !strings.HasSuffix(out, "\r\x1b[K\r\x1b[?25h") {
 		t.Errorf("unexpected spinner output %q", out)
 	}
 }

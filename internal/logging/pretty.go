@@ -79,7 +79,15 @@ func (r *ConsoleReporter) prettyRunHeader(runID, dir string) {
 	}
 	lines = append(lines, st.gray("run   ")+runID, st.gray("dir   ")+shortenHome(dir))
 	fmt.Fprint(r.Out, box(st, st.accent, lines, 44))
-	printPanels(r.Out, r.repoPanel())
+	// The sidebar opens under the header: from here on, context lives on the right.
+	r.OpenDock()
+	if r.dock != nil {
+		r.refreshDock()
+		return
+	}
+	if info := r.repo; info != nil {
+		fmt.Fprintln(r.Out, r.repoLine(*info))
+	}
 }
 
 func (r *ConsoleReporter) prettyProviderCallStarted(providerID, model string) {
@@ -104,6 +112,8 @@ func (r *ConsoleReporter) prettyStepStarted(index int, action domain.ActionType)
 	fmt.Fprintln(r.Out)
 	r.bullet(st.accent, titleCase(string(action)), meta)
 	r.stepUsage = domain.Usage{}
+	r.inStep = true
+	r.refreshDock()
 	if action == domain.ActionTest {
 		r.startSpin(actionVerbs[action], r.TestCommand)
 	}
@@ -111,6 +121,8 @@ func (r *ConsoleReporter) prettyStepStarted(index int, action domain.ActionType)
 
 func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepExecution, outcome workflow.StepOutcome) {
 	r.stopSpin()
+	r.inStep = false
+	r.run = run
 	st := r.st()
 	took := formatDuration(exec.FinishedAt.Sub(exec.StartedAt))
 	who := ""
@@ -162,9 +174,11 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 			r.detail(st.red("✗ Failed") + " " + st.gray("("+took+")"))
 		}
 	}
-	// The checklist shows where the run is; the final summary has its own chain.
-	if next := len(run.Executions); next > 0 && outcome.Outcome != "" {
-		printPanels(r.Out, "\n", r.workflowPanel(run))
+	// Where the run is now: the sidebar, or one dim line where there is no room for it.
+	if r.dock != nil {
+		r.refreshDock()
+	} else if s := r.compactStatus(run); s != "" {
+		fmt.Fprintf(r.Out, "\n%s\n", s)
 	}
 }
 
@@ -201,6 +215,11 @@ func issueCounts(review *domain.ReviewResult) string {
 
 func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 	r.stopSpin()
+	r.inStep = false
+	r.run = run
+	// The summary is the transcript's last word and must survive in the scrollback, so
+	// the sidebar closes first and its cards are printed inline, side by side if they fit.
+	r.CloseDock()
 	st := r.st()
 	var head string
 	border := st.green
@@ -230,7 +249,7 @@ func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 	lines = append(lines, st.gray(stats))
 	fmt.Fprintln(r.Out)
 	fmt.Fprint(r.Out, box(st, border, lines, 44))
-	printPanels(r.Out, r.usagePanel(), r.limitsPanel(r.runUsage.Limits))
+	fmt.Fprint(r.Out, sideBySide(termWidth(), r.usageCard(0), r.limitsCard(0)))
 }
 
 // executionChain renders the steps that ran, in order, each marked by how it ended:
@@ -250,11 +269,7 @@ func executionChain(st style, execs []domain.StepExecution) string {
 
 func (r *ConsoleReporter) prettyDecided(t domain.DecisionTrace) {
 	st := r.st()
-	defer func() {
-		if r.hasUsage {
-			fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "usage")), r.usageLine(r.runUsage))
-		}
-	}()
+	defer r.refreshDock()
 	meta := ""
 	if t.Source == domain.DecisionSourceManual {
 		meta = "manual (--stage)"

@@ -384,6 +384,16 @@ orchestrator decisions report
   plain text described above, byte for byte. `NO_COLOR=1` or `ORCHESTRATOR_PLAIN=1` forces
   plain text on a terminal too. Preview it without running a model:
   `ORCHESTRATOR_DEMO=1 go test ./internal/logging -run TestPretty_FullRun -v`.
+- **Sidebar.** On a terminal at least 120 columns wide and 20 rows tall, the context lives
+  in a sidebar pinned to the top right, out of the transcript. It shows the workflow
+  checklist (the running step marked), usage and cost so far, the 5-hour and weekly rate
+  limits, and the repository's branch and recent commits. It updates live. The transcript
+  stays ordinary scrolling output: copy, scrollback and prompts work as usual, the sidebar
+  steps aside while a question waits for an answer, and it never scrolls into the
+  scrollback. When the run ends it closes, and the summary prints usage and limits
+  inline. On narrower terminals a single dim status line between steps takes its place
+  (`▸ test · 1/2 steps · 32k tok · $0.053 · 5h 95%`). `ORCHESTRATOR_SIDEBAR=off` keeps that
+  layout on wide terminals too. Code diffs always stay in the transcript.
 
 Config loading, structural validation, dependency validation (executables on `PATH`, the
 Jev API key) and the authority check (every route's provider can enforce its authority) always

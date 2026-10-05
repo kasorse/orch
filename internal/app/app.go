@@ -284,7 +284,10 @@ func decisionsReport(stdout io.Writer) error {
 // (run --jira), the operator's notes on the ticket, which may be empty.
 func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
-	defer reporter.Pause()
+	defer reporter.Finish()
+	// Warnings on stderr go to the same terminal; routed through the reporter they stop
+	// the spinner and step around the sidebar.
+	stderr = reporter.Wrap(stderr)
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -402,6 +405,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// and can be resumed once the tree is clean (specs/resume/SPEC.md G10).
 	run.Decision = &out.decision
 	run.Workflow = &wf
+	reporter.SetRun(run)
 	if err := store.SaveDecision(run.ID, out.trace(wf)); err != nil {
 		return err
 	}

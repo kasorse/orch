@@ -100,7 +100,11 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 				// Raw command output: shown verbatim in a gutter, never re-flowed.
 				fmt.Fprintf(&b, "  %s\n", f.label(label))
 				for _, l := range lines {
-					fmt.Fprintf(&b, "    %s %s\n", f.st.gray("│"), f.st.gray(strings.TrimRight(l, " \t\r")))
+					l = strings.TrimRight(strings.ReplaceAll(l, "\t", "  "), " \r")
+					if room := termWidth() - 7; visibleWidth(l) > room {
+						l = truncateVisible(ansiRE.ReplaceAllString(l, ""), max(room, 10))
+					}
+					fmt.Fprintf(&b, "    %s %s\n", f.st.gray("│"), f.st.gray(l))
 				}
 			} else {
 				f.writeText(&b, label, strings.Join(lines, "\n"))

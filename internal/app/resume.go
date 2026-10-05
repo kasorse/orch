@@ -25,7 +25,8 @@ import (
 // approves, the persisted run is left exactly as it was found.
 func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
-	defer reporter.Pause()
+	defer reporter.Finish()
+	stderr = reporter.Wrap(stderr)
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -138,6 +139,12 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	reporter.History(run)
 	reporter.WorkingTree(treeSummary, treeErr)
 	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remainingSteps(*run.Workflow, opts.resume.Entry))
+	// The overview above is read in full width; the sidebar opens for the steps.
+	if reporter.Pretty {
+		reporter.SetRepoInfo(repoInfo(ctx, repo))
+		reporter.OpenDock()
+		reporter.SetRun(run)
+	}
 	return executeWorkflow(ctx, s, opts)
 }
 
