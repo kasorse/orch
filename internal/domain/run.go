@@ -81,6 +81,16 @@ type Resume struct {
 	Entry      ActionType `json:"entry"`
 	Why        string     `json:"why"`
 	Mode       RunMode    `json:"mode"`
+	// ProviderCLI is what the fail-fast version check saw in this process: the CLI may
+	// have been updated since the run started (specs/hardening/SPEC.md §7.3).
+	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
+}
+
+// ProviderCLI is one provider CLI as the version check found it: the version string the
+// CLI reported and whether it lies in the range its permission flags were verified on.
+type ProviderCLI struct {
+	Version  string `json:"version"`
+	Verified bool   `json:"verified"`
 }
 
 type Run struct {
@@ -104,6 +114,8 @@ type Run struct {
 	// anything runs (specs/resume/SPEC.md §9.1). Its shape belongs to the guard, not to
 	// domain.
 	ResumeBaseline json.RawMessage `json:"resume_baseline,omitempty"`
+	// ProviderCLI is the CLI version of each routed provider at run start.
+	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
 	// Resumes is append-only: one entry per `orchestrator resume` of this run.
 	Resumes       []Resume        `json:"resumes,omitempty"`
 	Executions    []StepExecution `json:"executions"`

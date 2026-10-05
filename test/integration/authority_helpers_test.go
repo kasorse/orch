@@ -40,8 +40,8 @@ func assertAuthorities(t *testing.T, repoDir, argsDir, stdout string) {
 		if !readsFiles && hasSettings {
 			t.Errorf("%s: a call without file tools needs no deny rules, got %q", action, settings)
 		}
-		if n := len(args); n < 3 || args[n-3] != "--model" || args[n-1] != "<prompt>" {
-			t.Errorf("%s: the prompt must be last, right after --model: %q", action, args)
+		if n := len(args); n < 2 || args[n-2] != "--model" {
+			t.Errorf("%s: the prompt is on stdin, so --model is last with its value: %q", action, args)
 		}
 	}
 

@@ -73,13 +73,16 @@ type ProviderError struct {
 	Kind       FailureKind
 	Executable string
 	Args       []string
-	WorkingDir string
-	ExitCode   int
-	Duration   time.Duration
-	Stdout     string
-	Stderr     string
-	LogPath    string // run-relative path to the raw logs, when persisted
-	Err        error
+	// PromptBytes is the size of a prompt the adapter passed on stdin; the message shows
+	// the size, never the text. Zero for a provider that puts the prompt in Args.
+	PromptBytes int
+	WorkingDir  string
+	ExitCode    int
+	Duration    time.Duration
+	Stdout      string
+	Stderr      string
+	LogPath     string // run-relative path to the raw logs, when persisted
+	Err         error
 
 	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
 	// the run-wide execution.timeout was the one that fired: an action's own
@@ -110,6 +113,9 @@ func (e *ProviderError) Error() string {
 	}
 	if e.Executable != "" {
 		fmt.Fprintf(&b, "command: %s\n", commandLine(e.Executable, e.Args))
+	}
+	if e.PromptBytes > 0 {
+		fmt.Fprintf(&b, "prompt: %d bytes on stdin\n", e.PromptBytes)
 	}
 	if e.WorkingDir != "" {
 		fmt.Fprintf(&b, "working dir: %s\n", e.WorkingDir)

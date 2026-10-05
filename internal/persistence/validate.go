@@ -3,8 +3,11 @@ package persistence
 import (
 	"fmt"
 	"net/url"
+	"slices"
+	"unicode"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 )
 
 // validateRun applies the structural checks of specs/resume/SPEC.md §6.3 to a decoded
@@ -38,7 +41,13 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if err := validateProviderCLI(run.ProviderCLI); err != nil {
+		return fmt.Errorf("provider_cli: %w", err)
+	}
 	for i, r := range run.Resumes {
+		if err := validateProviderCLI(r.ProviderCLI); err != nil {
+			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)
+		}
 		if !r.FromStatus.Valid() {
 			return fmt.Errorf("resumes[%d]: unknown status %q", i, r.FromStatus)
 		}
@@ -95,6 +104,25 @@ func validateTaskSource(src domain.TaskSource) error {
 	}
 	if src.FetchedAt.IsZero() {
 		return fmt.Errorf("fetched_at is not set")
+	}
+	return nil
+}
+
+// validateProviderCLI checks a recorded provider CLI map: known providers, printable
+// versions of at most 64 bytes.
+func validateProviderCLI(m map[string]domain.ProviderCLI) error {
+	for id, cli := range m {
+		if !slices.Contains(provider.SupportedProviders(), provider.ID(id)) {
+			return fmt.Errorf("unknown provider %q", id)
+		}
+		if len(cli.Version) > 64 {
+			return fmt.Errorf("%s: version is %d bytes, at most 64", id, len(cli.Version))
+		}
+		for _, r := range cli.Version {
+			if !unicode.IsPrint(r) {
+				return fmt.Errorf("%s: version has a non-printable character", id)
+			}
+		}
 	}
 	return nil
 }

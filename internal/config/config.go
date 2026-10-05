@@ -213,6 +213,10 @@ type SecurityConfig struct {
 	// ProtectedPaths extends domain.DefaultProtectedPaths: patterns an implement step must
 	// not change.
 	ProtectedPaths []string `yaml:"protected_paths"`
+	// AllowUnverifiedCLI lets a run proceed on a provider CLI version outside the range its
+	// permission flags were verified on; the run records and warns about it
+	// (specs/hardening/SPEC.md §7.2). A CLI that cannot be executed is refused regardless.
+	AllowUnverifiedCLI bool `yaml:"allow_unverified_cli"`
 }
 
 // CleanWorktreeRequired reports whether a workflow with implement must start on a clean

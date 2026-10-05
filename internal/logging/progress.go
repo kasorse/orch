@@ -238,6 +238,39 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
+// ProviderCLIUnverified warns, in every run's header, that a provider CLI outside its
+// verified version range runs because security.allow_unverified_cli is set.
+func (r *ConsoleReporter) ProviderCLIUnverified(id, version, verifiedRange string) {
+	msg := fmt.Sprintf("%s %s is outside the verified range %s (security.allow_unverified_cli)", id, version, verifiedRange)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().red("⚠ "+msg))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", msg)
+}
+
+// ProviderCLIVersion reports a provider CLI's version and range (validate only).
+func (r *ConsoleReporter) ProviderCLIVersion(id, version, verifiedRange string, verified bool) {
+	text := fmt.Sprintf("%s %s (verified range %s)", id, version, verifiedRange)
+	if !verified {
+		text = fmt.Sprintf("%s %s (outside the verified range %s, allowed by security.allow_unverified_cli)", id, version, verifiedRange)
+	}
+	if r.Pretty {
+		st := r.st()
+		mark := st.green("✓")
+		if !verified {
+			mark = st.red("⚠")
+		}
+		fmt.Fprintln(r.Out, mark+" "+st.gray(text))
+		return
+	}
+	mark := "✓"
+	if !verified {
+		mark = "⚠"
+	}
+	fmt.Fprintf(r.Out, "%s %s\n", mark, text)
+}
+
 // JevModelServed reports that Jev serves the configured decision model (validate only;
 // a run stays silent when the check passes).
 func (r *ConsoleReporter) JevModelServed(model string) {

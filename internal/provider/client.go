@@ -45,6 +45,16 @@ type Extensions struct {
 	UserSettings bool
 }
 
+// VersionVerifier is implemented by adapters whose permission flags were verified on a
+// range of CLI versions (specs/hardening/SPEC.md §7).
+type VersionVerifier interface {
+	// CLIVersion runs the CLI's version command and returns the version string and whether
+	// it is inside the verified range. A version that cannot be parsed is not verified.
+	CLIVersion(ctx context.Context) (version string, verified bool, err error)
+	// VerifiedRange describes the range for messages, e.g. ">=2.1.283 <2.2.0".
+	VerifiedRange() string
+}
+
 type Result struct {
 	Output   string
 	Stderr   string

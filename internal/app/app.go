@@ -186,21 +186,21 @@ const sandboxProbeTimeout = 10 * time.Second
 // ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, error) {
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, error) {
 	reporter.ValidatingConfig()
 
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
@@ -209,17 +209,70 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 		err := testexec.Probe(probeCtx, executor)
 		cancel()
 		if err != nil {
-			return config.Config{}, err
+			return config.Config{}, nil, err
 		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
 	if err := config.ValidateAuthorities(cfg, registry); err != nil {
-		return config.Config{}, err
+		return config.Config{}, nil, err
+	}
+
+	// The last check of the chain: it runs each routed CLI once (--version), which is
+	// not an AI call, and only after everything that needs no process at all.
+	clis, err := checkProviderCLIs(context.Background(), cfg, registry, reporter)
+	if err != nil {
+		return config.Config{}, nil, err
 	}
 
 	reporter.ConfigValid()
-	return cfg, nil
+	return cfg, clis, nil
+}
+
+// checkProviderCLIs asks every routed provider whose adapter can tell (provider.
+// VersionVerifier) for its CLI version (specs/hardening/SPEC.md §7.2). A version outside
+// the verified range is refused unless security.allow_unverified_cli is set, in which
+// case it is warned about and recorded; a CLI that cannot be run is refused regardless.
+func checkProviderCLIs(ctx context.Context, cfg config.Config, registry *provider.Registry, reporter *logging.ConsoleReporter) (map[string]domain.ProviderCLI, error) {
+	found := map[string]domain.ProviderCLI{}
+	for _, id := range config.ProvidersInUse(cfg) {
+		client, err := registry.Resolve(id)
+		if err != nil {
+			continue
+		}
+		verifier, ok := client.(provider.VersionVerifier)
+		if !ok {
+			continue
+		}
+		version, verified, err := verifier.CLIVersion(ctx)
+		if err != nil {
+			return nil, apperr.NewDependencyError(fmt.Sprintf("cannot determine the version of %s: %v", id, err), err)
+		}
+		if !verified && !cfg.Security.AllowUnverifiedCLI {
+			return nil, apperr.NewDependencyError(fmt.Sprintf(
+				"%s %s has not been verified with this orchestrator's permission flags (verified: %s).\n"+
+					"Run go test -tags security ./test/security/... on this version and extend the range, or set "+
+					"security.allow_unverified_cli: true to run anyway.",
+				id, version, verifier.VerifiedRange()), nil)
+		}
+		if !verified {
+			reporter.ProviderCLIUnverified(id, version, verifier.VerifiedRange())
+		}
+		found[id] = domain.ProviderCLI{Version: version, Verified: verified}
+	}
+	return found, nil
+}
+
+// providerCLIRange is the verified range the provider's adapter declares, "" if none.
+func providerCLIRange(registry *provider.Registry, id string) string {
+	client, err := registry.Resolve(id)
+	if err != nil {
+		return ""
+	}
+	if v, ok := client.(provider.VersionVerifier); ok {
+		return v.VerifiedRange()
+	}
+	return ""
 }
 
 // newRegistry registers every supported provider adapter with executor.
@@ -240,12 +293,18 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 func runValidate(ctx context.Context, configPath string, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
-	cfg, err := loadAndValidateConfig(configPath, newRegistry(executor), executor, reporter,
+	registry := newRegistry(executor)
+	cfg, clis, err := loadAndValidateConfig(configPath, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
 	if err != nil {
 		return err
+	}
+	for _, id := range config.ProvidersInUse(cfg) {
+		if cli, ok := clis[id]; ok {
+			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
+		}
 	}
 	checked, err := checkJevModel(ctx, cfg, stderr)
 	if checked {
@@ -296,7 +355,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -365,6 +424,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	if err != nil {
 		return err
 	}
+	run.ProviderCLI = clis
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)

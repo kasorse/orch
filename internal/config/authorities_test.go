@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -139,5 +140,22 @@ func TestValidateAuthorities_ExampleConfig(t *testing.T) {
 	registry.Register(provider.Gemini, gemini.New(exec))
 	if err := ValidateAuthorities(cfg, registry); err != nil {
 		t.Errorf("orchestrator.example.yaml must pass ValidateAuthorities: %v", err)
+	}
+}
+
+func TestProvidersInUse(t *testing.T) {
+	cfg := validConfig()
+	cfg.Actions.Analyze.Provider, cfg.Actions.Plan.Provider, cfg.Actions.Implement.Provider = "gemini", "gemini", "gemini"
+	cfg.Translation.Provider = "claude"
+	got := ProvidersInUse(cfg)
+	if want := []string{"claude", "codex", "gemini"}; !slices.Equal(got, want) {
+		t.Errorf("ProvidersInUse = %v, want %v", got, want)
+	}
+	// A provider routed only for translation still counts.
+	only := validConfig()
+	only.Actions = ActionsConfig{}
+	only.Translation.Provider = "claude"
+	if got := ProvidersInUse(only); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("translation only: %v", got)
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -39,6 +40,19 @@ func ValidateAuthorities(cfg Config, checker AuthorityChecker) error {
 		return nil
 	}
 	return &authorityErrors{errs: errs}
+}
+
+// ProvidersInUse lists the distinct providers the config routes any call to - actions, the
+// translator, an LLM decision provider - sorted.
+func ProvidersInUse(cfg Config) []string {
+	var ids []string
+	for _, r := range authorityRoutes(cfg) {
+		if r.Provider != "" {
+			ids = append(ids, r.Provider)
+		}
+	}
+	slices.Sort(ids)
+	return slices.Compact(ids)
 }
 
 type authorityRoute struct {
