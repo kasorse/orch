@@ -54,3 +54,23 @@ func TestDockWriteErasesAroundScrollingWrites(t *testing.T) {
 	}
 	_ = main
 }
+
+// The run summary keeps the cards on the right edge, like the sidebar did; a terminal
+// too narrow for both columns stacks them below.
+func TestBesideRight(t *testing.T) {
+	left := []string{"LLLL", "LL"}
+	right := []string{"RRR", "RRR", "RRR"}
+	got := strings.Split(strings.TrimRight(besideRight(20, left, right), "\n"), "\n")
+	if len(got) != 3 {
+		t.Fatalf("rows = %q", got)
+	}
+	for i, l := range got {
+		if visibleWidth(l) != 20 || !strings.HasSuffix(l, "RRR") {
+			t.Errorf("row %d not flush right: %q", i, l)
+		}
+	}
+	narrow := besideRight(8, left, right)
+	if want := "LLLL\nLL\n  RRR\n  RRR\n  RRR\n"; narrow != want {
+		t.Errorf("narrow = %q, want %q", narrow, want)
+	}
+}

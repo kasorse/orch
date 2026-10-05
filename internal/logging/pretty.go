@@ -248,8 +248,15 @@ func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 	}
 	lines = append(lines, st.gray(stats))
 	fmt.Fprintln(r.Out)
-	fmt.Fprint(r.Out, box(st, border, lines, 44))
-	fmt.Fprint(r.Out, sideBySide(termWidth(), r.usageCard(0), r.limitsCard(0)))
+	// The result box on the left, the usage and limits cards stacked on the right of it -
+	// the same place the sidebar kept them during the run. A terminal too narrow for both
+	// columns gets them stacked below instead.
+	summary := strings.Split(strings.TrimRight(box(st, border, lines, 44), "\n"), "\n")
+	var side []string
+	for _, c := range [][]string{r.usageCard(0), r.limitsCard(0)} {
+		side = append(side, c...)
+	}
+	fmt.Fprint(r.Out, besideRight(fullWidth(), summary, side))
 }
 
 // executionChain renders the steps that ran, in order, each marked by how it ended:

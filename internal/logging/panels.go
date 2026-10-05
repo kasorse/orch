@@ -293,6 +293,43 @@ func sideBySide(width int, cards ...[]string) string {
 	return b.String()
 }
 
+// besideRight prints left as is and right aligned to the terminal's right edge on the
+// same rows, like the sidebar during the run. When both do not fit side by side, right
+// follows left, indented.
+func besideRight(width int, left, right []string) string {
+	lw := 0
+	for _, l := range left {
+		lw = max(lw, visibleWidth(l))
+	}
+	rw := 0
+	for _, l := range right {
+		rw = max(rw, visibleWidth(l))
+	}
+	var b strings.Builder
+	if len(right) == 0 || lw+dockGap+rw > width-1 {
+		for _, l := range left {
+			b.WriteString(l + "\n")
+		}
+		for _, l := range right {
+			b.WriteString("  " + l + "\n")
+		}
+		return b.String()
+	}
+	col := width - rw // right column starts here (0-based), flush with the right edge
+	for i := 0; i < max(len(left), len(right)); i++ {
+		l := ""
+		if i < len(left) {
+			l = left[i]
+		}
+		if i >= len(right) {
+			b.WriteString(l + "\n")
+			continue
+		}
+		b.WriteString(l + strings.Repeat(" ", max(col-visibleWidth(l), dockGap)) + right[i] + "\n")
+	}
+	return b.String()
+}
+
 // repoLine is the repository card squeezed into one dim line for narrow terminals:
 // "  master · 2a1b3c4 Fix login · clean".
 func (r *ConsoleReporter) repoLine(info RepoInfo) string {
