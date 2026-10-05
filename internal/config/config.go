@@ -160,6 +160,10 @@ type Config struct {
 	// Jira is where run --jira fetches the task from (specs/jira/SPEC.md §7); nil when the
 	// section is absent, which is valid - only run --jira needs it.
 	Jira *JiraConfig `yaml:"jira"`
+
+	// Extensions opts provider calls into the operator's MCP servers and Claude user
+	// settings (extensions.go). Absent means none, as before.
+	Extensions ExtensionsConfig `yaml:"extensions"`
 }
 
 type SecurityConfig struct {

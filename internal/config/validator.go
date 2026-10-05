@@ -68,6 +68,12 @@ func Validate(cfg Config) error {
 		problems = append(problems, validateJira(*cfg.Jira)...)
 	}
 
+	providers := map[string]string{}
+	for _, pm := range cfg.actionProviderModels() {
+		providers[pm.Action] = pm.Provider
+	}
+	problems = append(problems, validateExtensions(cfg.Extensions, providers)...)
+
 	if len(problems) == 0 {
 		return nil
 	}

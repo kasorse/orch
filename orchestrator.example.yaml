@@ -96,6 +96,19 @@ security:
 # `orchestrator run --stage <name> [--stage <name> ...] "<task>"` skips the decision section
 # above (MVP.md §40); the config must still be valid, but nothing in it is called.
 
+# Optional: your own Claude extensions inside the steps - off unless listed (README,
+# "Extensions"). MCP servers keep steps restricted; user_settings loads your plugins, skills
+# and hooks (they run your code with your permissions).
+# extensions:
+#   mcp:
+#     graphify:
+#       command: graphify-mcp
+#       args: ["{repo}/graphify-out/graph.json"]
+#       tools: [query_graph, get_node, get_neighbors, shortest_path]
+#       actions: [analyze, plan, implement, review]   # default: analyze, plan, review
+#   user_settings: true                               # plugins, skills, hooks
+#   user_settings_actions: [implement, review]        # default: every model step
+
 # Optional: where `run --jira <KEY|URL>` reads the task from (MVP.md §39). Only run --jira
 # needs the credential variables; a plain run and resume work without them.
 # jira:

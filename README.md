@@ -257,6 +257,42 @@ Code session you launched the orchestrator from reaches its children (`CLAUDECOD
 `decision.jev.api_key_env` and, with a `jira` section, `jira.token_env` and
 `jira.email_env`. The orchestrator reads those itself; a test the model wrote cannot.
 
+### Extensions: your MCP servers, plugins and hooks (opt-in)
+
+By default no step sees your Claude setup. With an `extensions` section you choose what it
+does see:
+
+```yaml
+extensions:
+  mcp:
+    graphify:                     # a code knowledge graph instead of grep-only search
+      command: graphify-mcp
+      args: ["{repo}/graphify-out/graph.json"]   # {repo} = the repository root
+      tools: [query_graph, get_node, get_neighbors, shortest_path]   # or ["*"]
+      actions: [analyze, plan, implement, review]                    # default: analyze, plan, review
+  user_settings: true             # ~/.claude/settings.json: plugins, skills, hooks
+  user_settings_actions: [implement, review]                         # default: every model step
+```
+
+- **`mcp`** passes only the listed servers (`--mcp-config` with `--strict-mcp-config`).
+  - Only the listed tools are allowed; any other tool of the server is denied.
+  - Only the listed actions get the server.
+  - Steps keep `--restricted`, so the file tools and the authority table stay as above.
+  - The step's prompt names the extra tools, so the model uses them rather than defaulting
+    to grep.
+  - The server runs with your permissions, like any MCP server you use with Claude.
+- **`user_settings`** loads your **user** settings only (`--setting-sources user`): your
+  plugins, skills and hooks, such as writing a session to memory.
+  - The repository's own `.claude/` settings and hooks still never load.
+  - claude's `--restricted` ignores settings files, so these steps run without it.
+  - What it would add is kept by the rest of the command line: `--tools` lists the same
+    built-in tools (no shell), anything not pre-approved is denied, and the file tools stay
+    confined to the repository (checked against claude 2.1.287).
+  - **Your hooks run your code with your permissions** on every such step. Enable this for
+    hooks you trust, ideally only on the actions that need them.
+
+Extensions are only supported with provider `claude`; `validate` refuses them elsewhere.
+
 ### What is not protected
 
 - **Without `test.sandbox: bwrap`, code the model writes runs in `test`** with your

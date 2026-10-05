@@ -117,11 +117,13 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	start := time.Now()
 
 	stopHeartbeat := d.startHeartbeat()
+	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
 	result, err := client.Execute(ctx, provider.Request{
-		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
-		Authority: authority,
-		DenyRead:  d.denyRead(),
-		Activity:  provider.ActivityHook(d.Observer),
+		Prompt: prompt + extensionsHint(ext), Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
+		Authority:  authority,
+		DenyRead:   d.denyRead(),
+		Activity:   provider.ActivityHook(d.Observer),
+		Extensions: ext,
 	})
 	stopHeartbeat()
 	provider.ReportUsage(d.Observer, result)
