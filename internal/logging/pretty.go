@@ -316,7 +316,7 @@ func (r *ConsoleReporter) prettyDecided(t domain.DecisionTrace) {
 	}
 	r.rows(rows)
 
-	if len(t.Stages) > 0 {
+	if len(t.Stages) > 0 && !r.ReviewForm {
 		fmt.Fprintln(r.Out)
 		for _, s := range t.Stages {
 			r.stageRow(s)

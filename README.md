@@ -394,6 +394,20 @@ orchestrator decisions report
   inline. On narrower terminals a single dim status line between steps takes its place
   (`▸ test · 1/2 steps · 32k tok · $0.053 · 5h 95%`). `ORCHESTRATOR_SIDEBAR=off` keeps that
   layout on wide terminals too. Code diffs always stay in the transcript.
+- **Review screen.** On an interactive terminal (macOS, Linux, BSD), the approval is a
+  keyboard form instead of a typed `[a]pprove / [c]ancel`. In it you can:
+  - toggle stages: `↑↓` and `space`, or the digits `1`-`6`;
+  - override the complexity with `←→`. Picking one switches on the stages
+    `policy.stages.force` forces for it, and switching a forced stage off is marked as an
+    override;
+  - pick the mode when no `--mode` was given;
+  - press **Run** or **Cancel**: `Enter` runs, `Esc` cancels, `Tab` moves between rows.
+
+  The workflow line under the form previews exactly what will run. An edit is recorded as
+  `decision.edit` in `run.json` and `decision.json`, holding the complexity and the stages
+  as decided, and a resume continues the edited workflow. A resume shows the same screen
+  without the editing. Piped input, `--mode auto` and other terminals keep the line
+  prompts.
 
 Config loading, structural validation, dependency validation (executables on `PATH`, the
 Jev API key) and the authority check (every route's provider can enforce its authority) always

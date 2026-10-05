@@ -26,6 +26,8 @@ type DecisionTrace struct {
 	Stages     []StageOutcome    `json:"stages"`
 	Workflow   []ActionType      `json:"workflow"`
 	Latency    DecisionLatency   `json:"latency"`
+	// Edit is the operator's override on the review screen, if any (Decision.Edit).
+	Edit *DecisionEdit `json:"edit,omitempty"`
 }
 
 // TranslationTrace records the language step (T15).

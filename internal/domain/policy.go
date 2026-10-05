@@ -113,6 +113,66 @@ type Decision struct {
 	ContextDepth ContextDepthOutcome `json:"context_depth"`
 	Complexity   ComplexityOutcome   `json:"complexity"`
 	Stages       StageSelection      `json:"stages"`
+	// Edit is set when the operator changed the complexity or the stages on the review
+	// screen before approving; the provider's probabilities above are kept as answered.
+	Edit *DecisionEdit `json:"edit,omitempty"`
+}
+
+// DecisionEdit records what the operator overrode on the review screen.
+type DecisionEdit struct {
+	// DecidedComplexity is the complexity before the edit ("" when none was decided).
+	DecidedComplexity Complexity `json:"decided_complexity,omitempty"`
+	// DecidedStages are the stages that were enabled before the edit.
+	DecidedStages []Stage `json:"decided_stages"`
+}
+
+// WithEdit returns d with the operator's choice applied: complexity (empty keeps d's) and
+// exactly the enabled stages. forced lists the stages policy forces for the resulting
+// complexity; they are marked Forced, and one the operator left off is recorded as
+// overridden rather than silently missing. Probabilities and thresholds are kept. When
+// nothing changed, d is returned as it was, without an Edit.
+func (d Decision) WithEdit(complexity Complexity, enabled, forced []Stage) Decision {
+	if complexity == "" {
+		complexity = d.Complexity.Selected
+	}
+	on := map[Stage]bool{}
+	for _, s := range enabled {
+		on[s] = true
+	}
+	isForced := map[Stage]bool{}
+	for _, s := range forced {
+		isForced[s] = true
+	}
+	before := d.Stages.EnabledStages()
+	changed := complexity != d.Complexity.Selected || len(before) != len(enabled)
+	for _, s := range before {
+		if !on[s] {
+			changed = true
+		}
+	}
+	if !changed {
+		return d
+	}
+
+	out := d
+	out.Edit = &DecisionEdit{DecidedComplexity: d.Complexity.Selected, DecidedStages: before}
+	out.Complexity.Selected = complexity
+	out.Stages.Stages = make([]StageOutcome, len(d.Stages.Stages))
+	for i, so := range d.Stages.Stages {
+		was := so.Enabled
+		so.Enabled = on[so.Stage]
+		so.Forced = isForced[so.Stage]
+		switch {
+		case so.Forced && !so.Enabled:
+			so.Reason = fmt.Sprintf("forced: complexity=%s, excluded by user", complexity)
+		case so.Enabled && !was:
+			so.Reason = "selected by user"
+		case !so.Enabled && was:
+			so.Reason = "deselected by user"
+		}
+		out.Stages.Stages[i] = so
+	}
+	return out
 }
 
 // ManualDecision builds the Decision for stages the operator named with --stage

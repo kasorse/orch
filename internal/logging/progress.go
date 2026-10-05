@@ -60,6 +60,10 @@ type ConsoleReporter struct {
 	rawOut io.Writer
 	run    *domain.Run
 	inStep bool
+
+	// ReviewForm is set when the review screen will follow the decision: the decision
+	// block then leaves the stage table to the form, which shows it editable.
+	ReviewForm bool
 }
 
 func NewConsoleReporter(out io.Writer) *ConsoleReporter {

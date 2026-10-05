@@ -72,6 +72,8 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	}
 	prompter := reporter.PausingPrompter(interaction.NewTerminalPrompter(stdin, stdout))
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
+	// The review screen's buttons approve a resume too; what to run is fixed by then.
+	s.stdin = stdin
 
 	if run.Status == domain.RunCompleted {
 		return reportCompleted(s)
