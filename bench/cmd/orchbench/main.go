@@ -10,13 +10,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
 	"orchbench/internal/cache"
 	"orchbench/internal/exitcode"
 	"orchbench/internal/prereq"
+	"orchbench/internal/sandbox"
 )
 
 func main() {
@@ -38,7 +41,24 @@ type command struct {
 	needs    []prereq.Need
 	args     int // positional arguments accepted
 	flags    func(fs *flag.FlagSet)
+	// run is the command itself, called after the flags parsed and the prerequisites were
+	// found; nil is a command not built yet.
+	run func(ctx context.Context, inv invocation) error
 }
+
+// invocation is what a command's run gets: the parsed flags and where to write.
+type invocation struct {
+	cmd        command
+	common     commonFlags
+	fs         *flag.FlagSet
+	positional []string
+	stdout     io.Writer
+	// stderr receives -v output, so that stdout stays the command's result.
+	stderr io.Writer
+}
+
+// lookPath finds the prerequisites; tests replace it.
+var lookPath prereq.LookPath = exec.LookPath
 
 const exitCodes = `Exit codes, the same for every command:
   0    done
@@ -78,6 +98,7 @@ var commands = []command{
 			fs.Int("j", 1, "tasks checked in parallel")
 			fs.Bool("keep-workspaces", false, "keep each workspace for inspection; the path is printed")
 		},
+		run: runValidate,
 	},
 	{
 		name:    "run",
@@ -159,22 +180,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 
 	for _, c := range commands {
 		if c.name == args[0] {
-			return runCommand(ctx, c, args[1:], stdout)
+			return runCommand(ctx, c, args[1:], stdout, stderr)
 		}
 	}
 	return exitcode.UsageError{Msg: fmt.Sprintf("unknown command %q; see 'orchbench --help'", args[0])}
 }
 
-func runCommand(ctx context.Context, c command, args []string, stdout io.Writer) error {
-	fs := flag.NewFlagSet("orchbench "+c.name, flag.ContinueOnError)
-	// The flag package prints its own errors and usage; both are handled below instead, so
-	// that --help goes to stdout and a mistake is reported once, by main.
-	fs.SetOutput(io.Discard)
-	fs.Usage = func() {}
-
+func runCommand(ctx context.Context, c command, args []string, stdout, stderr io.Writer) error {
 	var common commonFlags
-	common.register(fs)
-	c.flags(fs)
+	fs := newCommandFlags(c, &common)
 
 	positional, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -191,8 +205,44 @@ func runCommand(ctx context.Context, c command, args []string, stdout io.Writer)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return exitcode.UsageError{Msg: fmt.Sprintf("orchbench %s: not implemented", c.name)}
+	if c.run == nil {
+		return exitcode.UsageError{Msg: fmt.Sprintf("orchbench %s: not implemented", c.name)}
+	}
+	return c.run(ctx, invocation{cmd: c, common: common, fs: fs, positional: positional, stdout: stdout, stderr: stderr})
 }
+
+// newCommandFlags is the flag set of a command, the common flags bound to common.
+func newCommandFlags(c command, common *commonFlags) *flag.FlagSet {
+	fs := flag.NewFlagSet("orchbench "+c.name, flag.ContinueOnError)
+	// The flag package prints its own errors and usage; both are handled by runCommand
+	// instead, so that --help goes to stdout and a mistake is reported once, by main.
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	common.register(fs)
+	c.flags(fs)
+	return fs
+}
+
+// checkPrereqs is the fail-fast check of §13.1: every program the command needs is there,
+// and bwrap can create a sandbox where the command needs one.
+func checkPrereqs(ctx context.Context, c command, common commonFlags) error {
+	ov := prereq.Overrides{Orchestrator: common.orchestrator, Claude: common.claude}
+	if err := prereq.Check(c.needs, ov, lookPath); err != nil {
+		return err
+	}
+	if !slices.Contains(c.needs, prereq.Bwrap) {
+		return nil
+	}
+	err := probe(ctx)
+	var pe *sandbox.ProbeError
+	if errors.As(err, &pe) {
+		return exitcode.UsageError{Msg: pe.Error()}
+	}
+	return err
+}
+
+// probe is sandbox.Probe; tests replace it.
+var probe = sandbox.Probe
 
 // parseInterspersed parses flags that may come after positional arguments, as in
 // `orchbench summarize <out> --seed 2`, which package flag alone would take as one
