@@ -614,8 +614,8 @@ type tailOptions struct {
 
 // executeWorkflow is everything after the decision, shared by run and resume: the
 // authority line, approval and mode, the restore point and run-start baseline (for a run
-// that has not executed a step), the test sandbox, the step guard, the engine and the
-// final answer.
+// that has not executed a step), the test sandbox, the step guard, the engine, the
+// final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
@@ -750,6 +750,10 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
+	}
+	// Only when the operator is at the terminal: --mode auto asks nothing.
+	if opts.mode != domain.ModeAuto && isTerminal(s.stdin) {
+		offerCommit(ctx, s)
 	}
 	return nil
 }

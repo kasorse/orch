@@ -514,6 +514,35 @@ If the target repository has uncommitted changes when `run` starts, a workflow w
 prints a warning and continues. The orchestrator never stashes, resets, or otherwise touches
 your working tree on your behalf.
 
+### Committing the result
+
+When a run that implemented something completes, `run` (and `resume`) shows what changed
+and offers to commit it on the current branch:
+
+```
+Changes:
+   M fixture.go
+
+Commit message:
+  fixed Add to use +
+
+  Orchestrator-Run: 3f2a9c1e-...
+
+Commit to main? [y]es / [N]o / [e]dit message:
+```
+
+Nothing is committed without an explicit `y`; `e` lets you replace the first line. The
+message is built from the implementation summary (prefixed with the ticket key for
+`run --jira`), with no model call. The commit stages everything the run changed (untracked
+files included, ignored files and `.orchestrator/` left out), uses your git identity and
+runs your hooks; if it fails, the changes stay staged and the error is printed. A failing
+review verdict or a likely secret (`secret_scan.mode: warn`) is shown as a warning above
+the question. `run.json` records the commit as `commit`.
+
+It is not offered with `--mode auto`, when the run started on uncommitted changes (they
+would end up in the same commit), or when git's config or hooks or a protected path
+changed since the run started (`git commit` runs those hooks). See `MVP.md` §42.
+
 ### Resuming a run
 
 ```
@@ -656,7 +685,8 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # provider.authority and attempt), limits/iteration counters,
                         # pre_run_ref, head_ref, resume_baseline, resumes, provider_cli
                         # (CLI versions), allow_red_tests, pre_run_test,
-                        # secret_scan_baseline, secret_findings (never a value)
+                        # secret_scan_baseline, secret_findings (never a value),
+                        # commit (the SHA, when you approved the commit at the end)
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision

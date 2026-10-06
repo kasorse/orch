@@ -116,3 +116,13 @@ func (d *Dispatcher) preRunFailureForImplement() *domain.TestResult {
 	}
 	return d.preRunFailure
 }
+
+// ImplementationSummary is the summary of the last implement step, restored from its
+// artifact on resume, or "" when none ran. The commit offered at the end of a run takes
+// its message from it (MVP.md §42).
+func (d *Dispatcher) ImplementationSummary() string {
+	if d.lastImpl == nil {
+		return ""
+	}
+	return d.lastImpl.Summary
+}

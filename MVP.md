@@ -3256,3 +3256,76 @@ result gains `diff`. Logs gain `logs/pre-run-test.{stdout,stderr}.log`.
 * Comparing failing test names between the pre-run test and the test step: a red suite is
   either refused or the task.
 * Files the tests create that are not ignored appear in the review diff.
+
+# 42. Commit at the end of a run
+
+Normative. A completed run's changes stay in the working tree until the operator commits
+them; at the end of the run the orchestrator offers to do it, and commits only on an
+explicit yes.
+
+## 42.1 When it is offered
+
+After the engine has finished and the final answer (if any) is printed, `run` and `resume`
+(the shared tail, `executeWorkflow`) offer a commit when all of these hold:
+
+* the operator is at the terminal: `--mode auto` was not given and stdin is a terminal.
+  `--mode auto` never asks and never commits;
+* the run is `completed` and its workflow contains `implement`;
+* the run started from a clean commit: `pre_run_ref` is set and equals `head_ref`. A run
+  started on uncommitted changes (`security.require_clean_worktree: false`) would commit
+  them together with its own, so it is told to commit by hand instead;
+* the repository still matches the run-start baseline (`action.CheckBaseline` over
+  `resume_baseline`): the git fingerprint first, before any `git status`, then the
+  protected paths. `git commit` runs the repository's hooks, so they must be the ones the
+  run started with;
+* `git status` (the runs directory excluded) shows changes. Otherwise it says
+  `No changes to commit.`
+
+Anything that stops the offer is printed as `Not offering a commit: <why>`; none of it
+changes the run's status or exit code.
+
+## 42.2 The question
+
+```
+Changes:
+   M fixture.go
+Warning: the review did not pass: <summary>
+Warning: a likely secret was added at cfg.go:3 (aws-access-key)
+
+Commit message:
+  fixed Add to use +
+
+  Orchestrator-Run: <run-id>
+
+Commit to <branch>? [y]es / [N]o / [e]dit message:
+```
+
+* Warnings: a failing last review verdict (a run that completes with the verdict,
+  §11) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
+* The message is written by Go, with no provider call: the header is the last
+  implementation summary (restored from its artifact on resume), or the task when there is
+  none, cut to its first line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
+  `run --jira` task. What the cut left out goes into the body; the body ends with the
+  `Orchestrator-Run: <run-id>` trailer.
+* The default (an empty answer) is no. `e` replaces the header and asks again. No answer
+  (stdin closed) is no.
+
+## 42.3 The commit
+
+`Repository.CommitAll` stages the whole tree — tracked changes, deletions and untracked
+files, minus ignored ones and the runs directory — with `git add -A`, and runs
+`git commit --file=-` (the message on stdin) on the current branch, as the user's own git
+identity and with the repository's hooks. It is the one call that writes the user's index
+and a branch. If the commit fails (a hook refuses, no identity), the changes stay staged and
+the error is printed; the run stays `completed`.
+
+## 42.4 Persistence
+
+`run.json` gains `commit`: the full SHA of the commit, set only after it succeeded.
+Validated on load: a full lowercase SHA, on a `completed` run only. A completed run is not
+resumable (§37), so the moved HEAD never meets a resume.
+
+## 42.5 Not covered
+
+* A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
+* Committing a part of the changes: the operator commits by hand when they want that.

@@ -15,7 +15,8 @@ the stages chosen by the operator (`run --stage`): MVP.md §40, with its design 
 `specs/stage-select/`;
 hardening - prompts on stdin and bounded, the test environment and default sandbox, the CLI
 version check, the pre-run test, the secret scan: MVP.md §41, with its design record in
-`specs/hardening/`.
+`specs/hardening/`;
+the commit offered at the end of a completed run: MVP.md §42.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -189,6 +190,13 @@ history, otherwise the state the history and the transition table give (MVP.md �
   Until the operator approves, a resume changes nothing on disk. `run` and `resume` share
   one tail after the decision (`executeWorkflow` in `internal/app/app.go`); keep it that
   way.
+- **Commit only on an explicit yes** (MVP.md §42). At the end of a completed run with
+  `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
+  never under `--mode auto`, never for a run started on uncommitted changes, and only after
+  `action.CheckBaseline` (fingerprint first) passes — `git commit` runs the repository's
+  hooks. The message is written by Go (implementation summary, `Orchestrator-Run` trailer),
+  never by a model. `Repository.CommitAll` is the one call that writes the user's index and
+  a branch. Nothing in the offer changes the run's status or exit code.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 
@@ -228,7 +236,7 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `allow_red_tests`, `pre_run_test`, `secret_scan_baseline`, `secret_findings` (never a
-value), the append-only `resumes` (each with its `provider_cli`), and each execution's
+value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority` and `attempt`; a review result also records its `diff` summary), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),

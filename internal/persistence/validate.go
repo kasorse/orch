@@ -59,6 +59,14 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("outcome: %w", err)
 		}
 	}
+	if run.Commit != "" {
+		if !isCommitSHA(run.Commit) {
+			return fmt.Errorf("commit %q is not a full commit SHA", run.Commit)
+		}
+		if run.Status != domain.RunCompleted {
+			return fmt.Errorf("commit recorded on a %s run; only a completed run is committed", run.Status)
+		}
+	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)
@@ -238,4 +246,12 @@ func validateDecisionUsage(u *domain.DecisionUsage) error {
 		}
 	}
 	return nil
+}
+
+// isCommitSHA reports whether s is a full SHA-1 or SHA-256 object name in lowercase hex.
+func isCommitSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	return strings.Trim(s, "0123456789abcdef") == ""
 }

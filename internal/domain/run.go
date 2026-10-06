@@ -145,6 +145,9 @@ type Run struct {
 	// Outcome is how the run ended and what it cost, written when it reaches a terminal
 	// status and recomputed over the whole history by a resume (ComputeOutcome).
 	Outcome *Outcome `json:"outcome,omitempty"`
+	// Commit is the commit the operator approved at the end of a completed run
+	// (MVP.md §42); empty when nothing was committed.
+	Commit string `json:"commit,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

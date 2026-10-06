@@ -2,7 +2,9 @@
 // orchestrator can inspect the repository it operates on without ever mutating it - it
 // never stashes, resets, checks out, or reverts user files. (SnapshotCommit only writes
 // objects, through a throwaway index; the tree and the index are untouched. The one ref it
-// writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint.)
+// writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint. CommitAll, the
+// one exception, stages and commits a finished run's changes on the operator's explicit
+// approval.)
 package repository
 
 import (
