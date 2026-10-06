@@ -41,3 +41,28 @@ One function that decides a cell's result from exit codes only, and is reused by
 ## Gates
 
 In `bench/`: `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-06. Differences from the plan, and why:
+
+- **Signatures:** `Final(ctx, ws, task, logDir) (Result, error)`. The mirror is `ws.Mirror`
+  and the cell's `logs/` directory is known only to the caller. `Answer(ctx, task, answer,
+  ws) (Result, error)`, because `git status` can fail. Only infrastructure failures (git,
+  bwrap, the disk) are errors, which BM10 maps to `infra_error`. A red or timed-out command is
+  a `Result`; a timeout is exit -1 and noted in the log.
+- **The steps are exported for `validate`:** `ResetTests`, `WriteOracle`, `OracleEntries`,
+  `RunCommand`, `Sandboxed` (any directory, with or without network: setup), `Decide` (the
+  table of §7.5) and `MatchChecks`.
+- **The reset does not use `git checkout`.** It compares every base_commit test file with
+  the tree: content, executable bit, symlink target, ancestors that are real directories.
+  Each one that differs is rewritten from the mirror's blob. So `tests_reset` does not depend
+  on the workspace's index or commits (a committed weakening and a staged deletion count). No
+  smudge filter or hook from the workspace's `.git` runs, and a symlink the model put in place
+  of a test file or directory is replaced, never written through.
+- **The oracle files** come from the mirror the same way. A file missing at fix_commit is a
+  `*MissingOracleFileError`, reported by `validate`. The workspace never gets the fix
+  commit's objects.
+- Logs: `oracle.log` and `suite.log` hold the command, the combined output and `# exit N
+  after D` (or `# timed out after D`).
+- A question reports both exit codes as -1: neither command runs.
