@@ -1,0 +1,27 @@
+Runs report: runs
+runs: 3, unreadable: 0
+
+by status
+  completed      1
+  failed         1
+  stopped        1
+
+by complexity
+  complexity  runs    completed  total cost  mean cost  decision
+  medium         2    1 (50.0%)     $0.0000    $0.0000         —
+  —              1     0 (0.0%)     $0.0000    $0.0000         —
+
+by stage set
+  stage set         runs    completed  total cost  mean cost  decision
+  implement → test     2    1 (50.0%)     $0.0000    $0.0000         —
+  implement            1     0 (0.0%)     $0.0000    $0.0000         —
+
+total
+         runs    completed  total cost  mean cost  decision
+  total     3    1 (33.3%)     $0.0000    $0.0000         —
+
+Decisions report: runs
+traces: 3, compared: 0
+skipped: 1 manual (--stage), 2 without the shadow question
+
+nothing to compare: no run asked both complexity questions of Jev or an LLM

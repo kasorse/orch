@@ -1,0 +1,22 @@
+Runs report: runs
+runs: 1, unreadable: 2
+  taskA/cfg1/rep2: run.json: unknown status "weird"
+  taskB/rep1: cannot read decision.json
+
+by status
+  completed      1
+
+by complexity
+  complexity  runs    completed  total cost  mean cost  decision
+  simple         1   1 (100.0%)     $0.1000    $0.1000     10.0%
+
+by stage set
+  stage set  runs    completed  total cost  mean cost  decision
+  implement     1   1 (100.0%)     $0.1000    $0.1000     10.0%
+
+total
+         runs    completed  total cost  mean cost  decision
+  total     1   1 (100.0%)     $0.1000    $0.1000     10.0%
+
+Decisions report: runs
+no decision traces yet

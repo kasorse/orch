@@ -39,3 +39,27 @@ It answers B3's "done when": ten runs show cost and success by complexity and st
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty ·
 `go test ./internal/report -update` only when the golden output changes on purpose
+
+## As built
+
+Done 2026-10-06. Differences from the plan, and why:
+
+- **`SummarizeRuns(entries, unreadable)`** takes the unreadable runs too, so the runs section
+  lists them; the decisions section that follows gets none, so a broken run is listed once.
+- **The stage set is the workflow's actions** joined with ` → ` (`implement → test →
+  review`), in workflow order, not the stage names comma-joined of the `SPEC.md` §13.12
+  sample: the actions are what ran. Groups are sorted by run count, then by key.
+- **Every table has the same columns** — runs, completed (count and share), total cost, mean
+  cost, decision share — and a `total` table closes the section. A share with no denominator
+  (no runs, or a group that cost nothing) prints `—`, as do a manual run's complexity and a
+  run without a workflow.
+- **Complexity is the run's `decision.complexity.selected`** (after any edit on the review
+  screen), `—` for `source: manual` and for a run that never got a decision.
+- **`persistence.LoadRunDirs(root)`** walks with `filepath.WalkDir` (no symlinks followed;
+  the root itself is resolved), stops at the first directory holding a regular `run.json`
+  (what lies inside a run is its own artifacts), and validates both files with the same
+  strict decoders as `LoadRun`/`LoadDecision` (`decodeRun`, `decodeDecision`, factored out).
+  A directory named like a run ID must hold that run; any other directory name accepts the
+  run's own ID. A bad `decision.json` makes the run unreadable, as in `decisions report`.
+- Unreadable runs are listed by their path relative to `--dir`, not by ID: under a bench
+  tree the directory, not the ID, says which task, config and repetition it was.

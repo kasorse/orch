@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, decisions report). This is the composition root - no other package
+// (version, validate, run, resume, decisions report, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -47,7 +47,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -93,6 +93,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return &apperr.ConfigError{Msg: "usage: orchestrator decisions report"}
 		}
 		return decisionsReport(stdout)
+	case "runs":
+		dir, err := runsReportArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return runsReport(stdout, dir)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -347,6 +353,69 @@ func decisionsReport(stdout io.Writer) error {
 		}
 	}
 	report.RenderDecisions(stdout, runsBaseDir, report.SummarizeDecisions(entries, unreadable))
+	return nil
+}
+
+const runsReportUsage = "usage: orchestrator runs report [--dir <path>]"
+
+// runsReportArgs parses what follows `runs`: `report`, and --dir <path> or --dir=<path>
+// (default: the runs directory of the current repository).
+func runsReportArgs(args []string) (string, error) {
+	if len(args) == 0 || args[0] != "report" {
+		return "", &apperr.ConfigError{Msg: runsReportUsage}
+	}
+	dir := runsBaseDir
+	given := false
+	for i := 1; i < len(args); i++ {
+		v, ok := strings.CutPrefix(args[i], "--dir=")
+		switch {
+		case ok:
+		case args[i] == "--dir" && i+1 < len(args):
+			i++
+			v = args[i]
+		default:
+			return "", &apperr.ConfigError{Msg: runsReportUsage}
+		}
+		if given || v == "" {
+			return "", &apperr.ConfigError{Msg: runsReportUsage}
+		}
+		dir, given = v, true
+	}
+	return dir, nil
+}
+
+// runsReport summarises every run found under dir, then compares the two complexity
+// questions over their decision traces. It needs no configuration and calls nothing.
+func runsReport(stdout io.Writer, dir string) error {
+	found, bad, err := persistence.LoadRunDirs(dir)
+	if err != nil {
+		return err
+	}
+	// The loader walks the root with its symlinks resolved.
+	root := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		root = resolved
+	}
+	rel := func(path string) string {
+		if r, err := filepath.Rel(root, path); err == nil {
+			return r
+		}
+		return path
+	}
+	var entries []report.RunEntry
+	var traces []report.Entry
+	for _, f := range found {
+		entries = append(entries, report.RunEntry{RunID: f.RunID, At: f.At, Run: f.Run, Trace: f.Trace})
+		if f.Trace != nil {
+			traces = append(traces, report.Entry{RunID: f.RunID, At: f.At, Trace: *f.Trace})
+		}
+	}
+	var unreadable []report.UnreadableRun
+	for _, b := range bad {
+		unreadable = append(unreadable, report.UnreadableRun{Path: rel(b.Dir), Err: b.Err.Error()})
+	}
+	// Unreadable runs are listed by the runs section, not again by the decisions one.
+	report.RenderRuns(stdout, dir, report.SummarizeRuns(entries, unreadable), report.SummarizeDecisions(traces, nil))
 	return nil
 }
 
