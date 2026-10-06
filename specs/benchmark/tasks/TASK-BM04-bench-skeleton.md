@@ -44,3 +44,38 @@ parsing, and the language defaults (`SPEC.md` §4, §5.1, §5.5, §13.1–§13.2
 
 In `bench/`: `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty.
 Root gates unchanged (the nested module is not part of `./...`).
+
+## As built
+
+Done 2026-10-06. Differences from the plan, and why:
+
+- **The glob matcher is `task.Match`** (`internal/task/glob.go`), not in `lang`: `task`
+  needs it to check `oracle.files` against `test_globs`, and `lang` imports `task`. It
+  handles `**/`, `/**`, `**`, `*`, `?` and nested `{a,b}`; an unbalanced brace matches nothing.
+- **`task.Defaults` avoids the import cycle.** `task` defines `Defaults` (and
+  `Defaults.Apply`, which fills only the empty fields and names those still missing);
+  `Task.Validate(d Defaults)` applies them to a copy before the glob check. `lang` holds the
+  §5.5 table, `Lookup`, `Resolve(*task.Task)` and `Validate(task.Task)`, the one call for a
+  loaded task.
+- **A draft is an accessor, not an error:** `Task.IsDraft()`. `Load` and `Validate` accept a
+  draft; `validate` and `run` refuse it (BM08, BM10).
+- **`Validate` returns `*task.ValidationError`** holding every problem. Checks beyond the
+  plan: `timeout` is required and positive, `pair` matches the id pattern and is not the task
+  itself, `oracle.files` entries are clean relative paths, `oracle.command` is required for a
+  non-question task, and `answer_checks` entries are not empty.
+- **The flags of every subcommand are already registered** (§13.3–§13.6, including
+  repeatable `--tasks` and `--test-glob`), so `--help` lists them and a bad value is a usage
+  error now. Flags may follow the positional `<out>` of `summarize`. A command's needs are
+  declared in the command table (`mine` git; `validate` git, bwrap; `run` all four;
+  `summarize` none) and tested, but not checked until the commands are built.
+- **Help goes to stdout, mistakes to stderr once:** the `flag` package's own output is
+  discarded; `--help` prints the synopsis, the flags and the exit codes to stdout and exits 0;
+  a bad flag is a `UsageError` printed by `main`. No arguments prints the usage to stderr
+  and exits 2.
+- **`--cache-dir` default** is `$XDG_CACHE_HOME/orchbench` when that is an absolute path,
+  else `~/.cache/orchbench` (`os.UserCacheDir` is not used: it fails instead of falling
+  back).
+- **Gates were not run in the session that wrote this**, which had no shell; run the four
+  gates in `bench/` and at the root first, and `git check-ignore -v bench/results/x/a.jsonl`
+  (ignored) and `git check-ignore bench/results/x/summary.md` (not ignored).
+- TODO.md B1 and B2 stay open: they finish with BM15 and BM16.
