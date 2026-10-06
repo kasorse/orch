@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"slices"
@@ -52,6 +53,11 @@ func validateRun(run *domain.Run, runID string) error {
 	}
 	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
 		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+	}
+	if o := run.Outcome; o != nil {
+		if err := validateOutcome(o, run.Status); err != nil {
+			return fmt.Errorf("outcome: %w", err)
+		}
 	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
@@ -183,6 +189,35 @@ func isSHA256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// validateOutcome checks the outcome run.json records: it describes the run's own status,
+// which is a terminal one, and its counters are not negative. Nothing saves a run whose
+// outcome is another status's — a resume drops the previous attempt's outcome before it
+// saves the run as running — so a mismatch is a corrupt run.json.
+func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
+	switch o.Status {
+	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
+	default:
+		return fmt.Errorf("status %q is not a terminal status", o.Status)
+	}
+	if o.Status != runStatus {
+		return fmt.Errorf("status %q is not the run's status %q", o.Status, runStatus)
+	}
+	if o.FixIterations < 0 || o.DurationMS < 0 {
+		return fmt.Errorf("negative counter")
+	}
+	if v := o.ReviewVerdict; v != "" && v != domain.ReviewPass && v != domain.ReviewFail {
+		return fmt.Errorf("unsupported review verdict %q", v)
+	}
+	if err := o.Usage.Validate(); err != nil {
+		return fmt.Errorf("usage: %w", err)
+	}
+	d := o.DecisionOverhead
+	if d.MS < 0 || d.Calls < 0 || d.CostUSD < 0 || math.IsNaN(d.CostUSD) || math.IsInf(d.CostUSD, 0) {
+		return fmt.Errorf("decision_overhead: negative or non-finite value")
+	}
+	return nil
 }
 
 // validateDecisionUsage checks the usage decision.json records for each decision call.

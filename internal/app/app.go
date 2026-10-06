@@ -639,7 +639,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 			if opts.resume == nil {
 				run.Status = domain.RunStopped
 				run.FailureReason = "cancelled by user"
-				_ = store.SaveRun(run)
+				_ = writeOutcome(store, run)
 			}
 			return fmt.Errorf("run cancelled by user: %w", context.Canceled)
 		}
@@ -664,6 +664,8 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		run.Resumes = append(run.Resumes, record)
 		run.Status = domain.RunRunning
 		run.FailureReason = ""
+		// The previous attempt's outcome no longer describes a running run.
+		run.Outcome = nil
 	}
 	if err := store.SaveRun(run); err != nil {
 		return err
@@ -737,8 +739,14 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		engine.Gate = gate
 	}
 
-	if err := engine.Run(runCtx, run); err != nil {
-		return err
+	// Whether the engine finished or not, a terminal status gets its outcome.
+	runErr := engine.Run(runCtx, run)
+	outcomeErr := writeOutcome(store, run)
+	if runErr != nil {
+		return runErr
+	}
+	if outcomeErr != nil {
+		return outcomeErr
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
@@ -1008,8 +1016,28 @@ func isTerminal(stdin io.Reader) bool {
 func failRun(store *persistence.Store, run *domain.Run, err error) error {
 	run.Status = domain.RunFailed
 	run.FailureReason = err.Error()
-	_ = store.SaveRun(run)
+	_ = writeOutcome(store, run)
 	return err
+}
+
+// writeOutcome records how a run that reached a terminal status ended and what it cost,
+// and saves the run. It computes over the whole history, so a resume keeps the usage of
+// the attempts before it. A run that is not terminal is left alone. Without a readable
+// decision.json (none yet, or one the strict loader refuses) the outcome leaves the
+// decision calls out rather than failing a run that already ended.
+func writeOutcome(store *persistence.Store, run *domain.Run) error {
+	switch run.Status {
+	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
+	default:
+		return nil
+	}
+	var trace *domain.DecisionTrace
+	if t, _, err := store.LoadDecision(run.ID); err == nil {
+		trace = &t
+	}
+	outcome := domain.ComputeOutcome(*run, trace)
+	run.Outcome = &outcome
+	return store.SaveRun(run)
 }
 
 // runObserver renders CLI progress via ConsoleReporter and, alongside that, persists

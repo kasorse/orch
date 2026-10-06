@@ -142,6 +142,9 @@ type Run struct {
 	FixIterations  int             `json:"fix_iterations"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
+	// Outcome is how the run ended and what it cost, written when it reaches a terminal
+	// status and recomputed over the whole history by a resume (ComputeOutcome).
+	Outcome *Outcome `json:"outcome,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint
