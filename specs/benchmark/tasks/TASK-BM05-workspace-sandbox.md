@@ -46,3 +46,38 @@ it (`SPEC.md` §7.2), and one way to run trusted-but-model-touched commands unde
 ## Gates
 
 In `bench/`: `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-06. Differences from the plan, and why:
+
+- **`workspace.Manager`** (`New(cache.Dir, verbose)`) holds the cache directory and the `-v`
+  writer; `Mirror`, `EnsureCommits` and `Create` are its methods and take a `ctx`.
+  `cache.Dir` derives every path under `--cache-dir` (`Mirrors`, `Work`, `Logs`,
+  `ValidatedFile`); `cmd/orchbench` takes its default from `cache.DefaultDir`.
+- **A local `repo` is keyed by its absolute path**, so the same repository named two ways is
+  mirrored once. A mirror is cloned into a temporary directory and renamed; a per-path mutex
+  stops parallel tasks cloning or fetching it twice (one process; two `orchbench` processes on
+  one cache directory are not serialised). A commit still missing after the fetch is a
+  `workspace.ErrMissingCommit`, which `validate` turns into its hint. The fetch does not
+  prune: that would delete the temporary refs of workspaces being created in parallel.
+- **`Tree` and `ReadBlobs`** read a commit's files from the mirror (`ls-tree`, one
+  `cat-file --batch`), for BM07: what the final check writes never comes from the
+  workspace's `.git`, which the model may have changed.
+- **Git in a workspace** runs with `core.fsmonitor=false` and `core.hooksPath=/dev/null`.
+  `Diff` builds its patch in a temporary index, so the model's staged state stays as it is.
+- **The sandbox re-binds the workspace's `.git` read-only**, as the core's
+  `testexec.Sandbox` does: code run by setup, the oracle or the suite cannot plant a hook or
+  an fsmonitor command for orchbench's next git call. The argv order is load-bearing and has
+  a unit test. `Run` returns `(exit, stdout, stderr, err)`. A timeout is exit -1 with
+  `ErrTimeout`, and a cancelled ctx is -1 with `ctx.Err()`; either way the whole process group
+  is killed. `Spec.Stdout`/`Stderr` are optional tees for the log files and `-v`. `ForTask`
+  builds the Spec from a task's binds. `Probe` returns a `*ProbeError` with the AppArmor hint.
+- **Tests share `internal/testutil`**: throwaway repositories, a toolchain-free shell project
+  (`SHProject`: base with a wrong `mul`, fix, a later commit) and `RequireBwrap`, which skips
+  where bwrap cannot sandbox. The network test re-executes the test binary inside the sandbox
+  to dial a host listener.
+- Residual risk, accepted under Q4 (the benchmark runs in a disposable container): `Status`
+  and `Diff` still read the workspace's `.git/config` and `.gitattributes`, so a clean or
+  textconv filter the model configured there would run on the host. The orchestrator's guard
+  fails such a step, and config A has a host shell anyway.

@@ -11,10 +11,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"syscall"
 
+	"orchbench/internal/cache"
 	"orchbench/internal/exitcode"
 	"orchbench/internal/prereq"
 )
@@ -130,17 +130,8 @@ func (c *commonFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&c.verbose, "v", false, "print every command orchbench runs and its output live")
 }
 
-// defaultCacheDir is $XDG_CACHE_HOME/orchbench, or ~/.cache/orchbench when XDG_CACHE_HOME is
-// unset or not an absolute path (as the XDG specification says to treat it).
-func defaultCacheDir() string {
-	if dir := os.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(dir) {
-		return filepath.Join(dir, "orchbench")
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".cache", "orchbench")
-	}
-	return ""
-}
+// defaultCacheDir is cache.DefaultDir as the flag's default.
+func defaultCacheDir() string { return string(cache.DefaultDir()) }
 
 // stringList is a repeatable string flag.
 type stringList []string

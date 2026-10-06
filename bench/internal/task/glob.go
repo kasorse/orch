@@ -9,6 +9,7 @@ import (
 
 // Match reports whether the slash-separated path matches the doublestar-style pattern:
 //
+//	pattern matches
 //	*       any run of characters except /
 //	?       one character except /
 //	**/     zero or more directories
