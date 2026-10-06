@@ -94,6 +94,9 @@ type Dispatcher struct {
 	pendingTestFailure  *domain.TestResult
 	pendingReviewIssues []domain.ReviewIssue
 
+	// stepUsage is the usage of the current step's provider call (Execute resets it).
+	stepUsage *domain.Usage
+
 	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
 	// is shown to implement until the first test step has run.
 	preRunFailure *domain.TestResult
@@ -134,6 +137,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	})
 	stopHeartbeat()
 	provider.ReportUsage(d.Observer, result)
+	d.stepUsage = result.Usage
 
 	if d.Observer != nil {
 		d.Observer.ProviderCallFinished(pm.Provider, pm.Model, time.Since(start), err)

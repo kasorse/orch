@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **specified** (2026-10-06), not started. The design questions are answered
+Status: **in progress** (2026-10-06): BM01 done. The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -25,7 +25,7 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 
 | task | title | TODO | size | depends on |
 |---|---|---|---|---|
-| [BM01](tasks/TASK-BM01-persist-usage.md) | persist usage per step and per decision call | B3 | S | — |
+| [BM01](tasks/TASK-BM01-persist-usage.md) | persist usage per step and per decision call ✓ | B3 | S | — |
 | [BM02](tasks/TASK-BM02-run-outcome.md) | `outcome` in `run.json` | B3 | S | BM01 |
 | [BM03](tasks/TASK-BM03-runs-report.md) | `orchestrator runs report` (`--dir`, alias) | B3 | M | BM02 |
 | [BM04](tasks/TASK-BM04-bench-skeleton.md) | `bench/` module, CLI frame, task file, languages | B1/B2 | M | — |

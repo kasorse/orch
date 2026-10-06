@@ -64,7 +64,11 @@ type StepExecution struct {
 	ArtifactPath string         `json:"artifact_path,omitempty"`
 	TestResult   *TestResult    `json:"test_result,omitempty"`
 	ReviewResult *ReviewResult  `json:"review_result,omitempty"`
-	Error        string         `json:"error,omitempty"`
+	// Usage is what the step's provider call cost, as the CLI reported it; nil for a step
+	// without a call (test) or a CLI that reports nothing. A call that failed after the
+	// CLI reported usage still records it.
+	Usage *Usage `json:"usage,omitempty"`
+	Error string `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`

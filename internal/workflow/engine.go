@@ -21,6 +21,9 @@ type StepOutcome struct {
 	ReviewResult *domain.ReviewResult
 	RawStdout    string
 	RawStderr    string
+	// Usage is what the step's provider call cost, when the CLI reported it - also on a
+	// failed call, so it is recorded whatever the outcome.
+	Usage *domain.Usage
 }
 
 // StepExecutor actually runs one action. A non-nil error means a hard failure (e.g. a
@@ -166,6 +169,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		stepExec.ArtifactPath = outcome.ArtifactPath
 		stepExec.TestResult = outcome.TestResult
 		stepExec.ReviewResult = outcome.ReviewResult
+		stepExec.Usage = outcome.Usage
 		if outcome.Provider != nil {
 			stepExec.Provider = outcome.Provider
 		}

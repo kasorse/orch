@@ -3,6 +3,8 @@ package apperr
 import (
 	"fmt"
 	"strings"
+
+	"orchestrator/internal/domain"
 )
 
 // DecisionFailureKind classifies how a call to the decision provider (Jev) failed. It
@@ -51,6 +53,9 @@ type DecisionError struct {
 	Attempts   int // total HTTP attempts made, including retries
 	Body       string
 	Err        error
+	// Usage is what the failed call cost when the provider reported it before failing
+	// (an answer that did not parse was still paid for); nil otherwise.
+	Usage *domain.Usage
 }
 
 func (e *DecisionError) Error() string {

@@ -87,6 +87,8 @@ type Result struct {
 	// DecisionError is the provider failure that led to the manual choice.
 	DecisionError error
 	Timings       Timings
+	// Usage is what each decision call cost, failed calls included.
+	Usage domain.DecisionUsage
 }
 
 // Classify runs the decision flow for req. Errors are a cancelled run, a provider
@@ -97,6 +99,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	start := time.Now()
 	tr, err := s.Translator.Prepare(ctx, req.RunID, req.Text)
 	res.Timings.Translation = time.Since(start)
+	res.Usage.Translation = tr.Usage
 	if err != nil {
 		return res, err
 	}
@@ -105,6 +108,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	start = time.Now()
 	depth, err := s.Decisions.ContextDepth(ctx, tr.Text)
 	res.Timings.PreCheck = time.Since(start)
+	res.Usage.ContextDepth = callUsage(depth.Usage, err)
 	if err != nil {
 		return s.manual(ctx, req, res, err)
 	}
@@ -139,6 +143,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 		Project:        res.Project,
 	})
 	res.Timings.Classification = time.Since(start)
+	res.Usage.Classification = callUsage(tc.Usage, err)
 	if err != nil {
 		return s.manual(ctx, req, res, err)
 	}
@@ -194,6 +199,19 @@ func (s *Service) manual(ctx context.Context, req Request, res Result, cause err
 	return res, nil
 }
 
+// callUsage is a decision call's usage: the answer's, or a failed call's from its
+// DecisionError.
+func callUsage(answered *domain.Usage, err error) *domain.Usage {
+	if err == nil {
+		return answered
+	}
+	var derr *apperr.DecisionError
+	if errors.As(err, &derr) {
+		return derr.Usage
+	}
+	return nil
+}
+
 func isCancellation(ctx context.Context, err error) bool {
 	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
 		return true
@@ -233,6 +251,10 @@ func (r Result) Trace(wf domain.Workflow) domain.DecisionTrace {
 	}
 	if tr.Translated {
 		t.RequestEN = tr.Text
+	}
+	if !r.Usage.Empty() {
+		u := r.Usage
+		t.Usage = &u
 	}
 	if r.DecisionError != nil {
 		t.DecisionError = r.DecisionError.Error()

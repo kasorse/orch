@@ -72,14 +72,17 @@ func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.Con
 	if err != nil {
 		return domain.ContextDepthDecision{}, p.fail(apperr.DecisionBadRequest, "", err)
 	}
-	out, err := p.call(ctx, logContext, prompt)
+	out, usage, err := p.call(ctx, logContext, prompt)
 	if err != nil {
 		return domain.ContextDepthDecision{}, err
 	}
 	d, err := parseContextDepth(out)
 	if err != nil {
-		return domain.ContextDepthDecision{}, p.fail(apperr.DecisionInvalidResponse, out, err)
+		derr := p.fail(apperr.DecisionInvalidResponse, out, err)
+		derr.Usage = usage
+		return domain.ContextDepthDecision{}, derr
 	}
+	d.Usage = usage
 	return d, nil
 }
 
@@ -88,22 +91,26 @@ func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInpu
 	if err != nil {
 		return domain.TaskClassification{}, p.fail(apperr.DecisionBadRequest, "", err)
 	}
-	out, err := p.call(ctx, logClassify, prompt)
+	out, usage, err := p.call(ctx, logClassify, prompt)
 	if err != nil {
 		return domain.TaskClassification{}, err
 	}
 	tc, err := parseClassification(out, input, p.Sources, p.ProviderID, p.Model)
 	if err != nil {
-		return domain.TaskClassification{}, p.fail(apperr.DecisionInvalidResponse, out, err)
+		derr := p.fail(apperr.DecisionInvalidResponse, out, err)
+		derr.Usage = usage
+		return domain.TaskClassification{}, derr
 	}
+	tc.Usage = usage
 	return tc, nil
 }
 
 // call runs one CLI call and turns any failure into a DecisionError, so the
 // Classification Service handles it exactly like a Jev failure (manual choice or
 // on_failure: fail). There is no retry: a CLI call is slow and its failures are rarely
-// transient in the way an HTTP 529 is.
-func (p *Provider) call(ctx context.Context, logName, prompt string) (string, error) {
+// transient in the way an HTTP 529 is. The call's usage is returned whenever the CLI
+// reported it, and also put on the DecisionError of a failed call.
+func (p *Provider) call(ctx context.Context, logName, prompt string) (string, *domain.Usage, error) {
 	callCtx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
 
@@ -127,7 +134,7 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 	wroteStderr := p.log(logName, "stderr", result.Stderr)
 
 	if err == nil {
-		return result.Output, nil
+		return result.Output, result.Usage, nil
 	}
 
 	var providerErr *apperr.ProviderError
@@ -159,7 +166,8 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, er
 	}
 	derr := p.fail(kind, "", fmt.Errorf("%s call failed: %w", logName, err))
 	derr.Attempts = 1
-	return "", derr
+	derr.Usage = result.Usage
+	return "", result.Usage, derr
 }
 
 func (p *Provider) fail(kind apperr.DecisionFailureKind, output string, err error) *apperr.DecisionError {

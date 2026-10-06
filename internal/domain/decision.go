@@ -85,6 +85,9 @@ func ParseComplexitySource(s string) (ComplexitySource, error) {
 type ContextDepthDecision struct {
 	Probabilities map[ContextDepth]float64 `json:"probabilities"`
 	Confidence    float64                  `json:"confidence"`
+	// Usage is what the call that answered cost, when the provider reports it. It is not
+	// part of the answer: the trace records it separately (DecisionTrace.Usage).
+	Usage *Usage `json:"-"`
 }
 
 func (d ContextDepthDecision) Validate() error {
@@ -227,6 +230,9 @@ type TaskClassification struct {
 	Provider string `json:"provider"`
 	// Model is the exact model version that answered, as reported by the provider.
 	Model string `json:"model,omitempty"`
+	// Usage is what the call that answered cost, when the provider reports it (see
+	// ContextDepthDecision.Usage).
+	Usage *Usage `json:"-"`
 }
 
 func (c TaskClassification) Validate() error {

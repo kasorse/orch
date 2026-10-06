@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -53,7 +54,8 @@ func fullRun(t *testing.T, store *Store) *domain.Run {
 	run.Executions = []domain.StepExecution{
 		{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted,
 			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit},
-			ArtifactPath: ArtifactRelPath(0, domain.ActionImplement)},
+			ArtifactPath: ArtifactRelPath(0, domain.ActionImplement),
+			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3}},
 		{Index: 1, Action: domain.ActionTest, Status: domain.StepCompleted,
 			TestResult:   &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL", Duration: time.Second},
 			ArtifactPath: ArtifactRelPath(1, domain.ActionTest)},
@@ -167,6 +169,11 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown authority", func(m map[string]any) {
 			execAt(m, 0)["provider"].(map[string]any)["authority"] = "root"
 		}, "unknown authority"},
+		{"negative usage counter", func(m map[string]any) {
+			execAt(m, 0)["usage"].(map[string]any)["output_tokens"] = -1
+		}, "executions[0]: usage: negative counter"},
+		{"negative cost", func(m map[string]any) { execAt(m, 0)["usage"].(map[string]any)["cost_usd"] = -0.5 }, "usage: cost_usd"},
+		{"rate limits in usage", func(m map[string]any) { execAt(m, 0)["usage"].(map[string]any)["limits"] = map[string]any{} }, "unknown field"},
 		{"artifact path traversal", func(m map[string]any) { execAt(m, 0)["artifact_path"] = "../../../etc/passwd" }, "artifact_path"},
 		{"artifact path of another step", func(m map[string]any) {
 			execAt(m, 0)["artifact_path"] = ArtifactRelPath(1, domain.ActionTest)
@@ -409,6 +416,28 @@ func TestRunIDsAndLoadDecision(t *testing.T) {
 	if err != nil || got.Model != "jev-1.13.0" || got.Source != domain.DecisionSourceJev || at.IsZero() {
 		t.Errorf("LoadDecision = %+v, %v, %v", got, at, err)
 	}
+	withUsage := trace
+	withUsage.Usage = &domain.DecisionUsage{
+		Translation:    &domain.Usage{InputTokens: 5, OutputTokens: 6, CostUSD: 0.01},
+		Classification: &domain.Usage{InputTokens: 1450, OutputTokens: 8},
+	}
+	if err := store.SaveDecision(undecided.ID, withUsage); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := store.LoadDecision(undecided.ID); err != nil || !reflect.DeepEqual(got.Usage, withUsage.Usage) {
+		t.Errorf("LoadDecision with usage = %+v, %v", got.Usage, err)
+	}
+	if err := os.WriteFile(filepath.Join(base, undecided.ID, "decision.json"),
+		[]byte(`{"request":"fix","usage":{"context_depth":{"input_tokens":-1,"output_tokens":0}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LoadDecision(undecided.ID); err == nil || !strings.Contains(err.Error(), "usage.context_depth: negative counter") {
+		t.Errorf("a negative decision usage must be refused, got %v", err)
+	}
+	if err := os.Remove(filepath.Join(base, undecided.ID, "decision.json")); err != nil {
+		t.Fatal(err)
+	}
+
 	for id, want := range map[string]apperr.RunStateKind{undecided.ID: apperr.RunNotFound, tampered.ID: apperr.RunCorrupt, "../x": apperr.RunNotFound} {
 		_, _, err := store.LoadDecision(id)
 		var rse *apperr.RunStateError

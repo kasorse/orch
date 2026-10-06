@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/decision"
 	"orchestrator/internal/domain"
 )
@@ -57,7 +60,12 @@ func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.Con
 	if err != nil {
 		return domain.ContextDepthDecision{}, err
 	}
-	return mapContextDepth(resp)
+	d, err := mapContextDepth(resp)
+	if err != nil {
+		return domain.ContextDepthDecision{}, withUsage(err, resp)
+	}
+	d.Usage = responseUsage(resp)
+	return d, nil
 }
 
 func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInput) (domain.TaskClassification, error) {
@@ -65,7 +73,31 @@ func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInpu
 	if err != nil {
 		return domain.TaskClassification{}, err
 	}
-	return mapClassification(resp, input, p.sources)
+	tc, err := mapClassification(resp, input, p.sources)
+	if err != nil {
+		return domain.TaskClassification{}, withUsage(err, resp)
+	}
+	tc.Usage = responseUsage(resp)
+	return tc, nil
+}
+
+// responseUsage is the tokens Jev reports for one request (it reports no cost). The
+// offline mock's numbers are invented, so a mock answer records none.
+func responseUsage(resp systemOneResponse) *domain.Usage {
+	if strings.HasPrefix(resp.Model, MockModelPrefix) {
+		return nil
+	}
+	return &domain.Usage{InputTokens: int64(resp.Usage.InputTokens), OutputTokens: int64(resp.Usage.OutputTokens)}
+}
+
+// withUsage puts the usage of an answer that failed mapping on its DecisionError: the
+// request was still paid for.
+func withUsage(err error, resp systemOneResponse) error {
+	var derr *apperr.DecisionError
+	if errors.As(err, &derr) {
+		derr.Usage = responseUsage(resp)
+	}
+	return err
 }
 
 func (p *Provider) contextDepthRequest(request string) systemOneRequest {

@@ -49,3 +49,32 @@ What every provider call cost is kept in the run directory, not only shown in th
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-06. Differences from the plan, and why:
+
+- **Step usage goes through `workflow.StepOutcome.Usage`**, set once in
+  `Dispatcher.Execute` from what `Dispatcher.call` saw (`stepUsage`, reset per step), and the
+  engine copies it onto the `StepExecution`. Every action makes at most one provider call,
+  so this covers all of them — failure returns included — without touching each action's
+  return paths. `internal/workflow` still imports only `domain`.
+- **Decision usage travels with the answer**: `ContextDepthDecision.Usage` and
+  `TaskClassification.Usage` (`json:"-"`, not part of the answer's wire form), and
+  `apperr.DecisionError.Usage` for a call that failed or whose answer did not parse or
+  map. `apperr` now imports `domain` (no cycle: `domain` imports nothing internal).
+  `classification.Service` collects the three into `Result.Usage`; `Trace` writes
+  `decision.json` `usage` only when some round reported any.
+- **Translation** records usage also when its sanity check rejects the answer (the call
+  was paid for).
+- **JSON form**: `input_tokens` and `output_tokens` always, `cache_read_tokens`,
+  `cache_creation_tokens`, `cost_usd`, `turns` when non-zero; `Limits` never (`json:"-"`).
+- **`LoadDecision` now validates** the usage it reads (it decoded strictly before but
+  checked no values); `run.json` executions' usage is checked in `validateExecution`.
+- Tests: `domain` (Validate, JSON without limits), `jev` (fixture tokens, unmapped answer,
+  mock records none), `llm` (answer, unparsed answer, failed call), `classification`
+  (three rounds, failed round before the manual choice, none), `persistence` (round trip,
+  negative counter / cost, limits refused, decision usage), integration scenario 29
+  (`test/integration/scenario29_usage_test.go`: stream-json costs in `run.json` per step
+  and in `decision.json` per round, a failed implement's usage, no rate limits recorded,
+  the strict loader reads it back).

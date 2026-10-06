@@ -169,5 +169,8 @@ func (s *Store) LoadDecision(runID string) (domain.DecisionTrace, time.Time, err
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json has data after the trace object"}
 	}
+	if err := validateDecisionUsage(trace.Usage); err != nil {
+		return domain.DecisionTrace{}, time.Time{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json is not a valid decision trace", Err: err}
+	}
 	return trace, info.ModTime(), nil
 }

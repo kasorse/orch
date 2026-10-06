@@ -88,6 +88,11 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	if exec.Attempt < 0 {
 		return fmt.Errorf("attempt is %d", exec.Attempt)
 	}
+	if exec.Usage != nil {
+		if err := exec.Usage.Validate(); err != nil {
+			return fmt.Errorf("usage: %w", err)
+		}
+	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
@@ -178,4 +183,24 @@ func isSHA256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// validateDecisionUsage checks the usage decision.json records for each decision call.
+func validateDecisionUsage(u *domain.DecisionUsage) error {
+	if u == nil {
+		return nil
+	}
+	calls := []struct {
+		name  string
+		usage *domain.Usage
+	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification}}
+	for _, c := range calls {
+		if c.usage == nil {
+			continue
+		}
+		if err := c.usage.Validate(); err != nil {
+			return fmt.Errorf("usage.%s: %w", c.name, err)
+		}
+	}
+	return nil
 }

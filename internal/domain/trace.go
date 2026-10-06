@@ -26,6 +26,9 @@ type DecisionTrace struct {
 	Stages     []StageOutcome    `json:"stages"`
 	Workflow   []ActionType      `json:"workflow"`
 	Latency    DecisionLatency   `json:"latency"`
+	// Usage is what each decision call cost; nil when no call reported any (Jev's mock,
+	// --stage, a provider that reports nothing).
+	Usage *DecisionUsage `json:"usage,omitempty"`
 	// Edit is the operator's override on the review screen, if any (Decision.Edit).
 	Edit *DecisionEdit `json:"edit,omitempty"`
 }
@@ -57,6 +60,19 @@ type DecisionLatency struct {
 	ContextMS        int64 `json:"context_ms"`
 	ClassificationMS int64 `json:"classification_ms"`
 	ManualChoiceMS   int64 `json:"manual_choice_ms,omitempty"`
+}
+
+// DecisionUsage is each decision round's provider call usage; a round that did not run,
+// or whose provider reported nothing, is nil. Jev reports tokens and no cost.
+type DecisionUsage struct {
+	Translation    *Usage `json:"translation,omitempty"`
+	ContextDepth   *Usage `json:"context_depth,omitempty"`
+	Classification *Usage `json:"classification,omitempty"`
+}
+
+// Empty reports whether no round recorded usage.
+func (u DecisionUsage) Empty() bool {
+	return u.Translation == nil && u.ContextDepth == nil && u.Classification == nil
 }
 
 // ManualTrace is decision.json for stages the operator named with --stage
