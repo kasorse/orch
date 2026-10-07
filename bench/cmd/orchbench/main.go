@@ -86,6 +86,7 @@ var commands = []command{
 			fs.Var(&stringList{}, "test-glob", "what counts as a test file; repeatable; required for a language without defaults")
 			fs.String("remote", "", "`url` written into repo: of the drafts; default the clone's origin URL, else --repo")
 		},
+		run: runMine,
 	},
 	{
 		name:     "validate",

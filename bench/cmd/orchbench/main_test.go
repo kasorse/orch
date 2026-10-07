@@ -133,7 +133,6 @@ func TestStubsAreNotImplemented(t *testing.T) {
 		command string
 		args    []string
 	}{
-		{"mine", []string{"--repo", "/r", "--out", "/o", "--test-glob", "a", "--test-glob", "b"}},
 		{"run", []string{"--tasks", "t/*.yaml", "--out", "/o", "--max-cost", "30", "--configs", "A,B", "--dry-run", "-v"}},
 		{"summarize", []string{"/o", "--seed", "2", "--stdout"}},
 		{"summarize", []string{"--baseline", "B", "/o"}},
