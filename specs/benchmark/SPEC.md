@@ -388,7 +388,7 @@ template: `test.command = test_command`, `test.sandbox: bwrap` with the task's b
 
 | config | what | invocation |
 |---|---|---|
-| **A** bare Claude Code | the main competitor | `claude -p --model <m> --output-format stream-json --verbose --permission-mode acceptEdits --allowedTools <Read,Grep,Glob,Edit,Write,Bash>` (exact flags verified in the task), prompt on stdin = task text + one line naming `test_command` (Q4) |
+| **A** bare Claude Code | the main competitor | `claude -p --model <m> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools <Read,Grep,Glob,Edit,Write,Bash>` (exact flags verified in the task), prompt on stdin = task text + one line naming `test_command` (Q4) |
 | **B** orchestrator auto | the product | `orchestrator run --mode auto "<task>"`, `decision.provider: claude` (the LLM decision provider), policy thresholds from `orchestrator.example.yaml` unchanged |
 | **C** all stages | upper bound on the pipeline | `orchestrator run --mode auto --stage research --stage analysis --stage planning --stage development --stage testing --stage review "<task>"` |
 | **D** implement + test | the pipeline without planning or review | `orchestrator run --mode auto --stage development --stage testing "<task>"` |

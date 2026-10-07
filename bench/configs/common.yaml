@@ -1,0 +1,2 @@
+# Shared by every config (specs/benchmark/SPEC.md §8, §13.7).
+model: sonnet                    # the code-writing model: A's --model, implement's model
