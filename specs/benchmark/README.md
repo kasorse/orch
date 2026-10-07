@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-06): BM01–BM05, BM07, BM08 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, the final check, `orchbench validate`). The design questions are answered
+Status: **in progress** (2026-10-07): BM01–BM08 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`). The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -30,7 +30,7 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 | [BM03](tasks/TASK-BM03-runs-report.md) | `orchestrator runs report` (`--dir`, alias) ✓ | B3 | M | BM02 |
 | [BM04](tasks/TASK-BM04-bench-skeleton.md) | `bench/` module, CLI frame, task file, languages ✓ | B1/B2 | M | — |
 | [BM05](tasks/TASK-BM05-workspace-sandbox.md) | mirrors, workspace without the future, sandbox ✓ | B2 | M | BM04 |
-| [BM06](tasks/TASK-BM06-mine.md) | `orchbench mine` | B1 | M | BM04 |
+| [BM06](tasks/TASK-BM06-mine.md) | `orchbench mine` ✓ | B1 | M | BM04 |
 | [BM07](tasks/TASK-BM07-final-check.md) | final check: reset, oracle, suite, answer checks ✓ | B2 | S | BM05 |
 | [BM08](tasks/TASK-BM08-validate.md) | `orchbench validate` ✓ | B1 | M | BM05, BM07 |
 | [BM09](tasks/TASK-BM09-config-runners.md) | config runners: A, orchestrator templates | B2 | M | BM02, BM04 |

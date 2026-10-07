@@ -32,6 +32,7 @@ func TestMineUsageErrors(t *testing.T) {
 		{"no --repo", []string{"--out", out}, "--repo is required"},
 		{"no --out", []string{"--repo", repo.Dir}, "--out is required"},
 		{"bad --since", []string{"--repo", repo.Dir, "--out", out, "--since", "01/02/2025"}, "YYYY-MM-DD"},
+		{"--since past 2099", []string{"--repo", repo.Dir, "--out", out, "--since", "2150-01-01"}, "1970 to 2099"},
 		{"--max-files 0", []string{"--repo", repo.Dir, "--out", out, "--max-files", "0"}, "must be at least 1"},
 		{"--max-lines 0", []string{"--repo", repo.Dir, "--out", out, "--max-lines", "0"}, "must be at least 1"},
 		{"a language without defaults", []string{"--repo", repo.Dir, "--out", out, "--language", "sh"}, "pass --test-glob"},

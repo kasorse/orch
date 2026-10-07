@@ -27,8 +27,14 @@ func runMine(ctx context.Context, inv invocation) error {
 	}
 	since := get("since").(string)
 	if since != "" {
-		if _, err := time.Parse("2006-01-02", since); err != nil {
+		d, err := time.Parse("2006-01-02", since)
+		if err != nil {
 			return usage("--since %q: want a date as YYYY-MM-DD", since)
+		}
+		// git ignores a --since it cannot read, a year from 2100 on included, and walks the
+		// whole history.
+		if d.Year() < 1970 || d.Year() > 2099 {
+			return usage("--since %q: want a year from 1970 to 2099", since)
 		}
 	}
 	maxFiles, maxLines := get("max-files").(int), get("max-lines").(int)

@@ -198,7 +198,7 @@ func TestSecondRunWritesNothingAndOverwritesNothing(t *testing.T) {
 func TestSinceBoundsTheHistory(t *testing.T) {
 	f := newFixture(t)
 	res, err := Run(context.Background(), Options{
-		Repo: f.repo.Dir, Out: t.TempDir(), MaxFiles: 10, MaxLines: 400, Remote: remote, Since: "2999-01-01",
+		Repo: f.repo.Dir, Out: t.TempDir(), MaxFiles: 10, MaxLines: 400, Remote: remote, Since: "2099-01-01",
 	}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)

@@ -41,3 +41,39 @@ Draft task files from a repository's history, reading git only (`SPEC.md` §5.4,
 ## Gates
 
 In `bench/`: `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built
+
+Done 2026-10-07. Differences from the plan, and why:
+
+- **The history:** `git log --format=%H%x00%P [--since=…] <rev>` instead of `--no-merges`,
+  and `git diff-tree -r --no-renames -z` (`--name-status`, `--numstat`) against the parent
+  instead of `git show`. The NUL-separated forms are safe for any file name, and a rename is
+  a delete and an add, so a moved test is not taken for a modified one. A commit without
+  exactly one parent counts as `merge`, so the root commit is counted there too.
+- **Skip summary:** `skipped: no test change: N, only deleted tests: N, too large: N, lock
+  file: N, merge: N`. `only deleted tests` is its own counter (the §13.3 sample has none).
+  Each skipped commit counts once, under the first filter in the order merge, no test change,
+  only deleted tests, lock file, too large. Before it, one `wrote <file>` or `kept <file>`
+  line per draft. A draft is created with `O_EXCL`, so a file that exists is never touched.
+- **Documentation** is `*.md`, `*.rst`, `*.txt`, `docs/**`, `README*`, `LICENSE*`,
+  `CHANGELOG*`. It counts neither as code nor as test and is listed in the `# stat:` line as
+  `other`. Known gap: `*.txt` also catches `CMakeLists.txt` and `requirements.txt`.
+- **Language detection** counts every non-excluded, non-documentation file by extension,
+  test files included: what a test file is depends on the language. `--language` overrides
+  it. No language, or one without defaults and without `--test-glob`, is a usage error
+  (`mine.ErrNoLanguage`) before anything is written.
+- **The draft** is a local struct in the §5.4 field order, not a `task.Task`, which would
+  write every empty optional field. Setup and test commands come from `lang.Lookup`; a Node
+  repository with `pnpm-lock.yaml` or `yarn.lock` at the parent gets that tool's setup. The
+  timeout is a placeholder: 30m, 60m for C++.
+- **`oracle.command`** per §5.5: Go runs the test files' packages with `-run` over the added
+  `Test…` functions; Python is pytest on the files; Node is jest, vitest or mocha from
+  `scripts.test`, else `npm test`; PHP filters on the added `test…` methods; C++ is `ctest -R`
+  over the added suites. A language without a recipe gets an empty command. Paths are not
+  quoted. A human reviews every draft.
+- **`--since`** must be a date with a year from 1970 to 2099. git ignores a date it cannot
+  read, including any year from 2100 on, and would walk the whole history.
+- The implementation came from an orchestrator run whose test step ran the core's
+  `go test ./...`, which does not include the `bench/` module. The `--since` test failed, and
+  was fixed while closing the task.
