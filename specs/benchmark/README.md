@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-07): BM01–BM09 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners). The design questions are answered
+Status: **in progress** (2026-10-07): BM01–BM09 and BM11 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench summarize`). The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -35,7 +35,7 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 | [BM08](tasks/TASK-BM08-validate.md) | `orchbench validate` ✓ | B1 | M | BM05, BM07 |
 | [BM09](tasks/TASK-BM09-config-runners.md) | config runners: A, orchestrator templates ✓ | B2 | M | BM02, BM04 |
 | [BM10](tasks/TASK-BM10-run.md) | `orchbench run`: cells, results, resume, budget | B2 | M | BM07, BM08, BM09 |
-| [BM11](tasks/TASK-BM11-summarize.md) | `orchbench summarize` | B2 | M | BM04 |
+| [BM11](tasks/TASK-BM11-summarize.md) | `orchbench summarize` ✓ | B2 | M | BM04 |
 | [BM12](tasks/TASK-BM12-integration.md) | end-to-end test with fakes | B2 | M | BM10, BM11 |
 | [BM13](tasks/TASK-BM13-container.md) | container image for running the benchmark | B2 | S | BM10 |
 | [BM14](tasks/TASK-BM14-documentation.md) | `bench/README.md`, MVP.md, CLAUDE.md, README, TODO.md | — | S | BM03, BM12 |

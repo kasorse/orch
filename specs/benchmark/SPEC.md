@@ -403,8 +403,8 @@ One JSON object per cell in `results.jsonl`:
 
 ```json
 {"schema": 1, "task": "go-pgqueue-retry-backoff", "task_sha256": "…", "config": "B", "rep": 2,
- "language": "go", "category": "bugfix", "lang": "en", "contributor": "owner",
- "started_at": "…", "wall_ms": 412000,
+ "language": "go", "category": "bugfix", "lang": "en", "pair": "go-pgqueue-retry-backoff-ru",
+ "contributor": "owner", "started_at": "…", "wall_ms": 412000,
  "result": "pass",            // pass | fail | infra_error
  "fail_reason": "",           // oracle | regression | answer | tree_changed (§7.5, §5.3)
  "oracle_exit": 0, "suite_exit": 0, "tests_reset": 0, "answer_checks_failed": [],
@@ -418,6 +418,8 @@ One JSON object per cell in `results.jsonl`:
  "model": "…", "claude_cli": "2.1.290", "orchestrator_commit": "…", "config_sha256": "…"}
 ```
 
+- `pair` is the task file's `pair` (§5), copied by `run`; absent when the task has none. It is
+  what `summarize` reads to find the en/ru pairs (§10).
 - Orchestrator configs: cost, tokens, calls, decision overhead, stages, complexity and status
   come from `run.json` `outcome` and `decision.json` (B3). Config A: from its stream-json
   `result` event (`total_cost_usd`, `usage`, `num_turns`); `llm_calls` = 1, no decision.
@@ -625,7 +627,7 @@ its line. Output: one progress line per cell (example in §13.10) and a total.
 ### 13.6 `orchbench summarize` — the report
 
 ```
-orchbench summarize <out> [--baseline A] [--seed 1] [--stdout]
+orchbench summarize <out> [--baseline A] [--seed 1] [--by language] [--stdout]
 ```
 
 | flag | default | meaning |
@@ -633,10 +635,12 @@ orchbench summarize <out> [--baseline A] [--seed 1] [--stdout]
 | `<out>` | required | a results directory |
 | `--baseline` | `A` | the config every other one is paired against (§10) |
 | `--seed` | 1 | the bootstrap's seed, so the same results give the same report |
+| `--by` | `language` | what the second breakdown groups by: `language`, `category` or `contributor` (§17.5) |
 | `--stdout` | off | print instead of writing `<out>/summary.md` |
 
 Reads `results.jsonl` only, calls nothing; can be run at any time, also during a run, on the
-cells done so far. The report's sections are §10; example in §13.11.
+cells done so far. The report's sections are §10; example in §13.11. A missing `<out>` or
+`results.jsonl`, or a bad `--by`, is a usage error (exit 2); a malformed line is exit 1.
 
 ### 13.7 Benchmark configs (`bench/configs/`)
 
@@ -895,7 +899,7 @@ config hashes, contributor name) and, per result line, only:
 
 | kept | how |
 |---|---|
-| task | replaced by `HMAC-SHA256(salt, task id)`; the salt is random, created once per contributor in `<cache-dir>/export-salt` and never exported, so the same task maps to the same hash in later bundles but nobody can test guesses of repository or task names |
+| task, `pair` | replaced by `HMAC-SHA256(salt, task id)`, `pair` with the id it names, so a pair stays a pair; the salt is random, created once per contributor in `<cache-dir>/export-salt` and never exported, so the same task maps to the same hash in later bundles but nobody can test guesses of repository or task names |
 | `language`, `category`, `lang`, `expected_stages` | as is |
 | config, rep, `result`, `fail_reason`, `oracle_exit`, `suite_exit`, `tests_reset` | as is |
 | cost, tokens, time, LLM calls, decision overhead, fix iterations, review verdict, stages, complexity | as is |

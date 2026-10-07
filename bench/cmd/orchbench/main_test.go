@@ -53,7 +53,7 @@ func TestCommandHelp(t *testing.T) {
 		{"mine", "orchbench mine --repo <path> --out <dir> [--since <date>] [--rev <rev>]", []string{"-repo", "-out", "-since", "-rev", "-max-files", "-max-lines", "-language", "-test-glob", "-remote"}},
 		{"validate", "orchbench validate --tasks <glob> [--tasks <glob>...] [--ids a,b] [-j 1] [--keep-workspaces]", []string{"-tasks", "-ids", "-j", "-keep-workspaces"}},
 		{"run", "orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>", []string{"-tasks", "-out", "-max-cost", "-configs", "-reps", "-ids", "-limit", "-j", "-redo", "-keep-workspaces", "-dry-run", "-allow-mixed", "-contributor"}},
-		{"summarize", "orchbench summarize <out> [--baseline A] [--seed 1] [--stdout]", []string{"-baseline", "-seed", "-stdout"}},
+		{"summarize", "orchbench summarize <out> [--baseline A] [--seed 1] [--by language] [--stdout]", []string{"-baseline", "-seed", "-by", "-stdout"}},
 	}
 
 	for _, tt := range tests {
@@ -134,8 +134,6 @@ func TestStubsAreNotImplemented(t *testing.T) {
 		args    []string
 	}{
 		{"run", []string{"--tasks", "t/*.yaml", "--out", "/o", "--max-cost", "30", "--configs", "A,B", "--dry-run", "-v"}},
-		{"summarize", []string{"/o", "--seed", "2", "--stdout"}},
-		{"summarize", []string{"--baseline", "B", "/o"}},
 	}
 
 	for _, tt := range tests {

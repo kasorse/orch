@@ -1,6 +1,7 @@
 // Command orchbench is the benchmark driver of specs/benchmark/SPEC.md §13: it makes tasks
 // from history, checks them, runs configurations over them and reports. This file is the
-// frame; the subcommands are filled in by their own tasks (BM06, BM08, BM10, BM11).
+// frame; the subcommands are filled in by their own tasks (BM06, BM08, BM10, BM11); `run` is
+// the one not built yet.
 package main
 
 import (
@@ -127,13 +128,15 @@ var commands = []command{
 	{
 		name:     "summarize",
 		summary:  "write the report of a results directory",
-		synopsis: `orchbench summarize <out> [--baseline A] [--seed 1] [--stdout]`,
+		synopsis: `orchbench summarize <out> [--baseline A] [--seed 1] [--by language] [--stdout]`,
 		args:     1,
 		flags: func(fs *flag.FlagSet) {
 			fs.String("baseline", "A", "the `config` every other one is paired against")
 			fs.Int("seed", 1, "the bootstrap's seed, so the same results give the same report")
+			fs.String("by", "language", "what the second breakdown groups by: language, category or contributor")
 			fs.Bool("stdout", false, "print instead of writing <out>/summary.md")
 		},
+		run: runSummarize,
 	},
 }
 
