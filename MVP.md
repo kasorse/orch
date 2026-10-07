@@ -993,11 +993,18 @@ The read-only artifacts (research, analysis, plan) carry an optional `answer`: t
 to the user when that step is the last read-only step of a workflow without
 development (§10).
 
+Every stage's artifact, and the review result, also carries `summary_short`: `summary` in
+one line of at most 72 characters, for an operator skimming the run (it is printed first,
+as `In short`). Implement's is asked for in the imperative mood and becomes the commit
+message (§42.2). It is optional: without implement's, the operator is asked to write the
+commit message.
+
 Example analysis artifact:
 
 ```json
 {
   "summary": "Retry policy retries all non-2xx responses.",
+  "summary_short": "Every non-2xx response is retried",
   "root_cause": "404 is not excluded.",
   "affected_files": [
     "internal/http/client.go"
@@ -1012,6 +1019,7 @@ Example implementation artifact:
 ```json
 {
   "summary": "Excluded HTTP 404 from retries.",
+  "summary_short": "Exclude HTTP 404 from retries",
   "changed_files": [
     "internal/http/client.go"
   ],
@@ -1105,6 +1113,7 @@ Require structured output:
 {
   "status": "fail",
   "summary": "404 is still retried in one path.",
+  "summary_short": "404 still retried in one path",
   "issues": [
     {
       "severity": "high",
@@ -3293,7 +3302,7 @@ Warning: the review did not pass: <summary>
 Warning: a likely secret was added at cfg.go:3 (aws-access-key)
 
 Commit message:
-  fixed Add to use +
+  Fix Add to use +
 
   Orchestrator-Run: <run-id>
 
@@ -3301,12 +3310,16 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
 ```
 
 * Warnings: a failing last review verdict (a run that completes with the verdict,
-  §11) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
+  §11; its `summary_short`, else its `summary`) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
 * The message is written by Go, with no provider call: the header is the last
-  implementation summary (restored from its artifact on resume), or the task when there is
-  none, cut to its first line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
+  implementation's `summary_short` (restored from its artifact on resume), cut to its first
+  line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
   `run --jira` task. What the cut left out goes into the body; the body ends with the
   `Orchestrator-Run: <run-id>` trailer.
+* Without a `summary_short` (the model left it out, or no implementation artifact is
+  left) no message is proposed: the orchestrator says
+  `The implementation proposed no commit message.` and asks for one line; an empty answer
+  commits nothing, a written one is shown with the trailer and still needs the `y`.
 * The default (an empty answer) is no. `e` replaces the header and asks again. No answer
   (stdin closed) is no.
 

@@ -194,9 +194,9 @@ history, otherwise the state the history and the transition table give (MVP.md Â
   `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
   never under `--mode auto`, never for a run started on uncommitted changes, and only after
   `action.CheckBaseline` (fingerprint first) passes â€” `git commit` runs the repository's
-  hooks. The message is written by Go (implementation summary, `Orchestrator-Run` trailer),
-  never by a model. `Repository.CommitAll` is the one call that writes the user's index and
-  a branch. Nothing in the offer changes the run's status or exit code.
+  hooks. The message is the implementation's `summary_short` (without one, the operator
+  types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
+  `Repository.CommitAll` is the one call that writes the user's index and a branch. Nothing in the offer changes the run's status or exit code.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 

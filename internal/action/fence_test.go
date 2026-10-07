@@ -168,3 +168,28 @@ func TestStagePrompts_FenceTheTask(t *testing.T) {
 		t.Error("the rubric must precede the task block")
 	}
 }
+
+// Every stage asks for a one-line summary_short, before the task block; implement's is
+// the commit message, so it is asked for in commit-message form.
+func TestStagePrompts_AskForSummaryShort(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"research":  BuildResearchPrompt(ResearchPromptInput{Task: "t"}),
+		"analyze":   BuildAnalyzePrompt(AnalyzePromptInput{Task: "t"}),
+		"plan":      BuildPlanPrompt(PlanPromptInput{Task: "t"}),
+		"implement": BuildImplementPrompt(ImplementPromptInput{Task: "t"}),
+		"review":    BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := summaryShortRule
+			if name == "implement" {
+				rule = implementSummaryShortRule
+			}
+			if !strings.Contains(prompt, `"summary_short": "..."`) || !strings.Contains(prompt, rule) {
+				t.Errorf("summary_short is not asked for:\n%s", prompt)
+			}
+			if strings.Index(prompt, rule) > strings.Index(prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+}

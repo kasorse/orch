@@ -12,11 +12,17 @@ import (
 // feeding stdin under --mode accept-edits, or with --mode auto when auto is set.
 func commitScenario(t *testing.T, stdin string, auto bool) (repoDir, stdout string) {
 	t.Helper()
+	return commitScenarioWith(t, implementResponse, stdin, auto)
+}
+
+// commitScenarioWith is commitScenario with implement's answer given.
+func commitScenarioWith(t *testing.T, implement, stdin string, auto bool) (repoDir, stdout string) {
+	t.Helper()
 	repoDir = fakeexec.InitGitFixture(t)
 	installFakeProviders(t, "claude", "codex", "gemini")
 
 	responsesDir := t.TempDir()
-	writeResponse(t, responsesDir, "implement", implementResponse)
+	writeResponse(t, responsesDir, "implement", implement)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
 	t.Setenv("FAKE_RESPONSES_DIR", responsesDir)
 	t.Setenv("FAKE_STATE_DIR", t.TempDir())
@@ -45,7 +51,7 @@ func commitScenario(t *testing.T, stdin string, auto bool) (repoDir, stdout stri
 
 // Scenario 31: at the end of a completed run that changed the tree, the operator is asked
 // whether to commit (MVP.md §42). Yes commits the run's changes - and not the run
-// directory - with a message Go wrote from the implementation summary; run.json records
+// directory - with a message Go wrote from the implementation's summary_short; run.json records
 // the commit.
 func TestScenario31_CommitApproved(t *testing.T) {
 	repoDir, stdout := commitScenario(t, "a\ny\n", false)
@@ -61,7 +67,7 @@ func TestScenario31_CommitApproved(t *testing.T) {
 		t.Errorf("run.json commit = %v, HEAD = %s", run["commit"], head)
 	}
 	msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B")
-	want := "fixed Add to use +\n\nOrchestrator-Run: " + run["id"].(string)
+	want := "Fix Add to use +\n\nOrchestrator-Run: " + run["id"].(string)
 	if strings.TrimSpace(msg) != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}
@@ -71,6 +77,25 @@ func TestScenario31_CommitApproved(t *testing.T) {
 	}
 	if count, _ := gitOutput(repoDir, "rev-list", "--count", "HEAD"); strings.TrimSpace(count) != "2" {
 		t.Errorf("commit count = %s, want 2", count)
+	}
+}
+
+// An implementation without a summary_short proposes no message: the operator writes it,
+// and it is still committed only on the explicit yes.
+func TestScenario31_CommitMessageAsked(t *testing.T) {
+	implement := strings.Replace(implementResponse, `  "summary_short": "Fix Add to use +",`+"\n", "", 1)
+	if strings.Contains(implement, "summary_short") {
+		t.Fatal("the response still has a summary_short")
+	}
+	repoDir, stdout := commitScenarioWith(t, implement, "a\nAdd instead of subtract\ny\n", false)
+
+	if !strings.Contains(stdout, "The implementation proposed no commit message.") {
+		t.Errorf("no request for a message in stdout:\n%s", stdout)
+	}
+	msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B")
+	want := "Add instead of subtract\n\nOrchestrator-Run: " + readRunJSON(t, repoDir)["id"].(string)
+	if strings.TrimSpace(msg) != want {
+		t.Errorf("commit message = %q, want %q", msg, want)
 	}
 }
 

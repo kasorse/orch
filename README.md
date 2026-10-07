@@ -524,7 +524,7 @@ Changes:
    M fixture.go
 
 Commit message:
-  fixed Add to use +
+  Fix Add to use +
 
   Orchestrator-Run: 3f2a9c1e-...
 
@@ -532,8 +532,9 @@ Commit to main? [y]es / [N]o / [e]dit message:
 ```
 
 Nothing is committed without an explicit `y`; `e` lets you replace the first line. The
-message is built from the implementation summary (prefixed with the ticket key for
-`run --jira`), with no model call. The commit stages everything the run changed (untracked
+message is the implementation's one-line `summary_short` (prefixed with the ticket key for
+`run --jira`), with no model call; when the model left it out, you are asked to type the
+message (empty skips the commit). The commit stages everything the run changed (untracked
 files included, ignored files and `.orchestrator/` left out), uses your git identity and
 runs your hooks; if it fails, the changes stay staged and the error is printed. A failing
 review verdict or a likely secret (`secret_scan.mode: warn`) is shown as a warning above

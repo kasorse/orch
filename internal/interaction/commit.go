@@ -15,8 +15,9 @@ type CommitOffer struct {
 	Changes string
 	// Warnings are reasons to look closer first: a failed review, a likely secret.
 	Warnings []string
-	// Header is the proposed first line of the message; Body is everything after it
-	// (the trailers), kept when the operator edits the header.
+	// Header is the proposed first line of the message, "" when there is none to propose
+	// and the operator writes it; Body is everything after it (the trailers), kept when
+	// the operator edits the header.
 	Header string
 	Body   string
 }
@@ -31,7 +32,8 @@ func (o CommitOffer) Message(header string) string {
 
 // AskCommit shows the offer and asks whether to commit. The default is no: nothing is
 // committed without an explicit yes. "e" replaces the message's first line and asks
-// again. It returns the header to commit with, or ok false.
+// again. Without a proposed header the operator writes one first; an empty one commits
+// nothing. It returns the header to commit with, or ok false.
 func AskCommit(p Prompter, out io.Writer, o CommitOffer) (header string, ok bool, err error) {
 	fmt.Fprintf(out, "\nChanges:\n%s\n", indent(o.Changes))
 	for _, w := range o.Warnings {
@@ -42,6 +44,16 @@ func AskCommit(p Prompter, out io.Writer, o CommitOffer) (header string, ok bool
 		where = "a detached HEAD"
 	}
 	header = o.Header
+	if header == "" {
+		fmt.Fprintln(out, "\nThe implementation proposed no commit message.")
+		line, err := p.Ask("Commit message (one line, empty to skip): ")
+		if err != nil {
+			return "", false, err
+		}
+		if header = strings.TrimSpace(line); header == "" {
+			return "", false, nil
+		}
+	}
 	for {
 		fmt.Fprintf(out, "\nCommit message:\n%s\n", indent(strings.TrimRight(o.Message(header), "\n")))
 		ans, err := p.Ask(fmt.Sprintf("Commit to %s? [y]es / [N]o / [e]dit message: ", where))

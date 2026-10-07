@@ -352,6 +352,7 @@ const analyzeResponse = `{
 
 const implementResponse = `{
   "summary": "fixed Add to use +",
+  "summary_short": "Fix Add to use +",
   "changed_files": ["fixture.go"],
   "tests_added": []
 }`

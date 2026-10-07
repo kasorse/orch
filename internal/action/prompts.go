@@ -17,6 +17,16 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 
 // finalAnswerRule is appended when the step is the workflow's last read-only step and
 // no development follows (TASKS.md В4): its answer is what the user gets back.
+// summaryShortRule asks every stage for a one-line "summary_short" next to "summary", for
+// an operator skimming the run.
+const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
+
+// implementSummaryShortRule is implement's variant: its "summary_short" becomes the
+// commit message offered at the end of the run (MVP.md §42.2).
+const implementSummaryShortRule = `"summary_short" is one line of at most 72 characters, without a trailing period, ` +
+	`saying what the change does in the imperative mood (for example "Exclude HTTP 404 from retries"): ` +
+	`it becomes the commit message.`
+
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
@@ -29,7 +39,8 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: research\n\n")
 	b.WriteString("Research the external knowledge the following software engineering task needs: approaches, libraries, tools, alternatives and their trade-offs. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	return b.String()
@@ -45,7 +56,8 @@ func BuildAnalyzePrompt(in AnalyzePromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: analyze\n\n")
 	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
@@ -63,7 +75,8 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: plan\n\n")
 	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
@@ -124,7 +137,8 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: implement\n\n")
 	b.WriteString("Implement the following software engineering task by modifying the code in the current repository directly. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
+	b.WriteString(implementSummaryShortRule + "\n\n")
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
@@ -210,7 +224,8 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
 

@@ -57,7 +57,7 @@ func offerCommit(ctx context.Context, s *session) {
 		return
 	}
 
-	offer := commitOffer(run, s.dispatcher.ImplementationSummary())
+	offer := commitOffer(run, s.dispatcher.LastImplementation())
 	offer.Branch, offer.Changes = branch, changes
 	header, ok, err := interaction.AskCommit(s.prompter, out, offer)
 	if err != nil {
@@ -82,30 +82,31 @@ func offerCommit(ctx context.Context, s *session) {
 }
 
 // commitOffer proposes the message and the warnings for run. The header is the last
-// implementation summary (else the task), cut to one line of commitHeaderMax runes and
-// prefixed with the Jira key for a run --jira task; whatever the cut left out goes into the
-// body, followed by the Orchestrator-Run trailer.
-func commitOffer(run *domain.Run, summary string) interaction.CommitOffer {
-	source := strings.TrimSpace(summary)
-	if source == "" {
-		source = strings.TrimSpace(run.Task.Description)
-	}
-	prefix := ""
-	if run.Task.Source != nil && run.Task.Source.Key != "" {
-		prefix = run.Task.Source.Key + ": "
-	}
-	first, _, _ := strings.Cut(source, "\n")
-	header := truncateRunes(prefix+strings.TrimSpace(first), commitHeaderMax)
-
+// implementation's summary_short, cut to one line of commitHeaderMax runes and prefixed
+// with the Jira key for a run --jira task; whatever the cut left out goes into the body,
+// followed by the Orchestrator-Run trailer. Without a summary_short the header is "" and
+// the operator is asked to write it.
+func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interaction.CommitOffer {
 	var body strings.Builder
-	if prefix+source != header {
-		body.WriteString(source + "\n\n")
+	var header string
+	if impl != nil {
+		if source := strings.TrimSpace(impl.SummaryShort); source != "" {
+			prefix := ""
+			if run.Task.Source != nil && run.Task.Source.Key != "" {
+				prefix = run.Task.Source.Key + ": "
+			}
+			first, _, _ := strings.Cut(source, "\n")
+			header = truncateRunes(prefix+strings.TrimSpace(first), commitHeaderMax)
+			if prefix+source != header {
+				body.WriteString(source + "\n\n")
+			}
+		}
 	}
 	body.WriteString("Orchestrator-Run: " + run.ID + "\n")
 
 	var warnings []string
 	if r := lastReview(run); r != nil && r.Decide() == domain.ReviewFail {
-		warnings = append(warnings, "the review did not pass: "+r.Summary)
+		warnings = append(warnings, "the review did not pass: "+firstNonEmpty(r.SummaryShort, r.Summary))
 	}
 	for _, f := range run.SecretFindings {
 		warnings = append(warnings, fmt.Sprintf("a likely secret was added at %s:%d (%s)", f.File, f.Line, f.Rule))
@@ -121,6 +122,16 @@ func lastReview(run *domain.Run) *domain.ReviewResult {
 		}
 	}
 	return nil
+}
+
+// firstNonEmpty is the first of values that is not blank, trimmed, or "".
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // truncateRunes cuts s to at most n runes, ending a cut string with "...".
