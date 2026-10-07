@@ -228,6 +228,11 @@ go test ./...
 gofmt -l .          # must be empty
 ```
 
+`scripts/check.sh` runs these four gates in the root module and in `bench/` and stops at the
+first failure; it is also the orchestrator's `test.command` for this repository, so a run's
+test step covers both modules. Under the bwrap sandbox three `bench/` tests skip (nested
+bwrap, `orchestrator validate`); run the script outside the sandbox before closing a task.
+
 Tests need no network, no Jev key and no real provider CLIs: `test/integration` uses fake
 executables (`internal/testutil/fakeexec`, routed by the `ACTION: <name>` first line of every
 prompt; `FAKE_ARGS_DIR` records each call's argv, `FAKE_ENV_DIR` its environment), a fake

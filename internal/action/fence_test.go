@@ -223,3 +223,30 @@ func TestStagePrompts_CarryTheRepositoryConventions(t *testing.T) {
 		}
 	}
 }
+
+// implement has no shell, so a required step that runs something other than the test command
+// is the operator's: implement is told so, and review reports such a step as medium instead of
+// sending it back to an implement that cannot do it (run a67fe1c2 looped to max_fix_iterations).
+func TestStagePrompts_LeaveCommandStepsToTheOperator(t *testing.T) {
+	for name, tt := range map[string]struct{ prompt, rule string }{
+		"implement": {BuildImplementPrompt(ImplementPromptInput{Task: "t"}), implementOperatorRule},
+		"review":    {BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewOperatorRule},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(tt.prompt, tt.rule) || !strings.Contains(tt.prompt, "cannot run commands") {
+				t.Fatalf("the operator rule is missing:\n%s", tt.prompt)
+			}
+			if strings.Index(tt.prompt, tt.rule) > strings.Index(tt.prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+	for _, want := range []string{`medium with "operator: "`, "never as critical or high", "Latest test result"} {
+		if !strings.Contains(reviewOperatorRule, want) {
+			t.Errorf("the review rule must say %q", want)
+		}
+	}
+	if !strings.Contains(BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewSeverityRubric) {
+		t.Error("the review prompt lost its severity rubric")
+	}
+}

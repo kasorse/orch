@@ -1006,6 +1006,13 @@ they require (marking the task done) belong to the change. Review checks the sam
 There is no documentation stage: the stage set is the decision's (§9), and a missed update
 goes back to implement like any other missed requirement.
 
+Implement is also told what it cannot do: its authority (§38) has no shell, and the run
+executes nothing but the test command. A step the task or the repository requires that needs
+running something else - a live check against an installed tool, a build, lint or format
+gate the test command does not run - is the operator's: implement names it in `summary` as
+left to the operator, never claims it done, and leaves the task tracking that waits on it
+open. The way to have such a gate checked by the run is to make it part of `test.command`.
+
 Example analysis artifact:
 
 ```json
@@ -1163,6 +1170,13 @@ one that decides. The outcome is still `ReviewResult.Decide()`, never the model'
 It also checks the change against the repository's own instructions (§17): a documentation
 or task-tracking update they require and the diff lacks is a missed requirement (high), so
 the change goes back to implement; other documentation left out of date is medium.
+A requirement only running something other than the test command can meet (§17), and task
+tracking left open because it waits on one, is never critical or high: another
+implementation attempt cannot do it, and failing on it would only loop until
+`max_fix_iterations`. Review reports it as medium with `operator: ` at the start of its
+description, so it reaches the operator among the warnings. Review is also told that the test
+result covers only what the test command runs, from the repository root, and that a claim in
+the diff or the summary that such a step was done is not evidence.
 
 If review returns `fail`:
 

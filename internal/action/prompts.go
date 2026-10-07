@@ -45,6 +45,28 @@ const reviewConventionsRule = `Also check the change against ` + conventionsFile
 
 `
 
+// implementOperatorRule tells implement what it cannot do: its authority (edit) has no
+// shell, and the test command is the only thing the run executes (MVP.md §17, §38). A step
+// that needs anything else is the operator's, reported rather than claimed done.
+const implementOperatorRule = `You can read and edit files; you cannot run commands, use installed tools or reach the network. ` +
+	`After you, the orchestrator runs the configured test command from the repository root, and nothing else. ` +
+	`A step the task or the repository's instructions require that needs running something else (a check against an ` +
+	`installed tool, a build, lint or format gate the test command does not run) is left to the operator: never claim ` +
+	`it was done, name it in "summary" as left to the operator, and leave the task tracking that waits on it open.`
+
+// reviewOperatorRule keeps review from failing on what another implement attempt cannot do:
+// sent back as high, such a step loops until max_fix_iterations. It also keeps the reviewer
+// from reading more into the test result than the command covers.
+const reviewOperatorRule = `Implement can only read and edit files: it cannot run commands, use installed tools or reach the network. ` +
+	`The run executes nothing but the test command shown under "Latest test result", from the repository root; ` +
+	`do not assume it covers what it does not run (another module, a linter, a formatter, a live check). ` +
+	`A requirement that can only be met by running something else cannot be fixed by another implementation attempt: ` +
+	`report it as medium with "operator: " at the start of its description, never as critical or high. ` +
+	`The same holds for task tracking left open because it waits on such a step. ` +
+	`A claim in the diff or the implementation summary that such a step was done is not evidence that it was.
+
+`
+
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
@@ -158,6 +180,7 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
 	b.WriteString(implementSummaryShortRule + "\n\n")
 	b.WriteString(implementConventionsRule + "\n\n")
+	b.WriteString(implementOperatorRule + "\n\n")
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
@@ -248,6 +271,7 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
 	b.WriteString(reviewConventionsRule)
+	b.WriteString(reviewOperatorRule)
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
 
