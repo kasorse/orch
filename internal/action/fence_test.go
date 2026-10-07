@@ -193,3 +193,33 @@ func TestStagePrompts_AskForSummaryShort(t *testing.T) {
 		})
 	}
 }
+
+// implement is told to finish a change the way the repository's instructions say, and review
+// to check it, both before the task block; a required update the diff lacks fails the review.
+func TestStagePrompts_CarryTheRepositoryConventions(t *testing.T) {
+	for name, tt := range map[string]struct{ prompt, rule string }{
+		"implement": {BuildImplementPrompt(ImplementPromptInput{Task: "t"}), implementConventionsRule},
+		"review":    {BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewConventionsRule},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(tt.prompt, tt.rule) || !strings.Contains(tt.prompt, "CLAUDE.md, AGENTS.md") {
+				t.Fatalf("the conventions rule is missing:\n%s", tt.prompt)
+			}
+			if strings.Index(tt.prompt, tt.rule) > strings.Index(tt.prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+	if !strings.Contains(reviewConventionsRule, "missed requirement of the task (high)") {
+		t.Error("a missing required update must be high, so the review fails and goes back to implement")
+	}
+	for name, prompt := range map[string]string{
+		"research": BuildResearchPrompt(ResearchPromptInput{Task: "t"}),
+		"analyze":  BuildAnalyzePrompt(AnalyzePromptInput{Task: "t"}),
+		"plan":     BuildPlanPrompt(PlanPromptInput{Task: "t"}),
+	} {
+		if strings.Contains(prompt, "CLAUDE.md") {
+			t.Errorf("%s is read-only and must not be asked to update anything", name)
+		}
+	}
+}

@@ -79,5 +79,6 @@ BM16 → BM17.
   exception is BM09's check of config A's flags against the installed `claude`.
 - Core tasks end green on `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .`
   empty. Bench tasks also on the same four run in `bench/`.
-- When a task is done: tick it here and in TODO.md, and add an "As built" section to the task
-  describing anything built differently and why.
+- When a task is done: tick it here, update the status line at the top, tick TODO.md where it
+  tracks the task, and add an "As built" section to the task describing anything built
+  differently and why.

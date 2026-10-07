@@ -27,6 +27,24 @@ const implementSummaryShortRule = `"summary_short" is one line of at most 72 cha
 	`saying what the change does in the imperative mood (for example "Exclude HTTP 404 from retries"): ` +
 	`it becomes the commit message.`
 
+// conventionsFiles are where a repository writes down how a change is finished. The task
+// rarely says it; implement is told to follow them and review to check them, so a missed
+// update goes back to implement instead of needing a stage of its own.
+const conventionsFiles = `the repository's own instructions (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, ` +
+	`and the README of the specification or task list the task comes from)`
+
+// implementConventionsRule asks implement to finish the change the way the repository says.
+const implementConventionsRule = `Finish the change the way ` + conventionsFiles + ` say a change is finished: ` +
+	`update the documentation the change makes out of date, and the task tracking they require ` +
+	`(for example marking the task done), as part of this change.`
+
+// reviewConventionsRule asks review to check the same, and says what a miss weighs.
+const reviewConventionsRule = `Also check the change against ` + conventionsFiles + `. ` +
+	`A documentation or task-tracking update they require for this change and the diff lacks is a missed requirement of the task (high). ` +
+	`Other documentation the change leaves out of date is medium.
+
+`
+
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
@@ -139,6 +157,7 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString("Implement the following software engineering task by modifying the code in the current repository directly. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
 	b.WriteString(implementSummaryShortRule + "\n\n")
+	b.WriteString(implementConventionsRule + "\n\n")
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
@@ -228,6 +247,7 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	b.WriteString(summaryShortRule + "\n\n")
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
+	b.WriteString(reviewConventionsRule)
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
 

@@ -999,6 +999,13 @@ as `In short`). Implement's is asked for in the imperative mood and becomes the 
 message (§42.2). It is optional: without implement's, the operator is asked to write the
 commit message.
 
+Implement is also told to finish the change the way the repository's own instructions say
+(`CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, the README of the specification or task list
+the task comes from): the documentation the change makes out of date and the task tracking
+they require (marking the task done) belong to the change. Review checks the same (§19).
+There is no documentation stage: the stage set is the decision's (§9), and a missed update
+goes back to implement like any other missed requirement.
+
 Example analysis artifact:
 
 ```json
@@ -1153,6 +1160,9 @@ The review prompt states this rule to the reviewer, with a rubric for each level
 (critical: breaks the build, data or security; high: incorrect behavior, missed requirement
 or regression; medium: real but non-blocking; low: style), so the severity it picks is the
 one that decides. The outcome is still `ReviewResult.Decide()`, never the model's `status`.
+It also checks the change against the repository's own instructions (§17): a documentation
+or task-tracking update they require and the diff lacks is a missed requirement (high), so
+the change goes back to implement; other documentation left out of date is medium.
 
 If review returns `fail`:
 

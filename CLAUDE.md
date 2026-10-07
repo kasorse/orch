@@ -210,6 +210,15 @@ comments, transitions or JQL), no remote repository execution, no RAG or persist
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
+## Tasks from `specs/*/tasks`
+
+A task is finished by its specification's README ("Ground rules"), not only by green tests:
+tick it in that README's table and in `TODO.md` where `TODO.md` tracks it, bring the
+README's `Status:` line up to date, and add an `## As built` section to the task file with
+the date and what was built differently from the plan, and why. A task under `bench/` also
+runs the four gates in `bench/`: it is a separate module, and the root `go test ./...` does
+not test it.
+
 ## Build & test
 
 ```
