@@ -599,6 +599,7 @@ used to mirror the repository and by `setup_command`; nothing else.
 orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>
               [--configs A,B,C,D] [--reps 3] [--ids a,b] [--limit N] [-j 1]
               [--redo] [--keep-workspaces] [--dry-run] [--allow-mixed]
+              [--contributor owner] [--configs-dir <dir>]
 ```
 
 | flag | default | meaning |
@@ -616,6 +617,7 @@ orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>
 | `--dry-run` | off | print the cells in order and their count, run nothing |
 | `--allow-mixed` | off | continue an `--out` whose `manifest.json` names another orchestrator commit or CLI version |
 | `--contributor` | `owner` | a short name written into `manifest.json` and every result line (§17); never taken from git or the OS |
+| `--configs-dir` | `./bench/configs`, else `./configs` | the directory of the config files and `common.yaml` (§13.7) |
 
 What one cell does is §7.1 and §7.5. Cells already in `results.jsonl` with `pass` or `fail`
 are skipped, `infra_error` ones are run again, so the same command continues an interrupted

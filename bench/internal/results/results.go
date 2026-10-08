@@ -1,7 +1,7 @@
 // Package results is the result line of specs/benchmark/SPEC.md §9: one JSON object per cell
-// (task × config × repetition) in results.jsonl. It holds the record type and the reader that
-// `orchbench summarize` (BM11) needs; BM10 (`orchbench run`) adds the append-only writer and the
-// manifest here.
+// (task × config × repetition) in results.jsonl. It holds the record type, the reader that
+// `orchbench summarize` needs, and what `orchbench run` adds: the append-only writer and the
+// manifest.json of the results directory.
 package results
 
 import (
@@ -121,6 +121,9 @@ type Records struct {
 	// Partial is 1 when the file ends in a half-written line, which was ignored: `run` may be
 	// writing it right now.
 	Partial int
+	// CostUSD is the sum of cost_usd over every line read, the replaced ones included: that
+	// money was spent. It is where `run`'s budget starts.
+	CostUSD float64
 }
 
 // Latest keeps the last record of every cell and sorts the result by task, config and
@@ -179,6 +182,7 @@ func Read(r io.Reader) (Records, error) {
 			switch {
 			case perr == nil:
 				out.Lines++
+				out.CostUSD += rec.CostUSD
 				all = append(all, rec)
 			case unterminated && errors.As(perr, &syntax):
 				out.Partial++

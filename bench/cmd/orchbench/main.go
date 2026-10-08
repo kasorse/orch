@@ -1,7 +1,6 @@
 // Command orchbench is the benchmark driver of specs/benchmark/SPEC.md §13: it makes tasks
 // from history, checks them, runs configurations over them and reports. This file is the
-// frame; the subcommands are filled in by their own tasks (BM06, BM08, BM10, BM11); `run` is
-// the one not built yet.
+// frame; the subcommands are in their own files (mine.go, validate.go, run.go, summarize.go).
 package main
 
 import (
@@ -107,7 +106,8 @@ var commands = []command{
 		summary: "run every task × config × repetition and record the results",
 		synopsis: `orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>
               [--configs A,B,C,D] [--reps 3] [--ids a,b] [--limit N] [-j 1]
-              [--redo] [--keep-workspaces] [--dry-run] [--allow-mixed]`,
+              [--redo] [--keep-workspaces] [--dry-run] [--allow-mixed]
+              [--contributor owner] [--configs-dir <dir>]`,
 		needs: []prereq.Need{prereq.Git, prereq.Bwrap, prereq.Orchestrator, prereq.Claude},
 		flags: func(fs *flag.FlagSet) {
 			fs.Var(&stringList{}, "tasks", "task files (quoted glob); repeatable; each must be valid with the same hash (required)")
@@ -123,7 +123,9 @@ var commands = []command{
 			fs.Bool("dry-run", false, "print the cells in order and their count, run nothing")
 			fs.Bool("allow-mixed", false, "continue an --out whose manifest.json names another orchestrator commit or CLI version")
 			fs.String("contributor", "owner", "a short `name` written into manifest.json and every result line")
+			fs.String("configs-dir", "", "the `dir` of the config files and common.yaml; default ./bench/configs, else ./configs")
 		},
+		run: runRun,
 	},
 	{
 		name:     "summarize",

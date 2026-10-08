@@ -52,7 +52,7 @@ func TestCommandHelp(t *testing.T) {
 	}{
 		{"mine", "orchbench mine --repo <path> --out <dir> [--since <date>] [--rev <rev>]", []string{"-repo", "-out", "-since", "-rev", "-max-files", "-max-lines", "-language", "-test-glob", "-remote"}},
 		{"validate", "orchbench validate --tasks <glob> [--tasks <glob>...] [--ids a,b] [-j 1] [--keep-workspaces]", []string{"-tasks", "-ids", "-j", "-keep-workspaces"}},
-		{"run", "orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>", []string{"-tasks", "-out", "-max-cost", "-configs", "-reps", "-ids", "-limit", "-j", "-redo", "-keep-workspaces", "-dry-run", "-allow-mixed", "-contributor"}},
+		{"run", "orchbench run --tasks <glob> [--tasks <glob>...] --out <dir> --max-cost <usd>", []string{"-tasks", "-out", "-max-cost", "-configs", "-reps", "-ids", "-limit", "-j", "-redo", "-keep-workspaces", "-dry-run", "-allow-mixed", "-contributor", "-configs-dir"}},
 		{"summarize", "orchbench summarize <out> [--baseline A] [--seed 1] [--by language] [--stdout]", []string{"-baseline", "-seed", "-by", "-stdout"}},
 	}
 
@@ -128,31 +128,11 @@ func TestNoArgumentsPrintsUsageToStderr(t *testing.T) {
 	}
 }
 
-func TestStubsAreNotImplemented(t *testing.T) {
-	tests := []struct {
-		command string
-		args    []string
-	}{
-		{"run", []string{"--tasks", "t/*.yaml", "--out", "/o", "--max-cost", "30", "--configs", "A,B", "--dry-run", "-v"}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.command+" "+strings.Join(tt.args, " "), func(t *testing.T) {
-			args := append([]string{tt.command}, tt.args...)
-			args = append(args, "--cache-dir", t.TempDir(), "--orchestrator", "/x/orchestrator", "--claude", "/x/claude")
-
-			var out, errOut bytes.Buffer
-			err := run(context.Background(), args, &out, &errOut)
-			if err == nil {
-				t.Fatal("a stub succeeded")
-			}
-			if code := exitcode.FromError(err); code != exitcode.Usage {
-				t.Fatalf("exit code = %d, want %d", code, exitcode.Usage)
-			}
-			if want := "orchbench " + tt.command + ": not implemented"; err.Error() != want {
-				t.Fatalf("error = %q, want %q", err, want)
-			}
-		})
+func TestEveryCommandIsBuilt(t *testing.T) {
+	for _, c := range commands {
+		if c.run == nil {
+			t.Errorf("command %s has no run function", c.name)
+		}
 	}
 }
 
