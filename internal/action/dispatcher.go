@@ -19,9 +19,10 @@ func (d *Dispatcher) Execute(ctx context.Context, actionType domain.ActionType, 
 
 	// Every action makes at most one provider call; call records its usage here, so the
 	// outcome carries it whichever return path the action took (failures included).
-	d.stepUsage = nil
+	d.stepUsage, d.stepCall, d.stepTruncated = nil, nil, nil
 	outcome, err := d.execute(ctx, actionType, run)
 	outcome.Usage = d.stepUsage
+	outcome.Call = d.stepCall
 	return outcome, err
 }
 

@@ -16,7 +16,7 @@ import (
 // whether the implementation is actually correct is verified by the next test/review
 // step, not by implement itself (MVP.md §31.4).
 func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
-	prompt := BuildImplementPrompt(ImplementPromptInput{
+	in := ImplementPromptInput{
 		Task:                   run.Task.Description,
 		Analysis:               d.lastAnalysis,
 		Plan:                   d.lastPlan,
@@ -25,7 +25,11 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		PreRunFailure:          d.preRunFailureForImplement(),
 		ReviewIssues:           d.pendingReviewIssues,
 		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
-	})
+	}
+	prompt := BuildImplementPrompt(in)
+	if TestOutputCut(in) {
+		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
+	}
 
 	// Fail closed: without a guard nothing would stop a write that turns into execution
 	// (a hook, CI, .git/config) from reaching the test step.
@@ -36,6 +40,9 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to snapshot protected paths before implement", Err: err}
 	}
+	// The working tree as a git tree, to count what the step changes. Best effort: without
+	// it the step records no diff.
+	treeBefore, _ := d.Repo.WorktreeTree(ctx)
 
 	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt)
 	if err != nil {
@@ -65,6 +72,13 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	}
 	if len(changed) > 0 {
 		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
+	}
+	// Only now, with the guard passed, may git look at what the call wrote.
+	if treeBefore != "" {
+		outcome.Diff, outcome.TreeAfter = d.stepDiff(ctx, run, treeBefore, artifact)
+		if outcome.TreeAfter != "" {
+			outcome.TreeBefore = treeBefore
+		}
 	}
 	if err := d.scanSecrets(ctx, run, domain.ActionImplement); err != nil {
 		return outcome, err

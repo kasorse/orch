@@ -294,6 +294,22 @@ func (r *Repository) DiffTrees(ctx context.Context, from, to string) (string, er
 	return r.git(ctx, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "-M", from, to)
 }
 
+// DiffNumstat lists the files that differ between two trees (or commits), with their
+// added and deleted line counts (Added -1 for a binary file), renames detected. Paths are
+// relative to the repository top level; exclude are left out, like ReviewDiff's. External
+// diff drivers and textconv filters are off: only git itself runs.
+func (r *Repository) DiffNumstat(ctx context.Context, from, to string, exclude []string) ([]FileChange, error) {
+	args := []string{"diff", "--numstat", "-z", "-M", "--no-color", "--no-ext-diff", "--no-textconv", from, to, "--", "."}
+	for _, p := range exclude {
+		args = append(args, ":(exclude)"+p)
+	}
+	out, err := r.git(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseNumstat(out)
+}
+
 // Commit is one line of RecentCommits.
 type Commit struct {
 	Hash    string

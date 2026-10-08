@@ -17,6 +17,11 @@ type Usage struct {
 	CacheCreationTokens int64   `json:"cache_creation_tokens,omitempty"`
 	CostUSD             float64 `json:"cost_usd,omitempty"`
 	Turns               int     `json:"turns,omitempty"`
+	// Partial is true when the call ended (a timeout, a crash) before the CLI's final
+	// report: the counters are summed from the messages it streamed until then. The
+	// input and cache counters are each message's own; OutputTokens is a lower bound,
+	// since the stream reports it as a message starts; CostUSD is unknown and left 0.
+	Partial bool `json:"partial,omitempty"`
 	// Limits is the account's rate-limit state after the call, when reported. It is the
 	// account's state, not the call's cost, so it is shown but never recorded.
 	Limits *RateLimits `json:"-"`
@@ -39,7 +44,8 @@ func (u Usage) PromptTokens() int64 {
 	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
 }
 
-// Add accumulates o into u; the latest non-nil Limits wins.
+// Add accumulates o into u; the latest non-nil Limits wins. Partial is the caller's to
+// keep track of: a sum is not one call.
 func (u *Usage) Add(o Usage) {
 	u.InputTokens += o.InputTokens
 	u.OutputTokens += o.OutputTokens

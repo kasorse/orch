@@ -687,7 +687,11 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # pre_run_ref, head_ref, resume_baseline, resumes, provider_cli
                         # (CLI versions), allow_red_tests, pre_run_test,
                         # secret_scan_baseline, secret_findings (never a value),
-                        # commit (the SHA, when you approved the commit at the end)
+                        # commit (the SHA, when you approved the commit at the end);
+                        # per step: usage (tokens, cost, partial), call (prompt size and
+                        # cuts, models, API time, tool calls), an implement's diff;
+                        # outcome (wall and active time, cost, net change)
+  summary.md            # the run's report for a reader, written when the run ends
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
@@ -701,6 +705,13 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
 
 A review artifact also records what the reviewer was shown: `diff: {bytes, files, shown,
 summarized, withheld, truncated}`.
+
+`summary.md` is the place to start after a run: status, wall and active time, cost (a lower
+bound when a call was cut off before its final report), tokens, the run's net code change,
+then a table of steps (time, API time, cost, tokens, turns, the model that actually
+answered, prompt size and what was cut), the tool calls per step, each implement's change
+from git against what its artifact claims, and the failures. Every field is explained in
+`MVP.md` §43.
 
 `decision.json` answers "why did this run have these stages?": the request and its
 translation, who decided (`jev`, `llm`, or `user` with the provider's error), the model

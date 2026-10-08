@@ -15,12 +15,19 @@ type Outcome struct {
 	// ReviewVerdict is the last review's authoritative verdict (ReviewResult.Decide);
 	// empty without a review or when the last review gave no result.
 	ReviewVerdict ReviewStatus `json:"review_verdict,omitempty"`
-	// DurationMS runs from the first execution's start to the last one's finish; 0 without
+	// DurationMS is the wall-clock time of the steps: from the first execution's start to
+	// the last one's finish, pauses between a stop and its resume included; 0 without
 	// executions.
 	DurationMS int64 `json:"duration_ms"`
+	// ActiveMS is the time the steps themselves took: the sum of each execution's own
+	// duration, without the pauses between them.
+	ActiveMS int64 `json:"active_ms"`
 	// Usage is summed over the executions and the decision calls.
 	Usage            OutcomeUsage     `json:"usage"`
 	DecisionOverhead DecisionOverhead `json:"decision_overhead"`
+	// Diff is the run's net change: the last implement step's diff against the run's
+	// restore point. Nil without one.
+	Diff *DiffStat `json:"diff,omitempty"`
 }
 
 // OutcomeUsage is the usage summed over every provider call of a run, and how many calls
@@ -28,12 +35,16 @@ type Outcome struct {
 type OutcomeUsage struct {
 	Usage
 	Calls int `json:"calls"`
+	// PartialCalls counts the calls among Calls that ended before their final report
+	// (Usage.Partial): their cost is not in CostUSD, so it is a lower bound when this is
+	// not 0.
+	PartialCalls int `json:"partial_calls,omitempty"`
 }
 
 // Validate checks a recorded outcome read back from disk.
 func (u OutcomeUsage) Validate() error {
-	if u.Calls < 0 {
-		return fmt.Errorf("negative counter")
+	if u.Calls < 0 || u.PartialCalls < 0 || u.PartialCalls > u.Calls {
+		return fmt.Errorf("negative or inconsistent counter")
 	}
 	return u.Usage.Validate()
 }
@@ -74,7 +85,15 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 		if exec.Usage != nil {
 			out.Usage.Usage.Add(*exec.Usage)
 			out.Usage.Calls++
+			if exec.Usage.Partial {
+				out.Usage.PartialCalls++
+			}
 		}
+		if exec.Diff != nil && exec.Diff.Run != nil {
+			d := *exec.Diff.Run
+			out.Diff = &d
+		}
+		out.ActiveMS += ExecutionMS(exec)
 	}
 	out.DurationMS = executionsDurationMS(run.Executions)
 
@@ -86,6 +105,9 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 				}
 				out.Usage.Usage.Add(*u)
 				out.Usage.Calls++
+				if u.Partial {
+					out.Usage.PartialCalls++
+				}
 				out.DecisionOverhead.CostUSD += u.CostUSD
 				out.DecisionOverhead.Calls++
 			}
@@ -95,9 +117,20 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 		l := trace.Latency
 		out.DecisionOverhead.MS = l.TranslationMS + l.PreCheckMS + l.ContextMS + l.ClassificationMS
 	}
-	// The account's rate-limit state is not a cost, and is never recorded.
+	// The account's rate-limit state is not a cost, and is never recorded; a sum is not
+	// one partial call (PartialCalls counts those).
 	out.Usage.Limits = nil
+	out.Usage.Partial = false
 	return out
+}
+
+// ExecutionMS is how long one execution took; 0 without both times or when the clock went
+// backwards.
+func ExecutionMS(exec StepExecution) int64 {
+	if exec.StartedAt.IsZero() || exec.FinishedAt.IsZero() || exec.FinishedAt.Before(exec.StartedAt) {
+		return 0
+	}
+	return exec.FinishedAt.Sub(exec.StartedAt).Milliseconds()
 }
 
 // executionsDurationMS is the first execution's start to the last finished execution's

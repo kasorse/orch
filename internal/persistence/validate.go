@@ -107,6 +107,19 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("usage: %w", err)
 		}
 	}
+	if exec.Call != nil {
+		if err := exec.Call.Validate(); err != nil {
+			return fmt.Errorf("call: %w", err)
+		}
+	}
+	if exec.Diff != nil {
+		if exec.Action != domain.ActionImplement {
+			return fmt.Errorf("diff recorded on a %s step", exec.Action)
+		}
+		if err := exec.Diff.Validate(); err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
+	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
@@ -212,7 +225,7 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 	if o.Status != runStatus {
 		return fmt.Errorf("status %q is not the run's status %q", o.Status, runStatus)
 	}
-	if o.FixIterations < 0 || o.DurationMS < 0 {
+	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 {
 		return fmt.Errorf("negative counter")
 	}
 	if v := o.ReviewVerdict; v != "" && v != domain.ReviewPass && v != domain.ReviewFail {
@@ -220,6 +233,11 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 	}
 	if err := o.Usage.Validate(); err != nil {
 		return fmt.Errorf("usage: %w", err)
+	}
+	if o.Diff != nil {
+		if err := o.Diff.Validate(); err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
 	}
 	d := o.DecisionOverhead
 	if d.MS < 0 || d.Calls < 0 || d.CostUSD < 0 || math.IsNaN(d.CostUSD) || math.IsInf(d.CostUSD, 0) {

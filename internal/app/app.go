@@ -1094,10 +1094,11 @@ func failRun(store *persistence.Store, run *domain.Run, err error) error {
 }
 
 // writeOutcome records how a run that reached a terminal status ended and what it cost,
-// and saves the run. It computes over the whole history, so a resume keeps the usage of
-// the attempts before it. A run that is not terminal is left alone. Without a readable
-// decision.json (none yet, or one the strict loader refuses) the outcome leaves the
-// decision calls out rather than failing a run that already ended.
+// saves the run, and renders its summary.md (MVP.md §43). It computes over the whole
+// history, so a resume keeps the usage of the attempts before it. A run that is not
+// terminal is left alone. Without a readable decision.json (none yet, or one the strict
+// loader refuses) the outcome leaves the decision calls out rather than failing a run that
+// already ended.
 func writeOutcome(store *persistence.Store, run *domain.Run) error {
 	switch run.Status {
 	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
@@ -1110,7 +1111,13 @@ func writeOutcome(store *persistence.Store, run *domain.Run) error {
 	}
 	outcome := domain.ComputeOutcome(*run, trace)
 	run.Outcome = &outcome
-	return store.SaveRun(run)
+	if err := store.SaveRun(run); err != nil {
+		return err
+	}
+	// summary.md is for a reader and never read back; a run that ended is not failed
+	// over it.
+	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	return nil
 }
 
 // runObserver renders CLI progress via ConsoleReporter and, alongside that, persists
@@ -1119,18 +1126,11 @@ type runObserver struct {
 	reporter *logging.ConsoleReporter
 	store    *persistence.Store
 	// repo, when set (pretty renderer), lets the observer show what implement changed:
-	// the worktree is snapshotted as a tree before the step and diffed after it.
-	repo      *repository.Repository
-	beforeImp string
+	// the diff between the trees the step recorded around itself.
+	repo *repository.Repository
 }
 
 func (o *runObserver) StepStarted(run *domain.Run, index int, action domain.ActionType) {
-	o.beforeImp = ""
-	if o.repo != nil && action == domain.ActionImplement {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		o.beforeImp, _ = o.repo.WorktreeTree(ctx)
-		cancel()
-	}
 	o.reporter.StepStarted(run, index, action)
 }
 
@@ -1143,12 +1143,11 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 	}
 	// Only after a completed implement: the step guard has already checked that nothing
 	// protected (git config, hooks) changed, so running git here is safe.
-	if o.beforeImp != "" && exec.Action == domain.ActionImplement && exec.Status == domain.StepCompleted {
+	if o.repo != nil && exec.Action == domain.ActionImplement && exec.Status == domain.StepCompleted &&
+		outcome.TreeBefore != "" && outcome.TreeAfter != "" && outcome.TreeBefore != outcome.TreeAfter {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if after, err := o.repo.WorktreeTree(ctx); err == nil && after != o.beforeImp {
-			if diff, err := o.repo.DiffTrees(ctx, o.beforeImp, after); err == nil {
-				o.reporter.SetStepDiff(diff)
-			}
+		if diff, err := o.repo.DiffTrees(ctx, outcome.TreeBefore, outcome.TreeAfter); err == nil {
+			o.reporter.SetStepDiff(diff)
 		}
 		cancel()
 	}

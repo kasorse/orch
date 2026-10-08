@@ -62,6 +62,9 @@ type Result struct {
 	Duration time.Duration
 	// Usage is the call's token/cost/rate-limit report, nil when the CLI gives none.
 	Usage *domain.Usage
+	// Call is what the CLI reported about the models and tools the call used, nil when it
+	// gives nothing; the caller adds the prompt's size.
+	Call *domain.CallReport
 }
 
 // UsageObserver is implemented by progress observers that want each call's Usage. Call

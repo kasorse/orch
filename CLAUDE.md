@@ -16,7 +16,9 @@ the stages chosen by the operator (`run --stage`): MVP.md §40, with its design 
 hardening - prompts on stdin and bounded, the test environment and default sandbox, the CLI
 version check, the pre-run test, the secret scan: MVP.md §41, with its design record in
 `specs/hardening/`;
-the commit offered at the end of a completed run: MVP.md §42.
+the commit offered at the end of a completed run: MVP.md §42;
+the run summary and step metrics (`summary.md`, the call report, the diff from git, active
+time): MVP.md §43, which is also the field reference for `summary.md`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -251,7 +253,11 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `allow_red_tests`, `pre_run_test`, `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
-`provider.authority` and `attempt`; a review result also records its `diff` summary), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
+`provider.authority`, `attempt`, `usage` (with `partial` for a call cut off before its final
+report), `call` (prompt size and cuts, models, API time, tool calls) and, for an implement the
+guard passed, `diff` from git; `outcome` adds `active_ms` and the net `diff`; a review result
+also records its `diff` summary), `summary.md` (rendered from run.json and decision.json when
+the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,

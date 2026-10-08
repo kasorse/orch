@@ -68,7 +68,14 @@ type StepExecution struct {
 	// without a call (test) or a CLI that reports nothing. A call that failed after the
 	// CLI reported usage still records it.
 	Usage *Usage `json:"usage,omitempty"`
-	Error string `json:"error,omitempty"`
+	// Call is the step's provider call beyond its cost: prompt size and cuts, the models
+	// and tools it used. Nil for a step without a call (test).
+	Call *CallReport `json:"call,omitempty"`
+	// Diff is what an implement step changed, from git. Nil for every other step, and for
+	// an implement whose call failed or whose changes the guard refused: git runs on the
+	// working tree only after the guard has passed it.
+	Diff  *StepDiff `json:"diff,omitempty"`
+	Error string    `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`

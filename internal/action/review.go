@@ -55,6 +55,9 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		diff.Text = secretscan.Redact(diff.Text)
 	}
 
+	if diff.Truncated {
+		d.stepTruncated = append(d.stepTruncated, domain.PromptDiff)
+	}
 	prompt := BuildReviewPrompt(ReviewPromptInput{
 		Task:           run.Task.Description,
 		Analysis:       d.lastAnalysis,

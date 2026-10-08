@@ -219,6 +219,20 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	return b.String()
 }
 
+// TestOutputCut reports whether BuildImplementPrompt(in) shortens the test output it
+// embeds, so the step can record it.
+func TestOutputCut(in ImplementPromptInput) bool {
+	r := in.LastTestResult
+	if r == nil {
+		r = in.PreRunFailure
+	}
+	if r == nil || in.MaxTestOutput <= 0 {
+		return false
+	}
+	_, _, omitted := BoundTestOutput(r.Stdout, r.Stderr, in.MaxTestOutput)
+	return omitted.Any()
+}
+
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
 // bounded by maxBytes (BoundTestOutput; 0 embeds them whole), and says so when it cut.
 func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int) {

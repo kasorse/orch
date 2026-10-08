@@ -233,16 +233,17 @@ func TestComputeOutcome_DoesNotMutate(t *testing.T) {
 
 func TestOutcome_JSON(t *testing.T) {
 	var o Outcome
-	o.Status, o.TestsPassedFinal, o.ReviewVerdict, o.DurationMS = RunCompleted, boolPtr(true), ReviewPass, 12
-	o.Usage = OutcomeUsage{Usage: Usage{InputTokens: 1, OutputTokens: 2, CostUSD: 0.5}, Calls: 3}
+	o.Status, o.TestsPassedFinal, o.ReviewVerdict, o.DurationMS, o.ActiveMS = RunCompleted, boolPtr(true), ReviewPass, 12, 10
+	o.Usage = OutcomeUsage{Usage: Usage{InputTokens: 1, OutputTokens: 2, CostUSD: 0.5}, Calls: 3, PartialCalls: 1}
 	o.DecisionOverhead = DecisionOverhead{CostUSD: 0.1, MS: 4, Calls: 1}
+	o.Diff = &DiffStat{Files: 2, Insertions: 5, Deletions: 1}
 	data, err := json.Marshal(o)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"status":"completed","fix_iterations":0,"tests_passed_final":true,"review_verdict":"pass","duration_ms":12,` +
-		`"usage":{"input_tokens":1,"output_tokens":2,"cost_usd":0.5,"calls":3},` +
-		`"decision_overhead":{"cost_usd":0.1,"ms":4,"calls":1}}`
+	want := `{"status":"completed","fix_iterations":0,"tests_passed_final":true,"review_verdict":"pass","duration_ms":12,"active_ms":10,` +
+		`"usage":{"input_tokens":1,"output_tokens":2,"cost_usd":0.5,"calls":3,"partial_calls":1},` +
+		`"decision_overhead":{"cost_usd":0.1,"ms":4,"calls":1},"diff":{"files":2,"insertions":5,"deletions":1}}`
 	if string(data) != want {
 		t.Errorf("json = %s\nwant   %s", data, want)
 	}
@@ -261,5 +262,37 @@ func TestOutcomeUsage_Validate(t *testing.T) {
 	}
 	if err := (OutcomeUsage{Usage: Usage{InputTokens: 1}, Calls: 1}).Validate(); err != nil {
 		t.Errorf("Validate() = %v", err)
+	}
+}
+
+// Active time leaves out the pause between a stop and its resume; a partial call is
+// counted, its tokens summed, and the run's net change is the last implement's.
+func TestComputeOutcome_ActiveTimePartialCallsAndDiff(t *testing.T) {
+	t0 := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	first := &DiffStat{Files: 1, Insertions: 3}
+	last := &DiffStat{Files: 2, Insertions: 5, Deletions: 1}
+	run := Run{Status: RunCompleted, Executions: []StepExecution{
+		{Action: ActionImplement, Status: StepFailed, StartedAt: t0, FinishedAt: t0.Add(10 * time.Minute),
+			Usage: &Usage{InputTokens: 4, CacheReadTokens: 100, OutputTokens: 1, Turns: 2, Partial: true}},
+		// Resumed an hour later.
+		{Action: ActionImplement, Status: StepCompleted, StartedAt: t0.Add(70 * time.Minute), FinishedAt: t0.Add(75 * time.Minute),
+			Usage: &Usage{InputTokens: 1, OutputTokens: 10, CostUSD: 0.5, Turns: 3}, Diff: &StepDiff{Step: *first, Run: first}},
+		{Action: ActionImplement, Status: StepCompleted, StartedAt: t0.Add(75 * time.Minute), FinishedAt: t0.Add(76 * time.Minute),
+			Diff: &StepDiff{Step: DiffStat{Files: 1, Insertions: 2, Deletions: 1}, Run: last}},
+		{Action: ActionTest, Status: StepCompleted, StartedAt: t0.Add(76 * time.Minute), FinishedAt: t0.Add(77 * time.Minute),
+			TestResult: &TestResult{Success: true}},
+	}}
+	out := ComputeOutcome(run, nil)
+	if out.DurationMS != (77 * time.Minute).Milliseconds() {
+		t.Errorf("duration_ms = %d, want the wall-clock span", out.DurationMS)
+	}
+	if out.ActiveMS != (17 * time.Minute).Milliseconds() {
+		t.Errorf("active_ms = %d, want the steps' own time", out.ActiveMS)
+	}
+	if out.Usage.Calls != 2 || out.Usage.PartialCalls != 1 || out.Usage.Partial || out.Usage.CostUSD != 0.5 || out.Usage.InputTokens != 5 {
+		t.Errorf("usage = %+v", out.Usage)
+	}
+	if out.Diff == nil || *out.Diff != *last {
+		t.Errorf("diff = %+v, want the last implement's run diff %+v", out.Diff, *last)
 	}
 }

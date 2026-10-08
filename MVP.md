@@ -1277,6 +1277,7 @@ Location:
       project_context.json     # exactly the context sent, only when one was sent
       workflow.json
       ticket.json              # the fetched Jira issue, run --jira only (§39.7)
+      summary.md               # the run's report for a reader, once it ends (§43)
 
       artifacts/
         <NNN>-<action>.json
@@ -1315,7 +1316,9 @@ At minimum save:
 * review result;
 * final run status;
 * failure reason if any;
-* execution mode the run actually ran under (`mode`).
+* execution mode the run actually ran under (`mode`);
+* each step's call report, an implement's diff from git, and the run's times, cost and net
+  change (§43).
 
 From `decision.json` alone it must be possible to tell why each stage ran.
 
@@ -3366,3 +3369,141 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 * A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
 * Committing a part of the changes: the operator commits by hand when they want that.
+
+---
+
+# 43. Run summary and step metrics
+
+Normative. Every run that ends says, per step and in total, how long it took, what it cost,
+which model answered, how big its prompt was and whether anything in it was cut, which
+tools the model used, and what an implement step changed. `run.json` records it (the
+source of truth); `summary.md` renders it for a reader. Nothing decides anything from these
+numbers: they are a record, like `outcome` (§21).
+
+## 43.1 Where it comes from
+
+| What | Source | Trust |
+| --- | --- | --- |
+| Step times | the engine's clock around each step (`started_at`, `finished_at`) | exact |
+| Tokens, cost, turns | the provider CLI's final report (claude: the `result` event) | as reported |
+| Models, API time | the same report (`modelUsage`, `duration_api_ms`) | as reported |
+| Tool calls | the model's `tool_use` blocks in the CLI's stream | as reported |
+| Prompt size, cuts | the orchestrator, from the prompt it sent | exact |
+| Code change | `git diff --numstat` between trees, after the guard passed the step | exact |
+
+Only claude reports models, API time and tool calls; codex and gemini steps leave them
+empty. A call that ends before its final report (a timeout, a crash, a kill) is still
+counted: its usage is summed from the assistant messages it streamed until then and marked
+`partial` (§43.3).
+
+## 43.2 summary.md
+
+Written to `.orchestrator/runs/<run-id>/summary.md` whenever a run reaches a terminal
+status (`completed`, `failed`, `stopped`), together with `outcome`; a resume that ends
+rewrites it over the whole history. It is rendered by Go from `run.json` and
+`decision.json` with no provider call, is never read back, and is not a resume input.
+Failing to write it fails nothing. Values that do not apply or are not known are `—`.
+
+### Totals
+
+| Field | Meaning |
+| --- | --- |
+| Task | The first line of the task, at most 120 characters. |
+| Source | Where a `run --jira` task came from: kind, issue key, URL. Absent for a typed task. |
+| Started | When the run was created (`created_at`), before the decision. |
+| Status | The run's final status; for a failed or stopped run, followed by the reason's telling line (a provider error's `failure:` line, otherwise its first line). |
+| Workflow | The workflow's actions in order. |
+| Decision | Who decided (`jev`, `llm`, `user`; `manual (run --stage)`), the decision provider and model that answered, the complexity, and whether the operator edited the decision on the review screen. |
+| Steps | Executions recorded (every attempt, retries and resumes included) and the fix iterations. |
+| Wall time | `outcome.duration_ms`: from the first step's start to the last step's finish, pauses between a stop and its resume included. The decision and the approval are not in it. |
+| Active time | `outcome.active_ms`: the sum of the steps' own durations, without those pauses. |
+| Decision time | `outcome.decision_overhead.ms`: the provider-bound decision steps (translation, pre-check, context, classification), never the operator's thinking time. |
+| Cost | `outcome.usage.cost_usd`: every provider call of the run, the decision calls included. With partial calls it reads `$X or more: N calls ended without a report`, since their cost is unknown. |
+| Decision cost | The part of the cost spent deciding the workflow, and how many decision calls reported usage. |
+| Tokens | Summed over every call: `prompt` is every input token (`input` uncached + `cache read` + `cache write`); `output` the generated tokens. |
+| Provider calls | Calls that reported usage (`outcome.usage.calls`). |
+| Tests (last run) | The last test step's result: `passed`, `failed`, or `not run`. |
+| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue fails). |
+| Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
+| Commit | The commit the operator approved at the end (§42), when there is one. |
+
+### Steps
+
+One row per execution, in order.
+
+| Column | Meaning |
+| --- | --- |
+| # | The execution's index; it is also the `NNN` of its artifact and log files. |
+| Step | The action, with `(resume N)` when the N-th resume ran it. |
+| Result | `completed` or `failed`; a test's `passed` / `failed (exit N)`; a review's verdict and issue count. |
+| Time | The step's own duration, git and guard checks included. |
+| API time | `call.api_ms`: how long the call waited on the model API. Time minus API time went to tools, the CLI and the orchestrator's checks. |
+| Cost | `usage.cost_usd`; `unknown` for a partial call. |
+| Prompt tokens | Every input token of the call: uncached, cache read and cache write together. |
+| Output tokens | Generated tokens; `≥ N` for a partial call, whose output count is a lower bound. |
+| Turns | API round trips the CLI made (`num_turns`; for a partial call, the messages streamed). |
+| Model | The model(s) that answered (`call.models`), e.g. `claude-sonnet-5-5` for the configured `sonnet`; for a run recorded before §43, the configured name followed by `(configured)`. |
+| Prompt | The size of the prompt sent on stdin, with `cut: <parts>` when `limits.prompt` shortened something (§41.2): `test_output` (a failing test's output in the implement prompt), `diff` (the review diff, where a file's diff did not fit or a file was not listed). |
+
+### Tool calls
+
+One row per step whose model called tools: the total and the count per tool, the most used
+first. MCP tools appear under their full name (`mcp__<server>__<tool>`).
+
+### Code changes
+
+One row per implement step with a diff.
+
+| Column | Meaning |
+| --- | --- |
+| This step | What the step changed: the working tree after the call against the tree before it. |
+| Run so far | The working tree after the step against `pre_run_ref`. |
+| Changed, not in changed_files | Files git shows the step changed that the artifact's `changed_files` and `tests_added` do not name. |
+| In changed_files, unchanged | Files the artifact names that the step did not change (a rename shows its new name in git, so an artifact naming the old one lands here). |
+
+Both lists are empty when the artifact has no `changed_files` at all (the model did not
+answer in JSON), and hold at most 50 paths each.
+
+### Notes
+
+One line per partial call (what its numbers mean) and per failed step (its telling error
+line). The full error is in `run.json` and the step's logs.
+
+## 43.3 run.json fields
+
+Added to each execution, and to `outcome`. All are optional on load, so a run written
+before §43 still loads; each is validated strictly when present (counters not negative,
+costs finite, names printable and bounded, paths clean and repository-relative, `diff` on an
+implement step only).
+
+| Field | Meaning |
+| --- | --- |
+| `executions[].usage.partial` | The call ended before the CLI's final report: the counters are summed from the messages it streamed, each message once at its largest values. Input and cache counters are each message's own; `output_tokens` is a lower bound (the stream reports it as a message starts); `cost_usd` is unknown and 0. |
+| `executions[].call.prompt_bytes` | The size of the prompt sent on stdin, extensions hint included. |
+| `executions[].call.truncated` | The prompt parts `limits.prompt` cut: `test_output`, `diff`. Absent when nothing was. |
+| `executions[].call.models[]` | `{model, cost_usd}` for each model that answered, sorted by name; `cost_usd` is absent when not reported. |
+| `executions[].call.api_ms` | Time spent waiting on the model API (claude's `duration_api_ms`). |
+| `executions[].call.tools` | Tool name → number of calls. |
+| `executions[].diff.step` | `{files, insertions, deletions, binary}` of the step's own change. Binary files count in `files` and `binary`, never in the line counts. |
+| `executions[].diff.run` | The same, for the working tree after the step against `pre_run_ref`; absent without a restore point. |
+| `executions[].diff.not_reported`, `.reported_unchanged` | As in §43.2's Code changes. |
+| `outcome.duration_ms` | Wall time of the steps, as above. |
+| `outcome.active_ms` | Sum of the steps' durations. |
+| `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
+| `outcome.diff` | The run's net change: the last implement's `diff.run`. |
+
+A step's `diff` is recorded only for an implement whose call succeeded and whose changes
+the guard passed (§38.3): git runs on the working tree only after the fingerprint and the
+protected paths are checked. The trees are written with a throwaway index, so the working
+tree, the user's index and every ref are untouched. A failed implement, whose files may
+have changed, records no diff; the next completed implement's `diff.run` covers them.
+
+## 43.4 Not covered
+
+* An estimate of a partial call's cost or output tokens: no prices are kept in the
+  orchestrator, and a guess would look like a measurement.
+* Models, API time and tool calls for codex and gemini: their CLIs do not report them in a
+  form the adapters read.
+* The changes a test command makes, and a diff for research/analyze/plan (read-only).
+* A machine-readable summary beyond `run.json` itself; `orchestrator runs report`
+  aggregates over many runs.
