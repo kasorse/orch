@@ -35,10 +35,10 @@ model or a real CLI (`SPEC.md` §16).
 
 In `bench/`: `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
 
-## As built (2026-10-08) — not closed yet
+## As built (2026-10-08)
 
-Written but not run: the change was made without a shell, so the gates and the golden file
-below are still to do, and BM12 is not ticked in the README until they are.
+The test was written by an orchestrator run with no shell; the operator steps it left (the
+golden file and the gates) were run by hand on the same day, which closed the task.
 
 - `bench/test/e2e_test.go` (`TestPipeline`) builds the real `orchbench` with `go build` and
   drives it as subprocesses: `validate`; `run --max-cost 0.25` (exit 3, the first three cells);
@@ -59,12 +59,10 @@ below are still to do, and BM12 is not ticked in the README until they are.
   written by the test (`fix`, `regression`).
 - **`wall_ms` and `started_at` are pinned** in `results.jsonl` (per config, by line) before
   `summarize`, since the only varying numbers of a result line are those two.
-- The hand-written parts that no test runs yet: the golden `testdata/summary.golden.md` does
-  not exist; until it does, the `summarize` step checks the header counts and then skips with
-  the command that creates it.
-
-Left to the operator, in `bench/`: `go test ./test -run TestPipeline -update`, read the golden
-it writes (8 pass, 6 fail, 2 infra_error; 2 replaced result lines) and commit it; then
-`go build ./...`, `go vet ./...`, `go test ./...` (also where bwrap is blocked, to see the
-skip message), `gofmt -l .` (it also looks into `testdata/fake`). Then tick BM12 in the README
-table, bring the `Status:` line to BM01–BM12 and delete this paragraph. TODO.md B2 stays `[~]`.
+- **The golden `testdata/summary.golden.md`** was written by `go test ./test -run TestPipeline
+  -update` and read: 8 pass, 6 fail, 2 infra_error, 2 replaced result lines; A passes both
+  tasks, B fails on the oracle and the answer, C on a regression, D's bugfix cells are the two
+  infra_error ones. A missing golden now fails the `summarize` step instead of skipping it, so
+  losing the file cannot quietly turn the comparison off.
+- Gates: `scripts/check.sh` green outside the sandbox (both modules, `TestPipeline` runs all
+  five steps); `go vet` and `go build` of `testdata/fake` clean; `-short` skips with its message.

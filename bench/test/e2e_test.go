@@ -456,11 +456,8 @@ func TestPipeline(t *testing.T) {
 			}
 		}
 		want, err := os.ReadFile(golden)
-		if errors.Is(err, os.ErrNotExist) {
-			t.Skipf("%s does not exist yet: run `go test ./test -run TestPipeline -update` in bench/, read the file and commit it", golden)
-		}
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("%v (go test ./test -run TestPipeline -update writes it)", err)
 		}
 		if string(got) != string(want) {
 			t.Errorf("summary.md differs from %s (go test ./test -update rewrites it)\n--- got\n%s\n--- want\n%s", golden, got, want)
