@@ -527,6 +527,10 @@ the verified range (MVP.md §41.4) and logged in, the toolchains of the task lan
 Python, Node). `orchbench` checks all of them before its first cell and refuses with what is
 missing — the same fail-fast idea as the orchestrator's.
 
+The container is `bench/docker/Dockerfile`, started only through `bench/docker/run.sh`
+(`run.sh build`, then `run.sh <tasks> <results> orchbench …`): only `ANTHROPIC_API_KEY`, the
+tasks read-only, the results and a cache volume go in (specs/benchmark/tasks/TASK-BM13-container.md).
+
 ### 13.2 The workflow in three steps
 
 | step | command | calls a model? | costs | how often |
