@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"slices"
@@ -53,6 +54,19 @@ func validateRun(run *domain.Run, runID string) error {
 	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
 		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
 	}
+	if o := run.Outcome; o != nil {
+		if err := validateOutcome(o, run.Status); err != nil {
+			return fmt.Errorf("outcome: %w", err)
+		}
+	}
+	if run.Commit != "" {
+		if !isCommitSHA(run.Commit) {
+			return fmt.Errorf("commit %q is not a full commit SHA", run.Commit)
+		}
+		if run.Status != domain.RunCompleted {
+			return fmt.Errorf("commit recorded on a %s run; only a completed run is committed", run.Status)
+		}
+	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)
@@ -87,6 +101,24 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	}
 	if exec.Attempt < 0 {
 		return fmt.Errorf("attempt is %d", exec.Attempt)
+	}
+	if exec.Usage != nil {
+		if err := exec.Usage.Validate(); err != nil {
+			return fmt.Errorf("usage: %w", err)
+		}
+	}
+	if exec.Call != nil {
+		if err := exec.Call.Validate(); err != nil {
+			return fmt.Errorf("call: %w", err)
+		}
+	}
+	if exec.Diff != nil {
+		if exec.Action != domain.ActionImplement {
+			return fmt.Errorf("diff recorded on a %s step", exec.Action)
+		}
+		if err := exec.Diff.Validate(); err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
 	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
@@ -178,4 +210,66 @@ func isSHA256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// validateOutcome checks the outcome run.json records: it describes the run's own status,
+// which is a terminal one, and its counters are not negative. Nothing saves a run whose
+// outcome is another status's — a resume drops the previous attempt's outcome before it
+// saves the run as running — so a mismatch is a corrupt run.json.
+func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
+	switch o.Status {
+	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
+	default:
+		return fmt.Errorf("status %q is not a terminal status", o.Status)
+	}
+	if o.Status != runStatus {
+		return fmt.Errorf("status %q is not the run's status %q", o.Status, runStatus)
+	}
+	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 {
+		return fmt.Errorf("negative counter")
+	}
+	if v := o.ReviewVerdict; v != "" && v != domain.ReviewPass && v != domain.ReviewFail {
+		return fmt.Errorf("unsupported review verdict %q", v)
+	}
+	if err := o.Usage.Validate(); err != nil {
+		return fmt.Errorf("usage: %w", err)
+	}
+	if o.Diff != nil {
+		if err := o.Diff.Validate(); err != nil {
+			return fmt.Errorf("diff: %w", err)
+		}
+	}
+	d := o.DecisionOverhead
+	if d.MS < 0 || d.Calls < 0 || d.CostUSD < 0 || math.IsNaN(d.CostUSD) || math.IsInf(d.CostUSD, 0) {
+		return fmt.Errorf("decision_overhead: negative or non-finite value")
+	}
+	return nil
+}
+
+// validateDecisionUsage checks the usage decision.json records for each decision call.
+func validateDecisionUsage(u *domain.DecisionUsage) error {
+	if u == nil {
+		return nil
+	}
+	calls := []struct {
+		name  string
+		usage *domain.Usage
+	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification}}
+	for _, c := range calls {
+		if c.usage == nil {
+			continue
+		}
+		if err := c.usage.Validate(); err != nil {
+			return fmt.Errorf("usage.%s: %w", c.name, err)
+		}
+	}
+	return nil
+}
+
+// isCommitSHA reports whether s is a full SHA-1 or SHA-256 object name in lowercase hex.
+func isCommitSHA(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	return strings.Trim(s, "0123456789abcdef") == ""
 }

@@ -1,0 +1,25 @@
+Runs report: runs
+runs: 4, unreadable: 0
+
+by status
+  completed      2
+  failed         1
+  stopped        1
+
+by complexity
+  complexity  runs    completed  total cost  mean cost  decision
+  simple         2    1 (50.0%)     $0.7500    $0.3750     13.3%
+  medium         1     0 (0.0%)     $1.0000    $1.0000     10.0%
+  complex        1   1 (100.0%)     $2.0000    $2.0000     10.0%
+
+by stage set
+  stage set                  runs    completed  total cost  mean cost  decision
+  implement → test              2    1 (50.0%)     $0.7500    $0.3750     13.3%
+  implement → test → review     2    1 (50.0%)     $3.0000    $1.5000     10.0%
+
+total
+         runs    completed  total cost  mean cost  decision
+  total     4    2 (50.0%)     $3.7500    $0.9375     10.7%
+
+Decisions report: runs
+no decision traces yet

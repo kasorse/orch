@@ -1,0 +1,77 @@
+# The B config of bench/configs/B.yaml rendered for the container: the file for
+# `orchestrator --config /opt/orche/rendered/B.yaml validate` (TASK-BM13). It differs from the
+# rendering of the tests (bench/internal/config/testdata/B.golden.yaml) only in test:, whose
+# binds are directories the image creates (see the Dockerfile): validate stats each bind before
+# it runs the sandbox probe, so a bind that does not exist fails it.
+version: 2
+
+decision:
+  provider: claude
+  model: haiku
+  timeout: 60s
+  complexity:
+    primary: choice
+    shadow: true
+  on_failure: fail
+  jev:
+    base_url: https://api.typesafe.ai
+    api_key_env: JEV_API_KEY
+    max_retries: 1
+    mock: false
+
+translation:
+  provider: claude
+  model: haiku
+  timeout: 60s
+
+policy:
+  context_depth:
+    project_threshold: 0.5
+  complexity:
+    complex: 0.40
+    medium: 0.50
+  stages:
+    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    force:
+      complex: [analysis, planning, review]
+
+context:
+  max_files: 20
+  max_bytes: 24576
+  extra_deny: []
+
+actions:
+  research:
+    provider: claude
+    model: sonnet
+    effort: medium
+  analyze:
+    provider: claude
+    model: sonnet
+  plan:
+    provider: claude
+    model: sonnet
+  implement:
+    provider: claude
+    model: "sonnet"
+  review:
+    provider: claude
+    model: sonnet
+    timeout: 20m
+
+test:
+  command: "go version && python3 --version && node --version"
+  sandbox: bwrap
+  ro_binds: ["/opt/orche/sandbox/ro"]
+  rw_binds: ["/opt/orche/sandbox/rw"]
+
+limits:
+  max_steps: 12
+  max_fix_iterations: 2
+
+execution:
+  timeout: "30m0s"
+
+security:
+  require_clean_worktree: true
+  protected_paths: []

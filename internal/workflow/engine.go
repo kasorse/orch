@@ -21,6 +21,17 @@ type StepOutcome struct {
 	ReviewResult *domain.ReviewResult
 	RawStdout    string
 	RawStderr    string
+	// Usage is what the step's provider call cost, when the CLI reported it - also on a
+	// failed call, so it is recorded whatever the outcome.
+	Usage *domain.Usage
+	// Call is the step's provider call beyond its cost (prompt, models, tools), also on a
+	// failed call.
+	Call *domain.CallReport
+	// Diff is what a completed implement changed, from git.
+	Diff *domain.StepDiff
+	// TreeBefore and TreeAfter are the git trees of the working tree around a completed
+	// implement, for showing its diff; not recorded.
+	TreeBefore, TreeAfter string
 }
 
 // StepExecutor actually runs one action. A non-nil error means a hard failure (e.g. a
@@ -166,6 +177,9 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		stepExec.ArtifactPath = outcome.ArtifactPath
 		stepExec.TestResult = outcome.TestResult
 		stepExec.ReviewResult = outcome.ReviewResult
+		stepExec.Usage = outcome.Usage
+		stepExec.Call = outcome.Call
+		stepExec.Diff = outcome.Diff
 		if outcome.Provider != nil {
 			stepExec.Provider = outcome.Provider
 		}

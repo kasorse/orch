@@ -41,6 +41,7 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 	var b strings.Builder
 	switch a := outcome.Artifact.(type) {
 	case domain.ResearchArtifact:
+		f.writeText(&b, "In short", a.SummaryShort)
 		f.writeText(&b, "Summary", a.Summary)
 		f.writeList(&b, "Findings", a.Findings)
 		f.writeList(&b, "Options", a.Options)
@@ -48,6 +49,7 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 		f.writeList(&b, "References", a.References)
 		f.writeText(&b, "Answer", a.Answer)
 	case domain.AnalysisArtifact:
+		f.writeText(&b, "In short", a.SummaryShort)
 		f.writeText(&b, "Summary", a.Summary)
 		f.writeText(&b, "Root cause", a.RootCause)
 		f.writeList(&b, "Affected files", a.AffectedFiles)
@@ -55,17 +57,20 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 		f.writeList(&b, "Risks", a.Risks)
 		f.writeText(&b, "Answer", a.Answer)
 	case domain.PlanArtifact:
+		f.writeText(&b, "In short", a.SummaryShort)
 		f.writeText(&b, "Summary", a.Summary)
 		f.writeNumbered(&b, "Steps", a.Steps)
 		f.writeList(&b, "Affected files", a.AffectedFiles)
 		f.writeList(&b, "Risks", a.Risks)
 		f.writeText(&b, "Answer", a.Answer)
 	case domain.ImplementationArtifact:
+		f.writeText(&b, "In short", a.SummaryShort)
 		f.writeText(&b, "Summary", a.Summary)
 		f.writeList(&b, "Changed files", a.ChangedFiles)
 		f.writeList(&b, "Tests added", a.TestsAdded)
 	}
 	if review := exec.ReviewResult; review != nil {
+		f.writeText(&b, "In short", review.SummaryShort)
 		f.writeText(&b, "Summary", review.Summary)
 		issues := make([]string, 0, len(review.Issues))
 		for _, issue := range review.Issues {

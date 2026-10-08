@@ -26,6 +26,7 @@ type fakeClient struct {
 	outputs []string // one per call, in order
 	err     error
 	block   bool
+	usage   *domain.Usage // reported with every call, failed ones included
 	calls   []provider.Request
 }
 
@@ -41,11 +42,11 @@ func (f *fakeClient) Execute(ctx context.Context, req provider.Request) (provide
 		return provider.Result{}, &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureTimeout, Err: ctx.Err()}
 	}
 	if f.err != nil {
-		return provider.Result{Stderr: "boom\n"}, f.err
+		return provider.Result{Stderr: "boom\n", Usage: f.usage}, f.err
 	}
 	out := f.outputs[0]
 	f.outputs = f.outputs[1:]
-	return provider.Result{Output: out}, nil
+	return provider.Result{Output: out, Usage: f.usage}, nil
 }
 
 type memLogger struct{ logs map[string]string }
@@ -358,5 +359,33 @@ func TestCLIFailureFollowsOnFailure(t *testing.T) {
 	_, err = svc.Classify(context.Background(), classification.Request{Text: "x"})
 	if code := exitcode.FromError(err); code != exitcode.ProviderExecution {
 		t.Errorf("on_failure fail: exit code %d, want %d (%v)", code, exitcode.ProviderExecution, err)
+	}
+}
+
+// Every call's usage is recorded: with the answer, or on the DecisionError of a call that
+// failed or whose answer did not parse (specs/benchmark/SPEC.md §11.1).
+func TestUsageRecorded(t *testing.T) {
+	cost := &domain.Usage{InputTokens: 10, OutputTokens: 20, CostUSD: 0.03}
+
+	client := &fakeClient{outputs: []string{contextOut}, usage: cost}
+	p, _ := newProvider(client, both)
+	d, err := p.ContextDepth(context.Background(), "x")
+	if err != nil || d.Usage != cost {
+		t.Errorf("context depth usage = %+v, %v", d.Usage, err)
+	}
+
+	client = &fakeClient{outputs: []string{"not json"}, usage: cost}
+	p, _ = newProvider(client, both)
+	_, err = p.Classify(context.Background(), projectInput())
+	var derr *apperr.DecisionError
+	if !errors.As(err, &derr) || derr.Kind != apperr.DecisionInvalidResponse || derr.Usage != cost {
+		t.Errorf("an unparsed answer's error = %+v", err)
+	}
+
+	client = &fakeClient{err: &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureExit}, usage: cost}
+	p, _ = newProvider(client, both)
+	_, err = p.ContextDepth(context.Background(), "x")
+	if !errors.As(err, &derr) || derr.Usage != cost {
+		t.Errorf("a failed call's error = %+v", err)
 	}
 }

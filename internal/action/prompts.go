@@ -17,6 +17,56 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 
 // finalAnswerRule is appended when the step is the workflow's last read-only step and
 // no development follows (TASKS.md В4): its answer is what the user gets back.
+// summaryShortRule asks every stage for a one-line "summary_short" next to "summary", for
+// an operator skimming the run.
+const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
+
+// implementSummaryShortRule is implement's variant: its "summary_short" becomes the
+// commit message offered at the end of the run (MVP.md §42.2).
+const implementSummaryShortRule = `"summary_short" is one line of at most 72 characters, without a trailing period, ` +
+	`saying what the change does in the imperative mood (for example "Exclude HTTP 404 from retries"): ` +
+	`it becomes the commit message.`
+
+// conventionsFiles are where a repository writes down how a change is finished. The task
+// rarely says it; implement is told to follow them and review to check them, so a missed
+// update goes back to implement instead of needing a stage of its own.
+const conventionsFiles = `the repository's own instructions (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, ` +
+	`and the README of the specification or task list the task comes from)`
+
+// implementConventionsRule asks implement to finish the change the way the repository says.
+const implementConventionsRule = `Finish the change the way ` + conventionsFiles + ` say a change is finished: ` +
+	`update the documentation the change makes out of date, and the task tracking they require ` +
+	`(for example marking the task done), as part of this change.`
+
+// reviewConventionsRule asks review to check the same, and says what a miss weighs.
+const reviewConventionsRule = `Also check the change against ` + conventionsFiles + `. ` +
+	`A documentation or task-tracking update they require for this change and the diff lacks is a missed requirement of the task (high). ` +
+	`Other documentation the change leaves out of date is medium.
+
+`
+
+// implementOperatorRule tells implement what it cannot do: its authority (edit) has no
+// shell, and the test command is the only thing the run executes (MVP.md §17, §38). A step
+// that needs anything else is the operator's, reported rather than claimed done.
+const implementOperatorRule = `You can read and edit files; you cannot run commands, use installed tools or reach the network. ` +
+	`After you, the orchestrator runs the configured test command from the repository root, and nothing else. ` +
+	`A step the task or the repository's instructions require that needs running something else (a check against an ` +
+	`installed tool, a build, lint or format gate the test command does not run) is left to the operator: never claim ` +
+	`it was done, name it in "summary" as left to the operator, and leave the task tracking that waits on it open.`
+
+// reviewOperatorRule keeps review from failing on what another implement attempt cannot do:
+// sent back as high, such a step loops until max_fix_iterations. It also keeps the reviewer
+// from reading more into the test result than the command covers.
+const reviewOperatorRule = `Implement can only read and edit files: it cannot run commands, use installed tools or reach the network. ` +
+	`The run executes nothing but the test command shown under "Latest test result", from the repository root; ` +
+	`do not assume it covers what it does not run (another module, a linter, a formatter, a live check). ` +
+	`A requirement that can only be met by running something else cannot be fixed by another implementation attempt: ` +
+	`report it as medium with "operator: " at the start of its description, never as critical or high. ` +
+	`The same holds for task tracking left open because it waits on such a step. ` +
+	`A claim in the diff or the implementation summary that such a step was done is not evidence that it was.
+
+`
+
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
@@ -29,7 +79,8 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: research\n\n")
 	b.WriteString("Research the external knowledge the following software engineering task needs: approaches, libraries, tools, alternatives and their trade-offs. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"findings\": [\"...\"],\n  \"options\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"references\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	return b.String()
@@ -45,7 +96,8 @@ func BuildAnalyzePrompt(in AnalyzePromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: analyze\n\n")
 	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
@@ -63,7 +115,8 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: plan\n\n")
 	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
@@ -124,7 +177,10 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: implement\n\n")
 	b.WriteString("Implement the following software engineering task by modifying the code in the current repository directly. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
+	b.WriteString(implementSummaryShortRule + "\n\n")
+	b.WriteString(implementConventionsRule + "\n\n")
+	b.WriteString(implementOperatorRule + "\n\n")
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
@@ -161,6 +217,20 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	}
 
 	return b.String()
+}
+
+// TestOutputCut reports whether BuildImplementPrompt(in) shortens the test output it
+// embeds, so the step can record it.
+func TestOutputCut(in ImplementPromptInput) bool {
+	r := in.LastTestResult
+	if r == nil {
+		r = in.PreRunFailure
+	}
+	if r == nil || in.MaxTestOutput <= 0 {
+		return false
+	}
+	_, _, omitted := BoundTestOutput(r.Stdout, r.Stderr, in.MaxTestOutput)
+	return omitted.Any()
 }
 
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
@@ -210,9 +280,12 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	b.WriteString(summaryShortRule + "\n\n")
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
+	b.WriteString(reviewConventionsRule)
+	b.WriteString(reviewOperatorRule)
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
 

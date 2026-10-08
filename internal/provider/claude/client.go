@@ -182,12 +182,14 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 
 	// The answer is the stream's result event; anything else (an older CLI, a test
 	// double) is taken as printed.
+	// A call that ended without a result event keeps its raw stream as the output, for the
+	// logs, and the usage its messages add up to.
 	stdout := res.Stdout
-	var usage *domain.Usage
-	if text, u, _, ok := parseStream(res.Stdout); ok {
-		stdout, usage = text, u
-		if req.Stream != nil && text != "" {
-			_, _ = req.Stream.Write([]byte(strings.TrimRight(text, "\n") + "\n"))
+	rep := parseStream(res.Stdout)
+	if rep.ok {
+		stdout = rep.text
+		if req.Stream != nil && rep.text != "" {
+			_, _ = req.Stream.Write([]byte(strings.TrimRight(rep.text, "\n") + "\n"))
 		}
 	}
 
@@ -196,7 +198,8 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		Stderr:   res.Stderr,
 		ExitCode: res.ExitCode,
 		Duration: res.Duration,
-		Usage:    usage,
+		Usage:    rep.usage,
+		Call:     rep.call,
 	}
 
 	if err != nil {

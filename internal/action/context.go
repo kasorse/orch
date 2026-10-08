@@ -94,6 +94,13 @@ type Dispatcher struct {
 	pendingTestFailure  *domain.TestResult
 	pendingReviewIssues []domain.ReviewIssue
 
+	// stepUsage and stepCall are the usage and the report of the current step's provider
+	// call; stepTruncated is what its prompt had cut, set by the action before the call.
+	// Execute resets all three.
+	stepUsage     *domain.Usage
+	stepCall      *domain.CallReport
+	stepTruncated []domain.PromptPart
+
 	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
 	// is shown to implement until the first test step has run.
 	preRunFailure *domain.TestResult
@@ -125,8 +132,9 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 
 	stopHeartbeat := d.startHeartbeat()
 	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
+	prompt += extensionsHint(ext)
 	result, err := client.Execute(ctx, provider.Request{
-		Prompt: prompt + extensionsHint(ext), Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
+		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority:  authority,
 		DenyRead:   d.denyRead(),
 		Activity:   provider.ActivityHook(d.Observer),
@@ -134,6 +142,13 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	})
 	stopHeartbeat()
 	provider.ReportUsage(d.Observer, result)
+	d.stepUsage = result.Usage
+	d.stepCall = &domain.CallReport{}
+	if result.Call != nil {
+		*d.stepCall = *result.Call
+	}
+	d.stepCall.PromptBytes = len(prompt)
+	d.stepCall.Truncated = d.stepTruncated
 
 	if d.Observer != nil {
 		d.Observer.ProviderCallFinished(pm.Provider, pm.Model, time.Since(start), err)

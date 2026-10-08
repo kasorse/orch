@@ -1,0 +1,4 @@
+# A: bare Claude Code, the baseline every other config is measured against (SPEC.md §8).
+kind: claude
+tools: [Read, Grep, Glob, Edit, Write, Bash]
+prompt_suffix: "Run the tests with: {{.TestCommand}}"

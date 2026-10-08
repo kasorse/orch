@@ -95,7 +95,7 @@ func testConfig() *config.Config {
 func newDispatcher(client provider.Client) *Dispatcher {
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, client)
-	d := New(testConfig(), registry, &repository.Repository{Dir: "/repo"}, nil)
+	d := New(testConfig(), registry, &repository.Repository{Dir: "/repo", Executor: &execution.FakeProcessExecutor{}}, nil)
 	d.Guard = &fakeGuard{}
 	return d
 }

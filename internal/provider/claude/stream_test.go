@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -64,5 +65,74 @@ func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 	_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err == nil || !strings.Contains(err.Error(), "overloaded_error") {
 		t.Errorf("expected the API error text in %v", err)
+	}
+}
+
+// The result event of claude 2.1.293 also says which models answered, what each cost, and
+// how long the call waited on the API; tool calls are counted from the assistant messages.
+func TestParseStream_ReportsModelsAPITimeAndTools(t *testing.T) {
+	stdout := `{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":3},"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}
+{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":9},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{}}]}}
+{"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{}},{"type":"tool_use","id":"t3","name":"Edit","input":{}}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"done","total_cost_usd":0.5,"num_turns":3,"duration_api_ms":4200,"usage":{"input_tokens":10,"output_tokens":50},"modelUsage":{"claude-sonnet-5-5":{"costUSD":0.45},"claude-haiku-5-5":{"costUSD":0.05}}}
+`
+	rep := parseStream(stdout)
+	if !rep.ok || rep.text != "done" || rep.usage == nil || rep.usage.Partial || rep.usage.OutputTokens != 50 || rep.usage.CostUSD != 0.5 {
+		t.Fatalf("report = %+v, usage %+v", rep, rep.usage)
+	}
+	c := rep.call
+	if c == nil || c.APIMS != 4200 {
+		t.Fatalf("call = %+v", c)
+	}
+	wantModels := []domain.ModelUse{{Model: "claude-haiku-5-5", CostUSD: 0.05}, {Model: "claude-sonnet-5-5", CostUSD: 0.45}}
+	if !reflect.DeepEqual(c.Models, wantModels) {
+		t.Errorf("models = %+v, want %+v", c.Models, wantModels)
+	}
+	// A tool_use block repeated under the same id is one call.
+	if want := map[string]int{"Read": 2, "Edit": 1}; !reflect.DeepEqual(c.Tools, want) {
+		t.Errorf("tools = %v, want %v", c.Tools, want)
+	}
+}
+
+// A call killed before its result event (a timeout) still reports what its streamed
+// messages add up to, marked partial: each message once, at its largest counters.
+func TestParseStream_PartialUsageWithoutResult(t *testing.T) {
+	stdout := `{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}
+{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":100,"cache_creation_input_tokens":40},"content":[{"type":"thinking","thinking":""}]}}
+{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":7,"cache_read_input_tokens":100,"cache_creation_input_tokens":40},"content":[{"type":"tool_use","id":"t1","name":"Write","input":{}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result"}]}}
+{"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":200,"cache_creation_input_tokens":5},"content":[{"type":"text","text":"half"}]}}
+{"type":"assistant","message":{"id":"m3","model":"claude-sonnet-5-5","usage":{"input_tokens":1,"output_to`
+	rep := parseStream(stdout)
+	if rep.ok {
+		t.Fatal("a stream without a result event must not give an answer")
+	}
+	want := domain.Usage{InputTokens: 3, OutputTokens: 9, CacheReadTokens: 300, CacheCreationTokens: 45, Turns: 2, Partial: true}
+	if rep.usage == nil || *rep.usage != want {
+		t.Fatalf("usage = %+v, want %+v", rep.usage, want)
+	}
+	if c := rep.call; c == nil || !reflect.DeepEqual(c.Models, []domain.ModelUse{{Model: "claude-sonnet-5-5"}}) || c.Tools["Write"] != 1 || c.APIMS != 0 {
+		t.Errorf("call = %+v", rep.call)
+	}
+}
+
+// A timeout keeps the raw stream as the output (for the logs) and still reports the
+// partial usage with the error.
+func TestExecute_TimeoutReportsPartialUsage(t *testing.T) {
+	stream := `{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":4,"output_tokens":1},"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}` + "\n"
+	fake := &execution.FakeProcessExecutor{
+		Results: []execution.ProcessResult{{Stdout: stream, ExitCode: -1}},
+		Errs:    []error{context.DeadlineExceeded},
+	}
+	res, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "sonnet", Authority: domain.AuthorityRead})
+	if err == nil {
+		t.Fatal("expected the timeout")
+	}
+	if res.Output != stream {
+		t.Errorf("Output = %q, want the raw stream", res.Output)
+	}
+	if res.Usage == nil || !res.Usage.Partial || res.Usage.InputTokens != 4 || res.Call == nil || res.Call.Tools["Read"] != 1 {
+		t.Errorf("usage = %+v, call = %+v", res.Usage, res.Call)
 	}
 }

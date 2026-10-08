@@ -17,6 +17,16 @@ func (d *Dispatcher) Execute(ctx context.Context, actionType domain.ActionType, 
 	ctx, cancel := d.withActionTimeout(ctx, actionType)
 	defer cancel()
 
+	// Every action makes at most one provider call; call records its usage here, so the
+	// outcome carries it whichever return path the action took (failures included).
+	d.stepUsage, d.stepCall, d.stepTruncated = nil, nil, nil
+	outcome, err := d.execute(ctx, actionType, run)
+	outcome.Usage = d.stepUsage
+	outcome.Call = d.stepCall
+	return outcome, err
+}
+
+func (d *Dispatcher) execute(ctx context.Context, actionType domain.ActionType, run *domain.Run) (workflow.StepOutcome, error) {
 	switch actionType {
 	case domain.ActionResearch:
 		return d.executeResearch(ctx, run)

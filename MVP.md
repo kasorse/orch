@@ -176,12 +176,22 @@ orchestrator run --allow-red-tests "<task>"
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
+orchestrator runs report [--dir <path>]
 orchestrator decisions report
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
 
-`decisions report` reads the `decision.json` of every run under `.orchestrator/runs/` and
+`runs report` reads the run directories under `.orchestrator/runs/` (or, with `--dir <path>`,
+every directory holding a `run.json` anywhere under `<path>`, so it also reports the run
+directories a benchmark collected, `bench/README.md`) and prints: the runs by status; cost,
+success and the share of cost spent deciding, by complexity and by stage set (from `outcome`
+and `decision.json`, §21; both are recomputed for runs written before they were recorded);
+the unreadable run directories; then the complexity comparison of `decisions report`. It
+needs no configuration and calls nothing, and nothing decides anything from it.
+
+`decisions report` is the older name, kept as an alias that prints only the last part: it
+reads the `decision.json` of every run under `.orchestrator/runs/` and
 compares the two complexity questions (§8.2): how often `choice` and `score` select the
 same level, the 3×3 matrix of their selections, each one's mean confidence, and the runs
 where they disagree. It skips manual (`--stage`) runs, runs chosen by hand after a provider
@@ -993,11 +1003,32 @@ The read-only artifacts (research, analysis, plan) carry an optional `answer`: t
 to the user when that step is the last read-only step of a workflow without
 development (§10).
 
+Every stage's artifact, and the review result, also carries `summary_short`: `summary` in
+one line of at most 72 characters, for an operator skimming the run (it is printed first,
+as `In short`). Implement's is asked for in the imperative mood and becomes the commit
+message (§42.2). It is optional: without implement's, the operator is asked to write the
+commit message.
+
+Implement is also told to finish the change the way the repository's own instructions say
+(`CLAUDE.md`, `AGENTS.md`, `CONTRIBUTING.md`, the README of the specification or task list
+the task comes from): the documentation the change makes out of date and the task tracking
+they require (marking the task done) belong to the change. Review checks the same (§19).
+There is no documentation stage: the stage set is the decision's (§9), and a missed update
+goes back to implement like any other missed requirement.
+
+Implement is also told what it cannot do: its authority (§38) has no shell, and the run
+executes nothing but the test command. A step the task or the repository requires that needs
+running something else - a live check against an installed tool, a build, lint or format
+gate the test command does not run - is the operator's: implement names it in `summary` as
+left to the operator, never claims it done, and leaves the task tracking that waits on it
+open. The way to have such a gate checked by the run is to make it part of `test.command`.
+
 Example analysis artifact:
 
 ```json
 {
   "summary": "Retry policy retries all non-2xx responses.",
+  "summary_short": "Every non-2xx response is retried",
   "root_cause": "404 is not excluded.",
   "affected_files": [
     "internal/http/client.go"
@@ -1012,6 +1043,7 @@ Example implementation artifact:
 ```json
 {
   "summary": "Excluded HTTP 404 from retries.",
+  "summary_short": "Exclude HTTP 404 from retries",
   "changed_files": [
     "internal/http/client.go"
   ],
@@ -1105,6 +1137,7 @@ Require structured output:
 {
   "status": "fail",
   "summary": "404 is still retried in one path.",
+  "summary_short": "404 still retried in one path",
   "issues": [
     {
       "severity": "high",
@@ -1144,6 +1177,16 @@ The review prompt states this rule to the reviewer, with a rubric for each level
 (critical: breaks the build, data or security; high: incorrect behavior, missed requirement
 or regression; medium: real but non-blocking; low: style), so the severity it picks is the
 one that decides. The outcome is still `ReviewResult.Decide()`, never the model's `status`.
+It also checks the change against the repository's own instructions (§17): a documentation
+or task-tracking update they require and the diff lacks is a missed requirement (high), so
+the change goes back to implement; other documentation left out of date is medium.
+A requirement only running something other than the test command can meet (§17), and task
+tracking left open because it waits on one, is never critical or high: another
+implementation attempt cannot do it, and failing on it would only loop until
+`max_fix_iterations`. Review reports it as medium with `operator: ` at the start of its
+description, so it reaches the operator among the warnings. Review is also told that the test
+result covers only what the test command runs, from the repository root, and that a claim in
+the diff or the summary that such a step was done is not evidence.
 
 If review returns `fail`:
 
@@ -1244,6 +1287,7 @@ Location:
       project_context.json     # exactly the context sent, only when one was sent
       workflow.json
       ticket.json              # the fetched Jira issue, run --jira only (§39.7)
+      summary.md               # the run's report for a reader, once it ends (§43)
 
       artifacts/
         <NNN>-<action>.json
@@ -1270,9 +1314,11 @@ At minimum save:
   error in the last case), the model version that answered, the pre-check distribution
   and depth, both complexity questions with their selections and agreement, each stage's
   probability, threshold, forced flag, enabled flag and reason, the workflow, and the
-  latency of each decision step;
+  latency and, where the provider reported one, the usage (`usage.translation`,
+  `usage.context_depth`, `usage.classification`: tokens, cost, turns) of each decision call;
 * workflow;
-* executed steps;
+* executed steps, each AI step with its `usage` (tokens, cost, turns; `partial` for a call cut
+  off before its final report, §43.3) when the CLI reported one;
 * provider/model and authority for each AI step (`provider.authority`, §38);
 * the restore point (`pre_run_ref`) recorded before the first step, and with it
   `head_ref` and `resume_baseline` (§38.3);
@@ -1282,7 +1328,17 @@ At minimum save:
 * review result;
 * final run status;
 * failure reason if any;
-* execution mode the run actually ran under (`mode`).
+* `outcome`, written to `run.json` whenever the run reaches a terminal status (and again
+  after a resume, over the whole history): `status`, `failure_reason`, `fix_iterations`,
+  `tests_passed_final` (the last test step's result, absent without one), `review_verdict`,
+  `duration_ms`, `usage` (summed over the steps and the decision calls, with `calls`) and
+  `decision_overhead` (`cost_usd`, `ms`, `calls` of the decision rounds; zero for
+  `--stage`), plus the fields of §43.3. It is derived data, a record that nothing decides
+  from; `runs report` recomputes it for runs written before it existed and for runs that died
+  without a terminal status;
+* execution mode the run actually ran under (`mode`);
+* each step's call report, an implement's diff from git, and the run's times, cost and net
+  change (§43).
 
 From `decision.json` alone it must be possible to tell why each stage ran.
 
@@ -1588,7 +1644,7 @@ internal/
   repository/       git (read-only helpers)
   action/           step executors and prompt builders
   testexec/         test runner
-  report/           decisions report over the persisted traces (§4); imports only domain
+  report/           runs report and decisions report over the persisted runs (§4); imports only domain
   interaction/      approval, mode select, manual-mode gate, manual choice
   persistence/      run directory
   logging/          console output
@@ -2174,6 +2230,13 @@ per-tool-call approval during a step
 OS-level sandboxing of provider CLIs (the test step's optional bwrap sandbox, §38.3, is
 the one exception)
 ```
+
+The one thing near "model benchmarking" that exists lives in `bench/`, outside the core: a
+separate Go module (`orchbench`, `bench/README.md`, design in `specs/benchmark/`) that runs
+`orchestrator` and bare Claude Code as black boxes over replayed commits and reports pass
+rate, cost and time. It imports nothing of the core, reads only what a run writes (`run.json`,
+`decision.json`), and never selects, routes or changes a model; the core records what a run
+cost and how it ended (§21) because an operator needs that too.
 
 Avoid introducing abstractions only required for these future features.
 
@@ -3256,3 +3319,218 @@ result gains `diff`. Logs gain `logs/pre-run-test.{stdout,stderr}.log`.
 * Comparing failing test names between the pre-run test and the test step: a red suite is
   either refused or the task.
 * Files the tests create that are not ignored appear in the review diff.
+
+# 42. Commit at the end of a run
+
+Normative. A completed run's changes stay in the working tree until the operator commits
+them; at the end of the run the orchestrator offers to do it, and commits only on an
+explicit yes.
+
+## 42.1 When it is offered
+
+After the engine has finished and the final answer (if any) is printed, `run` and `resume`
+(the shared tail, `executeWorkflow`) offer a commit when all of these hold:
+
+* the operator is at the terminal: `--mode auto` was not given and stdin is a terminal.
+  `--mode auto` never asks and never commits;
+* the run is `completed` and its workflow contains `implement`;
+* the run started from a clean commit: `pre_run_ref` is set and equals `head_ref`. A run
+  started on uncommitted changes (`security.require_clean_worktree: false`) would commit
+  them together with its own, so it is told to commit by hand instead;
+* the repository still matches the run-start baseline (`action.CheckBaseline` over
+  `resume_baseline`): the git fingerprint first, before any `git status`, then the
+  protected paths. `git commit` runs the repository's hooks, so they must be the ones the
+  run started with;
+* `git status` (the runs directory excluded) shows changes. Otherwise it says
+  `No changes to commit.`
+
+Anything that stops the offer is printed as `Not offering a commit: <why>`; none of it
+changes the run's status or exit code.
+
+## 42.2 The question
+
+```
+Changes:
+   M fixture.go
+Warning: the review did not pass: <summary>
+Warning: a likely secret was added at cfg.go:3 (aws-access-key)
+
+Commit message:
+  Fix Add to use +
+
+  Orchestrator-Run: <run-id>
+
+Commit to <branch>? [y]es / [N]o / [e]dit message:
+```
+
+* Warnings: a failing last review verdict (a run that completes with the verdict,
+  §11; its `summary_short`, else its `summary`) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
+* The message is written by Go, with no provider call: the header is the last
+  implementation's `summary_short` (restored from its artifact on resume), cut to its first
+  line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
+  `run --jira` task. What the cut left out goes into the body; the body ends with the
+  `Orchestrator-Run: <run-id>` trailer.
+* Without a `summary_short` (the model left it out, or no implementation artifact is
+  left) no message is proposed: the orchestrator says
+  `The implementation proposed no commit message.` and asks for one line; an empty answer
+  commits nothing, a written one is shown with the trailer and still needs the `y`.
+* The default (an empty answer) is no. `e` replaces the header and asks again. No answer
+  (stdin closed) is no.
+
+## 42.3 The commit
+
+`Repository.CommitAll` stages the whole tree — tracked changes, deletions and untracked
+files, minus ignored ones and the runs directory — with `git add -A`, and runs
+`git commit --file=-` (the message on stdin) on the current branch, as the user's own git
+identity and with the repository's hooks. It is the one call that writes the user's index
+and a branch. If the commit fails (a hook refuses, no identity), the changes stay staged and
+the error is printed; the run stays `completed`.
+
+## 42.4 Persistence
+
+`run.json` gains `commit`: the full SHA of the commit, set only after it succeeded.
+Validated on load: a full lowercase SHA, on a `completed` run only. A completed run is not
+resumable (§37), so the moved HEAD never meets a resume.
+
+## 42.5 Not covered
+
+* A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
+* Committing a part of the changes: the operator commits by hand when they want that.
+
+---
+
+# 43. Run summary and step metrics
+
+Normative. Every run that ends says, per step and in total, how long it took, what it cost,
+which model answered, how big its prompt was and whether anything in it was cut, which
+tools the model used, and what an implement step changed. `run.json` records it (the
+source of truth); `summary.md` renders it for a reader. Nothing decides anything from these
+numbers: they are a record, like `outcome` (§21).
+
+## 43.1 Where it comes from
+
+| What | Source | Trust |
+| --- | --- | --- |
+| Step times | the engine's clock around each step (`started_at`, `finished_at`) | exact |
+| Tokens, cost, turns | the provider CLI's final report (claude: the `result` event) | as reported |
+| Models, API time | the same report (`modelUsage`, `duration_api_ms`) | as reported |
+| Tool calls | the model's `tool_use` blocks in the CLI's stream | as reported |
+| Prompt size, cuts | the orchestrator, from the prompt it sent | exact |
+| Code change | `git diff --numstat` between trees, after the guard passed the step | exact |
+
+Only claude reports models, API time and tool calls; codex and gemini steps leave them
+empty. A call that ends before its final report (a timeout, a crash, a kill) is still
+counted: its usage is summed from the assistant messages it streamed until then and marked
+`partial` (§43.3).
+
+## 43.2 summary.md
+
+Written to `.orchestrator/runs/<run-id>/summary.md` whenever a run reaches a terminal
+status (`completed`, `failed`, `stopped`), together with `outcome`; a resume that ends
+rewrites it over the whole history. It is rendered by Go from `run.json` and
+`decision.json` with no provider call, is never read back, and is not a resume input.
+Failing to write it fails nothing. Values that do not apply or are not known are `—`.
+
+### Totals
+
+| Field | Meaning |
+| --- | --- |
+| Task | The first line of the task, at most 120 characters. |
+| Source | Where a `run --jira` task came from: kind, issue key, URL. Absent for a typed task. |
+| Started | When the run was created (`created_at`), before the decision. |
+| Status | The run's final status; for a failed or stopped run, followed by the reason's telling line (a provider error's `failure:` line, otherwise its first line). |
+| Workflow | The workflow's actions in order. |
+| Decision | Who decided (`jev`, `llm`, `user`; `manual (run --stage)`), the decision provider and model that answered, the complexity, and whether the operator edited the decision on the review screen. |
+| Steps | Executions recorded (every attempt, retries and resumes included) and the fix iterations. |
+| Wall time | `outcome.duration_ms`: from the first step's start to the last step's finish, pauses between a stop and its resume included. The decision and the approval are not in it. |
+| Active time | `outcome.active_ms`: the sum of the steps' own durations, without those pauses. |
+| Decision time | `outcome.decision_overhead.ms`: the provider-bound decision steps (translation, pre-check, context, classification), never the operator's thinking time. |
+| Cost | `outcome.usage.cost_usd`: every provider call of the run, the decision calls included. With partial calls it reads `$X or more: N calls ended without a report`, since their cost is unknown. |
+| Decision cost | The part of the cost spent deciding the workflow, and how many decision calls reported usage. |
+| Tokens | Summed over every call: `prompt` is every input token (`input` uncached + `cache read` + `cache write`); `output` the generated tokens. |
+| Provider calls | Calls that reported usage (`outcome.usage.calls`). |
+| Tests (last run) | The last test step's result: `passed`, `failed`, or `not run`. |
+| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue fails). |
+| Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
+| Commit | The commit the operator approved at the end (§42), when there is one. |
+
+### Steps
+
+One row per execution, in order.
+
+| Column | Meaning |
+| --- | --- |
+| # | The execution's index; it is also the `NNN` of its artifact and log files. |
+| Step | The action, with `(resume N)` when the N-th resume ran it. |
+| Result | `completed` or `failed`; a test's `passed` / `failed (exit N)`; a review's verdict and issue count. |
+| Time | The step's own duration, git and guard checks included. |
+| API time | `call.api_ms`: how long the call waited on the model API. Time minus API time went to tools, the CLI and the orchestrator's checks. |
+| Cost | `usage.cost_usd`; `unknown` for a partial call. |
+| Prompt tokens | Every input token of the call: uncached, cache read and cache write together. |
+| Output tokens | Generated tokens; `≥ N` for a partial call, whose output count is a lower bound. |
+| Turns | API round trips the CLI made (`num_turns`; for a partial call, the messages streamed). |
+| Model | The model(s) that answered (`call.models`), e.g. `claude-sonnet-5-5` for the configured `sonnet`; for a run recorded before §43, the configured name followed by `(configured)`. |
+| Prompt | The size of the prompt sent on stdin, with `cut: <parts>` when `limits.prompt` shortened something (§41.2): `test_output` (a failing test's output in the implement prompt), `diff` (the review diff, where a file's diff did not fit or a file was not listed). |
+
+### Tool calls
+
+One row per step whose model called tools: the total and the count per tool, the most used
+first. MCP tools appear under their full name (`mcp__<server>__<tool>`).
+
+### Code changes
+
+One row per implement step with a diff.
+
+| Column | Meaning |
+| --- | --- |
+| This step | What the step changed: the working tree after the call against the tree before it. |
+| Run so far | The working tree after the step against `pre_run_ref`. |
+| Changed, not in changed_files | Files git shows the step changed that the artifact's `changed_files` and `tests_added` do not name. |
+| In changed_files, unchanged | Files the artifact names that the step did not change (a rename shows its new name in git, so an artifact naming the old one lands here). |
+
+Both lists are empty when the artifact has no `changed_files` at all (the model did not
+answer in JSON), and hold at most 50 paths each.
+
+### Notes
+
+One line per partial call (what its numbers mean) and per failed step (its telling error
+line). The full error is in `run.json` and the step's logs.
+
+## 43.3 run.json fields
+
+Added to each execution, and to `outcome`. All are optional on load, so a run written
+before §43 still loads; each is validated strictly when present (counters not negative,
+costs finite, names printable and bounded, paths clean and repository-relative, `diff` on an
+implement step only).
+
+| Field | Meaning |
+| --- | --- |
+| `executions[].usage.partial` | The call ended before the CLI's final report: the counters are summed from the messages it streamed, each message once at its largest values. Input and cache counters are each message's own; `output_tokens` is a lower bound (the stream reports it as a message starts); `cost_usd` is unknown and 0. |
+| `executions[].call.prompt_bytes` | The size of the prompt sent on stdin, extensions hint included. |
+| `executions[].call.truncated` | The prompt parts `limits.prompt` cut: `test_output`, `diff`. Absent when nothing was. |
+| `executions[].call.models[]` | `{model, cost_usd}` for each model that answered, sorted by name; `cost_usd` is absent when not reported. |
+| `executions[].call.api_ms` | Time spent waiting on the model API (claude's `duration_api_ms`). |
+| `executions[].call.tools` | Tool name → number of calls. |
+| `executions[].diff.step` | `{files, insertions, deletions, binary}` of the step's own change. Binary files count in `files` and `binary`, never in the line counts. |
+| `executions[].diff.run` | The same, for the working tree after the step against `pre_run_ref`; absent without a restore point. |
+| `executions[].diff.not_reported`, `.reported_unchanged` | As in §43.2's Code changes. |
+| `outcome.duration_ms` | Wall time of the steps, as above. |
+| `outcome.active_ms` | Sum of the steps' durations. |
+| `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
+| `outcome.diff` | The run's net change: the last implement's `diff.run`. |
+
+A step's `diff` is recorded only for an implement whose call succeeded and whose changes
+the guard passed (§38.3): git runs on the working tree only after the fingerprint and the
+protected paths are checked. The trees are written with a throwaway index, so the working
+tree, the user's index and every ref are untouched. A failed implement, whose files may
+have changed, records no diff; the next completed implement's `diff.run` covers them.
+
+## 43.4 Not covered
+
+* An estimate of a partial call's cost or output tokens: no prices are kept in the
+  orchestrator, and a guess would look like a measurement.
+* Models, API time and tool calls for codex and gemini: their CLIs do not report them in a
+  form the adapters read.
+* The changes a test command makes, and a diff for research/analyze/plan (read-only).
+* A machine-readable summary beyond `run.json` itself; `orchestrator runs report`
+  aggregates over many runs.

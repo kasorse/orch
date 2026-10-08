@@ -182,10 +182,12 @@ func TestScenario18_ResumeInterruptedRun(t *testing.T) {
 	cfg := jevConfig(t, j)
 	failed := failedAtImplement(t, repoDir, cfg)
 
-	// What a process killed mid-run leaves: status running, no reason, no lock held.
+	// What a process killed mid-run leaves: status running, no reason, no outcome, no lock
+	// held.
 	editRunJSON(t, repoDir, func(run map[string]any) {
 		run["status"] = "running"
 		delete(run, "failure_reason")
+		delete(run, "outcome")
 	})
 
 	stdout, stderr, err := resume(t, repoDir, cfg, failed.ID)

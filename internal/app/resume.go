@@ -119,7 +119,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 			// The process died between persisting the last step and persisting the run's
 			// completion; nothing is left to run.
 			run.Status = domain.RunCompleted
-			if err := store.SaveRun(run); err != nil {
+			if err := writeOutcome(store, run); err != nil {
 				return err
 			}
 			return reportCompleted(s)

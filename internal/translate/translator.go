@@ -55,6 +55,9 @@ type Result struct {
 	Provider   string        `json:"provider,omitempty"`
 	Model      string        `json:"model,omitempty"`
 	Latency    time.Duration `json:"latency,omitempty"`
+	// Usage is what the translation call cost, when the CLI reported it (also for a
+	// translation that failed its check); the decision trace records it.
+	Usage *domain.Usage `json:"-"`
 }
 
 // Translator translates via one provider CLI call (translation.provider/model).
@@ -83,7 +86,7 @@ func (t *Translator) Prepare(ctx context.Context, runID, request string) (Result
 	res.Provider, res.Model = t.ProviderID, t.Model
 
 	start := time.Now()
-	out, err := t.call(ctx, runID, request)
+	out, err := t.call(ctx, runID, request, &res)
 	res.Latency = time.Since(start)
 	if ctx.Err() != nil {
 		return res, ctx.Err()
@@ -101,7 +104,8 @@ func (t *Translator) Prepare(ctx context.Context, runID, request string) (Result
 	return res, nil
 }
 
-func (t *Translator) call(ctx context.Context, runID, request string) (string, error) {
+// call runs the CLI and records the call's usage on res.
+func (t *Translator) call(ctx context.Context, runID, request string, res *Result) (string, error) {
 	callCtx, cancel := context.WithTimeout(ctx, t.Timeout)
 	defer cancel()
 
@@ -117,6 +121,7 @@ func (t *Translator) call(ctx context.Context, runID, request string) (string, e
 	})
 	stopHeartbeat()
 	provider.ReportUsage(t.Observer, result)
+	res.Usage = result.Usage
 	if t.Observer != nil {
 		t.Observer.ProviderCallFinished(t.ProviderID, t.Model, time.Since(start), err)
 	}

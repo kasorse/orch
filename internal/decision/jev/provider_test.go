@@ -357,3 +357,41 @@ func TestNewProvider_Validation(t *testing.T) {
 		t.Errorf("valid provider: %v, %v", p, err)
 	}
 }
+
+// Jev reports tokens and no cost; the provider records them with the answer, and on the
+// DecisionError of an answer that did not map (the request was still paid for). The mock's
+// numbers are invented and never recorded (specs/benchmark/SPEC.md §11.1).
+func TestProvider_RecordsUsage(t *testing.T) {
+	stub := &stubClient{resp: loadResponse(t, "precheck_response.json")}
+	d, err := newTestProvider(t, stub, bothSources).ContextDepth(context.Background(), "Add a cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Usage == nil || *d.Usage != (domain.Usage{InputTokens: 120, OutputTokens: 1}) {
+		t.Errorf("context depth usage = %+v", d.Usage)
+	}
+
+	stub = &stubClient{resp: loadResponse(t, "classification_response.json")}
+	tc, err := newTestProvider(t, stub, bothSources).Classify(context.Background(),
+		domain.ClassificationInput{Request: "Add a cache", ContextDepth: domain.ContextDepthProject, Project: testProject()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tc.Usage == nil || *tc.Usage != (domain.Usage{InputTokens: 1450, OutputTokens: 8}) {
+		t.Errorf("classification usage = %+v", tc.Usage)
+	}
+
+	resp := loadResponse(t, "precheck_response.json")
+	delete(resp.Answers, "context_depth")
+	_, err = newTestProvider(t, &stubClient{resp: resp}, bothSources).ContextDepth(context.Background(), "x")
+	var derr *apperr.DecisionError
+	if !errors.As(err, &derr) || derr.Usage == nil || derr.Usage.InputTokens != 120 {
+		t.Errorf("an unmapped answer's usage = %v (%v)", derr, err)
+	}
+
+	p := newTestProvider(t, NewMockClient(), bothSources)
+	depth, err := p.ContextDepth(context.Background(), "Add pagination support to the list endpoint")
+	if err != nil || depth.Usage != nil {
+		t.Errorf("mock usage = %+v, %v; want none", depth.Usage, err)
+	}
+}

@@ -49,9 +49,10 @@ type ReviewResult struct {
 	// Status is the raw self-reported value from the LLM - informational only. Decide()
 	// is the authoritative pass/fail computation based on issue severities, since the
 	// orchestrator never trusts an LLM's self-assessment of its own review.
-	Status  ReviewStatus  `json:"status"`
-	Summary string        `json:"summary"`
-	Issues  []ReviewIssue `json:"issues"`
+	Status       ReviewStatus  `json:"status"`
+	Summary      string        `json:"summary"`
+	SummaryShort string        `json:"summary_short,omitempty"`
+	Issues       []ReviewIssue `json:"issues"`
 	// Diff records what the reviewer was shown (specs/hardening/SPEC.md §5.3). The
 	// orchestrator sets it after parsing; whatever the model wrote there is replaced.
 	Diff *ReviewDiffSummary `json:"diff,omitempty"`
@@ -102,6 +103,7 @@ func (r ReviewResult) Validate() error {
 // (approaches, libraries, alternatives) gathered before touching the code.
 type ResearchArtifact struct {
 	Summary        string   `json:"summary"`
+	SummaryShort   string   `json:"summary_short,omitempty"`
 	Findings       []string `json:"findings"`
 	Options        []string `json:"options"`
 	Recommendation string   `json:"recommendation"`
@@ -113,6 +115,7 @@ type ResearchArtifact struct {
 
 type AnalysisArtifact struct {
 	Summary        string   `json:"summary"`
+	SummaryShort   string   `json:"summary_short,omitempty"`
 	RootCause      string   `json:"root_cause"`
 	AffectedFiles  []string `json:"affected_files"`
 	Recommendation string   `json:"recommendation"`
@@ -123,6 +126,7 @@ type AnalysisArtifact struct {
 
 type PlanArtifact struct {
 	Summary       string   `json:"summary"`
+	SummaryShort  string   `json:"summary_short,omitempty"`
 	Steps         []string `json:"steps"`
 	AffectedFiles []string `json:"affected_files"`
 	Risks         []string `json:"risks"`
@@ -131,7 +135,11 @@ type PlanArtifact struct {
 }
 
 type ImplementationArtifact struct {
-	Summary      string   `json:"summary"`
+	Summary string `json:"summary"`
+	// SummaryShort is the model's one-line version of Summary, for a reader skimming the
+	// run (every stage's artifact and the review result carry one); implement's becomes
+	// the commit message (MVP.md §42.2). Empty when the model left it out.
+	SummaryShort string   `json:"summary_short,omitempty"`
 	ChangedFiles []string `json:"changed_files"`
 	TestsAdded   []string `json:"tests_added"`
 }

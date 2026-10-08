@@ -368,3 +368,41 @@ func TestResultTrace_ManualChoice(t *testing.T) {
 }
 
 func ptrf(v float64) *float64 { return &v }
+
+// Each decision round's usage reaches the trace (specs/benchmark/SPEC.md §11.1), also the
+// usage of a provider call that failed before the manual choice.
+func TestClassify_RecordsUsage(t *testing.T) {
+	tr, depth, tc := &domain.Usage{CostUSD: 0.01}, &domain.Usage{CostUSD: 0.02}, &domain.Usage{CostUSD: 0.03}
+
+	f := newFixture(0.9)
+	f.svc.Translator = fakeTranslator{res: translate.Result{Usage: tr}}
+	f.provider.depth.Usage = depth
+	f.provider.tc.Usage = tc
+	res, err := f.svc.Classify(context.Background(), Request{Text: "Fix the bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := domain.DecisionUsage{Translation: tr, ContextDepth: depth, Classification: tc}
+	if trace := res.Trace(domain.Workflow{}); trace.Usage == nil || *trace.Usage != want {
+		t.Errorf("trace usage = %+v, want %+v", trace.Usage, want)
+	}
+
+	f = newFixture(0.9)
+	f.provider.tcErr = &apperr.DecisionError{Provider: "claude", Kind: apperr.DecisionInvalidResponse, Usage: tc}
+	res, err = f.svc.Classify(context.Background(), Request{Text: "Fix the bug"})
+	if err != nil || res.Decision.Source != domain.DecisionSourceUser {
+		t.Fatalf("Classify = %+v, %v", res.Decision, err)
+	}
+	if trace := res.Trace(domain.Workflow{}); trace.Usage == nil || trace.Usage.Classification != tc {
+		t.Errorf("a failed classification's usage = %+v", trace.Usage)
+	}
+
+	f = newFixture(0.1)
+	res, err = f.svc.Classify(context.Background(), Request{Text: "Fix the bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace := res.Trace(domain.Workflow{}); trace.Usage != nil {
+		t.Errorf("no round reported usage, trace usage = %+v", trace.Usage)
+	}
+}

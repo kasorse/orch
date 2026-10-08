@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -203,10 +204,14 @@ func TestExecuteImplement_BoundsTestOutputToTheConfiguredLimit(t *testing.T) {
 	d.pendingTestFailure = &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: stdout}
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	prompt := client.lastReq.Prompt
+	if c := outcome.Call; c == nil || c.PromptBytes != len(prompt) || !slices.Equal(c.Truncated, []domain.PromptPart{domain.PromptTestOutput}) {
+		t.Errorf("call = %+v, want the prompt's size and the test output marked cut", outcome.Call)
+	}
 	if !strings.Contains(prompt, "--- FAIL: TestFoo") {
 		t.Error("the failure line was cut from the prompt")
 	}
@@ -224,11 +229,15 @@ func TestExecuteImplement_ShortTestOutputIsNotAnnotated(t *testing.T) {
 	d.pendingTestFailure = &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL: TestFoo"}
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if strings.Contains(client.lastReq.Prompt, "was shortened") {
 		t.Error("an output within the default limit was annotated as shortened")
+	}
+	if outcome.Call == nil || len(outcome.Call.Truncated) != 0 {
+		t.Errorf("call = %+v, want nothing marked cut", outcome.Call)
 	}
 }
 

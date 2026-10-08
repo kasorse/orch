@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, decisions report). This is the composition root - no other package
+// (version, validate, run, resume, decisions report, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -47,7 +47,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -93,6 +93,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return &apperr.ConfigError{Msg: "usage: orchestrator decisions report"}
 		}
 		return decisionsReport(stdout)
+	case "runs":
+		dir, err := runsReportArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return runsReport(stdout, dir)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -347,6 +353,69 @@ func decisionsReport(stdout io.Writer) error {
 		}
 	}
 	report.RenderDecisions(stdout, runsBaseDir, report.SummarizeDecisions(entries, unreadable))
+	return nil
+}
+
+const runsReportUsage = "usage: orchestrator runs report [--dir <path>]"
+
+// runsReportArgs parses what follows `runs`: `report`, and --dir <path> or --dir=<path>
+// (default: the runs directory of the current repository).
+func runsReportArgs(args []string) (string, error) {
+	if len(args) == 0 || args[0] != "report" {
+		return "", &apperr.ConfigError{Msg: runsReportUsage}
+	}
+	dir := runsBaseDir
+	given := false
+	for i := 1; i < len(args); i++ {
+		v, ok := strings.CutPrefix(args[i], "--dir=")
+		switch {
+		case ok:
+		case args[i] == "--dir" && i+1 < len(args):
+			i++
+			v = args[i]
+		default:
+			return "", &apperr.ConfigError{Msg: runsReportUsage}
+		}
+		if given || v == "" {
+			return "", &apperr.ConfigError{Msg: runsReportUsage}
+		}
+		dir, given = v, true
+	}
+	return dir, nil
+}
+
+// runsReport summarises every run found under dir, then compares the two complexity
+// questions over their decision traces. It needs no configuration and calls nothing.
+func runsReport(stdout io.Writer, dir string) error {
+	found, bad, err := persistence.LoadRunDirs(dir)
+	if err != nil {
+		return err
+	}
+	// The loader walks the root with its symlinks resolved.
+	root := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		root = resolved
+	}
+	rel := func(path string) string {
+		if r, err := filepath.Rel(root, path); err == nil {
+			return r
+		}
+		return path
+	}
+	var entries []report.RunEntry
+	var traces []report.Entry
+	for _, f := range found {
+		entries = append(entries, report.RunEntry{RunID: f.RunID, At: f.At, Run: f.Run, Trace: f.Trace})
+		if f.Trace != nil {
+			traces = append(traces, report.Entry{RunID: f.RunID, At: f.At, Trace: *f.Trace})
+		}
+	}
+	var unreadable []report.UnreadableRun
+	for _, b := range bad {
+		unreadable = append(unreadable, report.UnreadableRun{Path: rel(b.Dir), Err: b.Err.Error()})
+	}
+	// Unreadable runs are listed by the runs section, not again by the decisions one.
+	report.RenderRuns(stdout, dir, report.SummarizeRuns(entries, unreadable), report.SummarizeDecisions(traces, nil))
 	return nil
 }
 
@@ -614,8 +683,8 @@ type tailOptions struct {
 
 // executeWorkflow is everything after the decision, shared by run and resume: the
 // authority line, approval and mode, the restore point and run-start baseline (for a run
-// that has not executed a step), the test sandbox, the step guard, the engine and the
-// final answer.
+// that has not executed a step), the test sandbox, the step guard, the engine, the
+// final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
@@ -639,7 +708,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 			if opts.resume == nil {
 				run.Status = domain.RunStopped
 				run.FailureReason = "cancelled by user"
-				_ = store.SaveRun(run)
+				_ = writeOutcome(store, run)
 			}
 			return fmt.Errorf("run cancelled by user: %w", context.Canceled)
 		}
@@ -664,6 +733,8 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		run.Resumes = append(run.Resumes, record)
 		run.Status = domain.RunRunning
 		run.FailureReason = ""
+		// The previous attempt's outcome no longer describes a running run.
+		run.Outcome = nil
 	}
 	if err := store.SaveRun(run); err != nil {
 		return err
@@ -737,11 +808,21 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		engine.Gate = gate
 	}
 
-	if err := engine.Run(runCtx, run); err != nil {
-		return err
+	// Whether the engine finished or not, a terminal status gets its outcome.
+	runErr := engine.Run(runCtx, run)
+	outcomeErr := writeOutcome(store, run)
+	if runErr != nil {
+		return runErr
+	}
+	if outcomeErr != nil {
+		return outcomeErr
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
+	}
+	// Only when the operator is at the terminal: --mode auto asks nothing.
+	if opts.mode != domain.ModeAuto && isTerminal(s.stdin) {
+		offerCommit(ctx, s)
 	}
 	return nil
 }
@@ -1008,8 +1089,35 @@ func isTerminal(stdin io.Reader) bool {
 func failRun(store *persistence.Store, run *domain.Run, err error) error {
 	run.Status = domain.RunFailed
 	run.FailureReason = err.Error()
-	_ = store.SaveRun(run)
+	_ = writeOutcome(store, run)
 	return err
+}
+
+// writeOutcome records how a run that reached a terminal status ended and what it cost,
+// saves the run, and renders its summary.md (MVP.md §43). It computes over the whole
+// history, so a resume keeps the usage of the attempts before it. A run that is not
+// terminal is left alone. Without a readable decision.json (none yet, or one the strict
+// loader refuses) the outcome leaves the decision calls out rather than failing a run that
+// already ended.
+func writeOutcome(store *persistence.Store, run *domain.Run) error {
+	switch run.Status {
+	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
+	default:
+		return nil
+	}
+	var trace *domain.DecisionTrace
+	if t, _, err := store.LoadDecision(run.ID); err == nil {
+		trace = &t
+	}
+	outcome := domain.ComputeOutcome(*run, trace)
+	run.Outcome = &outcome
+	if err := store.SaveRun(run); err != nil {
+		return err
+	}
+	// summary.md is for a reader and never read back; a run that ended is not failed
+	// over it.
+	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	return nil
 }
 
 // runObserver renders CLI progress via ConsoleReporter and, alongside that, persists
@@ -1018,18 +1126,11 @@ type runObserver struct {
 	reporter *logging.ConsoleReporter
 	store    *persistence.Store
 	// repo, when set (pretty renderer), lets the observer show what implement changed:
-	// the worktree is snapshotted as a tree before the step and diffed after it.
-	repo      *repository.Repository
-	beforeImp string
+	// the diff between the trees the step recorded around itself.
+	repo *repository.Repository
 }
 
 func (o *runObserver) StepStarted(run *domain.Run, index int, action domain.ActionType) {
-	o.beforeImp = ""
-	if o.repo != nil && action == domain.ActionImplement {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		o.beforeImp, _ = o.repo.WorktreeTree(ctx)
-		cancel()
-	}
 	o.reporter.StepStarted(run, index, action)
 }
 
@@ -1042,12 +1143,11 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 	}
 	// Only after a completed implement: the step guard has already checked that nothing
 	// protected (git config, hooks) changed, so running git here is safe.
-	if o.beforeImp != "" && exec.Action == domain.ActionImplement && exec.Status == domain.StepCompleted {
+	if o.repo != nil && exec.Action == domain.ActionImplement && exec.Status == domain.StepCompleted &&
+		outcome.TreeBefore != "" && outcome.TreeAfter != "" && outcome.TreeBefore != outcome.TreeAfter {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if after, err := o.repo.WorktreeTree(ctx); err == nil && after != o.beforeImp {
-			if diff, err := o.repo.DiffTrees(ctx, o.beforeImp, after); err == nil {
-				o.reporter.SetStepDiff(diff)
-			}
+		if diff, err := o.repo.DiffTrees(ctx, outcome.TreeBefore, outcome.TreeAfter); err == nil {
+			o.reporter.SetStepDiff(diff)
 		}
 		cancel()
 	}

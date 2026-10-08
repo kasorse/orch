@@ -116,7 +116,7 @@ func TestRestore_MatchesLiveContextAfterEveryStep(t *testing.T) {
 		{Stderr: "FAIL", ExitCode: 1}, {Stdout: "PASS"}, {Stdout: "PASS"},
 	}}
 	repoExec := &execution.FakeProcessExecutor{Results: slices.Concat(reviewChange("diff"), reviewChange("diff"))}
-	live := New(testConfig(), registry, &repository.Repository{Dir: "/repo", Executor: repoExec}, testexec.New(testRuns))
+	live := New(testConfig(), registry, &repository.Repository{Dir: "/repo", Executor: treeless{repoExec}}, testexec.New(testRuns))
 	live.Guard = &fakeGuard{}
 	live.Artifacts = store
 
@@ -280,4 +280,18 @@ func TestStoreImplementsArtifactReader(t *testing.T) {
 	if _, err := store.ReadArtifact("../"+filepath.Base(run.ID), 0, domain.ActionPlan); err == nil {
 		t.Error("a non-ID run reached the filesystem")
 	}
+}
+
+// treeless answers the git calls that write the working tree as a tree (implement's diff
+// count; they run on a throwaway index) with no tree, so the queued results stay in step
+// with the review diff's calls.
+type treeless struct{ next execution.ProcessExecutor }
+
+func (t treeless) Run(ctx context.Context, spec execution.Spec) (execution.ProcessResult, error) {
+	for _, e := range spec.Env {
+		if strings.HasPrefix(e, "GIT_INDEX_FILE=") {
+			return execution.ProcessResult{}, nil
+		}
+	}
+	return t.next.Run(ctx, spec)
 }

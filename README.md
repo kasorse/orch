@@ -425,6 +425,7 @@ orchestrator [--config path] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
+orchestrator runs report [--dir <path>]
 orchestrator decisions report
 ```
 
@@ -447,7 +448,15 @@ orchestrator decisions report
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
-- `decisions report` — compares the two complexity questions (`choice` and `score`) over
+- `runs report [--dir <path>]` — what your runs cost and how they ended, over the run
+  directories in `.orchestrator/runs/` (or every directory holding a `run.json` under
+  `<path>`): the runs by status, then cost, success and the share of cost spent on the
+  decision by complexity and by stage set, then the `decisions report` comparison below. Runs
+  written before `outcome` existed are computed on the fly. It needs no config and calls
+  nothing. The benchmark in [`bench/`](bench/README.md) uses it on the run directories it
+  collects.
+- `decisions report` — the older name of the last part of `runs report`, kept as an alias:
+  compares the two complexity questions (`choice` and `score`) over
   the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,
   mean confidence, and the runs where they disagree. Manual (`--stage`) runs, runs chosen by
   hand, mock answers and runs without the shadow question are skipped. It needs no config and
@@ -513,6 +522,36 @@ If the target repository has uncommitted changes when `run` starts, a workflow w
 `implement` refuses to start (see [Security model](#security-model)); any other workflow
 prints a warning and continues. The orchestrator never stashes, resets, or otherwise touches
 your working tree on your behalf.
+
+### Committing the result
+
+When a run that implemented something completes, `run` (and `resume`) shows what changed
+and offers to commit it on the current branch:
+
+```
+Changes:
+   M fixture.go
+
+Commit message:
+  Fix Add to use +
+
+  Orchestrator-Run: 3f2a9c1e-...
+
+Commit to main? [y]es / [N]o / [e]dit message:
+```
+
+Nothing is committed without an explicit `y`; `e` lets you replace the first line. The
+message is the implementation's one-line `summary_short` (prefixed with the ticket key for
+`run --jira`), with no model call; when the model left it out, you are asked to type the
+message (empty skips the commit). The commit stages everything the run changed (untracked
+files included, ignored files and `.orchestrator/` left out), uses your git identity and
+runs your hooks; if it fails, the changes stay staged and the error is printed. A failing
+review verdict or a likely secret (`secret_scan.mode: warn`) is shown as a warning above
+the question. `run.json` records the commit as `commit`.
+
+It is not offered with `--mode auto`, when the run started on uncommitted changes (they
+would end up in the same commit), or when git's config or hooks or a protected path
+changed since the run started (`git commit` runs those hooks). See `MVP.md` §42.
 
 ### Resuming a run
 
@@ -656,7 +695,13 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # provider.authority and attempt), limits/iteration counters,
                         # pre_run_ref, head_ref, resume_baseline, resumes, provider_cli
                         # (CLI versions), allow_red_tests, pre_run_test,
-                        # secret_scan_baseline, secret_findings (never a value)
+                        # secret_scan_baseline, secret_findings (never a value),
+                        # commit (the SHA, when you approved the commit at the end);
+                        # per step: usage (tokens, cost, partial), call (prompt size and
+                        # cuts, models, API time, tool calls), an implement's diff;
+                        # outcome (status, fix iterations, last test and review result,
+                        # wall and active time, cost, decision overhead, net change)
+  summary.md            # the run's report for a reader, written when the run ends
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
@@ -671,11 +716,19 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
 A review artifact also records what the reviewer was shown: `diff: {bytes, files, shown,
 summarized, withheld, truncated}`.
 
+`summary.md` is the place to start after a run: status, wall and active time, cost (a lower
+bound when a call was cut off before its final report), tokens, the run's net code change,
+then a table of steps (time, API time, cost, tokens, turns, the model that actually
+answered, prompt size and what was cut), the tool calls per step, each implement's change
+from git against what its artifact claims, and the failures. Every field is explained in
+`MVP.md` §43.
+
 `decision.json` answers "why did this run have these stages?": the request and its
 translation, who decided (`jev`, `llm`, or `user` with the provider's error), the model
 version that answered, the pre-check distribution and chosen depth, both complexity questions
 with their picks and whether they agree, every stage's probability, threshold, forced flag and
-reason, the workflow, and how long each decision step took.
+reason, the workflow, how long each decision step took and what each decision call cost
+(`usage`, where the provider reported it).
 
 Every provider call's raw stdout/stderr is persisted this way, whether it succeeds or fails —
 not just failures.
@@ -753,6 +806,10 @@ go vet ./...
 go test ./...
 gofmt -l .   # should print nothing
 ```
+
+The benchmark in `bench/` is a separate Go module, which the root `go test ./...` does not
+include: test it with `cd bench && go test ./...`. `scripts/check.sh` runs the four gates in
+both modules. What `bench/` is and how to run it: [`bench/README.md`](bench/README.md).
 
 `go test ./...` requires no network access, no Jev key and no real `claude`/`codex`/`gemini`
 installs: the `test/integration` suite uses fake executables installed on a scoped `PATH` and

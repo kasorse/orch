@@ -18,6 +18,7 @@ func TestStepFinished_PrintsArtifactAsText(t *testing.T) {
 	exec := domain.StepExecution{Action: domain.ActionPlan, Status: domain.StepCompleted}
 	artifact := domain.PlanArtifact{
 		Summary:       "Stop retrying 404s.",
+		SummaryShort:  "No 404 retries",
 		Steps:         []string{"Classify the status", "Add a test\nfor 404"},
 		AffectedFiles: []string{"client.go"},
 		Answer:        "line one\nline two",
@@ -25,6 +26,7 @@ func TestStepFinished_PrintsArtifactAsText(t *testing.T) {
 	r.StepFinished(&domain.Run{}, 0, exec, workflow.StepOutcome{Outcome: workflow.OutcomeSuccess, Artifact: artifact})
 
 	want := "\nResult:\n" +
+		"  In short: No 404 retries\n" +
 		"  Summary: Stop retrying 404s.\n" +
 		"  Steps:\n" +
 		"    1. Classify the status\n" +

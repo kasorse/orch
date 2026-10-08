@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,8 +25,12 @@ type streamEvent struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
 	Message *struct {
+		ID      string       `json:"id"`
+		Model   string       `json:"model"`
+		Usage   *streamUsage `json:"usage"`
 		Content []struct {
 			Type  string          `json:"type"`
+			ID    string          `json:"id"`
 			Name  string          `json:"name"`
 			Input json.RawMessage `json:"input"`
 		} `json:"content"`
@@ -38,22 +43,51 @@ type streamEvent struct {
 	} `json:"rate_limit_info"`
 
 	// type "result"
-	Result       *string  `json:"result"`
-	IsError      bool     `json:"is_error"`
-	TotalCostUSD *float64 `json:"total_cost_usd"`
-	NumTurns     int      `json:"num_turns"`
-	Usage        *struct {
-		InputTokens              int64 `json:"input_tokens"`
-		OutputTokens             int64 `json:"output_tokens"`
-		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
-		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
-	} `json:"usage"`
+	Result        *string      `json:"result"`
+	IsError       bool         `json:"is_error"`
+	TotalCostUSD  *float64     `json:"total_cost_usd"`
+	NumTurns      int          `json:"num_turns"`
+	DurationAPIMS int64        `json:"duration_api_ms"`
+	Usage         *streamUsage `json:"usage"`
+	ModelUsage    map[string]struct {
+		CostUSD float64 `json:"costUSD"`
+	} `json:"modelUsage"`
 }
 
-// parseStream turns a whole stdout into the answer text and the call's usage. ok is false
-// when stdout is not a stream-json transcript with a result event.
-func parseStream(stdout string) (text string, usage *domain.Usage, isError bool, ok bool) {
-	var limits *domain.RateLimits
+type streamUsage struct {
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+}
+
+// streamReport is what a whole stdout says: the answer, the call's usage and its report.
+type streamReport struct {
+	text    string
+	usage   *domain.Usage
+	call    *domain.CallReport
+	isError bool
+	// ok is true when stdout is a stream-json transcript with a result event; only then
+	// is text the answer.
+	ok bool
+}
+
+// parseStream reads a whole stdout. With a result event, usage and the models come from
+// it. Without one - the call was killed (a timeout) or crashed - usage is summed from the
+// assistant messages streamed until then and marked partial: the stream repeats a
+// message's usage on each of its content blocks, so each message counts once, with the
+// largest value seen for each counter. Tool calls are counted from the assistant messages
+// either way. A stdout with neither gives a zero report and no usage.
+func parseStream(stdout string) streamReport {
+	var (
+		rep      streamReport
+		limits   *domain.RateLimits
+		messages = map[string]streamUsage{}
+		models   = map[string]bool{}
+		tools    = map[string]int{}
+		seenTool = map[string]bool{}
+		result   *streamEvent
+	)
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "{") {
@@ -68,24 +102,87 @@ func parseStream(stdout string) (text string, usage *domain.Usage, isError bool,
 			if l := rateLimits(ev); l != nil {
 				limits = l
 			}
-		case "result":
-			if ev.Result == nil {
+		case "assistant":
+			if ev.Message == nil {
 				continue
 			}
-			u := &domain.Usage{Turns: ev.NumTurns, Limits: limits}
-			if ev.TotalCostUSD != nil {
-				u.CostUSD = *ev.TotalCostUSD
+			if ev.Message.Model != "" {
+				models[ev.Message.Model] = true
 			}
-			if ev.Usage != nil {
-				u.InputTokens = ev.Usage.InputTokens
-				u.OutputTokens = ev.Usage.OutputTokens
-				u.CacheReadTokens = ev.Usage.CacheReadInputTokens
-				u.CacheCreationTokens = ev.Usage.CacheCreationInputTokens
+			if id, u := ev.Message.ID, ev.Message.Usage; id != "" && u != nil {
+				m := messages[id]
+				m.InputTokens = max(m.InputTokens, u.InputTokens)
+				m.OutputTokens = max(m.OutputTokens, u.OutputTokens)
+				m.CacheReadInputTokens = max(m.CacheReadInputTokens, u.CacheReadInputTokens)
+				m.CacheCreationInputTokens = max(m.CacheCreationInputTokens, u.CacheCreationInputTokens)
+				messages[id] = m
 			}
-			text, usage, isError, ok = *ev.Result, u, ev.IsError, true
+			for _, c := range ev.Message.Content {
+				if c.Type != "tool_use" || c.Name == "" || (c.ID != "" && seenTool[c.ID]) {
+					continue
+				}
+				seenTool[c.ID] = c.ID != ""
+				tools[c.Name]++
+			}
+		case "result":
+			if ev.Result != nil {
+				ev := ev
+				result = &ev
+			}
 		}
 	}
-	return text, usage, isError, ok
+
+	call := &domain.CallReport{}
+	if len(tools) > 0 {
+		call.Tools = tools
+	}
+	switch {
+	case result != nil:
+		u := &domain.Usage{Turns: result.NumTurns, Limits: limits}
+		if result.TotalCostUSD != nil {
+			u.CostUSD = *result.TotalCostUSD
+		}
+		if result.Usage != nil {
+			u.InputTokens = result.Usage.InputTokens
+			u.OutputTokens = result.Usage.OutputTokens
+			u.CacheReadTokens = result.Usage.CacheReadInputTokens
+			u.CacheCreationTokens = result.Usage.CacheCreationInputTokens
+		}
+		call.APIMS = max(result.DurationAPIMS, 0)
+		if len(result.ModelUsage) > 0 {
+			for name, mu := range result.ModelUsage {
+				call.Models = append(call.Models, domain.ModelUse{Model: name, CostUSD: mu.CostUSD})
+			}
+		} else {
+			call.Models = modelList(models)
+		}
+		rep = streamReport{text: *result.Result, usage: u, isError: result.IsError, ok: true}
+	case len(messages) > 0:
+		u := &domain.Usage{Turns: len(messages), Limits: limits, Partial: true}
+		for _, m := range messages {
+			u.InputTokens += m.InputTokens
+			u.OutputTokens += m.OutputTokens
+			u.CacheReadTokens += m.CacheReadInputTokens
+			u.CacheCreationTokens += m.CacheCreationInputTokens
+		}
+		call.Models = modelList(models)
+		rep.usage = u
+	default:
+		call.Models = modelList(models)
+	}
+	slices.SortFunc(call.Models, func(a, b domain.ModelUse) int { return strings.Compare(a.Model, b.Model) })
+	if len(call.Models) > 0 || len(call.Tools) > 0 || call.APIMS > 0 {
+		rep.call = call
+	}
+	return rep
+}
+
+func modelList(set map[string]bool) []domain.ModelUse {
+	var out []domain.ModelUse
+	for name := range set {
+		out = append(out, domain.ModelUse{Model: name})
+	}
+	return out
 }
 
 func rateLimits(ev streamEvent) *domain.RateLimits {

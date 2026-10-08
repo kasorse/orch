@@ -168,3 +168,85 @@ func TestStagePrompts_FenceTheTask(t *testing.T) {
 		t.Error("the rubric must precede the task block")
 	}
 }
+
+// Every stage asks for a one-line summary_short, before the task block; implement's is
+// the commit message, so it is asked for in commit-message form.
+func TestStagePrompts_AskForSummaryShort(t *testing.T) {
+	for name, prompt := range map[string]string{
+		"research":  BuildResearchPrompt(ResearchPromptInput{Task: "t"}),
+		"analyze":   BuildAnalyzePrompt(AnalyzePromptInput{Task: "t"}),
+		"plan":      BuildPlanPrompt(PlanPromptInput{Task: "t"}),
+		"implement": BuildImplementPrompt(ImplementPromptInput{Task: "t"}),
+		"review":    BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rule := summaryShortRule
+			if name == "implement" {
+				rule = implementSummaryShortRule
+			}
+			if !strings.Contains(prompt, `"summary_short": "..."`) || !strings.Contains(prompt, rule) {
+				t.Errorf("summary_short is not asked for:\n%s", prompt)
+			}
+			if strings.Index(prompt, rule) > strings.Index(prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+}
+
+// implement is told to finish a change the way the repository's instructions say, and review
+// to check it, both before the task block; a required update the diff lacks fails the review.
+func TestStagePrompts_CarryTheRepositoryConventions(t *testing.T) {
+	for name, tt := range map[string]struct{ prompt, rule string }{
+		"implement": {BuildImplementPrompt(ImplementPromptInput{Task: "t"}), implementConventionsRule},
+		"review":    {BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewConventionsRule},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(tt.prompt, tt.rule) || !strings.Contains(tt.prompt, "CLAUDE.md, AGENTS.md") {
+				t.Fatalf("the conventions rule is missing:\n%s", tt.prompt)
+			}
+			if strings.Index(tt.prompt, tt.rule) > strings.Index(tt.prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+	if !strings.Contains(reviewConventionsRule, "missed requirement of the task (high)") {
+		t.Error("a missing required update must be high, so the review fails and goes back to implement")
+	}
+	for name, prompt := range map[string]string{
+		"research": BuildResearchPrompt(ResearchPromptInput{Task: "t"}),
+		"analyze":  BuildAnalyzePrompt(AnalyzePromptInput{Task: "t"}),
+		"plan":     BuildPlanPrompt(PlanPromptInput{Task: "t"}),
+	} {
+		if strings.Contains(prompt, "CLAUDE.md") {
+			t.Errorf("%s is read-only and must not be asked to update anything", name)
+		}
+	}
+}
+
+// implement has no shell, so a required step that runs something other than the test command
+// is the operator's: implement is told so, and review reports such a step as medium instead of
+// sending it back to an implement that cannot do it (run a67fe1c2 looped to max_fix_iterations).
+func TestStagePrompts_LeaveCommandStepsToTheOperator(t *testing.T) {
+	for name, tt := range map[string]struct{ prompt, rule string }{
+		"implement": {BuildImplementPrompt(ImplementPromptInput{Task: "t"}), implementOperatorRule},
+		"review":    {BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewOperatorRule},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(tt.prompt, tt.rule) || !strings.Contains(tt.prompt, "cannot run commands") {
+				t.Fatalf("the operator rule is missing:\n%s", tt.prompt)
+			}
+			if strings.Index(tt.prompt, tt.rule) > strings.Index(tt.prompt, "<<<TASK-") {
+				t.Error("the rule must precede the task block")
+			}
+		})
+	}
+	for _, want := range []string{`medium with "operator: "`, "never as critical or high", "Latest test result"} {
+		if !strings.Contains(reviewOperatorRule, want) {
+			t.Errorf("the review rule must say %q", want)
+		}
+	}
+	if !strings.Contains(BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"}), reviewSeverityRubric) {
+		t.Error("the review prompt lost its severity rubric")
+	}
+}
