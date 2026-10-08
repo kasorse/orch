@@ -176,12 +176,22 @@ orchestrator run --allow-red-tests "<task>"
 orchestrator resume <run-id>
 orchestrator validate
 orchestrator version
+orchestrator runs report [--dir <path>]
 orchestrator decisions report
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
 
-`decisions report` reads the `decision.json` of every run under `.orchestrator/runs/` and
+`runs report` reads the run directories under `.orchestrator/runs/` (or, with `--dir <path>`,
+every directory holding a `run.json` anywhere under `<path>`, so it also reports the run
+directories a benchmark collected, `bench/README.md`) and prints: the runs by status; cost,
+success and the share of cost spent deciding, by complexity and by stage set (from `outcome`
+and `decision.json`, §21; both are recomputed for runs written before they were recorded);
+the unreadable run directories; then the complexity comparison of `decisions report`. It
+needs no configuration and calls nothing, and nothing decides anything from it.
+
+`decisions report` is the older name, kept as an alias that prints only the last part: it
+reads the `decision.json` of every run under `.orchestrator/runs/` and
 compares the two complexity questions (§8.2): how often `choice` and `score` select the
 same level, the 3×3 matrix of their selections, each one's mean confidence, and the runs
 where they disagree. It skips manual (`--stage`) runs, runs chosen by hand after a provider
@@ -1304,9 +1314,11 @@ At minimum save:
   error in the last case), the model version that answered, the pre-check distribution
   and depth, both complexity questions with their selections and agreement, each stage's
   probability, threshold, forced flag, enabled flag and reason, the workflow, and the
-  latency of each decision step;
+  latency and, where the provider reported one, the usage (`usage.translation`,
+  `usage.context_depth`, `usage.classification`: tokens, cost, turns) of each decision call;
 * workflow;
-* executed steps;
+* executed steps, each AI step with its `usage` (tokens, cost, turns; `partial` for a call cut
+  off before its final report, §43.3) when the CLI reported one;
 * provider/model and authority for each AI step (`provider.authority`, §38);
 * the restore point (`pre_run_ref`) recorded before the first step, and with it
   `head_ref` and `resume_baseline` (§38.3);
@@ -1316,6 +1328,14 @@ At minimum save:
 * review result;
 * final run status;
 * failure reason if any;
+* `outcome`, written to `run.json` whenever the run reaches a terminal status (and again
+  after a resume, over the whole history): `status`, `failure_reason`, `fix_iterations`,
+  `tests_passed_final` (the last test step's result, absent without one), `review_verdict`,
+  `duration_ms`, `usage` (summed over the steps and the decision calls, with `calls`) and
+  `decision_overhead` (`cost_usd`, `ms`, `calls` of the decision rounds; zero for
+  `--stage`), plus the fields of §43.3. It is derived data, a record that nothing decides
+  from; `runs report` recomputes it for runs written before it existed and for runs that died
+  without a terminal status;
 * execution mode the run actually ran under (`mode`);
 * each step's call report, an implement's diff from git, and the run's times, cost and net
   change (§43).
@@ -1624,7 +1644,7 @@ internal/
   repository/       git (read-only helpers)
   action/           step executors and prompt builders
   testexec/         test runner
-  report/           decisions report over the persisted traces (§4); imports only domain
+  report/           runs report and decisions report over the persisted runs (§4); imports only domain
   interaction/      approval, mode select, manual-mode gate, manual choice
   persistence/      run directory
   logging/          console output
@@ -2210,6 +2230,13 @@ per-tool-call approval during a step
 OS-level sandboxing of provider CLIs (the test step's optional bwrap sandbox, §38.3, is
 the one exception)
 ```
+
+The one thing near "model benchmarking" that exists lives in `bench/`, outside the core: a
+separate Go module (`orchbench`, `bench/README.md`, design in `specs/benchmark/`) that runs
+`orchestrator` and bare Claude Code as black boxes over replayed commits and reports pass
+rate, cost and time. It imports nothing of the core, reads only what a run writes (`run.json`,
+`decision.json`), and never selects, routes or changes a model; the core records what a run
+cost and how it ended (§21) because an operator needs that too.
 
 Avoid introducing abstractions only required for these future features.
 

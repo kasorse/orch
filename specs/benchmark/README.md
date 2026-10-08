@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-08): BM01–BM13 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench run`, `orchbench summarize`, the end-to-end test with fakes, the container image). The design questions are answered
+Status: **in progress** (2026-10-08): BM01–BM13 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench run`, `orchbench summarize`, the end-to-end test with fakes, the container image). BM14 (documentation) is written (`bench/README.md`, MVP.md, CLAUDE.md, README.md) and waits for one operator check, see its "As built"; it is ticked when that is done. The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -38,7 +38,7 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 | [BM11](tasks/TASK-BM11-summarize.md) | `orchbench summarize` ✓ | B2 | M | BM04 |
 | [BM12](tasks/TASK-BM12-integration.md) | end-to-end test with fakes ✓ | B2 | M | BM10, BM11 |
 | [BM13](tasks/TASK-BM13-container.md) | container image for running the benchmark ✓ | B2 | S | BM10 |
-| [BM14](tasks/TASK-BM14-documentation.md) | `bench/README.md`, MVP.md, CLAUDE.md, README, TODO.md | — | S | BM03, BM12 |
+| [BM14](tasks/TASK-BM14-documentation.md) | `bench/README.md`, MVP.md, CLAUDE.md, README, TODO.md | B1–B3 | S | BM03, BM12 |
 | [BM15](tasks/TASK-BM15-task-set.md) | the 30 tasks (owner + assistant) | B1 | L | BM06, BM08 |
 | [BM16](tasks/TASK-BM16-pilot-and-full-run.md) | pilot, then the full run | B2 | M | BM13, BM14, BM15 |
 | [BM17](tasks/TASK-BM17-decision.md) | `bench/DECISION.md` | B4 | S | BM16 |

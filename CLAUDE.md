@@ -18,7 +18,9 @@ version check, the pre-run test, the secret scan: MVP.md §41, with its design r
 `specs/hardening/`;
 the commit offered at the end of a completed run: MVP.md §42;
 the run summary and step metrics (`summary.md`, the call report, the diff from git, active
-time): MVP.md §43, which is also the field reference for `summary.md`.
+time): MVP.md §43, which is also the field reference for `summary.md`;
+the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
+design record in `specs/benchmark/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -45,6 +47,15 @@ are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it
 workflow package also defines its own `StepExecutor` interface). `internal/action` is the
 composition point that implements `StepExecutor` using config/provider/repository/testexec;
 `internal/app` is the composition root for everything.
+
+`bench/` is a black box to the core and the core is one to it. It is a separate Go module
+with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a
+compile error, backed by `bench/boundary_test.go`, which also catches a `replace` or a vendored
+copy); it starts `orchestrator` and `claude` as programs and reads only what they write
+(`run.json`, `decision.json`, stream-json). Nothing in the core imports it or exists only for
+it (`internal/report` imports only `domain`), and it never selects or routes a model. Add no
+shortcut that shares code between the two modules; if `bench/` needs a field, the orchestrator
+must write it for an operator's sake too.
 
 ## Decision flow (MVP.md §8–§9)
 
@@ -205,7 +216,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
 ## Out of scope (MVP.md §30)
 
 No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
-decision API and reading one Jira issue for `run --jira`), no model benchmarking or automatic
+decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
+(it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows, no Web UI/REST
 API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue (no
 comments, transitions or JQL), no remote repository execution, no RAG or persistent
@@ -228,6 +240,7 @@ go build ./...
 go vet ./...
 go test ./...
 gofmt -l .          # must be empty
+cd bench && go test ./...   # bench/ is a separate module; the root go test does not run it
 ```
 
 `scripts/check.sh` runs these four gates in the root module and in `bench/` and stops at the
@@ -256,11 +269,17 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `attempt`, `usage` (with `partial` for a call cut off before its final
 report), `call` (prompt size and cuts, models, API time, tool calls) and, for an implement the
-guard passed, `diff` from git; `outcome` adds `active_ms` and the net `diff`; a review result
-also records its `diff` summary), `summary.md` (rendered from run.json and decision.json when
+guard passed, `diff` from git; a review result also records its `diff` summary) and `outcome`
+(written when the run reaches a terminal status, recomputed over the whole history by a
+resume, derived and never read back for a decision: `status`, `failure_reason`,
+`fix_iterations`, `tests_passed_final`, `review_verdict`, `duration_ms`, `active_ms`,
+`usage` summed over the steps and the decision calls with `calls` and `partial_calls`,
+`decision_overhead` {`cost_usd`, `ms`, `calls`}, the net `diff`), `summary.md` (rendered
+from run.json and decision.json when
 the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
-probability/threshold/forced/reason, latencies),
+probability/threshold/forced/reason, latencies, and `usage` of each decision call that
+reported one: `translation`, `context_depth`, `classification`),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
 `artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log`, and for calls

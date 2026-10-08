@@ -425,6 +425,7 @@ orchestrator [--config path] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
+orchestrator runs report [--dir <path>]
 orchestrator decisions report
 ```
 
@@ -447,7 +448,15 @@ orchestrator decisions report
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
-- `decisions report` — compares the two complexity questions (`choice` and `score`) over
+- `runs report [--dir <path>]` — what your runs cost and how they ended, over the run
+  directories in `.orchestrator/runs/` (or every directory holding a `run.json` under
+  `<path>`): the runs by status, then cost, success and the share of cost spent on the
+  decision by complexity and by stage set, then the `decisions report` comparison below. Runs
+  written before `outcome` existed are computed on the fly. It needs no config and calls
+  nothing. The benchmark in [`bench/`](bench/README.md) uses it on the run directories it
+  collects.
+- `decisions report` — the older name of the last part of `runs report`, kept as an alias:
+  compares the two complexity questions (`choice` and `score`) over
   the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,
   mean confidence, and the runs where they disagree. Manual (`--stage`) runs, runs chosen by
   hand, mock answers and runs without the shadow question are skipped. It needs no config and
@@ -690,7 +699,8 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # commit (the SHA, when you approved the commit at the end);
                         # per step: usage (tokens, cost, partial), call (prompt size and
                         # cuts, models, API time, tool calls), an implement's diff;
-                        # outcome (wall and active time, cost, net change)
+                        # outcome (status, fix iterations, last test and review result,
+                        # wall and active time, cost, decision overhead, net change)
   summary.md            # the run's report for a reader, written when the run ends
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
@@ -717,7 +727,8 @@ from git against what its artifact claims, and the failures. Every field is expl
 translation, who decided (`jev`, `llm`, or `user` with the provider's error), the model
 version that answered, the pre-check distribution and chosen depth, both complexity questions
 with their picks and whether they agree, every stage's probability, threshold, forced flag and
-reason, the workflow, and how long each decision step took.
+reason, the workflow, how long each decision step took and what each decision call cost
+(`usage`, where the provider reported it).
 
 Every provider call's raw stdout/stderr is persisted this way, whether it succeeds or fails —
 not just failures.
@@ -795,6 +806,10 @@ go vet ./...
 go test ./...
 gofmt -l .   # should print nothing
 ```
+
+The benchmark in `bench/` is a separate Go module, which the root `go test ./...` does not
+include: test it with `cd bench && go test ./...`. `scripts/check.sh` runs the four gates in
+both modules. What `bench/` is and how to run it: [`bench/README.md`](bench/README.md).
 
 `go test ./...` requires no network access, no Jev key and no real `claude`/`codex`/`gemini`
 installs: the `test/integration` suite uses fake executables installed on a scoped `PATH` and

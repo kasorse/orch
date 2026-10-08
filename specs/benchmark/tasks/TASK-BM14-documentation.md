@@ -1,6 +1,6 @@
 # BM14 — Documentation
 
-**Size** S (0.5 d) · **TODO** — · **Depends on** BM03, BM12 · **Blocks** BM16
+**Size** S (0.5 d) · **TODO** B1–B3 (documents them; B3 is ticked, B1 and B2 wait for BM15 and BM16) · **Depends on** BM03, BM12 · **Blocks** BM16
 
 ## Goal
 
@@ -29,3 +29,45 @@ What was built is documented where users and future work look for it.
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty (root and `bench/`)
+
+## As built (2026-10-08)
+
+The files were written by an orchestrator run with no shell, so nothing below was run by it.
+Two things are left to the operator, and this task is not ticked in `README.md` until they are
+done:
+
+1. `scripts/check.sh` outside the sandbox (build, vet, test and `gofmt -l` in the root and in
+   `bench/`; the new test below is part of it).
+2. The second acceptance item: run the integration suite (or any real run with the fake
+   executables of `test/integration`), open one run directory and check the "Run artifacts"
+   paragraph of `CLAUDE.md` against its `run.json` and `decision.json` — `outcome` and its
+   fields, `executions[].usage`, `decision.json` `usage`. It was written from `internal/domain`
+   (`outcome.go`, `trace.go`, `run.go`) and the assertions of scenarios 29, 30 and 32 in
+   `test/integration`, not from a run directory.
+
+When both pass: tick BM14 in `README.md`, change its status line to BM01–BM14, and update the
+status line of `SPEC.md`.
+
+- **The first acceptance item is a test, not a one-off script.** `bench/cmd/orchbench/readme_test.go`
+  runs `orchbench --help` and `orchbench <command> --help` and compares them with
+  `bench/README.md`: the same commands (the `### \`orchbench <name>\`` headings), the same
+  common flags, the same flags per command (the first column of each flag table) and each
+  command's synopsis as the help prints it. It fails when a flag is added to the code without
+  the manual, or the other way round.
+- **`bench/README.md` follows the code, not §13, where they differ.** `mine` also prints `kept`
+  for a draft that exists and counts `only deleted tests` among the skips; `run` exits 3 on
+  `--max-cost` and 1 for `infra_error` cells left; `summarize` always writes the by-category
+  breakdown and, unless `--by category`, the `--by` one; groups under three tasks are `insufficient
+  data`; `Bmock.yaml` is the B′ config and is not in the default `--configs`. The container
+  section is the as-built `run.sh`, with the options `docker run` needs left to `run.sh` and
+  `TASK-BM13`.
+- **Documented as not built:** `bench/tasks/`, `bench/DECISION.md`, `orchbench export` and
+  `summarize` over several sources (BM15, BM17, BM18). The walkthroughs of §13.9–§13.12 were
+  not copied; the manual has short samples of the real output shapes instead.
+- **`MVP.md`:** §4 lists `runs report [--dir]` and calls `decisions report` the alias that
+  prints only the complexity comparison, which is what the code does; §21 lists `usage` of
+  decision calls and of steps and the `outcome` fields; §30 got a paragraph after the list, not
+  a changed list entry; the package-layout line of `report/` names both reports.
+- **`CLAUDE.md`:** the black-box rule is a paragraph under Architecture; the "Run artifacts"
+  sentence "`outcome` adds `active_ms` and the net `diff`" now lists all of `outcome`.
+- **`TODO.md`:** B3 was already `[x]`; it now links the spec. B1 and B2 stay `[~]`.
