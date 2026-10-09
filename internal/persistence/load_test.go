@@ -422,7 +422,7 @@ func TestArtifactRelPath_MatchesSaveArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.SaveArtifact(run.ID, 7, domain.ActionPlan, map[string]string{})
+	got, err := store.SaveArtifact(run.ID, 7, domain.ActionPlan, map[string]string{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

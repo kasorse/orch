@@ -42,7 +42,8 @@ const heartbeatInterval = 30 * time.Second
 // nil ArtifactWriter (artifacts are then only carried in memory/RawStdout, not written to
 // disk) - this is the documented no-op-persistence state during early build-out.
 type ArtifactWriter interface {
-	SaveArtifact(runID string, stepIndex int, action domain.ActionType, artifact any) (string, error)
+	// prompt is what the step sent to its model, empty for a step without a model call.
+	SaveArtifact(runID string, stepIndex int, action domain.ActionType, artifact any, prompt string) (string, error)
 }
 
 // LogPathBuilder returns the path a step's raw provider output will be written to, without
@@ -99,11 +100,13 @@ type Dispatcher struct {
 	pendingUnmetCriteria []domain.CriterionVerdict
 
 	// stepUsage and stepCall are the usage and the report of the current step's provider
-	// call; stepTruncated is what its prompt had cut, set by the action before the call.
-	// Execute resets all three.
+	// call; stepTruncated is what its prompt had cut, set by the action before the call;
+	// stepPrompt is the prompt the call sent, saved with the step's artifact. Execute
+	// resets all four.
 	stepUsage     *domain.Usage
 	stepCall      *domain.CallReport
 	stepTruncated []domain.PromptPart
+	stepPrompt    string
 
 	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
 	// is shown to implement until the first test step has run.
@@ -144,6 +147,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 	stopHeartbeat := d.startHeartbeat()
 	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
 	prompt += extensionsHint(ext)
+	d.stepPrompt = prompt
 	result, err := client.Execute(ctx, provider.Request{
 		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority:  authority,
@@ -243,7 +247,7 @@ func (d *Dispatcher) saveArtifact(run *domain.Run, actionName domain.ActionType,
 	if d.Artifacts == nil {
 		return ""
 	}
-	path, err := d.Artifacts.SaveArtifact(run.ID, len(run.Executions), actionName, artifact)
+	path, err := d.Artifacts.SaveArtifact(run.ID, len(run.Executions), actionName, artifact, d.stepPrompt)
 	if err != nil {
 		return ""
 	}

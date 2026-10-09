@@ -1309,7 +1309,7 @@ Location:
       summary.md               # the run's report for a reader, once it ends (§43)
 
       artifacts/
-        <NNN>-<action>.json
+        <NNN>-<action>.json    # a model step's also has "prompt": exactly what was sent
 
       logs/
         <NNN>-<action>.{stdout,stderr}.log

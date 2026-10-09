@@ -303,7 +303,7 @@ type orderWriter struct {
 	savedTooSoon bool
 }
 
-func (w *orderWriter) SaveArtifact(string, int, domain.ActionType, any) (string, error) {
+func (w *orderWriter) SaveArtifact(string, int, domain.ActionType, any, string) (string, error) {
 	if !w.guard.changedCalled {
 		w.savedTooSoon = true
 	}
@@ -338,7 +338,7 @@ func TestStoreImplementsArtifactReader(t *testing.T) {
 	if _, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan); !os.IsNotExist(err) {
 		t.Errorf("missing artifact: %v, want not-exist", err)
 	}
-	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p"}); err != nil {
+	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan)

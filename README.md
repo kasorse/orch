@@ -706,7 +706,8 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
   ticket.json           # run --jira only: the issue as fetched (a record; never read back)
-  artifacts/<NNN>-<action>.json          # structured output per step
+  artifacts/<NNN>-<action>.json          # structured output per step, and for a model step
+                                         # the "prompt" it was sent (a record; never read back)
   logs/<NNN>-<action>.{stdout,stderr}.log  # raw provider/test output per step
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls

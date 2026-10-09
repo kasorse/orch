@@ -4,6 +4,7 @@
 package persistence
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -131,13 +132,81 @@ func (s *Store) SaveSummary(runID, markdown string) error {
 }
 
 // SaveArtifact writes one action's structured output and returns its path relative to the
-// run directory, satisfying action.ArtifactWriter.
-func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any) (string, error) {
+// run directory, satisfying action.ArtifactWriter. A non-empty prompt - what the step sent
+// to its model - is added as the object's last field, "prompt", for the operator to read;
+// ReadArtifact removes it, so nothing ever decides on it.
+func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any, prompt string) (string, error) {
 	relPath := ArtifactRelPath(stepIndex, actionType)
-	if err := s.writeJSON(runID, relPath, artifact); err != nil {
+	data, err := marshalArtifact(artifact, prompt)
+	if err == nil {
+		err = writeFileAtomic(filepath.Join(s.runDir(runID), relPath), data, 0o644)
+	}
+	if err != nil {
 		return "", fmt.Errorf("save artifact: %w", err)
 	}
 	return relPath, nil
+}
+
+// artifactPromptKey is the field SaveArtifact adds and ReadArtifact removes.
+const artifactPromptKey = "prompt"
+
+// marshalArtifact renders artifact as indented JSON with prompt, when there is one, as the
+// object's last field. Nothing is HTML-escaped, so a prompt's "<<<TASK-..." delimiters
+// read as they were sent.
+func marshalArtifact(artifact any, prompt string) ([]byte, error) {
+	data, err := marshalUnescaped(artifact)
+	if err != nil {
+		return nil, fmt.Errorf("marshal: %w", err)
+	}
+	if prompt != "" {
+		if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
+			return nil, fmt.Errorf("artifact of type %T is not a JSON object", artifact)
+		}
+		value, err := marshalUnescaped(prompt)
+		if err != nil {
+			return nil, fmt.Errorf("marshal prompt: %w", err)
+		}
+		obj := append([]byte{}, data[:len(data)-1]...)
+		if len(data) > 2 {
+			obj = append(obj, ',')
+		}
+		obj = append(obj, `"`+artifactPromptKey+`":`...)
+		data = append(append(obj, value...), '}')
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, data, "", "  "); err != nil {
+		return nil, fmt.Errorf("indent: %w", err)
+	}
+	return out.Bytes(), nil
+}
+
+// marshalUnescaped is json.Marshal without HTML escaping and without the trailing newline.
+func marshalUnescaped(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// withoutPrompt removes the field withPrompt added. Anything that is not a JSON object
+// with that field is returned unchanged, for the caller's strict decoding to judge.
+func withoutPrompt(data []byte) []byte {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return data
+	}
+	if _, ok := fields[artifactPromptKey]; !ok {
+		return data
+	}
+	delete(fields, artifactPromptKey)
+	out, err := json.Marshal(fields)
+	if err != nil {
+		return data
+	}
+	return bytes.TrimSpace(out)
 }
 
 // ArtifactRelPath is where SaveArtifact writes a step's artifact, relative to the run
@@ -148,13 +217,17 @@ func ArtifactRelPath(stepIndex int, actionType domain.ActionType) string {
 }
 
 // ReadArtifact reads a step's artifact back for a resume, from the path derived from index
-// and action, satisfying action.ArtifactReader. A missing artifact is an error matching
-// fs.ErrNotExist.
+// and action, satisfying action.ArtifactReader. The prompt SaveArtifact added is removed. A
+// missing artifact is an error matching fs.ErrNotExist.
 func (s *Store) ReadArtifact(runID string, stepIndex int, actionType domain.ActionType) ([]byte, error) {
 	if !isRunID(runID) {
 		return nil, fmt.Errorf("read artifact: %q is not a run ID", runID)
 	}
-	return os.ReadFile(filepath.Join(s.runDir(runID), ArtifactRelPath(stepIndex, actionType)))
+	data, err := os.ReadFile(filepath.Join(s.runDir(runID), ArtifactRelPath(stepIndex, actionType)))
+	if err != nil {
+		return nil, err
+	}
+	return withoutPrompt(data), nil
 }
 
 // AppendLog appends raw process output (stream is "stdout" or "stderr") to the log file
