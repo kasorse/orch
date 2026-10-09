@@ -26,10 +26,6 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ReviewIssues:           d.pendingReviewIssues,
 		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
 	}
-	prompt := BuildImplementPrompt(in)
-	if TestOutputCut(in) {
-		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
-	}
 
 	// Fail closed: without a guard nothing would stop a write that turns into execution
 	// (a hook, CI, .git/config) from reaching the test step.
@@ -43,6 +39,23 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	// The working tree as a git tree, to count what the step changes. Best effort: without
 	// it the step records no diff.
 	treeBefore, _ := d.Repo.WorktreeTree(ctx)
+
+	// A retry also sees what the run has changed so far. Not fatal: without the stat the
+	// prompt is the one it was before.
+	if d.lastImpl != nil && run.PreRunRef != "" {
+		const noStat = "could not compute the run's diff stat for the retry prompt"
+		if treeBefore == "" {
+			d.warn(domain.ActionImplement, noStat+": the working tree could not be read")
+		} else if files, err := d.Repo.DiffNumstat(ctx, run.PreRunRef, treeBefore, d.runsExclude()); err != nil {
+			d.warn(domain.ActionImplement, noStat+": "+err.Error())
+		} else {
+			in.RunDiffStat = renderDiffStat(files, d.Config.Limits.Prompt.DiffBytes())
+		}
+	}
+	prompt := BuildImplementPrompt(in)
+	if TestOutputCut(in) {
+		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
+	}
 
 	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt)
 	if err != nil {

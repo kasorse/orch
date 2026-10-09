@@ -256,7 +256,9 @@ Jev (`test/integration/jev_test.go`) and a fake Jira (`test/integration/jira_tes
 live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
 `go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
-`go test ./internal/jira -update`. Never commit a token-shaped literal (an `AKIA…` key, a
+`go test ./internal/jira -update`, and the six stage prompts
+`go test ./internal/action -update` (`internal/action/testdata/prompts/`; the test fixes
+`action.nonce`, so read the diff of a rewritten file before committing it). Never commit a token-shaped literal (an `AKIA…` key, a
 `ghp_…` token): secret scanners and push protection would flag the repository itself;
 tests assemble such values at run time (`internal/secretscan`, scenario 27).
 

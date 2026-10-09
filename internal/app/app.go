@@ -788,6 +788,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		}
 	}
 	s.dispatcher.OnSecret = s.reporter.SecretFound
+	s.dispatcher.OnWarning = s.reporter.Warning
 
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 

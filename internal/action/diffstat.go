@@ -21,10 +21,7 @@ func (d *Dispatcher) stepDiff(ctx context.Context, run *domain.Run, before strin
 	if err != nil {
 		return nil, ""
 	}
-	var exclude []string
-	if d.RunsDir != "" {
-		exclude = append(exclude, d.RunsDir)
-	}
+	exclude := d.runsExclude()
 	files, err := d.Repo.DiffNumstat(ctx, before, after, exclude)
 	if err != nil {
 		return nil, ""
@@ -48,6 +45,15 @@ func (d *Dispatcher) stepDiff(ctx context.Context, run *domain.Run, before strin
 		}
 	}
 	return diff, after
+}
+
+// runsExclude is the pathspec list that keeps the runs directory, the orchestrator's own
+// bookkeeping, out of a diff.
+func (d *Dispatcher) runsExclude() []string {
+	if d.RunsDir == "" {
+		return nil
+	}
+	return []string{d.RunsDir}
 }
 
 func diffStat(files []repository.FileChange) domain.DiffStat {

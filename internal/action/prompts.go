@@ -21,6 +21,13 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 // an operator skimming the run.
 const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
 
+// acceptanceCriteriaRule tells plan what a criterion is (specs/quality/SPEC.md §4.2). parsePlan
+// enforces the same cap.
+const acceptanceCriteriaRule = `"acceptance_criteria" lists what must be true of the result for the task to be done. ` +
+	`Each criterion is one observable, checkable statement about the result, for example ` +
+	`"function X returns ErrEmpty for an empty input" or "` + "`go test ./internal/store`" + ` passes". ` +
+	`Give at most 8; write none rather than vague ones.`
+
 // implementSummaryShortRule is implement's variant: its "summary_short" becomes the
 // commit message offered at the end of the run (MVP.md §42.2).
 const implementSummaryShortRule = `"summary_short" is one line of at most 72 characters, without a trailing period, ` +
@@ -115,16 +122,45 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: plan\n\n")
 	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
+	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
 	if in.Analysis != nil {
 		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
 			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
+		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
+		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
 	}
 	return b.String()
+}
+
+// writeList writes heading and one "- item" line per non-blank item. Without one it writes
+// nothing, so an empty list leaves no heading behind.
+func writeList(b *strings.Builder, heading string, items []string) {
+	writeItems(b, heading, items, func(int) string { return "- " })
+}
+
+// writeNumberedList is writeList with "1. item" lines, for a list the reader refers to by
+// number.
+func writeNumberedList(b *strings.Builder, heading string, items []string) {
+	writeItems(b, heading, items, func(n int) string { return fmt.Sprintf("%d. ", n) })
+}
+
+func writeItems(b *strings.Builder, heading string, items []string, marker func(n int) string) {
+	n := 0
+	for _, item := range items {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		if n == 0 {
+			b.WriteString(heading + ":\n")
+		}
+		n++
+		b.WriteString(marker(n) + item + "\n")
+	}
 }
 
 func answerField(final bool) string {
@@ -171,6 +207,10 @@ type ImplementPromptInput struct {
 	// MaxTestOutput bounds LastTestResult's stdout and stderr together, in bytes
 	// (limits.prompt.max_test_output_bytes; BoundTestOutput). 0 embeds them whole.
 	MaxTestOutput int
+	// RunDiffStat is the git diff --stat of what the run has changed so far, for a retry
+	// (renderDiffStat, bounded by limits.prompt.max_diff_bytes). The dispatcher computes it,
+	// so this builder stays pure; "" leaves the section out.
+	RunDiffStat string
 }
 
 func BuildImplementPrompt(in ImplementPromptInput) string {
@@ -185,14 +225,27 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
 	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n\n",
+		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
 			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
+		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
+		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
+		b.WriteString("\n")
 	}
 	if in.Plan != nil {
-		fmt.Fprintf(&b, "Plan:\n%s\nSteps:\n- %s\n\n", in.Plan.Summary, strings.Join(in.Plan.Steps, "\n- "))
+		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
+		writeList(&b, "Steps", in.Plan.Steps)
+		writeList(&b, "Affected files (from plan)", in.Plan.AffectedFiles)
+		writeList(&b, "Risks (from plan)", in.Plan.Risks)
+		writeList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		b.WriteString("\n")
 	}
 	if in.PreviousImplementation != nil {
 		fmt.Fprintf(&b, "Previous implementation attempt:\n%s\n\n", in.PreviousImplementation.Summary)
+		if in.RunDiffStat != "" {
+			b.WriteString("What the run has changed so far (git diff --stat against the run's start):\n")
+			b.WriteString(fence("diffstat", "the git diff --stat of the run so far", in.RunDiffStat))
+			b.WriteString("\n")
+		}
 	}
 
 	if in.PreRunFailure != nil && in.LastTestResult == nil {
@@ -293,7 +346,11 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 		fmt.Fprintf(&b, "Analysis:\n%s\n\n", in.Analysis.Summary)
 	}
 	if in.Plan != nil {
-		fmt.Fprintf(&b, "Plan:\n%s\n\n", in.Plan.Summary)
+		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
+		writeList(&b, "Steps", in.Plan.Steps)
+		writeList(&b, "Risks (from plan)", in.Plan.Risks)
+		writeNumberedList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		b.WriteString("\n")
 	}
 	if in.Implementation != nil {
 		fmt.Fprintf(&b, "Implementation summary:\n%s\n\n", in.Implementation.Summary)

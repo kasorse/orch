@@ -56,3 +56,26 @@ plan's acceptance criteria. A retried `implement` sees what the run has changed 
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-09)
+
+Done as planned, except:
+
+- **No logger in the dispatcher, so a new `Dispatcher.OnWarning` hook.** The git failure
+  warning goes through it, wired in `app.go` next to `OnSecret` to a new
+  `ConsoleReporter.Warning`. It is nil-safe (`Dispatcher.warn`).
+- **`executeImplement` builds its prompt after the guard snapshot and `WorktreeTree`**, not
+  before, so the tree is read once and the git calls keep their order. The prompt build has no
+  side effect that depended on running first.
+- **The stat is rendered in `retrydiff.go`** (`renderDiffStat`), reusing `diffStat` for the
+  totals. When the bound cuts it, the file lines are the first ones, the totals line still
+  counts every file, and the last line is `… N more files` (always "files").
+  `Dispatcher.runsExclude` is shared with `stepDiff`.
+- **`review.go` is unchanged**: it already passed `d.lastPlan`.
+- **`writeNumberedList`** next to `writeList`, for the review's criteria; both share
+  `writeItems`, and both skip blank items.
+- **The golden files were written by hand**, because the change was made without being able
+  to run `go test ./internal/action -update`. Run it once and check that `git status` shows no
+  change under `testdata/prompts/`.
+- **TODO.md Q1 stays `[~]`**: its "done when" also asks for an integration scenario, which is
+  QL13.

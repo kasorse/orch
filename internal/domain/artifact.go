@@ -130,6 +130,10 @@ type PlanArtifact struct {
 	Steps         []string `json:"steps"`
 	AffectedFiles []string `json:"affected_files"`
 	Risks         []string `json:"risks"`
+	// AcceptanceCriteria are the checkable statements about the result the plan commits to,
+	// at most 8 of 300 bytes (specs/quality/SPEC.md §4.2). An artifact written before the
+	// field existed has none.
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	// Answer: see ResearchArtifact.Answer.
 	Answer string `json:"answer,omitempty"`
 }

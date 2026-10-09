@@ -81,6 +81,9 @@ type Dispatcher struct {
 	// OnSecret, if set, is told of each new likely secret a step added when
 	// security.secret_scan.mode is warn (file, line and rule - never the value).
 	OnSecret func(step domain.ActionType, file string, line int, rule string)
+	// OnWarning, if set, is told of a problem a step went on despite (nothing a run stops
+	// for), such as context it could not add to a prompt.
+	OnWarning func(step domain.ActionType, msg string)
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
@@ -104,6 +107,13 @@ type Dispatcher struct {
 	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
 	// is shown to implement until the first test step has run.
 	preRunFailure *domain.TestResult
+}
+
+// warn reports a non-fatal problem through OnWarning, if set.
+func (d *Dispatcher) warn(step domain.ActionType, msg string) {
+	if d.OnWarning != nil {
+		d.OnWarning(step, msg)
+	}
 }
 
 func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repository, runner *testexec.Runner) *Dispatcher {

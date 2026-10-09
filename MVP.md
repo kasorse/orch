@@ -1023,6 +1023,16 @@ gate the test command does not run - is the operator's: implement names it in `s
 left to the operator, never claims it done, and leaves the task tracking that waits on it
 open. The way to have such a gate checked by the run is to make it part of `test.command`.
 
+Each stage's prompt carries what the earlier stages found that it can use
+(`specs/quality/SPEC.md` §4): plan gets the analysis `affected_files` and `risks`; implement
+gets those of the analysis and the plan, and the plan's steps and `acceptance_criteria`;
+review gets the plan's steps, `risks` and criteria (numbered). Empty lists are left out. A
+retried implement also gets the git diff --stat of what the run has changed so far (against
+`pre_run_ref`), fenced and bounded by `limits.prompt.max_diff_bytes`; if git cannot tell, the
+step goes on without it and a warning is shown. The plan's optional `acceptance_criteria`
+(at most 8, each at most 300 bytes) are checkable statements about the result; the parser
+keeps the first 8 non-empty ones and cuts each on a UTF-8 boundary.
+
 Example analysis artifact:
 
 ```json

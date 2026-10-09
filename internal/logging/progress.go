@@ -496,6 +496,17 @@ func (r *ConsoleReporter) SecretScanOff() {
 	fmt.Fprintln(r.Out, "Secret scan: off - what steps add is not checked for secrets")
 }
 
+// Warning reports a problem a step went on despite.
+func (r *ConsoleReporter) Warning(step domain.ActionType, msg string) {
+	r.stopSpin()
+	text := fmt.Sprintf("%s: %s", step, msg)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ "+text))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", text)
+}
+
 // SecretFound reports a likely secret a step added, under security.secret_scan.mode:
 // warn: where and which rule, never the value.
 func (r *ConsoleReporter) SecretFound(step domain.ActionType, file string, line int, rule string) {

@@ -205,6 +205,38 @@ func TestRestore_RefusesMissingOrInvalidState(t *testing.T) {
 	}
 }
 
+// A plan artifact written before acceptance_criteria existed loads, with no criteria, and the
+// prompts built from it work; one written after it loads with its criteria (QL01).
+func TestRestore_PlanArtifactWithAndWithoutCriteria(t *testing.T) {
+	old := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[]}`
+	current := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[],"acceptance_criteria":["a.go compiles","a test covers it"]}`
+	cases := []struct {
+		name, artifact string
+		want           []string
+	}{
+		{"before the field", old, nil},
+		{"with the field", current, []string{"a.go compiles", "a test covers it"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := &domain.Run{ID: "r", Executions: []domain.StepExecution{
+				{Index: 0, Action: domain.ActionPlan, Status: domain.StepCompleted},
+			}}
+			d := &Dispatcher{}
+			if err := d.Restore(run, memReader{memKey(0, domain.ActionPlan): tc.artifact}); err != nil {
+				t.Fatal(err)
+			}
+			if d.lastPlan == nil || !slices.Equal(d.lastPlan.AcceptanceCriteria, tc.want) {
+				t.Fatalf("restored plan = %+v, want criteria %q", d.lastPlan, tc.want)
+			}
+			prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: d.lastPlan})
+			if got := strings.Contains(prompt, "Acceptance criteria:\n"); got != (tc.want != nil) {
+				t.Errorf("criteria in the implement prompt = %v, want %v:\n%s", got, tc.want != nil, prompt)
+			}
+		})
+	}
+}
+
 func TestRestore_TestArtifactIsOptional(t *testing.T) {
 	pass := &domain.TestResult{Command: "go test", Success: true}
 	run := &domain.Run{ID: "r", Executions: []domain.StepExecution{
