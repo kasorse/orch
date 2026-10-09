@@ -169,6 +169,27 @@ func TestDiffShowsTheChangeButNotOrchestrator(t *testing.T) {
 	}
 }
 
+// A repository that ignores .orchestrator itself (sku-master does): git add refuses an
+// exclude pathspec naming an ignored path.
+func TestDiffWhenTheRepositoryIgnoresOrchestrator(t *testing.T) {
+	p := testutil.NewSHProject(t)
+	m, _ := newManager(t)
+	ws := create(t, m, p, p.Base)
+
+	testutil.Apply(t, ws.Dir, map[string]string{
+		".gitignore":                     ".orchestrator/\n",
+		".orchestrator/runs/r1/run.json": "{}\n",
+		"calc.sh":                        testutil.CalcFixed,
+	})
+	diff, err := ws.Diff(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "calc.sh") || strings.Contains(diff, "run.json") {
+		t.Errorf("the diff should show calc.sh and not .orchestrator:\n%s", diff)
+	}
+}
+
 func TestDiffOfAnUnchangedTreeIsEmpty(t *testing.T) {
 	p := testutil.NewSHProject(t)
 	m, _ := newManager(t)

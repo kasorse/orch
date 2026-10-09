@@ -285,9 +285,11 @@ func (w *Workspace) Diff(ctx context.Context) (string, error) {
 	defer os.RemoveAll(tmp)
 	env := []string{"GIT_INDEX_FILE=" + filepath.Join(tmp, "index")}
 
+	// add takes no exclude: git refuses an exclude pathspec naming an ignored path (a repository
+	// that ignores .orchestrator), so .orchestrator is left out by the diff below.
 	steps := [][]string{
 		{"read-tree", w.Commit},
-		{"add", "-A", "--", ".", excludeOrchestrator},
+		{"add", "-A", "--", "."},
 	}
 	for _, args := range steps {
 		if _, err := w.m.git(ctx, w.Dir, env, append(safeConfig(), args...)...); err != nil {
