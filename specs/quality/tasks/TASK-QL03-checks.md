@@ -57,3 +57,42 @@ and guard (`SPEC.md` §5).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-09)
+
+Done as planned, except:
+
+- **Gates:** the change was written without being able to run anything, so the four gates
+  (`scripts/check.sh`) and the two new golden files are for the operator's run to confirm. The
+  goldens `implement_retry_check` and `implement_red_prerun_check` were written by hand
+  from the prompt code; if they differ, read the diff and run `go test ./internal/action
+  -update`. The live sandbox test (`go test -tags security ./test/security/...`) was updated
+  for `ORCH_BASE_REF` and not run either.
+- **Shared names live in `domain`:** `domain.CheckNameRE` and `domain.MaxChecks`, so
+  `persistence` (which does not import `config`) and QL04 use the same ones; the config
+  validator uses them too.
+- **`Runner.Run(ctx, command, dir, RunOptions{Env})`:** a pair must match `^ORCH_[A-Z0-9_]+=`,
+  or `Run` returns an `ExecutionError` and nothing runs. Unsandboxed, the pairs are appended to
+  `TestEnv()`. Under bwrap they are `--setenv KEY VALUE` after the isolation flags and before
+  `--chdir`; the bwrap process's own environment stays the allowlist.
+- **`ORCH_BASE_REF` is always set**, empty when `pre_run_ref` could not be recorded, so every
+  command sees the same environment. The example config says so.
+- **`guardedTest` returns `(*TestResult, []CheckOutput, error)`.** `CheckOutput` is the raw
+  output of each check, carried to the log writers through `StepOutcome.CheckLogs`; it is not
+  persisted. A failed check's output is in both its own log and the step's usual
+  `<NNN>-test.*.log`, since the top-level fields are the failing check's. On a guard
+  violation the partial result (what ran so far) is returned with the error.
+- **Logs:** `Store.AppendCheckLog` writes `logs/<NNN>-test.<check>.<stream>.log` and refuses a
+  name that does not match `CheckNameRE`. The pre-run test uses
+  `AppendCallLog("pre-run-test.<check>", …)`.
+- **Persistence:** `validateChecks` runs on `pre_run_test` and on every execution's
+  `test_result`. It requires a failed check to be the last entry (the sequence stops there)
+  and `failed_check` to name it. The existing top-level `success == (exit_code == 0)` check
+  stays on `pre_run_test` only; execution results were not checked for it before, and adding
+  it could refuse a run that resumes today.
+- **Report:** `summary.md` shows `failed (check vet, exit 1)` in the steps table and
+  `failed (check vet)` for "Tests (last run)"; the console's pre-run line names the check.
+- **Integration:** `scenario26_checks_test.go` covers the refusal and `--allow-red-tests`
+  with a check that fails while the fixture's test fails. "vet failed → implement fixed it →
+  all green" as a full scenario is QL13's.
+- **Not done:** `init` proposing checks (TODO.md Q5.5) is not in the spec's tasks.

@@ -69,6 +69,21 @@ func goldenFailingTest() *domain.TestResult {
 	}
 }
 
+// goldenFailingCheck is a test step that stopped at the check vet: the top-level fields are
+// the check's and the tests did not run (specs/quality/SPEC.md §5.3).
+func goldenFailingCheck() *domain.TestResult {
+	return &domain.TestResult{
+		Command: "go vet ./...", ExitCode: 1,
+		Stdout: "internal/store/store.go:21:2: unreachable code\n",
+		Stderr: "exit status 1",
+		Checks: []domain.CheckResult{
+			{Name: "build", Success: true},
+			{Name: "vet", ExitCode: 1},
+		},
+		FailedCheck: "vet",
+	}
+}
+
 func TestPrompts_Golden(t *testing.T) {
 	retry := &domain.ImplementationArtifact{Summary: "Added make() in NewStore."}
 	noRisks := goldenPlan()
@@ -101,6 +116,12 @@ func TestPrompts_Golden(t *testing.T) {
 				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat, LastTestResult: goldenFailingTest(),
 			})
 		}},
+		{"implement_retry_check", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{
+				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat, LastTestResult: goldenFailingCheck(),
+			})
+		}},
 		{"implement_retry_review", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
 				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
@@ -120,6 +141,9 @@ func TestPrompts_Golden(t *testing.T) {
 			return BuildImplementPrompt(ImplementPromptInput{
 				Task: goldenTask, PreRunFailure: &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL: TestPutFresh\n", Stderr: "exit status 1"},
 			})
+		}},
+		{"implement_red_prerun_check", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, PreRunFailure: goldenFailingCheck()})
 		}},
 		{"review_plan", func() string {
 			return BuildReviewPrompt(ReviewPromptInput{

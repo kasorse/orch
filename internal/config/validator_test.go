@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -337,6 +338,61 @@ func TestValidate_TestBaseline(t *testing.T) {
 	}
 	if !(TestConfig{}).PreRunTest() || (TestConfig{Baseline: BaselineOff}).PreRunTest() {
 		t.Error("PreRunTest disagrees with test.baseline")
+	}
+}
+
+func nChecks(n int) []CheckConfig {
+	var checks []CheckConfig
+	for i := 0; i < n; i++ {
+		checks = append(checks, CheckConfig{Name: fmt.Sprintf("check-%d", i), Command: "true"})
+	}
+	return checks
+}
+
+func TestValidate_Checks(t *testing.T) {
+	ok := validConfig()
+	ok.Checks = []CheckConfig{
+		{Name: "build", Command: "go build ./..."},
+		{Name: "vet", Command: "go vet ./..."},
+		{Name: "a_b-9", Command: "true"},
+		{Name: strings.Repeat("x", 32), Command: "true"},
+	}
+	if err := Validate(ok); err != nil {
+		t.Errorf("valid checks: %v", err)
+	}
+	max := validConfig()
+	max.Checks = nChecks(16)
+	if err := Validate(max); err != nil {
+		t.Errorf("16 checks: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"duplicate name", func(c *Config) { c.Checks = []CheckConfig{{"vet", "a"}, {"vet", "b"}} }, `checks[1].name "vet" is used by an earlier check`},
+		{"uppercase", func(c *Config) { c.Checks = []CheckConfig{{"Build", "a"}} }, `checks[0].name "Build" must match`},
+		{"leading dash", func(c *Config) { c.Checks = []CheckConfig{{"-x", "a"}} }, `checks[0].name "-x" must match`},
+		{"33 characters", func(c *Config) { c.Checks = []CheckConfig{{strings.Repeat("a", 33), "a"}} }, "must match"},
+		{"slash", func(c *Config) { c.Checks = []CheckConfig{{"a/b", "a"}} }, `checks[0].name "a/b" must match`},
+		{"empty name", func(c *Config) { c.Checks = []CheckConfig{{"", "a"}} }, `checks[0].name "" must match`},
+		{"17 checks", func(c *Config) { c.Checks = nChecks(17) }, "17 checks, at most 16"},
+		{"empty command", func(c *Config) { c.Checks = []CheckConfig{{"vet", ""}} }, "checks[0].command is required"},
+		{"blank command", func(c *Config) { c.Checks = []CheckConfig{{"vet", "  \t"}} }, "checks[0].command is required"},
+		{"no test command", func(c *Config) {
+			c.Checks = []CheckConfig{{"vet", "go vet ./..."}}
+			c.Test.Command = ""
+		}, "checks need test.command"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("want %q in %v", tc.want, err)
+			}
+		})
 	}
 }
 

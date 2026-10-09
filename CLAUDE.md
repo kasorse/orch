@@ -284,6 +284,6 @@ probability/threshold/forced/reason, latencies, and `usage` of each decision cal
 reported one: `translation`, `context_depth`, `classification`),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
-`artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log`, and for calls
-outside steps `logs/translate.*`, `logs/decide-{context,classify}.*` and
-`logs/pre-run-test.*`.
+`artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log` (a test step with
+`checks:` adds `logs/<NNN>-test.<check>.*`), and for calls outside steps `logs/translate.*`,
+`logs/decide-{context,classify}.*`, `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.

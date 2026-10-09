@@ -21,6 +21,9 @@ type StepOutcome struct {
 	ReviewResult *domain.ReviewResult
 	RawStdout    string
 	RawStderr    string
+	// CheckLogs is the raw output of each check a test step ran, for logs/<NNN>-test.<check>.*;
+	// RawStdout/RawStderr stay the failing check's or the test command's.
+	CheckLogs []domain.CheckOutput
 	// Usage is what the step's provider call cost, when the CLI reported it - also on a
 	// failed call, so it is recorded whatever the outcome.
 	Usage *domain.Usage

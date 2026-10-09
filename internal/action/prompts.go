@@ -250,17 +250,34 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		}
 	}
 
-	if in.PreRunFailure != nil && in.LastTestResult == nil {
-		b.WriteString("The test command already FAILS before any change, and the operator expects that: the task is " +
-			"to make it pass. Its output from before the change:\n\n")
-		fmt.Fprintf(&b, "Test command: %s\nExit code: %d\n\n", in.PreRunFailure.Command, in.PreRunFailure.ExitCode)
-		writeTestOutput(&b, *in.PreRunFailure, in.MaxTestOutput)
+	if r := in.PreRunFailure; r != nil && in.LastTestResult == nil {
+		if r.FailedCheck != "" {
+			fmt.Fprintf(&b, "The check %q (one of the operator's checks, run before the tests) already FAILS before any change, "+
+				"and the operator expects that: the task is to make it pass. The tests did not run. "+
+				"Its output from before the change:\n\n", r.FailedCheck)
+			fmt.Fprintf(&b, "Check command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, checkOutputOwner(r.FailedCheck))
+		} else {
+			b.WriteString("The test command already FAILS before any change, and the operator expects that: the task is " +
+				"to make it pass. Its output from before the change:\n\n")
+			fmt.Fprintf(&b, "Test command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, testOutputOwner)
+		}
 	}
 
-	if in.LastTestResult != nil {
-		b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
-		fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", in.LastTestResult.Command, in.LastTestResult.ExitCode)
-		writeTestOutput(&b, *in.LastTestResult, in.MaxTestOutput)
+	if r := in.LastTestResult; r != nil {
+		if r.FailedCheck != "" {
+			// SPEC §5.4: the check is named, and the prompt says the tests did not run - it
+			// never lets the model assume they pass.
+			fmt.Fprintf(&b, "The previous implementation FAILED the check %q (one of the operator's checks, run before the tests). "+
+				"Fix the implementation so the check passes.\nThe tests did not run: do not assume they pass.\n\n", r.FailedCheck)
+			fmt.Fprintf(&b, "Failing command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, checkOutputOwner(r.FailedCheck))
+		} else {
+			b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
+			fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, testOutputOwner)
+		}
 	}
 
 	if len(in.UnmetCriteria) > 0 || len(in.ReviewIssues) > 0 {
@@ -307,17 +324,24 @@ func TestOutputCut(in ImplementPromptInput) bool {
 	return omitted.Any()
 }
 
+// testOutputOwner and checkOutputOwner say whose output a fence holds, in the fence's
+// description: the test command's, or the failed check's.
+const testOutputOwner = "the test command's"
+
+func checkOutputOwner(check string) string { return fmt.Sprintf("the check %q's", check) }
+
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
 // bounded by maxBytes (BoundTestOutput; 0 embeds them whole), and says so when it cut.
-func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int) {
+// owner is whose output it is (testOutputOwner or checkOutputOwner).
+func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owner string) {
 	stdout, stderr := r.Stdout, r.Stderr
 	var omitted Omitted
 	if maxBytes > 0 {
 		stdout, stderr, omitted = BoundTestOutput(stdout, stderr, maxBytes)
 	}
-	b.WriteString(fence("stdout", "the test command's stdout", stdout))
+	b.WriteString(fence("stdout", owner+" stdout", stdout))
 	b.WriteString("\n")
-	b.WriteString(fence("stderr", "the test command's stderr", stderr))
+	b.WriteString(fence("stderr", owner+" stderr", stderr))
 	b.WriteString("\n")
 	if omitted.Any() {
 		fmt.Fprintf(b, "The test output above was shortened to fit this prompt: %d lines (%d bytes) were left out "+

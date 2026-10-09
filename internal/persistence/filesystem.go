@@ -175,6 +175,17 @@ func (s *Store) AppendLog(runID string, stepIndex int, actionType domain.ActionT
 	return nil
 }
 
+// AppendCheckLog appends the raw output of one check (stream is "stdout" or "stderr") of a
+// test step to logs/<NNN>-test.<check>.<stream>.log (specs/quality/SPEC.md §5.3). The name
+// becomes part of a path, so it is checked against domain.CheckNameRE here and not trusted
+// to have been validated.
+func (s *Store) AppendCheckLog(runID string, stepIndex int, actionType domain.ActionType, check, stream, content string) error {
+	if !domain.CheckNameRE.MatchString(check) {
+		return fmt.Errorf("check log: %q is not a check name", check)
+	}
+	return s.AppendLog(runID, stepIndex, actionType+"."+domain.ActionType(check), stream, content)
+}
+
 // CallLogPath returns where AppendCallLog writes stream for the named call, without
 // writing anything - used to populate apperr.ProviderError.LogPath.
 func (s *Store) CallLogPath(runID, name, stream string) string {

@@ -98,6 +98,14 @@ type TestConfig struct {
 	Baseline string `yaml:"baseline"`
 }
 
+// CheckConfig is one operator-defined deterministic check (specs/quality/SPEC.md §5): a
+// command the test step runs before test.command, and the pre-run test too. Like
+// test.command it is trusted operator configuration and goes through `sh -c`.
+type CheckConfig struct {
+	Name    string `yaml:"name"`
+	Command string `yaml:"command"`
+}
+
 // test.baseline values.
 const (
 	BaselineRequireGreen = "require_green"
@@ -210,6 +218,10 @@ type Config struct {
 	Test      TestConfig      `yaml:"test"`
 	Limits    LimitsConfig    `yaml:"limits"`
 	Execution ExecutionConfig `yaml:"execution"`
+
+	// Checks run in order before test.command, inside the test step and the pre-run test
+	// (specs/quality/SPEC.md §5). Absent means none, as before.
+	Checks []CheckConfig `yaml:"checks"`
 
 	// Decision, Translation, Policy, and Context configure how the workflow is decided
 	// (specs/JEV integration/TASKS.md T02, T22); see decision.go.

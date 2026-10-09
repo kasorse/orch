@@ -30,6 +30,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --chdir) cd "$2"; shift 2 ;;
     --ro-bind|--bind) shift 3 ;;
+    --setenv) export "$2=$3"; shift 3 ;;
     --dev|--proc|--tmpfs) shift 2 ;;
     --*) shift ;;
     *) exec "$@" ;;

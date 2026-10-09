@@ -43,7 +43,7 @@ var isolation = []string{
 // order, later ones over earlier ones: the $HOME tmpfs must come before the repository
 // and cache binds (a repository under $HOME would otherwise be hidden), and the git
 // directories after the repository bind (or they would be writable again).
-func (s *Sandbox) args(workingDir, command string) []string {
+func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	argv := append([]string(nil), baseMounts...)
 	argv = append(argv, "--tmpfs", s.Home, "--bind", s.RepoRoot, s.RepoRoot)
 	for _, d := range s.GitDirs {
@@ -56,6 +56,12 @@ func (s *Sandbox) args(workingDir, command string) []string {
 		argv = append(argv, "--bind", d, d)
 	}
 	argv = append(argv, isolation...)
+	// extraEnv (Runner.Run has checked the names) reaches the command through --setenv, after
+	// every mount and before the command: bwrap would read a later option as part of it.
+	for _, kv := range extraEnv {
+		key, value, _ := strings.Cut(kv, "=")
+		argv = append(argv, "--setenv", key, value)
+	}
 	return append(argv, "--chdir", workingDir, "sh", "-c", command)
 }
 

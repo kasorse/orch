@@ -53,6 +53,8 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Sprintf("limits.max_fix_iterations must be positive, got %d", cfg.Limits.MaxFixIterations))
 	}
 
+	problems = append(problems, checkProblems(cfg)...)
+
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 
 	if cfg.Execution.Timeout <= 0 {
@@ -104,6 +106,32 @@ func Validate(cfg Config) error {
 		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n")),
 		nil,
 	)
+}
+
+// checkProblems validates checks (specs/quality/SPEC.md §5.1): at most domain.MaxChecks,
+// each with a name matching domain.CheckNameRE, unique, and a command; and test.command,
+// since checks run inside the test step.
+func checkProblems(cfg Config) []string {
+	var problems []string
+	if len(cfg.Checks) > domain.MaxChecks {
+		problems = append(problems, fmt.Sprintf("checks: %d checks, at most %d", len(cfg.Checks), domain.MaxChecks))
+	}
+	if len(cfg.Checks) > 0 && strings.TrimSpace(cfg.Test.Command) == "" {
+		problems = append(problems, "checks need test.command: they run inside the test step, which needs its command")
+	}
+	seen := map[string]bool{}
+	for i, c := range cfg.Checks {
+		if !domain.CheckNameRE.MatchString(c.Name) {
+			problems = append(problems, fmt.Sprintf("checks[%d].name %q must match %s", i, c.Name, domain.CheckNameRE))
+		} else if seen[c.Name] {
+			problems = append(problems, fmt.Sprintf("checks[%d].name %q is used by an earlier check", i, c.Name))
+		}
+		seen[c.Name] = true
+		if strings.TrimSpace(c.Command) == "" {
+			problems = append(problems, fmt.Sprintf("checks[%d].command is required", i))
+		}
+	}
+	return problems
 }
 
 // EffortLevels are the accepted values of an action's effort, as the claude CLI names them.

@@ -2,9 +2,34 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// CheckNameRE is the shape of a check's name (config `checks[].name`); the name becomes part
+// of a log file name, so it is checked again wherever it is used for a path.
+var CheckNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// MaxChecks is the most checks a config may define.
+const MaxChecks = 16
+
+// CheckResult is one check of the test step that ran (specs/quality/SPEC.md §5.3). Its
+// output is not kept here: it goes to logs/<NNN>-test.<check>.{stdout,stderr}.log.
+type CheckResult struct {
+	Name     string        `json:"name"`
+	ExitCode int           `json:"exit_code"`
+	Success  bool          `json:"success"`
+	Duration time.Duration `json:"duration"`
+}
+
+// CheckOutput is the raw output of one check, on its way to the log files. It is not
+// persisted in run.json.
+type CheckOutput struct {
+	Name   string
+	Stdout string
+	Stderr string
+}
 
 type TestResult struct {
 	Command  string        `json:"command"`
@@ -15,6 +40,11 @@ type TestResult struct {
 	Duration time.Duration `json:"duration"`
 	// Sandboxed is true when the command ran under test.sandbox (bwrap).
 	Sandboxed bool `json:"sandboxed,omitempty"`
+	// Checks lists every check that ran before test.command, in order. When a check fails,
+	// the fields above are the failing check's and FailedCheck names it; the test command did
+	// not run.
+	Checks      []CheckResult `json:"checks,omitempty"`
+	FailedCheck string        `json:"failed_check,omitempty"`
 }
 
 type Severity string

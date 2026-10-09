@@ -69,6 +69,17 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	tests := "not run"
 	if p := out.TestsPassedFinal; p != nil {
 		tests = map[bool]string{true: "passed", false: "failed"}[*p]
+		if !*p {
+			// A failed check means the tests did not run (specs/quality/SPEC.md §5.3).
+			for i := len(run.Executions) - 1; i >= 0; i-- {
+				if t := run.Executions[i].TestResult; t != nil {
+					if t.FailedCheck != "" {
+						tests = "failed (check " + t.FailedCheck + ")"
+					}
+					break
+				}
+			}
+		}
 	}
 	row("Tests (last run)", tests)
 	verdict := noValue
@@ -178,6 +189,9 @@ func stepResult(e domain.StepExecution) string {
 	case e.TestResult != nil:
 		if e.TestResult.Success {
 			return "passed"
+		}
+		if c := e.TestResult.FailedCheck; c != "" {
+			return fmt.Sprintf("failed (check %s, exit %d)", c, e.TestResult.ExitCode)
 		}
 		return fmt.Sprintf("failed (exit %d)", e.TestResult.ExitCode)
 	case e.ReviewResult != nil:

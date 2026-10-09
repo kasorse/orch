@@ -94,6 +94,18 @@ func TestRunSummary_ReviewCriteria(t *testing.T) {
 	}
 }
 
+func TestRunSummary_FailedCheck(t *testing.T) {
+	run := summaryRun()
+	run.Executions[2].TestResult = &domain.TestResult{Command: "go vet ./...", ExitCode: 1, FailedCheck: "vet",
+		Checks: []domain.CheckResult{{Name: "build", Success: true}, {Name: "vet", ExitCode: 1}}}
+	got := RunSummary(run, nil)
+	for _, want := range []string{"| Tests (last run) | failed (check vet) |", "| test (resume 1) | failed (check vet, exit 1) |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
+}
+
 // A run recorded before the call report existed still renders: the configured model
 // stands in, and what is unknown is a dash.
 func TestRunSummary_OldRun(t *testing.T) {

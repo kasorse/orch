@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,7 @@ func TestTestSandbox(t *testing.T) {
 		t.Setenv("ANTHROPIC_API_KEY", "sk-ant-live-planted")
 		script := fmt.Sprintf(`printenv ANTHROPIC_API_KEY > env-key || true
 printenv PATH > env-path || true
+printenv ORCH_BASE_REF > env-base-ref || true
 touch inside
 touch "$HOME/home-marker"
 touch %s
@@ -51,7 +53,7 @@ exit 0`, outside)
 		if sandboxed {
 			runner.Sandbox = &testexec.Sandbox{Home: home, RepoRoot: repo, GitDirs: []string{filepath.Join(repo, ".git")}}
 		}
-		res, err := runner.Run(ctx, script, repo)
+		res, err := runner.Run(ctx, script, repo, testexec.RunOptions{Env: []string{"ORCH_BASE_REF=abc123"}})
 		if err != nil || !res.Success {
 			t.Fatalf("run (sandboxed=%v): %v\nstdout: %s\nstderr: %s", sandboxed, err, res.Stdout, res.Stderr)
 		}
@@ -76,6 +78,10 @@ exit 0`, outside)
 		}
 		if data, _ := os.ReadFile(filepath.Join(repo, "env-path")); len(data) == 0 {
 			t.Error("the test command lost PATH")
+		}
+		// The extra pair reaches the command with or without bwrap (specs/quality/SPEC.md §5.2).
+		if data, _ := os.ReadFile(filepath.Join(repo, "env-base-ref")); strings.TrimSpace(string(data)) != "abc123" {
+			t.Errorf("ORCH_BASE_REF = %q, want abc123", data)
 		}
 	}
 	checkEnv(repo)

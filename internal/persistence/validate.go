@@ -51,8 +51,13 @@ func validateRun(run *domain.Run, runID string) error {
 	if err := validateSecretScan(run); err != nil {
 		return err
 	}
-	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
-		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+	if t := run.PreRunTest; t != nil {
+		if t.Success != (t.ExitCode == 0) || t.Duration < 0 {
+			return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+		}
+		if err := validateChecks(*t); err != nil {
+			return fmt.Errorf("pre_run_test: %w", err)
+		}
 	}
 	if o := run.Outcome; o != nil {
 		if err := validateOutcome(o, run.Status); err != nil {
@@ -120,6 +125,11 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("diff: %w", err)
 		}
 	}
+	if exec.TestResult != nil {
+		if err := validateChecks(*exec.TestResult); err != nil {
+			return fmt.Errorf("test_result: %w", err)
+		}
+	}
 	if exec.ReviewResult != nil {
 		if exec.Action != domain.ActionReview {
 			return fmt.Errorf("review_result recorded on step action %s", exec.Action)
@@ -131,6 +141,47 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
+	}
+	return nil
+}
+
+// validateChecks checks the checks a test result lists and its failed_check
+// (specs/quality/SPEC.md §5.3). A result written before checks existed has neither. The
+// names end up in log file names, so each must have the shape a config allows.
+//
+// The sequence stops at the first non-zero exit, so a failed check is the last one listed and
+// every earlier one passed; without a failed check every listed one passed, and the top-level
+// result can only be red through test.command.
+func validateChecks(t domain.TestResult) error {
+	if len(t.Checks) > domain.MaxChecks {
+		return fmt.Errorf("checks: %d entries, at most %d", len(t.Checks), domain.MaxChecks)
+	}
+	seen := map[string]bool{}
+	for i, c := range t.Checks {
+		switch {
+		case !domain.CheckNameRE.MatchString(c.Name):
+			return fmt.Errorf("checks[%d]: name %q is not a check name", i, c.Name)
+		case seen[c.Name]:
+			return fmt.Errorf("checks[%d]: name %q appears more than once", i, c.Name)
+		case c.Success != (c.ExitCode == 0) || c.Duration < 0:
+			return fmt.Errorf("checks[%d]: inconsistent result (exit code %d, success %v, duration %s)", i, c.ExitCode, c.Success, c.Duration)
+		}
+		seen[c.Name] = true
+		if last := i == len(t.Checks)-1; !c.Success && !(last && t.FailedCheck == c.Name) {
+			return fmt.Errorf("checks[%d]: %q failed, but the sequence goes on after it or failed_check does not name it", i, c.Name)
+		}
+	}
+	if t.FailedCheck == "" {
+		return nil
+	}
+	if !domain.CheckNameRE.MatchString(t.FailedCheck) {
+		return fmt.Errorf("failed_check %q is not a check name", t.FailedCheck)
+	}
+	if n := len(t.Checks); n == 0 || t.Checks[n-1].Name != t.FailedCheck || t.Checks[n-1].Success {
+		return fmt.Errorf("failed_check %q is not the last entry of checks, or that entry did not fail", t.FailedCheck)
+	}
+	if t.Success {
+		return fmt.Errorf("failed_check %q on a successful result", t.FailedCheck)
 	}
 	return nil
 }

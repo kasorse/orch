@@ -182,6 +182,32 @@ func TestAppendCallLog_NamedUnindexedPath(t *testing.T) {
 	}
 }
 
+func TestAppendCheckLog_PathAndName(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, "vet", "stdout", "one\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, "vet", "stdout", "two\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), "logs", "004-test.vet.stdout.log"))
+	if err != nil || string(data) != "one\ntwo\n" {
+		t.Errorf("log = %q, %v", data, err)
+	}
+
+	// The name is part of a path: whatever the config said, a bad one is refused.
+	for _, bad := range []string{"", "../x", "a/b", "A", "-x", ".", "..", "a.b", strings.Repeat("a", 33)} {
+		if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, bad, "stdout", "x"); err == nil {
+			t.Errorf("check name %q must be refused", bad)
+		}
+	}
+}
+
 func TestSaveDecisionAndProjectContext(t *testing.T) {
 	store := NewStore(t.TempDir())
 	run, err := store.NewRun(domain.Task{Description: "fix"})

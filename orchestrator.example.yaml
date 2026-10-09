@@ -91,6 +91,23 @@ test:
   # is about making failing tests pass, start it with `run --allow-red-tests`.
   # baseline: require_green          # require_green (default) | off
 
+# Optional: your own deterministic checks (build, vet, lint, SAST). The test step runs each
+# one in order, then test.command, and stops at the first non-zero exit code; the retry
+# prompt names the failed check and says the tests did not run. The pre-run test runs the
+# same sequence, so a check that already fails stops the run like a failing test
+# (`run --allow-red-tests` goes on). Every command runs like test.command: through `sh -c`,
+# under the same sandbox, environment and guard. ORCH_BASE_REF is set to the commit the run
+# started from (empty if it could not be recorded), so a linter can report only what the run
+# introduced. A name matches ^[a-z0-9][a-z0-9_-]{0,31}$ and is unique; at most 16 checks;
+# test.command is required. Checks only run when the workflow has a testing stage: to always
+# have them, force it with policy.stages.force. Each check's output goes to
+# logs/<NNN>-test.<name>.{stdout,stderr}.log in the run directory.
+# checks:
+#   - {name: build, command: "go build ./..."}
+#   - {name: vet,   command: "go vet ./..."}
+#   - {name: lint,  command: "golangci-lint run --new-from-rev=$ORCH_BASE_REF"}
+#   - {name: sast,  command: "semgrep --error --config p/golang"}
+
 limits:
   max_steps: 12
   max_fix_iterations: 2

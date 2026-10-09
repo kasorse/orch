@@ -465,14 +465,19 @@ func (r *ConsoleReporter) PreRunTestFinished(result *domain.TestResult, allowRed
 		return
 	}
 	took := result.Duration.Round(100 * time.Millisecond)
+	// A red check names itself: the tests did not run (specs/quality/SPEC.md §5.5).
+	failed := fmt.Sprintf("exit %d, %s", result.ExitCode, took)
+	if result.FailedCheck != "" {
+		failed = fmt.Sprintf("check %s, %s", result.FailedCheck, failed)
+	}
 	var text string
 	switch {
 	case result.Success:
 		text = fmt.Sprintf("passed (%s)", took)
 	case allowRed:
-		text = fmt.Sprintf("failed (exit %d, %s) - going on: --allow-red-tests, the task is to make them pass", result.ExitCode, took)
+		text = fmt.Sprintf("failed (%s) - going on: --allow-red-tests, the task is to make them pass", failed)
 	default:
-		text = fmt.Sprintf("failed (exit %d, %s) - the run stops before any change", result.ExitCode, took)
+		text = fmt.Sprintf("failed (%s) - the run stops before any change", failed)
 	}
 	if r.Pretty {
 		st := r.st()

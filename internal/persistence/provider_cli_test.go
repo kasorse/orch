@@ -45,6 +45,65 @@ func TestValidateRun_PreRunTest(t *testing.T) {
 	}
 }
 
+// Checks and failed_check (specs/quality/SPEC.md §5.3), in the pre-run test and in a test
+// step. A result with neither, as every run written before checks existed, is valid.
+func TestValidateRun_Checks(t *testing.T) {
+	pass := func(name string) domain.CheckResult { return domain.CheckResult{Name: name, Success: true} }
+	fail := func(name string) domain.CheckResult { return domain.CheckResult{Name: name, ExitCode: 1} }
+	withPreRun := func(r domain.TestResult) *domain.Run {
+		return &domain.Run{ID: "r", Status: domain.RunFailed, PreRunTest: &r}
+	}
+	withStep := func(r domain.TestResult) *domain.Run {
+		return &domain.Run{ID: "r", Status: domain.RunFailed, Executions: []domain.StepExecution{
+			{Index: 0, Action: domain.ActionTest, Status: domain.StepCompleted, TestResult: &r}}}
+	}
+
+	valid := map[string]domain.TestResult{
+		"no checks (an old result)": {ExitCode: 1},
+		"green checks, green tests": {Success: true, Checks: []domain.CheckResult{pass("build"), pass("vet")}},
+		"green checks, red tests":   {ExitCode: 1, Checks: []domain.CheckResult{pass("build")}},
+		"the last check failed":     {ExitCode: 1, FailedCheck: "vet", Checks: []domain.CheckResult{pass("build"), fail("vet")}},
+		"the only check failed":     {ExitCode: 1, FailedCheck: "b", Checks: []domain.CheckResult{fail("b")}},
+	}
+	for name, r := range valid {
+		if err := validateRun(withPreRun(r), "r"); err != nil {
+			t.Errorf("pre_run_test, %s: %v", name, err)
+		}
+		if err := validateRun(withStep(r), "r"); err != nil {
+			t.Errorf("test step, %s: %v", name, err)
+		}
+	}
+
+	var tooMany []domain.CheckResult
+	for i := 0; i <= domain.MaxChecks; i++ {
+		tooMany = append(tooMany, pass(string(rune('a'+i))))
+	}
+	invalid := map[string]domain.TestResult{
+		"failed_check without checks":      {ExitCode: 1, FailedCheck: "vet"},
+		"failed_check names a passed one":  {ExitCode: 1, FailedCheck: "build", Checks: []domain.CheckResult{pass("build"), fail("vet")}},
+		"failed_check not the last":        {ExitCode: 1, FailedCheck: "build", Checks: []domain.CheckResult{fail("build"), pass("vet")}},
+		"failed_check names no entry":      {ExitCode: 1, FailedCheck: "lint", Checks: []domain.CheckResult{fail("vet")}},
+		"a failed check without the name":  {ExitCode: 1, Checks: []domain.CheckResult{fail("vet")}},
+		"a pass after a failed check":      {ExitCode: 1, FailedCheck: "vet", Checks: []domain.CheckResult{fail("vet"), pass("lint")}},
+		"failed_check on a green result":   {Success: true, FailedCheck: "vet", Checks: []domain.CheckResult{fail("vet")}},
+		"bad failed_check name":            {ExitCode: 1, FailedCheck: "../x", Checks: []domain.CheckResult{fail("../x")}},
+		"bad check name":                   {ExitCode: 1, Checks: []domain.CheckResult{pass("A b")}},
+		"empty check name":                 {ExitCode: 1, Checks: []domain.CheckResult{pass("")}},
+		"duplicate check name":             {ExitCode: 1, Checks: []domain.CheckResult{pass("vet"), pass("vet")}},
+		"success with a failing exit code": {ExitCode: 1, Checks: []domain.CheckResult{{Name: "vet", ExitCode: 2, Success: true}}},
+		"negative check duration":          {ExitCode: 1, Checks: []domain.CheckResult{{Name: "vet", Success: true, Duration: -1}}},
+		"more than 16 checks":              {ExitCode: 1, Checks: tooMany},
+	}
+	for name, r := range invalid {
+		if err := validateRun(withPreRun(r), "r"); err == nil || !strings.Contains(err.Error(), "pre_run_test") {
+			t.Errorf("pre_run_test, %s: got %v", name, err)
+		}
+		if err := validateRun(withStep(r), "r"); err == nil || !strings.Contains(err.Error(), "test_result") {
+			t.Errorf("test step, %s: got %v", name, err)
+		}
+	}
+}
+
 func TestValidateRun_SecretScan(t *testing.T) {
 	fp := strings.Repeat("ab", 32)
 	ok := &domain.Run{ID: "r", Status: domain.RunRunning, SecretScanBaseline: []string{fp},
