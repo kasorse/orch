@@ -28,6 +28,7 @@ func (d *Dispatcher) applyImplementation(a domain.ImplementationArtifact) {
 	// Consumed - do not resend stale retry context to a later, unrelated implement call.
 	d.pendingTestFailure = nil
 	d.pendingReviewIssues = nil
+	d.pendingUnmetCriteria = nil
 }
 
 func (d *Dispatcher) applyTest(r domain.TestResult) {
@@ -51,8 +52,10 @@ func (d *Dispatcher) applyPreRunTest(r domain.TestResult) {
 func (d *Dispatcher) applyReview(r domain.ReviewResult) {
 	if r.Decide() == domain.ReviewFail {
 		d.pendingReviewIssues = r.Issues
+		d.pendingUnmetCriteria = r.UnmetCriteria()
 	} else {
 		d.pendingReviewIssues = nil
+		d.pendingUnmetCriteria = nil
 	}
 }
 
@@ -74,7 +77,7 @@ type ArtifactReader interface {
 // rather than continuing with a thinner prompt.
 func (d *Dispatcher) Restore(run *domain.Run, r ArtifactReader) error {
 	d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest = nil, nil, nil, nil, nil
-	d.pendingTestFailure, d.pendingReviewIssues, d.preRunFailure = nil, nil, nil
+	d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.preRunFailure = nil, nil, nil, nil
 	if run.PreRunTest != nil {
 		d.applyPreRunTest(*run.PreRunTest)
 	}

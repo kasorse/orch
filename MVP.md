@@ -1033,6 +1033,15 @@ step goes on without it and a warning is shown. The plan's optional `acceptance_
 (at most 8, each at most 300 bytes) are checkable statements about the result; the parser
 keeps the first 8 non-empty ones and cuts each on a UTF-8 boundary.
 
+When the plan has criteria, review must return a verdict for each one
+(`criteria: [{index, met, evidence}]`, `specs/quality/SPEC.md` §7.1): exactly one entry per
+criterion, indexes `1…N` each once, `evidence` of 1 to 500 bytes. Any other answer is a
+malformed review (a hard step error). Go fills `criterion` from the plan. An unmet criterion
+fails the review like a `high` issue, and the retried implement is told which criteria were
+unmet, with the evidence, before the issues. Without criteria the answer has none. Every
+review prompt also tells the reviewer it has Read, Grep and Glob and should read the code
+around the change (§7.2).
+
 Example analysis artifact:
 
 ```json
@@ -3460,7 +3469,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Tokens | Summed over every call: `prompt` is every input token (`input` uncached + `cache read` + `cache write`); `output` the generated tokens. |
 | Provider calls | Calls that reported usage (`outcome.usage.calls`). |
 | Tests (last run) | The last test step's result: `passed`, `failed`, or `not run`. |
-| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue fails). |
+| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue, or any unmet acceptance criterion, fails). |
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
 

@@ -49,3 +49,26 @@ the change (`SPEC.md` §7.1–§7.2).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-09)
+
+Done as planned, except:
+
+- **Gates:** `scripts/check.sh` passed (`go build`, `go vet`, `go test` including the
+  prompt golden comparison, and `gofmt -l`), so the hand-written goldens, including the new
+  `implement_retry_review_criteria`, match the code. QL02 is marked ✓ in `README.md`.
+- **`ReviewResult.ValidateCriteria()`** holds the shape check (range, duplicates, evidence
+  size); `Validate()` calls it. The persistence load calls `ValidateCriteria` only, so a
+  hand-written `run.json` whose review has no `status` is not newly refused. It also refuses
+  a `review_result` on a step that is not review.
+- **`planCriteria`** (prompts.go) is the plan's non-blank criteria, the list the prompt
+  numbers; the review prompt and `executeReview` both use it, so index `N` is the same
+  criterion in both.
+- **`ReviewResult.UnmetCriteria()`** feeds `pendingUnmetCriteria` (set and cleared with
+  `pendingReviewIssues`) and the report. `summary.md` and the resume history show
+  `N/M criteria met` next to the issue count when the review has verdicts.
+- **Retry prompt:** with unmet criteria the "FAILED" line names them, "Unmet acceptance
+  criteria:" lists `- <index>. <criterion>` and `  evidence: <evidence>` (each on one
+  line), and the issues follow under "Review issues:". An issues-only retry is unchanged.
+- **Integration and fake-CLI fixtures** whose plans have criteria must return verdicts;
+  the full set is QL13's.

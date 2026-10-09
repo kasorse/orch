@@ -3,9 +3,10 @@
 Status: **in progress** (specified 2026-10-08): the owner went through TODO.md Q1–Q8 one by one. Q1, Q2,
 Q3, Q5, Q6 and Q7 are in this spec. Q4 (worktree isolation) gets its own spec together with
 W1. Q8 (the cost of the decision rounds) waits for the benchmark decision B4. The decisions
-are in `SPEC.md` §14 and the author's defaults in §15. In progress (2026-10-09): QL01 done
-(stage context in the prompts, `acceptance_criteria`, the retry diff stat, prompt golden
-files); QL02–QL15 have not started.
+are in `SPEC.md` §14 and the author's defaults in §15. In progress (2026-10-09): QL01 and QL02
+done (stage context in the prompts, `acceptance_criteria`, the retry diff stat, prompt golden
+files; the review verdict per criterion and the read-the-surroundings prompt);
+QL03–QL15 have not started.
 
 | document | role |
 |---|---|
@@ -34,7 +35,7 @@ step runs on one model regardless of how simple the task is. This phase:
 | task | title | TODO | size | depends on |
 |---|---|---|---|---|
 | [QL01](tasks/TASK-QL01-stage-context.md) | stage context in prompts, `acceptance_criteria`, retry diff stat, prompt golden files ✓ | Q1 | S | — |
-| [QL02](tasks/TASK-QL02-review-criteria.md) | review verdict per criterion, read-the-surroundings prompt | Q6.1–2 | S | QL01 |
+| [QL02](tasks/TASK-QL02-review-criteria.md) | review verdict per criterion, read-the-surroundings prompt ✓ | Q6.1–2 | S | QL01 |
 | [QL03](tasks/TASK-QL03-checks.md) | `checks:` in the test step and the pre-run test | Q5 | M | — |
 | [QL04](tasks/TASK-QL04-verify-server.md) | `internal/verify`: stdio MCP server, `run_tests`, `run_check` | Q2 | M | QL03 |
 | [QL05](tasks/TASK-QL05-verify-wiring.md) | verify in the implement step: config, fail-fast, dispatcher, record | Q2 | M | QL04 |

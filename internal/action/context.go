@@ -91,11 +91,12 @@ type Dispatcher struct {
 	lastImpl     *domain.ImplementationArtifact
 	lastTest     *domain.TestResult
 
-	// pendingTestFailure/pendingReviewIssues carry retry context into the next
-	// executeImplement call; both are cleared once consumed, since the engine's
+	// pendingTestFailure/pendingReviewIssues/pendingUnmetCriteria carry retry context into
+	// the next executeImplement call; all are cleared once consumed, since the engine's
 	// transition table never has a test failure and a review failure pending at once.
-	pendingTestFailure  *domain.TestResult
-	pendingReviewIssues []domain.ReviewIssue
+	pendingTestFailure   *domain.TestResult
+	pendingReviewIssues  []domain.ReviewIssue
+	pendingUnmetCriteria []domain.CriterionVerdict
 
 	// stepUsage and stepCall are the usage and the report of the current step's provider
 	// call; stepTruncated is what its prompt had cut, set by the action before the call.

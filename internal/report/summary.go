@@ -181,9 +181,19 @@ func stepResult(e domain.StepExecution) string {
 		}
 		return fmt.Sprintf("failed (exit %d)", e.TestResult.ExitCode)
 	case e.ReviewResult != nil:
-		return fmt.Sprintf("%s (%s)", e.ReviewResult.Decide(), plural(len(e.ReviewResult.Issues), "issue"))
+		return fmt.Sprintf("%s (%s)", e.ReviewResult.Decide(), reviewCounts(*e.ReviewResult))
 	}
 	return string(e.Status)
+}
+
+// reviewCounts is the issue count, and the criteria met out of the total when the review
+// judged any.
+func reviewCounts(r domain.ReviewResult) string {
+	s := plural(len(r.Issues), "issue")
+	if n := len(r.Criteria); n > 0 {
+		s += fmt.Sprintf(", %d/%d criteria met", n-len(r.UnmetCriteria()), n)
+	}
+	return s
 }
 
 func writeTools(b *strings.Builder, run domain.Run) {

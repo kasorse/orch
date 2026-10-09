@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -54,6 +55,34 @@ func runWith(wf *domain.Workflow, execs ...domain.StepExecution) *domain.Run {
 		execs[i].Index = i
 	}
 	return &domain.Run{Workflow: wf, Executions: execs}
+}
+
+// A review that failed only on an unmet criterion (no issues) is still a failure after the
+// run.json round trip a resume goes through (QL02).
+func TestOutcomeOf_UnmetCriterion(t *testing.T) {
+	review := &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+		{Index: 1, Criterion: "a", Met: true, Evidence: "a.go:1"},
+		{Index: 2, Criterion: "b", Met: false, Evidence: "no test"},
+		{Index: 3, Criterion: "c", Met: true, Evidence: "c.go:3"},
+	}}
+	data, err := json.Marshal(domain.StepExecution{Action: domain.ActionReview, Status: domain.StepCompleted, ReviewResult: review})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exec domain.StepExecution
+	if err := json.Unmarshal(data, &exec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := outcomeOf(exec)
+	if err != nil || got != OutcomeFailure {
+		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
+	}
+
+	full := wfp(domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	entry, _, err := Entry(runWith(full, done(domain.ActionImplement), done(domain.ActionTest), exec))
+	if err != nil || entry != StateImplement {
+		t.Errorf("Entry = %s, %v; want implement", entry, err)
+	}
 }
 
 func TestEntry(t *testing.T) {

@@ -83,6 +83,17 @@ func TestRunSummary(t *testing.T) {
 	}
 }
 
+func TestRunSummary_ReviewCriteria(t *testing.T) {
+	run := summaryRun()
+	run.Executions[3].ReviewResult = &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+		{Index: 1, Met: true, Evidence: "a"}, {Index: 2, Met: false, Evidence: "b"}, {Index: 3, Met: true, Evidence: "c"},
+	}}
+	got := RunSummary(run, nil)
+	if want := "| fail (0 issues, 2/3 criteria met) |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+}
+
 // A run recorded before the call report existed still renders: the configured model
 // stands in, and what is unknown is a dash.
 func TestRunSummary_OldRun(t *testing.T) {

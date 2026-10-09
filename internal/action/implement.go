@@ -24,6 +24,7 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		LastTestResult:         d.pendingTestFailure,
 		PreRunFailure:          d.preRunFailureForImplement(),
 		ReviewIssues:           d.pendingReviewIssues,
+		UnmetCriteria:          d.pendingUnmetCriteria,
 		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
 	}
 

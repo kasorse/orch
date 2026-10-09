@@ -108,6 +108,14 @@ func TestPrompts_Golden(t *testing.T) {
 				ReviewIssues: []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "internal/store/store.go", Description: "Put still panics on a zero Store"}},
 			})
 		}},
+		{"implement_retry_review_criteria", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{
+				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat,
+				UnmetCriteria: []domain.CriterionVerdict{{Index: 2, Criterion: goldenPlan().AcceptanceCriteria[1], Evidence: "no test calls Put on a fresh store"}},
+				ReviewIssues:  []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "internal/store/store.go", Description: "Put still panics on a zero Store"}},
+			})
+		}},
 		{"implement_red_prerun", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
 				Task: goldenTask, PreRunFailure: &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL: TestPutFresh\n", Stderr: "exit status 1"},
@@ -223,6 +231,31 @@ func TestPrompts_StageContext(t *testing.T) {
 	}
 	if strings.Contains(review, "Affected files") {
 		t.Error("review is not given file lists (QL01)")
+	}
+
+	// QL02: the verdict shape and rule only with criteria, the §7.2 paragraph always.
+	noPlan := BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"})
+	blank := BuildReviewPrompt(ReviewPromptInput{Task: "t", Plan: &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{" "}}, GitDiff: "d"})
+	for name, prompt := range map[string]string{"with criteria": review, "no plan": noPlan, "blank criteria": blank} {
+		if !strings.Contains(prompt, "You have Read, Grep and Glob.") || !strings.Contains(prompt, reviewSurroundingsRule) {
+			t.Errorf("review prompt (%s) lacks the Read/Grep paragraph", name)
+		}
+	}
+	if !strings.Contains(review, `"criteria": [`) || !strings.Contains(review, reviewCriteriaRule) {
+		t.Errorf("review prompt with criteria lacks the verdict shape or rule:\n%s", review)
+	}
+	for name, prompt := range map[string]string{"no plan": noPlan, "blank criteria": blank} {
+		if strings.Contains(prompt, `"criteria": [`) || strings.Contains(prompt, reviewCriteriaRule) {
+			t.Errorf("review prompt (%s) asks for criteria verdicts", name)
+		}
+	}
+
+	onlyUnmet := BuildImplementPrompt(ImplementPromptInput{Task: "t",
+		UnmetCriteria: []domain.CriterionVerdict{{Index: 1, Criterion: "c", Evidence: "e\nmore"}}})
+	for _, want := range []string{"A code review FAILED", "Unmet acceptance criteria:\n- 1. c\n  evidence: e more\n"} {
+		if !strings.Contains(onlyUnmet, want) {
+			t.Errorf("a review that failed only on criteria lacks %q:\n%s", want, onlyUnmet)
+		}
 	}
 
 	bare := BuildImplementPrompt(ImplementPromptInput{Task: "t", Analysis: &domain.AnalysisArtifact{Summary: "s"}, Plan: &domain.PlanArtifact{Summary: "p"}})

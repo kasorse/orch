@@ -48,10 +48,11 @@ type dispatcherState struct {
 	Test           *domain.TestResult
 	PendingTest    *domain.TestResult
 	PendingReviews []domain.ReviewIssue
+	PendingUnmet   []domain.CriterionVerdict
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues}
+	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -190,6 +191,10 @@ func TestRestore_RefusesMissingOrInvalidState(t *testing.T) {
 		{"review with an unknown severity", []domain.StepExecution{{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
 			ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Issues: []domain.ReviewIssue{{Severity: "catastrophic"}}}}},
 			memReader{}, "severity"},
+		{"review with a duplicate criterion index", []domain.StepExecution{{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+			ReviewResult: &domain.ReviewResult{Status: domain.ReviewFail, Criteria: []domain.CriterionVerdict{
+				{Index: 1, Evidence: "a"}, {Index: 1, Evidence: "b"}}}}},
+			memReader{}, "more than once"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +239,37 @@ func TestRestore_PlanArtifactWithAndWithoutCriteria(t *testing.T) {
 				t.Errorf("criteria in the implement prompt = %v, want %v:\n%s", got, tc.want != nil, prompt)
 			}
 		})
+	}
+}
+
+// A review that failed only on an unmet criterion leaves it pending for the retry, and an
+// implement consumes it.
+func TestRestore_UnmetCriteriaArePending(t *testing.T) {
+	review := domain.StepExecution{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+		ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+			{Index: 1, Criterion: "a", Met: true, Evidence: "a.go:1"},
+			{Index: 2, Criterion: "b", Met: false, Evidence: "no test"},
+		}}}
+	impl := domain.StepExecution{Index: 1, Action: domain.ActionImplement, Status: domain.StepCompleted}
+	reader := memReader{memKey(1, domain.ActionImplement): `{"summary":"i"}`}
+
+	d := &Dispatcher{}
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.pendingUnmetCriteria) != 1 || d.pendingUnmetCriteria[0].Index != 2 || len(d.pendingReviewIssues) != 0 {
+		t.Fatalf("pending unmet criteria = %+v", d.pendingUnmetCriteria)
+	}
+	prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", UnmetCriteria: d.pendingUnmetCriteria, ReviewIssues: d.pendingReviewIssues})
+	if !strings.Contains(prompt, "- 2. b\n  evidence: no test\n") {
+		t.Errorf("the retry prompt lacks the unmet criterion:\n%s", prompt)
+	}
+
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review, impl}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if d.pendingUnmetCriteria != nil {
+		t.Errorf("an implement left %+v pending", d.pendingUnmetCriteria)
 	}
 }
 

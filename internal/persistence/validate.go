@@ -120,6 +120,14 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("diff: %w", err)
 		}
 	}
+	if exec.ReviewResult != nil {
+		if exec.Action != domain.ActionReview {
+			return fmt.Errorf("review_result recorded on step action %s", exec.Action)
+		}
+		if err := exec.ReviewResult.ValidateCriteria(); err != nil {
+			return fmt.Errorf("review_result.criteria: %w", err)
+		}
+	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)

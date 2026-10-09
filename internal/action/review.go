@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"orchestrator/internal/apperr"
@@ -73,7 +74,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		return d.failureOutcome(ref, result), err
 	}
 
-	review, err := parseReviewStrict(result.Output)
+	review, err := parseReviewStrict(result.Output, planCriteria(d.lastPlan))
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}
 	}
@@ -103,7 +104,11 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	}, nil
 }
 
-func parseReviewStrict(output string) (domain.ReviewResult, error) {
+// parseReviewStrict decodes and validates the review. criteria are the plan's acceptance
+// criteria as the prompt numbered them: with n of them the answer has exactly n verdicts,
+// indexes 1..n each once, and without any it has none (specs/quality/SPEC.md §7.1). The
+// model echoes only the index; Criterion is filled from criteria.
+func parseReviewStrict(output string, criteria []string) (domain.ReviewResult, error) {
 	obj := extractJSONObject(output)
 	if obj == "" {
 		return domain.ReviewResult{}, errNoJSONObject
@@ -117,6 +122,16 @@ func parseReviewStrict(output string) (domain.ReviewResult, error) {
 	review.Diff = nil
 	if err := review.Validate(); err != nil {
 		return domain.ReviewResult{}, err
+	}
+	// Validate has checked the range and uniqueness of the indexes, so exactly n verdicts
+	// are exactly 1..n.
+	if len(review.Criteria) != len(criteria) {
+		return domain.ReviewResult{}, fmt.Errorf("the plan has %d acceptance criteria and the review has %d verdicts",
+			len(criteria), len(review.Criteria))
+	}
+	slices.SortFunc(review.Criteria, func(a, b domain.CriterionVerdict) int { return a.Index - b.Index })
+	for i := range review.Criteria {
+		review.Criteria[i].Criterion = criteria[review.Criteria[i].Index-1]
 	}
 	return review, nil
 }

@@ -149,6 +149,44 @@ func sourceOf(m map[string]any) map[string]any {
 	return m["task"].(map[string]any)["source"].(map[string]any)
 }
 
+func verdict(index int, evidence string) map[string]any {
+	return map[string]any{"index": index, "criterion": "c", "met": false, "evidence": evidence}
+}
+
+// setCriteria puts verdicts on the run's review result (execution 3 of fullRun).
+func setCriteria(m map[string]any, verdicts ...map[string]any) {
+	list := make([]any, len(verdicts))
+	for i, v := range verdicts {
+		list[i] = v
+	}
+	execAt(m, 3)["review_result"].(map[string]any)["criteria"] = list
+}
+
+// A review result with well-formed criteria loads and keeps them; one written before the
+// field existed (fullRun's) loads without.
+func TestLoadRun_ReviewCriteria(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run := fullRun(t, store)
+	loaded, err := store.LoadRun(run.ID)
+	if err != nil {
+		t.Fatalf("a review result without criteria: %v", err)
+	}
+	if got := loaded.Executions[3].ReviewResult.Criteria; got != nil {
+		t.Errorf("criteria = %+v, want none", got)
+	}
+
+	editRunJSON(t, store, run.ID, func(m map[string]any) {
+		setCriteria(m, verdict(2, "b.go:2"), verdict(1, "a.go:1"))
+	})
+	loaded, err = store.LoadRun(run.ID)
+	if err != nil {
+		t.Fatalf("a review result with criteria: %v", err)
+	}
+	if got := loaded.Executions[3].ReviewResult; len(got.Criteria) != 2 || got.Decide() != domain.ReviewFail {
+		t.Errorf("review result = %+v", got)
+	}
+}
+
 func TestLoadRun_RefusesCorruptState(t *testing.T) {
 	cases := []struct {
 		name string
@@ -181,6 +219,19 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown resume status", func(m map[string]any) {
 			m["resumes"].([]any)[0].(map[string]any)["from_status"] = "odd"
 		}, "resumes[0]"},
+		{"criterion index out of range", func(m map[string]any) {
+			setCriteria(m, verdict(1, "a.go:1"), verdict(3, "b.go:2"))
+		}, "review_result.criteria"},
+		{"duplicate criterion index", func(m map[string]any) {
+			setCriteria(m, verdict(1, "a.go:1"), verdict(1, "b.go:2"))
+		}, "more than once"},
+		{"criterion evidence too long", func(m map[string]any) {
+			setCriteria(m, verdict(1, strings.Repeat("x", domain.MaxCriterionEvidenceBytes+1)))
+		}, "evidence"},
+		{"criterion without evidence", func(m map[string]any) { setCriteria(m, verdict(1, "")) }, "no evidence"},
+		{"review result on another step", func(m map[string]any) {
+			execAt(m, 0)["review_result"] = execAt(m, 3)["review_result"]
+		}, "review_result recorded on step action implement"},
 		{"unknown task source field", func(m map[string]any) { sourceOf(m)["extra"] = 1 }, "unknown field"},
 		{"task source kind", func(m map[string]any) { sourceOf(m)["kind"] = "github" }, `task.source: unknown kind "github"`},
 		{"task source kind empty", func(m map[string]any) { sourceOf(m)["kind"] = "" }, "task.source: unknown kind"},

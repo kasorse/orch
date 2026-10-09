@@ -123,7 +123,11 @@ func executionResult(exec domain.StepExecution) (ok bool, result string) {
 		return false, fmt.Sprintf("tests failed (exit %d)", exec.TestResult.ExitCode)
 	case exec.Action == domain.ActionReview && exec.ReviewResult != nil:
 		if exec.ReviewResult.Decide() == domain.ReviewFail {
-			return false, fmt.Sprintf("FAIL (%s)", countOf(len(exec.ReviewResult.Issues), "issue"))
+			counts := countOf(len(exec.ReviewResult.Issues), "issue")
+			if n := len(exec.ReviewResult.Criteria); n > 0 {
+				counts += fmt.Sprintf(", %d/%d criteria met", n-len(exec.ReviewResult.UnmetCriteria()), n)
+			}
+			return false, fmt.Sprintf("FAIL (%s)", counts)
 		}
 		return true, "PASS"
 	}

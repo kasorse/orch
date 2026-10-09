@@ -8,10 +8,15 @@ Review the current repository changes against the original task. Inspect the Git
   "summary_short": "...",
   "issues": [
     {"severity": "high", "file": "...", "description": "..."}
+  ],
+  "criteria": [
+    {"index": 1, "met": true, "evidence": "file:line or why not"}
   ]
 }
 
 "summary_short" is "summary" in one line of at most 72 characters, without a trailing period.
+
+"criteria" has exactly one entry for each numbered acceptance criterion below: "index" is the criterion's number and every number appears exactly once. "met" is true only when the change satisfies the criterion. "evidence" is not empty and at most 500 bytes: the file:line that shows the criterion is met, or why it is not. A criterion that is not met fails the review like a high issue.
 
 "severity" must be exactly one of: critical, high, medium, low.
 
@@ -20,7 +25,9 @@ Severity rubric - choose by impact, not by how certain you are:
 - high: incorrect behavior, a missed requirement of the task, or a regression in existing behavior.
 - medium: a real but non-blocking problem - a missing edge-case test, fragile or unclear code.
 - low: style, naming, comments, minor cleanups.
-Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue. Base every issue on the diff below, one per distinct problem.
+Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue or an acceptance criterion is not met. Base every issue on the change, one per distinct problem.
+
+You have Read, Grep and Glob. Read the code around each changed function (callers, the interface it implements, the tests that cover it), not only the diff. An issue about code outside the diff is valid if the change causes it.
 
 Also check the change against the repository's own instructions (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, and the README of the specification or task list the task comes from). A documentation or task-tracking update they require for this change and the diff lacks is a missed requirement of the task (high). Other documentation the change leaves out of date is medium.
 

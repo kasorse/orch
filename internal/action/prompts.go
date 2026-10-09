@@ -193,7 +193,8 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 // attempt, Analysis/Plan (whichever the workflow produced) are set and
 // PreviousImplementation/LastTestResult/ReviewIssues are nil/empty. On a retry after test
 // failure, LastTestResult carries the failing command/stdout/stderr. On a retry after
-// review failure, ReviewIssues carries the structured issues.
+// review failure, ReviewIssues carries the structured issues and UnmetCriteria the
+// acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
 	Task                   string
 	Analysis               *domain.AnalysisArtifact
@@ -201,6 +202,7 @@ type ImplementPromptInput struct {
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
+	UnmetCriteria          []domain.CriterionVerdict
 	// PreRunFailure is the test command's red result before any change, when the operator
 	// started the run with --allow-red-tests (specs/hardening/SPEC.md §8.4).
 	PreRunFailure *domain.TestResult
@@ -261,8 +263,27 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		writeTestOutput(&b, *in.LastTestResult, in.MaxTestOutput)
 	}
 
-	if len(in.ReviewIssues) > 0 {
-		b.WriteString("A code review FAILED on the previous implementation. Address every issue below.\n\n")
+	if len(in.UnmetCriteria) > 0 || len(in.ReviewIssues) > 0 {
+		switch {
+		case len(in.UnmetCriteria) == 0:
+			b.WriteString("A code review FAILED on the previous implementation. Address every issue below.\n\n")
+		case len(in.ReviewIssues) == 0:
+			b.WriteString("A code review FAILED on the previous implementation. Address every unmet criterion below.\n\n")
+		default:
+			b.WriteString("A code review FAILED on the previous implementation. Address every unmet criterion and every issue below.\n\n")
+		}
+		if len(in.UnmetCriteria) > 0 {
+			// The criterion comes from the plan and the evidence from the review: both are
+			// model output, kept to one line each so they stay list items.
+			b.WriteString("Unmet acceptance criteria:\n")
+			for _, c := range in.UnmetCriteria {
+				fmt.Fprintf(&b, "- %d. %s\n  evidence: %s\n", c.Index, oneLine(c.Criterion), oneLine(c.Evidence))
+			}
+			b.WriteString("\n")
+			if len(in.ReviewIssues) > 0 {
+				b.WriteString("Review issues:\n")
+			}
+		}
 		for _, issue := range in.ReviewIssues {
 			fmt.Fprintf(&b, "- [%s] %s: %s\n", issue.Severity, issue.File, issue.Description)
 		}
@@ -325,18 +346,60 @@ const reviewSeverityRubric = `Severity rubric - choose by impact, not by how cer
 - high: incorrect behavior, a missed requirement of the task, or a regression in existing behavior.
 - medium: a real but non-blocking problem - a missing edge-case test, fragile or unclear code.
 - low: style, naming, comments, minor cleanups.
-Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue. Base every issue on the diff below, one per distinct problem.
+Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue or an acceptance criterion is not met. Base every issue on the change, one per distinct problem.
 
 `
 
+// reviewSurroundingsRule asks review to read beyond the diff (specs/quality/SPEC.md §7.2).
+const reviewSurroundingsRule = `You have Read, Grep and Glob. Read the code around each changed function ` +
+	`(callers, the interface it implements, the tests that cover it), not only the diff. ` +
+	`An issue about code outside the diff is valid if the change causes it.`
+
+// reviewCriteriaRule asks for one verdict per numbered acceptance criterion of the plan
+// (specs/quality/SPEC.md §7.1). parseReviewStrict enforces the same.
+const reviewCriteriaRule = `"criteria" has exactly one entry for each numbered acceptance criterion below: ` +
+	`"index" is the criterion's number and every number appears exactly once. ` +
+	`"met" is true only when the change satisfies the criterion. "evidence" is not empty and at most 500 bytes: ` +
+	`the file:line that shows the criterion is met, or why it is not. ` +
+	`A criterion that is not met fails the review like a high issue.`
+
+// oneLine collapses s to a single line, so model text printed in a list stays one item.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// planCriteria are the plan's acceptance criteria as the prompts number them: the blank
+// ones are skipped, as writeNumberedList does, so a verdict's index counts the same list.
+func planCriteria(p *domain.PlanArtifact) []string {
+	var out []string
+	if p == nil {
+		return out
+	}
+	for _, c := range p.AcceptanceCriteria {
+		if strings.TrimSpace(c) != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func BuildReviewPrompt(in ReviewPromptInput) string {
+	hasCriteria := len(planCriteria(in.Plan)) > 0
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	criteriaShape := ""
+	if hasCriteria {
+		criteriaShape = ",\n  \"criteria\": [\n    {\"index\": 1, \"met\": true, \"evidence\": \"file:line or why not\"}\n  ]"
+	}
+	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]" + criteriaShape + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
+	if hasCriteria {
+		b.WriteString(reviewCriteriaRule + "\n\n")
+	}
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
+	b.WriteString(reviewSurroundingsRule + "\n\n")
 	b.WriteString(reviewConventionsRule)
 	b.WriteString(reviewOperatorRule)
 

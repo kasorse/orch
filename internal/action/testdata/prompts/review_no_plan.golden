@@ -20,7 +20,9 @@ Severity rubric - choose by impact, not by how certain you are:
 - high: incorrect behavior, a missed requirement of the task, or a regression in existing behavior.
 - medium: a real but non-blocking problem - a missing edge-case test, fragile or unclear code.
 - low: style, naming, comments, minor cleanups.
-Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue. Base every issue on the diff below, one per distinct problem.
+Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue or an acceptance criterion is not met. Base every issue on the change, one per distinct problem.
+
+You have Read, Grep and Glob. Read the code around each changed function (callers, the interface it implements, the tests that cover it), not only the diff. An issue about code outside the diff is valid if the change causes it.
 
 Also check the change against the repository's own instructions (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, and the README of the specification or task list the task comes from). A documentation or task-tracking update they require for this change and the diff lacks is a missed requirement of the task (high). Other documentation the change leaves out of date is medium.
 
