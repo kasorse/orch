@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"reflect"
+	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -25,6 +26,9 @@ func (d *Dispatcher) applyPlan(a domain.PlanArtifact) { d.lastPlan = &a }
 
 func (d *Dispatcher) applyImplementation(a domain.ImplementationArtifact) {
 	d.lastImpl = &a
+	if d.commitImpl == nil && strings.TrimSpace(a.SummaryShort) != "" {
+		d.commitImpl = &a
+	}
 	// Consumed - do not resend stale retry context to a later, unrelated implement call.
 	d.pendingTestFailure = nil
 	d.pendingReviewIssues = nil
@@ -77,6 +81,7 @@ type ArtifactReader interface {
 // rather than continuing with a thinner prompt.
 func (d *Dispatcher) Restore(run *domain.Run, r ArtifactReader) error {
 	d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest = nil, nil, nil, nil, nil
+	d.commitImpl = nil
 	d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.preRunFailure = nil, nil, nil, nil
 	if run.PreRunTest != nil {
 		d.applyPreRunTest(*run.PreRunTest)

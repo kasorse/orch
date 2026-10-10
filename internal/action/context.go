@@ -93,7 +93,10 @@ type Dispatcher struct {
 	lastAnalysis *domain.AnalysisArtifact
 	lastPlan     *domain.PlanArtifact
 	lastImpl     *domain.ImplementationArtifact
-	lastTest     *domain.TestResult
+	// commitImpl is the run's first implementation with a summary_short: the commit
+	// describes the whole change, not the last fix iteration (MVP.md §42.2).
+	commitImpl *domain.ImplementationArtifact
+	lastTest   *domain.TestResult
 
 	// pendingTestFailure/pendingReviewIssues/pendingUnmetCriteria carry retry context into
 	// the next executeImplement call; all are cleared once consumed, since the engine's

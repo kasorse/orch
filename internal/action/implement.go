@@ -201,9 +201,13 @@ func (d *Dispatcher) preRunFailureForImplement() *domain.TestResult {
 	return d.preRunFailure
 }
 
-// LastImplementation is the artifact of the last implement step, restored from its
-// artifact on resume, or nil when none ran. The commit offered at the end of a run takes
-// its message from it (MVP.md §42).
-func (d *Dispatcher) LastImplementation() *domain.ImplementationArtifact {
+// CommitImplementation is the implementation the commit offered at the end of a run takes
+// its message from (MVP.md §42): the first one with a summary_short, since a fix
+// iteration's describes only the fix, else the last one; restored from the artifacts on
+// resume, or nil when none ran.
+func (d *Dispatcher) CommitImplementation() *domain.ImplementationArtifact {
+	if d.commitImpl != nil {
+		return d.commitImpl
+	}
 	return d.lastImpl
 }

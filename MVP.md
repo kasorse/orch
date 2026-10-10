@@ -3384,8 +3384,10 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
 
 * Warnings: a failing last review verdict (a run that completes with the verdict,
   §11; its `summary_short`, else its `summary`) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
-* The message is written by Go, with no provider call: the header is the last
-  implementation's `summary_short` (restored from its artifact on resume), cut to its first
+* The message is written by Go, with no provider call: the header is the `summary_short`
+  of the run's first implementation that has one - a fix iteration's describes only the
+  fix, not the change being committed - else of the last implementation (restored from
+  the artifacts on resume), cut to its first
   line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
   `run --jira` task. What the cut left out goes into the body; the body ends with the
   `Orchestrator-Run: <run-id>` trailer.

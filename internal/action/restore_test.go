@@ -45,6 +45,7 @@ type dispatcherState struct {
 	Analysis       *domain.AnalysisArtifact
 	Plan           *domain.PlanArtifact
 	Impl           *domain.ImplementationArtifact
+	CommitImpl     *domain.ImplementationArtifact
 	Test           *domain.TestResult
 	PendingTest    *domain.TestResult
 	PendingReviews []domain.ReviewIssue
@@ -52,7 +53,7 @@ type dispatcherState struct {
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria}
+	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -362,4 +363,20 @@ func (t treeless) Run(ctx context.Context, spec execution.Spec) (execution.Proce
 		}
 	}
 	return t.next.Run(ctx, spec)
+}
+
+func TestCommitImplementation(t *testing.T) {
+	d := &Dispatcher{}
+	if d.CommitImplementation() != nil {
+		t.Fatal("no implementation yet, want nil")
+	}
+	d.applyImplementation(domain.ImplementationArtifact{Summary: "unparsed"})
+	if got := d.CommitImplementation(); got == nil || got.Summary != "unparsed" {
+		t.Errorf("without a summary_short, want the last implementation, got %+v", got)
+	}
+	d.applyImplementation(domain.ImplementationArtifact{SummaryShort: "Add the feature"})
+	d.applyImplementation(domain.ImplementationArtifact{SummaryShort: "Fix the feature's test"})
+	if got := d.CommitImplementation(); got.SummaryShort != "Add the feature" {
+		t.Errorf("want the first summary_short, got %q", got.SummaryShort)
+	}
 }

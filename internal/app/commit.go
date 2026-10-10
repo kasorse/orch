@@ -66,7 +66,7 @@ func offerCommit(ctx context.Context, s *session) {
 		return
 	}
 
-	offer := commitOffer(run, s.dispatcher.LastImplementation())
+	offer := commitOffer(run, s.dispatcher.CommitImplementation())
 	offer.Branch, offer.Changes = branch, changes
 	header := offer.Header
 	if auto {
