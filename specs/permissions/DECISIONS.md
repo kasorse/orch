@@ -180,6 +180,34 @@ stdin; argv ends with `--model <model>`. Live suite
 failed `TestRead_DenyListHidesSecrets` once, the model declining the probing prompt; it
 passed on rerun and in the full rerun.
 
+## D16 — Verify tools are not a shell
+
+**Decision.** With `actions.implement.verify: true` (`specs/quality/SPEC.md` §6) the
+implement session gets two MCP tools from the orchestrator's own `mcp-verify` server,
+`mcp__orch__run_tests` and `mcp__orch__run_check`. The tool set of `edit` does not change:
+`--tools` stays `Read,Grep,Glob,Edit,Write`, and only the two tool names are added to
+`--allowed-tools`. D6 stands: `implement` has no shell and no Bash allowlist is a boundary.
+
+**Why.** Neither tool takes a command. The command is `test.command` or a configured check:
+trusted operator config, chosen in Go. The model chooses only whether to run it, which
+configured check (a closed enum), and a filter that matches `^[A-Za-z0-9_./:-]{1,200}$` and
+reaches the command only as the environment variable `ORCH_TEST_FILTER`, never on a command
+line. Each run happens in bwrap with no network and no credentials, after the guard has
+checked that no protected file (hook, git config, CI file) changed; a change refuses the call
+and every later one. Running model-written code is already what the `test` step does; verify
+moves the same execution, with the same isolation, into the session. The verify directory
+(`verify.json`, `calls.jsonl`, `violation`) lies outside the repository, so the file tools
+cannot reach it.
+
+**Live check.** `go test -tags security ./test/security/...` (`verify_test.go`, V-verify-1…4
+of `specs/quality/SPEC.md` §6.10): only the configured commands run and a filter with shell
+syntax is refused; a planted protected file is refused by claude or by the server; the model
+can neither write nor read the verify directory; the argv keeps `--tools
+Read,Grep,Glob,Edit,Write`, and a Bash call does nothing. Results: **not yet recorded.**
+The run needs the installed `claude`, the network and `bwrap`, which the change that added
+the tests could not use. Whoever runs the suite adds the output of `claude --version`, the
+date, and the result of each V-verify here, as D15 does.
+
 ## Fate of v1
 
 | v1 | fate in v2 |

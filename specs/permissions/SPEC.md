@@ -101,7 +101,7 @@ There is no field for shell or network-from-shell: no profile has them (P1, D6).
 | `analyze` | `read` | inspects the repository |
 | `plan` | `read` | inspects the repository |
 | `review` | `read` | the diff is in the prompt; reads surrounding code |
-| `implement` | `edit` | the only step that changes code; no shell — compiling and testing is `test`'s job |
+| `implement` | `edit` | the only step that changes code; no shell — compiling and testing is `test`'s job (with `implement.verify` on, `edit` also gets the two `orch` MCP tools; see the notes under the per-profile flag table below) |
 | `test` | — | no AI call; the orchestrator runs `test.command` (§8) |
 
 `domain.AuthorityFor(ActionType) Authority` implements the rows for workflow actions from a
@@ -167,6 +167,10 @@ Per profile:
 
 Notes:
 
+- `edit` may add the two `orch` MCP tools, `mcp__orch__run_tests` and `mcp__orch__run_check`,
+  to `--allowed-tools` (and the `orch` server to `--mcp-config`) when `implement.verify` is
+  on. `--tools` is unchanged and there is still no shell: the tools run only the configured
+  `test.command` or a configured check, in bwrap (D16, `specs/quality/SPEC.md` §6).
 - `--tools`, `--allowed-tools`, `--add-dir`, `--mcp-config` are **variadic**. A variadic flag
   directly before the prompt would swallow the prompt as another value. The prompt is
   always last and always directly preceded by `--model <model>`; a test pins the order.

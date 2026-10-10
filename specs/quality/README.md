@@ -10,7 +10,8 @@ golden files; the review verdict per criterion and the read-the-surroundings pro
 QL04 done too (the `internal/verify` MCP server, the hidden `mcp-verify` subcommand, the guard
 moved to `internal/guard`; 2026-10-10); QL05 done as well (`actions.implement.verify` wired
 into the implement step, `verify_calls` in `run.json`, the `summary.md` row; 2026-10-10), written
-without running anything, so its gates are the operator's; QL06–QL15 have not started.
+without running anything, so its gates are the operator's; QL06 is written (the V-verify tests
+and D16) but stays open until the live suite has run; QL07–QL15 have not started.
 
 | document | role |
 |---|---|

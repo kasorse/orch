@@ -42,3 +42,22 @@ D16.
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty ·
 `go test -tags security ./test/security/...`
+
+## Status
+
+Open. Written without running anything; what remains is the operator's:
+
+- run the gates above, the last one on a host with `claude`, network and a working `bwrap`
+  (the V-verify tests skip without bwrap);
+- fill in the "Results" of D16 in `specs/permissions/DECISIONS.md` with `claude --version`, the
+  date and the result of V-verify-1…4, then mark QL06 done in `README.md`.
+
+Notes on what was written:
+
+- `test/security/verify_test.go` builds the extension by hand, mirroring `verifyExtensions` and
+  `verifySpec` of `internal/action` (unexported there); if those change, change the helper.
+- The test command also writes `ran-sentinel` into the repository, because the sandbox's `/tmp`
+  is private. V-verify-2 accepts both outcomes (claude refuses the write, or the server
+  refuses the run and writes `violation`) and fails only if a planted file and a run coexist.
+- V-verify-4 reads the argv through a `claude` wrapper placed first on `PATH`, so it is the only
+  verify test that is not parallel.
