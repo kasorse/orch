@@ -482,6 +482,11 @@ implement → выполнен».
 (дерево, те же тесты, повтор замечаний ревью), `limits.stop_without_progress` (по умолчанию
 `true`), `resume` останова без прогресса идёт в implement. Написано без запуска: шлюзы
 (`go build`, `go vet`, `go test`, `gofmt -l`) за оператором, задача QL08 открыта до них.
+**Написано (2026-10-10):** QL09 — п. 3: `domain.SplitFailedTests`, строки «Failing before this
+run started …» / «New failures since the run started: …» в промпте повтора (только при одном
+`report_format` и именах с обеих сторон), строка «N failing before the run, M new» в
+`summary.md`. Подсказка: `outcomeOf`, `Next` и успех шага не менялись. Написано без запуска:
+шлюзы за оператором, задача QL09 открыта до них.
 Остаётся `[~]` до QL08 (п. 1) и QL09 (п. 3).
 
 ### [ ] Q8. Пересмотреть цену decision rounds — P2 · S (после B4)

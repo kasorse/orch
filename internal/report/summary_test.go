@@ -107,6 +107,30 @@ func TestRunSummary_FailedCheck(t *testing.T) {
 	}
 }
 
+func TestRunSummary_BaselineSplit(t *testing.T) {
+	run := summaryRun()
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("a run without a red pre-run test has no Failing tests row\n%s", got)
+	}
+
+	run.PreRunTest = &domain.TestResult{ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestB"}, ReportFormat: "gotext"}
+	run.Executions[2].TestResult = &domain.TestResult{ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestC", "p.TestD"}, ReportFormat: "gotext"}
+	got := RunSummary(run, nil)
+	if want := "| Failing tests | 1 failing before the run, 2 new |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+
+	run.Executions[2].TestResult.ReportFormat = "pytest"
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("names in different formats must not be split\n%s", got)
+	}
+
+	run.Executions[2].TestResult = &domain.TestResult{Success: true}
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("a green last test has no split\n%s", got)
+	}
+}
+
 func TestRunSummary_Verify(t *testing.T) {
 	run := summaryRun()
 	if got := RunSummary(run, nil); strings.Contains(got, "| Verify |") {

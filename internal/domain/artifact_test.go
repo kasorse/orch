@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestSplitFailedTests(t *testing.T) {
+	pre := &TestResult{FailedTests: []string{"a", "b"}, ReportFormat: "gotext"}
+	old, fresh, ok := SplitFailedTests(pre, &TestResult{FailedTests: []string{"a", "c"}, ReportFormat: "gotext"})
+	if !ok || strings.Join(old, ",") != "a" || strings.Join(fresh, ",") != "c" {
+		t.Errorf("split = %v, %v, %v", old, fresh, ok)
+	}
+	for name, cur := range map[string]*TestResult{
+		"nil":              nil,
+		"other format":     {FailedTests: []string{"a"}, ReportFormat: "pytest"},
+		"no names":         {ReportFormat: "gotext"},
+		"no format either": {FailedTests: []string{"a"}},
+	} {
+		if _, _, ok := SplitFailedTests(pre, cur); ok {
+			t.Errorf("%s: split made", name)
+		}
+	}
+	if _, _, ok := SplitFailedTests(nil, pre); ok {
+		t.Error("split made without a pre-run test")
+	}
+	if _, _, ok := SplitFailedTests(&TestResult{FailedTests: []string{"a"}}, &TestResult{FailedTests: []string{"a"}}); ok {
+		t.Error("split made without a format")
+	}
+}
+
 func TestReviewResult_Decide(t *testing.T) {
 	tests := []struct {
 		name   string

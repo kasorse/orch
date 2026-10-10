@@ -162,6 +162,45 @@ func TestPreRunFailure_ShownToImplementUntilTheFirstTest(t *testing.T) {
 	}
 }
 
+// A retry after a failed test still has the red pre-run names to split from the current ones,
+// although the pre-run output itself is no longer shown (QL09). On a resume they come back
+// from run.json, and a run recorded without names gets the plain line.
+func TestImplementRetry_SplitsOldAndNewFailures(t *testing.T) {
+	pre := domain.TestResult{Command: "go test ./...", ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestB"}, ReportFormat: "gotext"}
+	cur := domain.TestResult{Command: "go test ./...", ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestC"}, ReportFormat: "gotext"}
+	client := &fakeClient{output: `{"summary":"fixed","changed_files":[],"tests_added":[]}`}
+	run := &domain.Run{ID: "r", Task: domain.Task{Description: "t"}}
+
+	d := newDispatcher(client)
+	d.applyPreRunTest(pre)
+	d.applyTest(cur)
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Failing before this run started (the task may be to fix them): p.TestA\n",
+		"New failures since the run started: p.TestC\n",
+	} {
+		if !strings.Contains(client.lastReq.Prompt, want) {
+			t.Errorf("the retry prompt lacks %q:\n%s", want, client.lastReq.Prompt)
+		}
+	}
+	if strings.Contains(client.lastReq.Prompt, "already FAILS before any change") {
+		t.Error("the pre-run output was repeated after a test step")
+	}
+
+	// A pre-run result recorded without names degrades to the plain line.
+	old := newDispatcher(client)
+	old.applyPreRunTest(domain.TestResult{Command: "go test ./...", ExitCode: 1})
+	old.applyTest(cur)
+	if _, err := old.Execute(context.Background(), domain.ActionImplement, run); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(client.lastReq.Prompt, "New failures") || !strings.Contains(client.lastReq.Prompt, "Failing tests (parsed from the output): p.TestA, p.TestC") {
+		t.Errorf("a pre-run test without names must give the plain line:\n%s", client.lastReq.Prompt)
+	}
+}
+
 func TestRestore_KeepsTheRedPreRunTest(t *testing.T) {
 	red := &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL"}
 	run := &domain.Run{ID: "r", PreRunTest: red, AllowRedTests: true, Executions: []domain.StepExecution{

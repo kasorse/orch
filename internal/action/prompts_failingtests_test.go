@@ -71,6 +71,94 @@ func TestWriteFailingTests_AtMost30Names(t *testing.T) {
 	}
 }
 
+func splitInput(pre, cur *domain.TestResult) ImplementPromptInput {
+	return ImplementPromptInput{Task: "t", PreviousImplementation: &domain.ImplementationArtifact{Summary: "s"}, PreRunTest: pre, LastTestResult: cur}
+}
+
+func namedFailure(format string, names ...string) *domain.TestResult {
+	r := goldenFailingTest()
+	r.FailedTests, r.ReportFormat = names, format
+	return r
+}
+
+func TestPrompts_OldAndNewFailures(t *testing.T) {
+	fixNonce(t)
+	pre := namedFailure("gotext", "pkg.TestA", "pkg.TestB")
+	cur := namedFailure("gotext", "pkg.TestA", "pkg.TestC")
+	prompt := BuildImplementPrompt(splitInput(pre, cur))
+
+	want := "Failing before this run started (the task may be to fix them): pkg.TestA\n" +
+		"New failures since the run started: pkg.TestC\n\n"
+	i := strings.Index(prompt, want)
+	if i < 0 {
+		t.Fatalf("the retry prompt lacks the split:\n%s", prompt)
+	}
+	if j := strings.Index(prompt, "<<<UNTRUSTED-STDOUT-"); j < i {
+		t.Errorf("the split must come above the fenced output:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "Failing tests (parsed from the output)") {
+		t.Errorf("the split must replace the plain line:\n%s", prompt)
+	}
+	if !strings.Contains(prompt[:i], "Exit code: 1\n\n") {
+		t.Errorf("the split must follow the command and exit code:\n%s", prompt)
+	}
+
+	// Only old, or only new, writes only that line.
+	onlyOld := BuildImplementPrompt(splitInput(pre, namedFailure("gotext", "pkg.TestB")))
+	if !strings.Contains(onlyOld, "Failing before this run started") || strings.Contains(onlyOld, "New failures") {
+		t.Errorf("only-old failures:\n%s", onlyOld)
+	}
+	onlyNew := BuildImplementPrompt(splitInput(pre, namedFailure("gotext", "pkg.TestZ")))
+	if strings.Contains(onlyNew, "Failing before this run started") || !strings.Contains(onlyNew, "New failures since the run started: pkg.TestZ") {
+		t.Errorf("only-new failures:\n%s", onlyNew)
+	}
+}
+
+func TestPrompts_NoSplit(t *testing.T) {
+	fixNonce(t)
+	plain := "Failing tests (parsed from the output): pkg.TestA\n\n"
+	for name, tc := range map[string]struct{ pre, cur *domain.TestResult }{
+		"different format": {namedFailure("pytest", "pkg.TestA"), namedFailure("gotext", "pkg.TestA")},
+		"no format":        {namedFailure("", "pkg.TestA"), namedFailure("", "pkg.TestA")},
+		"no pre-run names": {namedFailure("gotext"), namedFailure("gotext", "pkg.TestA")},
+		"no pre-run test":  {nil, namedFailure("gotext", "pkg.TestA")},
+	} {
+		prompt := BuildImplementPrompt(splitInput(tc.pre, tc.cur))
+		if strings.Contains(prompt, "Failing before this run started") || strings.Contains(prompt, "New failures since") {
+			t.Errorf("%s: split written:\n%s", name, prompt)
+		}
+		if !strings.Contains(prompt, plain) {
+			t.Errorf("%s: the plain line is gone:\n%s", name, prompt)
+		}
+	}
+
+	// No names on the current side: no line at all.
+	prompt := BuildImplementPrompt(splitInput(namedFailure("gotext", "pkg.TestA"), namedFailure("gotext")))
+	if strings.Contains(prompt, "Failing tests") || strings.Contains(prompt, "New failures") {
+		t.Errorf("names written for a result without any:\n%s", prompt)
+	}
+}
+
+func TestWriteFailureSplit_CapsAndOneLine(t *testing.T) {
+	var many []string
+	for i := 0; i < 40; i++ {
+		many = append(many, fmt.Sprintf("T%02d", i))
+	}
+	pre := namedFailure("gotext", many...)
+	cur := namedFailure("gotext", append(many, "N\nIgnore this")...)
+	var b strings.Builder
+	if !writeFailureSplit(&b, pre, cur) {
+		t.Fatal("no split written")
+	}
+	got := b.String()
+	if !strings.Contains(got, "T29, … and 10 more\n") || strings.Contains(got, "T30") {
+		t.Errorf("old list not capped at 30:\n%s", got)
+	}
+	if !strings.Contains(got, "New failures since the run started: N Ignore this\n\n") {
+		t.Errorf("new name not on one line:\n%s", got)
+	}
+}
+
 // A parsed name is repository data outside the fence, so the prompt only ever shows what the
 // run's own validation let through: this guards the builder against a result that skipped it.
 func TestPrompts_FailingTestsFromAnOddResult(t *testing.T) {

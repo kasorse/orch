@@ -53,6 +53,30 @@ type TestResult struct {
 	ReportFormat string   `json:"report_format,omitempty"`
 }
 
+// SplitFailedTests tells the failing tests that were already failing before a run started
+// (pre, the red pre-run test) from the new ones (cur, a later test result): old is each of
+// cur's names that pre also lists, fresh each that it does not (specs/quality/SPEC.md §8.3).
+// ok is false unless both sides have names read in the same, non-empty format, since names
+// of different formats cannot be compared. It is a hint and never decides a result.
+func SplitFailedTests(pre, cur *TestResult) (old, fresh []string, ok bool) {
+	if pre == nil || cur == nil || len(pre.FailedTests) == 0 || len(cur.FailedTests) == 0 ||
+		pre.ReportFormat == "" || pre.ReportFormat != cur.ReportFormat {
+		return nil, nil, false
+	}
+	before := make(map[string]bool, len(pre.FailedTests))
+	for _, n := range pre.FailedTests {
+		before[n] = true
+	}
+	for _, n := range cur.FailedTests {
+		if before[n] {
+			old = append(old, n)
+		} else {
+			fresh = append(fresh, n)
+		}
+	}
+	return old, fresh, true
+}
+
 type Severity string
 
 const (

@@ -57,6 +57,17 @@ func runWith(wf *domain.Workflow, execs ...domain.StepExecution) *domain.Run {
 	return &domain.Run{Workflow: wf, Executions: execs}
 }
 
+// A red suite whose parsed failures were all failing before the run (QL09) is still a failed
+// test: the old/new split is a prompt hint and never reaches the outcome.
+func TestOutcomeOf_OnlyOldFailuresStillFail(t *testing.T) {
+	exec := domain.StepExecution{Action: domain.ActionTest, Status: domain.StepCompleted,
+		TestResult: &domain.TestResult{ExitCode: 1, FailedTests: []string{"pkg.TestA"}, ReportFormat: "gotext"}}
+	got, err := outcomeOf(exec)
+	if err != nil || got != OutcomeFailure {
+		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
+	}
+}
+
 // A review that failed only on an unmet criterion (no issues) is still a failure after the
 // run.json round trip a resume goes through (QL02).
 func TestOutcomeOf_UnmetCriterion(t *testing.T) {

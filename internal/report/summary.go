@@ -95,6 +95,9 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		}
 	}
 	row("Tests (last run)", tests)
+	if line := baselineSplit(run); line != "" {
+		row("Failing tests", line)
+	}
 	verdict := noValue
 	if out.ReviewVerdict != "" {
 		verdict = string(out.ReviewVerdict)
@@ -108,6 +111,27 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
+}
+
+// baselineSplit is how many of the last failed test's parsed failures were already failing
+// before the run started (run --allow-red-tests) and how many are new; "" when the run did not
+// start red or the two have no names in the same format. A hint: the exit code decides.
+func baselineSplit(run domain.Run) string {
+	if run.PreRunTest == nil || run.PreRunTest.Success {
+		return ""
+	}
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		t := run.Executions[i].TestResult
+		if t == nil {
+			continue
+		}
+		old, fresh, ok := domain.SplitFailedTests(run.PreRunTest, t)
+		if !ok || t.Success {
+			return ""
+		}
+		return fmt.Sprintf("%d failing before the run, %d new", len(old), len(fresh))
+	}
+	return ""
 }
 
 func decisionLine(run domain.Run, trace *domain.DecisionTrace) string {

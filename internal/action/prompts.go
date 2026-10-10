@@ -206,6 +206,10 @@ type ImplementPromptInput struct {
 	// PreRunFailure is the test command's red result before any change, when the operator
 	// started the run with --allow-red-tests (specs/hardening/SPEC.md §8.4).
 	PreRunFailure *domain.TestResult
+	// PreRunTest is the same red pre-run result, kept for a retry after a failed test, where
+	// PreRunFailure is nil: its failing test names are split from the current ones (QL09;
+	// specs/quality/SPEC.md §8.3). It never changes what the step reports.
+	PreRunTest *domain.TestResult
 	// MaxTestOutput bounds LastTestResult's stdout and stderr together, in bytes
 	// (limits.prompt.max_test_output_bytes; BoundTestOutput). 0 embeds them whole.
 	MaxTestOutput int
@@ -294,7 +298,11 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		} else {
 			b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
 			fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
-			writeTestOutput(&b, *r, in.MaxTestOutput, testOutputOwner)
+			shown := *r
+			if writeFailureSplit(&b, in.PreRunTest, r) {
+				shown.FailedTests = nil // the split replaces the plain line
+			}
+			writeTestOutput(&b, shown, in.MaxTestOutput, testOutputOwner)
 		}
 	}
 
@@ -355,6 +363,14 @@ const maxPromptTests = 30
 // above the fenced output, so they survive when the output is cut. The names are a hint: the
 // exit code decided that the run failed. Without names it writes nothing.
 func writeFailingTests(b *strings.Builder, names []string) {
+	if list := nameList(names); list != "" {
+		b.WriteString("Failing tests (parsed from the output): " + list + "\n\n")
+	}
+}
+
+// nameList is the test names on one line, each through oneLine, at most maxPromptTests of
+// them and then "… and N more"; "" when there is no name.
+func nameList(names []string) string {
 	var shown []string
 	for _, n := range names {
 		if n = oneLine(n); n != "" {
@@ -362,18 +378,41 @@ func writeFailingTests(b *strings.Builder, names []string) {
 		}
 	}
 	if len(shown) == 0 {
-		return
+		return ""
 	}
 	more := 0
 	if len(shown) > maxPromptTests {
 		more = len(shown) - maxPromptTests
 		shown = shown[:maxPromptTests]
 	}
-	b.WriteString("Failing tests (parsed from the output): " + strings.Join(shown, ", "))
+	s := strings.Join(shown, ", ")
 	if more > 0 {
-		fmt.Fprintf(b, ", … and %d more", more)
+		s += fmt.Sprintf(", … and %d more", more)
 	}
-	b.WriteString("\n\n")
+	return s
+}
+
+// writeFailureSplit tells which of the current failing tests were failing before the run
+// started and which are new (specs/quality/SPEC.md §8.3), and reports whether it wrote
+// anything. It is a hint: the exit code decided that the run failed. When pre and cur have no
+// names in the same format it writes nothing, and the caller writes the plain line.
+func writeFailureSplit(b *strings.Builder, pre, cur *domain.TestResult) bool {
+	old, fresh, ok := domain.SplitFailedTests(pre, cur)
+	if !ok {
+		return false
+	}
+	oldList, freshList := nameList(old), nameList(fresh)
+	if oldList == "" && freshList == "" {
+		return false
+	}
+	if oldList != "" {
+		b.WriteString("Failing before this run started (the task may be to fix them): " + oldList + "\n")
+	}
+	if freshList != "" {
+		b.WriteString("New failures since the run started: " + freshList + "\n")
+	}
+	b.WriteString("\n")
+	return true
 }
 
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
