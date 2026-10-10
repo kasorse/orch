@@ -272,6 +272,10 @@ func writeNotes(b *strings.Builder, run domain.Run) {
 			notes = append(notes, fmt.Sprintf("#%d %s ended without the CLI's final report: its tokens are summed from the "+
 				"messages it streamed, the output tokens are a lower bound, and its cost is unknown.", e.Index, e.Action))
 		}
+		if e.Call != nil && len(e.Call.MCPFailed) > 0 {
+			notes = append(notes, fmt.Sprintf("#%d %s ran without MCP server(s) %s: the CLI could not start them "+
+				"(run the configured command by hand to see why).", e.Index, e.Action, strings.Join(e.Call.MCPFailed, ", ")))
+		}
 		if e.Error != "" {
 			notes = append(notes, fmt.Sprintf("#%d %s failed: %s", e.Index, e.Action, failureLine(e.Error)))
 		}

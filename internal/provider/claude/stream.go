@@ -24,6 +24,11 @@ import (
 type streamEvent struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
+	// type "system", subtype "init": each MCP server's status ("connected", "failed", ...)
+	MCPServers []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	} `json:"mcp_servers"`
 	Message *struct {
 		ID      string       `json:"id"`
 		Model   string       `json:"model"`
@@ -87,6 +92,7 @@ func parseStream(stdout string) streamReport {
 		tools    = map[string]int{}
 		seenTool = map[string]bool{}
 		result   *streamEvent
+		mcpFail  []string
 	)
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
@@ -98,6 +104,16 @@ func parseStream(stdout string) streamReport {
 			continue
 		}
 		switch ev.Type {
+		case "system":
+			// A server that fails to start does not stop the CLI: the model just runs
+			// without its tools, so the run records it.
+			if ev.Subtype == "init" {
+				for _, s := range ev.MCPServers {
+					if s.Status == "failed" {
+						mcpFail = append(mcpFail, s.Name)
+					}
+				}
+			}
 		case "rate_limit_event":
 			if l := rateLimits(ev); l != nil {
 				limits = l
@@ -136,6 +152,8 @@ func parseStream(stdout string) streamReport {
 	if len(tools) > 0 {
 		call.Tools = tools
 	}
+	slices.Sort(mcpFail)
+	call.MCPFailed = mcpFail
 	switch {
 	case result != nil:
 		u := &domain.Usage{Turns: result.NumTurns, Limits: limits}
@@ -171,7 +189,7 @@ func parseStream(stdout string) streamReport {
 		call.Models = modelList(models)
 	}
 	slices.SortFunc(call.Models, func(a, b domain.ModelUse) int { return strings.Compare(a.Model, b.Model) })
-	if len(call.Models) > 0 || len(call.Tools) > 0 || call.APIMS > 0 {
+	if len(call.Models) > 0 || len(call.Tools) > 0 || call.APIMS > 0 || len(call.MCPFailed) > 0 {
 		rep.call = call
 	}
 	return rep

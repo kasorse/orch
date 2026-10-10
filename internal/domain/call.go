@@ -26,6 +26,9 @@ type CallReport struct {
 	// Tools counts the model's tool calls by tool name; empty when it made none or the
 	// CLI does not say.
 	Tools map[string]int `json:"tools,omitempty"`
+	// MCPFailed names the configured MCP servers (extensions.mcp) the CLI could not start,
+	// sorted: the step ran without their tools.
+	MCPFailed []string `json:"mcp_failed,omitempty"`
 }
 
 // ModelUse is one model a call used and what it cost; CostUSD is 0 when not reported
@@ -63,8 +66,13 @@ func (c CallReport) Validate() error {
 			return fmt.Errorf("unknown prompt part %q", p)
 		}
 	}
-	if len(c.Models) > maxReportNames || len(c.Tools) > maxReportNames {
-		return fmt.Errorf("more than %d models or tools", maxReportNames)
+	if len(c.Models) > maxReportNames || len(c.Tools) > maxReportNames || len(c.MCPFailed) > maxReportNames {
+		return fmt.Errorf("more than %d models, tools or MCP servers", maxReportNames)
+	}
+	for _, name := range c.MCPFailed {
+		if err := reportName(name); err != nil {
+			return fmt.Errorf("mcp server: %w", err)
+		}
 	}
 	for _, m := range c.Models {
 		if err := reportName(m.Model); err != nil {

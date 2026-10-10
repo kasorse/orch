@@ -3512,8 +3512,9 @@ answer in JSON), and hold at most 50 paths each.
 
 ### Notes
 
-One line per partial call (what its numbers mean) and per failed step (its telling error
-line). The full error is in `run.json` and the step's logs.
+One line per partial call (what its numbers mean), per step that ran without an MCP server
+it was given (`call.mcp_failed`), and per failed step (its telling error line). The full
+error is in `run.json` and the step's logs.
 
 ## 43.3 run.json fields
 
@@ -3530,6 +3531,7 @@ implement step only).
 | `executions[].call.models[]` | `{model, cost_usd}` for each model that answered, sorted by name; `cost_usd` is absent when not reported. |
 | `executions[].call.api_ms` | Time spent waiting on the model API (claude's `duration_api_ms`). |
 | `executions[].call.tools` | Tool name → number of calls. |
+| `executions[].call.mcp_failed` | The `extensions.mcp` servers the CLI reported as failed to start, sorted; the step ran without their tools. Absent when all started. |
 | `executions[].diff.step` | `{files, insertions, deletions, binary}` of the step's own change. Binary files count in `files` and `binary`, never in the line counts. |
 | `executions[].diff.run` | The same, for the working tree after the step against `pre_run_ref`; absent without a restore point. |
 | `executions[].diff.not_reported`, `.reported_unchanged` | As in §43.2's Code changes. |

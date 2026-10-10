@@ -29,7 +29,7 @@ func summaryRun() domain.Run {
 				Provider: &domain.ProviderRef{Provider: "claude", Model: "sonnet"},
 				Usage:    &domain.Usage{InputTokens: 38, OutputTokens: 40315, CacheReadTokens: 1374052, CacheCreationTokens: 110786, CostUSD: 1.1211804, Turns: 41},
 				Call: &domain.CallReport{PromptBytes: 20480, Truncated: []domain.PromptPart{domain.PromptTestOutput}, APIMS: 183_000,
-					Models: []domain.ModelUse{{Model: "claude-sonnet-5-5", CostUSD: 1.1}}, Tools: map[string]int{"Edit": 7}},
+					Models: []domain.ModelUse{{Model: "claude-sonnet-5-5", CostUSD: 1.1}}, Tools: map[string]int{"Edit": 7}, MCPFailed: []string{"graphify"}},
 				Diff: &domain.StepDiff{Step: domain.DiffStat{Files: 3, Insertions: 120, Deletions: 4}, Run: &domain.DiffStat{Files: 6, Insertions: 420, Deletions: 35, Binary: 1},
 					NotReported: []string{"internal/x.go"}, ReportedUnchanged: []string{"ghost.go"}}},
 			{Index: 2, Action: domain.ActionTest, Status: domain.StepCompleted, Attempt: 1, StartedAt: t0.Add(75 * time.Minute), FinishedAt: t0.Add(75*time.Minute + 3200*time.Millisecond),
@@ -71,6 +71,7 @@ func TestRunSummary(t *testing.T) {
 		"| 0 | implement | 24 | Read 17, Glob 3, Grep 3, Write 1 |",
 		"| 1 | 3 files, +120 −4 | 6 files, +420 −35 (1 binary) | internal/x.go | ghost.go |",
 		"- #0 implement ended without the CLI's final report",
+		"- #1 implement ran without MCP server(s) graphify: the CLI could not start them",
 		"- #0 implement failed: failure: timeout (exceeded actions.implement.timeout = 10m0s)\n",
 		"MVP.md §43",
 	} {
