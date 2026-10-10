@@ -52,10 +52,11 @@ another, on the action's provider. Go merges their answers, and the merged resul
 
 ## As built (2026-10-10)
 
-Written without running anything, so the gates (`scripts/check.sh`) are the operator's. An
-earlier version of this change passed them, but the review fixes below came after that run, so
-QL12 is not ticked in `README.md` or `TODO.md` until the gates have passed on the final code.
 Built as planned, except:
+
+- **Gates:** `scripts/check.sh` passed on the final code, outside the sandbox (`go build`,
+  `go vet`, `go test`, `gofmt -l`, in the root module and in `bench/`). QL12 is ticked in
+  `README.md` and `TODO.md`.
 
 - **Config:** `ActionConfig.Models` and `config.MaxExtraReviewers`; the checks are
   `extraReviewerProblems` in `validator.go` (more than 4, an empty name, a repeat of the base

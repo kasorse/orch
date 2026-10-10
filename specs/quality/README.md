@@ -22,9 +22,9 @@ so it stays open until its gates have run; QL10 written (`actions.*.by_complexit
 2026-10-10) without running anything, so it stays open until its gates have run; QL11 done
 (`review.fix_medium`, `Run.Options`, `OutcomeFixable`, `outcomeOf` shared by the engine and
 resume, the derived outcome reported to the observer; 2026-10-10), `scripts/check.sh` passed;
-QL12 written (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
-`CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10) without running anything,
-so it stays open until its gates have run; QL13–QL15 have not started.
+QL12 done (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
+`CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10), `scripts/check.sh`
+passed; QL13–QL15 have not started.
 
 | document | role |
 |---|---|
@@ -63,7 +63,7 @@ step runs on one model regardless of how simple the task is. This phase:
 | [QL09](tasks/TASK-QL09-baseline-names.md) | old vs new failures in the retry prompt | Q7.3 | S | QL03, QL07 |
 | [QL10](tasks/TASK-QL10-by-complexity.md) | `by_complexity`: model and effort per decided complexity | Q3 | M | — |
 | [QL11](tasks/TASK-QL11-fix-medium.md) | `review.fix_medium` ✓ | Q6.3 | M | QL02 |
-| [QL12](tasks/TASK-QL12-extra-reviewers.md) | extra reviewers `actions.review.models` | Q6.5 | M | QL02 |
+| [QL12](tasks/TASK-QL12-extra-reviewers.md) | extra reviewers `actions.review.models` ✓ | Q6.5 | M | QL02 |
 | [QL13](tasks/TASK-QL13-integration.md) | integration scenarios 33+ | — | M | QL01–QL12 |
 | [QL14](tasks/TASK-QL14-documentation.md) | MVP.md §44 and others, CLAUDE.md, README, example config, TODO.md | — | S | QL13 |
 | [QL15](tasks/TASK-QL15-bench-configs.md) | benchmark configurations E (verify) and F (by_complexity) | Q2, Q3 | S | QL14, BM16 |
