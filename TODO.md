@@ -355,6 +355,10 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
 роста нарушений guard'а.
 **⚠ спека:** новый раздел в `specs/permissions/` (authority `edit` + встроенный verify), MVP.md §38.
 **В спеке:** `specs/quality/` §6, задачи QL04–QL06 (решение D16); сравнение в бенче — QL15.
+**Сделано (2026-10-10):** QL04 — пакет `internal/verify` (stdio MCP-сервер, `run_tests`,
+`run_check`) и скрытая подкоманда `mcp-verify --dir`; guard вынесен в `internal/guard`.
+Написано без запуска; гейты гоняет `scripts/check.sh` (он же `test.command`).
+Остаётся `[~]` до QL05 (подключение) и QL06 (live-проверки).
 
 ### [~] Q3. Сложность управляет моделью и effort — P1 · M
 **Зачем:** 0.1. Это главный источник экономии, который адаптивность может дать

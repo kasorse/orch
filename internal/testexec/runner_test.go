@@ -122,6 +122,60 @@ func TestRunner_EmptyExtraValueIsStillSet(t *testing.T) {
 	}
 }
 
+func TestRunner_BaseEnvReplacesTheAllowlist(t *testing.T) {
+	t.Setenv("GOFLAGS", "-count=1")
+	base := []string{"PATH=/usr/bin", "HOME=/home/u", "TMPDIR=/tmp/outer"}
+	for _, sandbox := range []*Sandbox{nil, testSandbox()} {
+		exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+		runner := &Runner{Executor: exec, Sandbox: sandbox, BaseEnv: base}
+		opts := RunOptions{Env: []string{"ORCH_BASE_REF=abc"}}
+		if _, err := runner.Run(context.Background(), "true", "/home/u/repo", opts); err != nil {
+			t.Fatal(err)
+		}
+		call := exec.Calls[0]
+		if slices.Contains(call.Env, "GOFLAGS=-count=1") {
+			t.Errorf("sandbox %v: BaseEnv must replace execution.TestEnv(), env = %q", sandbox != nil, call.Env)
+		}
+		if !slices.Contains(call.Env, "PATH=/usr/bin") {
+			t.Errorf("sandbox %v: BaseEnv lost PATH: %q", sandbox != nil, call.Env)
+		}
+		if sandbox == nil {
+			if !slices.Contains(call.Env, "ORCH_BASE_REF=abc") || !slices.Contains(call.Env, "TMPDIR=/tmp/outer") {
+				t.Errorf("unsandboxed env = %q", call.Env)
+			}
+			continue
+		}
+		if !slices.Contains(call.Env, "TMPDIR=/tmp") || slices.Contains(call.Env, "TMPDIR=/tmp/outer") {
+			t.Errorf("sandboxed env = %q, want TMPDIR=/tmp only", call.Env)
+		}
+		if !slices.Contains(call.Args, "ORCH_BASE_REF") {
+			t.Errorf("the extra pair must still reach bwrap through --setenv: %q", call.Args)
+		}
+	}
+}
+
+func TestRunner_EmptyBaseEnvIsNotInherit(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+	runner := &Runner{Executor: exec, BaseEnv: []string{}}
+	if _, err := runner.Run(context.Background(), "true", "/repo", RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if exec.Calls[0].Env == nil {
+		t.Error("an empty BaseEnv produced a nil Env, which would inherit the orchestrator's environment")
+	}
+}
+
+func TestRunner_NilBaseEnvKeepsTheAllowlist(t *testing.T) {
+	t.Setenv("GOFLAGS", "-count=1")
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+	if _, err := (&Runner{Executor: exec}).Run(context.Background(), "true", "/repo", RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(exec.Calls[0].Env, "GOFLAGS=-count=1") {
+		t.Errorf("env = %q", exec.Calls[0].Env)
+	}
+}
+
 func TestRunner_RefusesAnExtraNameOutsideORCH(t *testing.T) {
 	for _, kv := range []string{"PATH=/x", "ORCH=1", "orch_base_ref=x", "ORCH_X", "LD_PRELOAD=/x", "ORCH-X=1"} {
 		for _, sandbox := range []*Sandbox{nil, testSandbox()} {

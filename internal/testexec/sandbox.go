@@ -16,16 +16,16 @@ import (
 type Sandbox struct {
 	// Home is hidden behind an empty tmpfs: ~/.ssh, ~/.aws, ~/.config/gh and the rest are
 	// not visible unless re-exposed through ReadOnly/ReadWrite.
-	Home string
+	Home string `json:"home"`
 	// RepoRoot is the one writable tree.
-	RepoRoot string
+	RepoRoot string `json:"repo_root"`
 	// GitDirs are re-bound read-only over RepoRoot: a test that wrote a hook or
 	// core.fsmonitor into .git would run code outside the sandbox on the orchestrator's
 	// next git call.
-	GitDirs []string
+	GitDirs []string `json:"git_dirs"`
 	// ReadOnly and ReadWrite are test.ro_binds / test.rw_binds (caches, module stores).
-	ReadOnly  []string
-	ReadWrite []string
+	ReadOnly  []string `json:"ro_binds"`
+	ReadWrite []string `json:"rw_binds"`
 }
 
 // baseMounts is what every sandboxed process sees before any bind: the whole filesystem
@@ -65,11 +65,12 @@ func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	return append(argv, "--chdir", workingDir, "sh", "-c", command)
 }
 
-// env is the test environment (execution.TestEnv) with TMPDIR pointing at the private
-// /tmp: an inherited TMPDIR under /tmp no longer exists inside the sandbox.
-func (s *Sandbox) env() []string {
+// env is the test environment base (execution.TestEnv, or Runner.BaseEnv) with TMPDIR
+// pointing at the private /tmp: an inherited TMPDIR under /tmp no longer exists inside the
+// sandbox.
+func (s *Sandbox) env(base []string) []string {
 	var env []string
-	for _, kv := range execution.TestEnv() {
+	for _, kv := range base {
 		if !strings.HasPrefix(kv, "TMPDIR=") {
 			env = append(env, kv)
 		}

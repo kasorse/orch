@@ -21,6 +21,11 @@ type Runner struct {
 	Executor execution.ProcessExecutor
 	// Sandbox, when set (test.sandbox: bwrap), runs the command under bubblewrap.
 	Sandbox *Sandbox
+	// BaseEnv, when non-nil, replaces execution.TestEnv() as the environment the command
+	// starts from; nil keeps today's behaviour, and an empty non-nil slice means an empty
+	// base. Only Go code sets it, never a model or a config file: the verify server (which
+	// does not read the config) gets the already-computed allowlist from verify.json.
+	BaseEnv []string
 }
 
 func New(executor execution.ProcessExecutor) *Runner {
@@ -55,12 +60,18 @@ func (r *Runner) Run(ctx context.Context, command string, workingDir string, opt
 	// The test command runs code a model may have written, so it gets only the allowlisted
 	// environment: no credential, no parent agent session's IPC channel
 	// (specs/hardening/SPEC.md §6.1, specs/permissions/SPEC.md §7.1).
+	base := r.BaseEnv
+	if base == nil {
+		base = execution.TestEnv()
+	}
+	// Never nil, even when empty: a nil Env would mean "inherit the orchestrator's".
+	env := append(make([]string, 0, len(base)+len(opts.Env)), base...)
 	spec := execution.Spec{
 		Executable: "sh", Args: []string{"-c", command}, WorkingDir: workingDir,
-		Env: append(execution.TestEnv(), opts.Env...),
+		Env: append(env, opts.Env...),
 	}
 	if r.Sandbox != nil {
-		spec.Executable, spec.Args, spec.Env = "bwrap", r.Sandbox.args(workingDir, command, opts.Env), r.Sandbox.env()
+		spec.Executable, spec.Args, spec.Env = "bwrap", r.Sandbox.args(workingDir, command, opts.Env), r.Sandbox.env(base)
 	}
 	result, err := r.Executor.Run(ctx, spec)
 	if err != nil {

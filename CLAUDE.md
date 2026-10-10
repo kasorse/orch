@@ -46,7 +46,10 @@ are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it
 `internal/workflow` and `internal/policy` must never import anything but `domain` (the
 workflow package also defines its own `StepExecutor` interface). `internal/action` is the
 composition point that implements `StepExecutor` using config/provider/repository/testexec;
-`internal/app` is the composition root for everything.
+`internal/app` is the composition root for everything. `internal/verify` is the in-session
+verify server behind the hidden `orchestrator mcp-verify --dir <dir>` (specs/quality §6): it
+speaks MCP with the standard library only, reads nothing but `<dir>/verify.json`, and imports
+`guard`, `testexec` and `domain`, never `action`.
 
 `bench/` is a black box to the core and the core is one to it. It is a separate Go module
 with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a
@@ -137,7 +140,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   `bypassPermissions` or any equivalent.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
-  run records `pre_run_ref`; `action.Guard` compares protected paths (git-ignored ones
+  run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)
+  compares protected paths (git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
@@ -186,7 +190,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   task/prompt — the one documented exception is `test.command`, which is trusted operator
   config and does go through `sh -c` to support shell syntax. The prompt itself goes on
   stdin, never in argv (MVP.md §41.1). Repository data in a prompt is bounded
-  (`limits.prompt`): test output by `action.BoundTestOutput`, the review diff by
+  (`limits.prompt`): test output by `testexec.BoundTestOutput` (aliased in `action`), the
+  review diff by
   `Repository.ReviewDiff` (new files included, deny-listed files by name only); artifacts
   and logs keep everything. User text inside prompts
   (request, project context) is embedded as delimited data that cannot close its block;

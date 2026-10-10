@@ -58,7 +58,7 @@ func TestSandboxEnv(t *testing.T) {
 	// its reset helper is private to package execution.
 	t.Setenv("ORCH_SANDBOX_TEST_TOKEN", "planted")
 	execution.ScrubCredentials("ORCH_SANDBOX_TEST_TOKEN")
-	env := testSandbox().env()
+	env := testSandbox().env(execution.TestEnv())
 	tmp := slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return !strings.HasPrefix(kv, "TMPDIR=") })
 	if !slices.Equal(tmp, []string{"TMPDIR=/tmp"}) {
 		t.Errorf("TMPDIR entries = %q, want exactly TMPDIR=/tmp", tmp)
@@ -70,7 +70,7 @@ func TestSandboxEnv(t *testing.T) {
 		t.Error("the sandboxed environment must not carry a credential variable")
 	}
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "planted")
-	if slices.ContainsFunc(testSandbox().env(), func(kv string) bool { return strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") }) {
+	if slices.ContainsFunc(testSandbox().env(execution.TestEnv()), func(kv string) bool { return strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") }) {
 		t.Error("the sandboxed environment must be the allowlist, not the scrubbed environment")
 	}
 }

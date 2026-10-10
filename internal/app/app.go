@@ -99,6 +99,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return err
 		}
 		return runsReport(stdout, dir)
+	case "mcp-verify":
+		// Hidden: not in the usage text. parseArgs has run, but --dir is not a global flag,
+		// so it is still in rest.
+		dir, err := mcpVerifyArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return runMCPVerify(ctx, dir, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
