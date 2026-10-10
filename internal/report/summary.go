@@ -103,6 +103,9 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		verdict = string(out.ReviewVerdict)
 	}
 	row("Review verdict", verdict)
+	if names := reviewerNames(run); names != "" {
+		row("Reviewers", names)
+	}
 	change := noValue
 	if out.Diff != nil {
 		change = diffLine(*out.Diff)
@@ -111,6 +114,23 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
+}
+
+// reviewerNames lists the models whose answers the last review merged (actions.review.models),
+// "sonnet, opus"; "" when it had a single reviewer or the run has no review.
+func reviewerNames(run domain.Run) string {
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		r := run.Executions[i].ReviewResult
+		if r == nil {
+			continue
+		}
+		names := make([]string, len(r.Reviewers))
+		for j, a := range r.Reviewers {
+			names[j] = a.Model
+		}
+		return strings.Join(names, ", ")
+	}
+	return ""
 }
 
 // baselineSplit is how many of the last failed test's parsed failures were already failing

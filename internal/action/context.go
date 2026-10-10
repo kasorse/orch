@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"orchestrator/internal/apperr"
@@ -229,6 +230,53 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		return result, ref, err
 	}
 	return result, ref, nil
+}
+
+// stepCalls sums the calls of one step that makes several, a review with extra reviewers: the
+// usage is the sum of every call's, and the report is the first call's with a compact entry
+// per later call (domain.CallReport.ExtraCalls).
+type stepCalls struct {
+	usage *domain.Usage
+	first *domain.CallReport
+	extra []domain.ExtraCall
+}
+
+// newStepCalls starts from the first call's usage and report, either of which may be nil.
+func newStepCalls(usage *domain.Usage, report *domain.CallReport) *stepCalls {
+	s := &stepCalls{first: report}
+	if usage != nil {
+		u := *usage
+		s.usage = &u
+	}
+	return s
+}
+
+// add records a later call to model; its usage and report may be nil (the call failed before
+// they were known, or the provider reports none).
+func (s *stepCalls) add(model string, usage *domain.Usage, report *domain.CallReport) {
+	x := domain.ExtraCall{Model: model}
+	if report != nil {
+		x.APIMS = report.APIMS
+	}
+	if usage != nil {
+		x.InputTokens, x.OutputTokens = usage.PromptTokens(), usage.OutputTokens
+		if s.usage == nil {
+			s.usage = &domain.Usage{}
+		}
+		s.usage.Add(*usage)
+		s.usage.Partial = s.usage.Partial || usage.Partial
+	}
+	s.extra = append(s.extra, x)
+}
+
+// report is the first call's report with the extra calls so far; nil without a first report.
+func (s *stepCalls) report() *domain.CallReport {
+	if s.first == nil {
+		return nil
+	}
+	r := *s.first
+	r.ExtraCalls = slices.Clone(s.extra)
+	return &r
 }
 
 // denyRead is every call's file-tool deny list: the same secret deny list the Context

@@ -237,6 +237,19 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 			setCriteria(m, verdict(1, strings.Repeat("x", domain.MaxCriterionEvidenceBytes+1)))
 		}, "evidence"},
 		{"criterion without evidence", func(m map[string]any) { setCriteria(m, verdict(1, "")) }, "no evidence"},
+		{"reviewer without a model", func(m map[string]any) {
+			execAt(m, 3)["review_result"].(map[string]any)["reviewers"] = []any{
+				map[string]any{"model": "", "result": map[string]any{"status": "pass", "summary": "s", "issues": []any{}}},
+			}
+		}, "review_result.reviewers"},
+		{"reviewer with an invalid result", func(m map[string]any) {
+			execAt(m, 3)["review_result"].(map[string]any)["reviewers"] = []any{
+				map[string]any{"model": "opus", "result": map[string]any{"status": "maybe"}},
+			}
+		}, "review_result.reviewers"},
+		{"extra call without a model", func(m map[string]any) {
+			execAt(m, 3)["call"] = map[string]any{"prompt_bytes": 1, "extra_calls": []any{map[string]any{"model": "", "input_tokens": 1, "output_tokens": 1}}}
+		}, "extra call 0"},
 		{"review result on another step", func(m map[string]any) {
 			execAt(m, 0)["review_result"] = execAt(m, 3)["review_result"]
 		}, "review_result recorded on step action implement"},

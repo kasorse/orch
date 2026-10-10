@@ -91,6 +91,11 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 			if exec.Usage.Partial {
 				out.Usage.PartialCalls++
 			}
+			// A review with extra reviewers made one call more per reviewer; their usage is
+			// already in the step's sum.
+			if exec.Call != nil {
+				out.Usage.Calls += len(exec.Call.ExtraCalls)
+			}
 		}
 		if exec.Diff != nil && exec.Diff.Run != nil {
 			d := *exec.Diff.Run

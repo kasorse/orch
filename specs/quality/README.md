@@ -22,7 +22,9 @@ so it stays open until its gates have run; QL10 written (`actions.*.by_complexit
 2026-10-10) without running anything, so it stays open until its gates have run; QL11 done
 (`review.fix_medium`, `Run.Options`, `OutcomeFixable`, `outcomeOf` shared by the engine and
 resume, the derived outcome reported to the observer; 2026-10-10), `scripts/check.sh` passed;
-QL12–QL15 have not started.
+QL12 written (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
+`CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10) without running anything,
+so it stays open until its gates have run; QL13–QL15 have not started.
 
 | document | role |
 |---|---|

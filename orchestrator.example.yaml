@@ -78,6 +78,10 @@ actions:
   review:
     provider: claude
     model: sonnet
+    # Optional, review only: extra reviewers, up to 4 model names on this provider. After the
+    # model above each one reviews the same diff in turn, and the issues are merged (a
+    # criterion is met only if every reviewer says so). Each is another call, so it costs.
+    # models: [opus]
     # codex and gemini are refused for every action until their permission flags are
     # verified against the real CLI (specs/permissions/SPEC.md §6.4):
     # provider: codex

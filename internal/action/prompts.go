@@ -63,13 +63,16 @@ const implementOperatorRule = `You can read and edit files; you cannot run comma
 
 // reviewOperatorRule keeps review from failing on what another implement attempt cannot do:
 // sent back as high, such a step loops until max_fix_iterations. It also keeps the reviewer
-// from reading more into the test result than the command covers.
+// from reading more into the test result than the command covers. Tracking that waits on the
+// test command is the operator's too: implement runs before the tests and cannot tick it honestly.
 const reviewOperatorRule = `Implement can only read and edit files: it cannot run commands, use installed tools or reach the network. ` +
 	`The run executes nothing but the test command shown under "Latest test result", from the repository root; ` +
 	`do not assume it covers what it does not run (another module, a linter, a formatter, a live check). ` +
 	`A requirement that can only be met by running something else cannot be fixed by another implementation attempt: ` +
 	`report it as medium with "operator: " at the start of its description, never as critical or high. ` +
-	`The same holds for task tracking left open because it waits on such a step. ` +
+	`The same holds for task tracking left open because it waits on such a step, or on the test command itself: ` +
+	`implement edits before the tests run and cannot know their result, so tracking that waits on a gate is the operator's ` +
+	`to close, even when the latest test result passed. ` +
 	`A claim in the diff or the implementation summary that such a step was done is not evidence that it was.
 
 `

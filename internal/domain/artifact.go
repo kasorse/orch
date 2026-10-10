@@ -134,6 +134,20 @@ type ReviewResult struct {
 	// Diff records what the reviewer was shown (specs/hardening/SPEC.md §5.3). The
 	// orchestrator sets it after parsing; whatever the model wrote there is replaced.
 	Diff *ReviewDiffSummary `json:"diff,omitempty"`
+	// Reviewers are the answers the merged result is made of, the base model first, when
+	// actions.review.models asked for extra reviewers; absent for a single review
+	// (specs/quality/SPEC.md §7.5). A reviewer's own result has none.
+	Reviewers []ReviewerAnswer `json:"reviewers,omitempty"`
+}
+
+// MaxReviewers bounds ReviewResult.Reviewers: the base model and the extra reviewers a
+// config allows (config.MaxExtraReviewers).
+const MaxReviewers = 5
+
+// ReviewerAnswer is one reviewer's own, unmerged result.
+type ReviewerAnswer struct {
+	Model  string       `json:"model"`
+	Result ReviewResult `json:"result"`
 }
 
 // ReviewDiffSummary counts the files of the review diff by how they were shown. Files
@@ -226,6 +240,26 @@ func (r ReviewResult) Validate() error {
 		if d.Bytes < 0 || d.Files < 0 || d.Shown < 0 || d.Summarized < 0 || d.Withheld < 0 ||
 			d.Shown+d.Summarized+d.Withheld > d.Files {
 			return fmt.Errorf("inconsistent review diff counts %+v", *d)
+		}
+	}
+	return r.ValidateReviewers()
+}
+
+// ValidateReviewers checks the reviewers' answers: bounded, each with a model name and a
+// valid result of its own that merges nothing further.
+func (r ReviewResult) ValidateReviewers() error {
+	if len(r.Reviewers) > MaxReviewers {
+		return fmt.Errorf("%d reviewers, at most %d", len(r.Reviewers), MaxReviewers)
+	}
+	for i, a := range r.Reviewers {
+		if err := reportName(a.Model); err != nil {
+			return fmt.Errorf("reviewers[%d].model: %w", i, err)
+		}
+		if len(a.Result.Reviewers) > 0 {
+			return fmt.Errorf("reviewers[%d] has reviewers of its own", i)
+		}
+		if err := a.Result.Validate(); err != nil {
+			return fmt.Errorf("reviewers[%d]: %w", i, err)
 		}
 	}
 	return nil

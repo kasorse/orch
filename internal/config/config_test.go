@@ -94,6 +94,83 @@ func TestLoad_ByComplexityRejects(t *testing.T) {
 	}
 }
 
+func reviewModelsYAML(models string) string {
+	return strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
+		"review: {provider: claude, model: sonnet, models: "+models+"}", 1)
+}
+
+func TestLoad_ReviewModels(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, reviewModelsYAML("[opus, haiku]")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := strings.Join(cfg.Actions.Review.Models, ","); got != "opus,haiku" {
+		t.Errorf("models = %q", got)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+
+	if cfg, err := Load(writeTempConfig(t, validV2(""))); err != nil || Validate(cfg) != nil || len(cfg.Actions.Review.Models) != 0 {
+		t.Errorf("no models is the default and valid: %v", err)
+	}
+}
+
+func TestValidate_ReviewModels(t *testing.T) {
+	for name, tc := range map[string]struct {
+		models string
+		want   string
+	}{
+		"too many":         {"[a, b, c, d, e]", "at most 4"},
+		"empty name":       {`["opus", " "]`, "actions.review.models[1] must not be empty"},
+		"the base model":   {"[sonnet]", `actions.review.models[0] "sonnet" repeats the base model`},
+		"a repeated entry": {"[opus, opus]", `actions.review.models[1] "opus" repeats`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, reviewModelsYAML(tc.models)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate = %v, want it to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	// yaml.v3 would drop a null entry of a string list without a word; it is refused at load.
+	for _, models := range []string{"[~]", "[opus, null]"} {
+		if _, err := Load(writeTempConfig(t, reviewModelsYAML(models))); err == nil || !strings.Contains(err.Error(), "must not be null or empty") {
+			t.Errorf("Load with models %s = %v, want the null entry refused", models, err)
+		}
+	}
+
+	// A by_complexity model is a base reviewer too, once its complexity is decided.
+	byc := strings.Replace(reviewModelsYAML("[opus, big]"), "model: sonnet, models",
+		"model: sonnet, by_complexity: {complex: {model: big}}, models", 1)
+	cfg, err := Load(writeTempConfig(t, byc))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), `actions.review.models[1] "big" repeats the base model, a by_complexity model`) {
+		t.Errorf("Validate = %v, want the by_complexity model refused as an extra reviewer", err)
+	}
+
+	// Four is the most; the key belongs to review alone.
+	if cfg, err := Load(writeTempConfig(t, reviewModelsYAML("[a, b, c, d]"))); err != nil || Validate(cfg) != nil {
+		t.Errorf("four extra reviewers are valid: %v", err)
+	}
+	for _, action := range []string{"research", "analyze", "plan", "implement"} {
+		y := strings.Replace(validV2(""), action+": {provider: claude, model:", action+": {models: [opus], provider: claude, model:", 1)
+		cfg, err := Load(writeTempConfig(t, y))
+		if err != nil {
+			t.Fatalf("%s: Load: %v", action, err)
+		}
+		if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "actions."+action+".models: unknown key") {
+			t.Errorf("%s: Validate = %v, want models refused", action, err)
+		}
+	}
+}
+
 func TestValidate_ByComplexityEffortNeedsClaude(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Review.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexitySimple: {Effort: "low"}}

@@ -158,6 +158,12 @@ func validateExecution(exec domain.StepExecution, i int) error {
 		if err := exec.ReviewResult.ValidateCriteria(); err != nil {
 			return fmt.Errorf("review_result.criteria: %w", err)
 		}
+		// A run.json is read back without ReviewResult.Validate, which only runs where
+		// a review is parsed, so the reviewers (nested, model-answered, and the part that
+		// breaks a resume if nested again) are checked here on their own.
+		if err := exec.ReviewResult.ValidateReviewers(); err != nil {
+			return fmt.Errorf("review_result.reviewers: %w", err)
+		}
 	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {

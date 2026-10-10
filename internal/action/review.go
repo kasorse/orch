@@ -70,15 +70,46 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		DiffPartial:    diff.Count(repository.TreatFull) < len(diff.Files) || diff.Unlisted > 0,
 	})
 
+	// The base model answers first, then each extra reviewer, one after another with the same
+	// prompt (specs/quality/SPEC.md §7.5). A failed call or a malformed answer from any of
+	// them fails the step: a resume reruns every reviewer.
 	pm, source := d.route(run, domain.ActionReview)
 	result, ref, err := d.call(ctx, run, pm, source, domain.ActionReview, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}
-
-	review, err := parseReviewStrict(result.Output, planCriteria(d.lastPlan))
+	criteria := planCriteria(d.lastPlan)
+	first, err := parseReviewStrict(result.Output, criteria)
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}
+	}
+	review := first
+	rawStdout := result.Output
+
+	if extra := d.Config.Actions.Review.Models; len(extra) > 0 {
+		answers := []domain.ReviewerAnswer{{Model: pm.Model, Result: first}}
+		sum := newStepCalls(d.stepUsage, d.stepCall)
+		for _, model := range extra {
+			// Extra reviewers run on the action's base provider and effort, not on the
+			// effort by_complexity routed the base review to (specs/quality/SPEC.md §7.5).
+			xpm := d.Config.Actions.Review.ProviderModel
+			xpm.Model = model
+			d.stepUsage, d.stepCall = nil, nil
+			xresult, xref, err := d.call(ctx, run, xpm, domain.ModelSourceBase, domain.ActionReview, prompt, provider.Extensions{})
+			sum.add(model, d.stepUsage, d.stepCall)
+			d.stepUsage, d.stepCall = sum.usage, sum.report()
+			if err != nil {
+				return d.failureOutcome(xref, xresult), err
+			}
+			answer, err := parseReviewStrict(xresult.Output, criteria)
+			if err != nil {
+				return workflow.StepOutcome{}, &apperr.WorkflowError{
+					Msg: fmt.Sprintf("malformed review output from the extra reviewer %s", model), Err: err}
+			}
+			answers = append(answers, domain.ReviewerAnswer{Model: model, Result: answer})
+			rawStdout += "\n" + xresult.Output
+		}
+		review = mergeReviews(answers)
 	}
 
 	review.Diff = &domain.ReviewDiffSummary{
@@ -102,7 +133,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		Provider:     &ref,
 		ArtifactPath: path,
 		ReviewResult: &review,
-		RawStdout:    result.Output,
+		RawStdout:    rawStdout,
 	}, nil
 }
 
@@ -119,9 +150,11 @@ func parseReviewStrict(output string, criteria []string) (domain.ReviewResult, e
 	if err := json.Unmarshal([]byte(obj), &review); err != nil {
 		return domain.ReviewResult{}, err
 	}
-	// The diff summary is the orchestrator's record, set after parsing; a model that
-	// writes one of its own must not fail the review over it.
+	// The diff summary and the reviewers are the orchestrator's record, set after parsing; a
+	// model that writes its own must not fail the review over it, nor have it kept (a
+	// reviewers list inside an answer would nest in mergeReviews and break the saved run).
 	review.Diff = nil
+	review.Reviewers = nil
 	if err := review.Validate(); err != nil {
 		return domain.ReviewResult{}, err
 	}

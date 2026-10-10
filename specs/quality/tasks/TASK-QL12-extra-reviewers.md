@@ -49,3 +49,45 @@ another, on the action's provider. Go merges their answers, and the merged resul
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-10)
+
+Written without running anything, so the gates (`scripts/check.sh`) are the operator's. An
+earlier version of this change passed them, but the review fixes below came after that run, so
+QL12 is not ticked in `README.md` or `TODO.md` until the gates have passed on the final code.
+Built as planned, except:
+
+- **Config:** `ActionConfig.Models` and `config.MaxExtraReviewers`; the checks are
+  `extraReviewerProblems` in `validator.go` (more than 4, an empty name, a repeat of the base
+  model, of a `by_complexity` model of review or of an earlier entry, and the key on any action
+  but `review`). A null entry (`models: [~]`) is refused at load by `ActionConfig.UnmarshalYAML`:
+  yaml.v3 would drop it from a `[]string` without a word.
+- **Effort and model:** extra reviewers run on the action's base provider and base effort
+  (`Actions.Review.ProviderModel` with the extra model), never on the effort `by_complexity`
+  routed the base review to.
+- **Model-written `reviewers`:** `parseReviewStrict` clears `reviewers` like `diff`; both are the
+  orchestrator's record, and a list inside an answer would otherwise nest in `mergeReviews`.
+- **Artifact:** `reviewers` is a field of `domain.ReviewResult` (`[]ReviewerAnswer{Model,
+  Result}`, base model first), so the artifact, `run.json` and the resume check that the two agree
+  all see the same value. A single review writes none. `Validate` bounds it (`MaxReviewers`) and
+  refuses a reviewer that has reviewers of its own; `persistence/validate.go` calls
+  `ValidateReviewers`.
+- **Merge:** `mergeReviews` in `reviewmerge.go`. `Status` of the merged result is its `Decide()`.
+  The word-set normalisation is a copy of `workflow.normalizeWords` (unexported, and `action`
+  should not reach into it): lower case, letters and digits, words of 3+ characters.
+- **Calls:** `stepCalls` in `context.go` sums the usage; `ExtraCall.InputTokens` is every input
+  token, cached or not (`Usage.PromptTokens`). A failed extra call is still counted, so the
+  step's usage is what was spent. `ComputeOutcome` counts each extra call in `Provider calls`.
+  The raw stdout logged for the step is the answers joined by a newline.
+- **Report:** `summary.md` gets a `Reviewers | sonnet, opus` row, only when the last review had
+  extra reviewers.
+- **Tests:** `reviewmerge_test.go` (merge table, criteria AND, the step with two reviewers,
+  usage and `extra_calls`, a malformed second answer, the second answer's criteria, a failed
+  extra call), `config.TestLoad_ReviewModels`, `TestValidate_ReviewModels`,
+  `TestParseReviewStrict_DropsModelWrittenReviewers`,
+  `TestExecuteReview_ModelWrittenReviewersDoNotNest`,
+  `TestExecuteReview_ExtraReviewersUseTheBaseEffort`, the null and by_complexity cases of
+  `TestValidate_ReviewModels`, `domain.TestReviewResult_ValidateReviewers`, `TestCallReport_ExtraCalls`,
+  `TestComputeOutcome_CountsExtraReviewerCalls`, `report.TestRunSummary_Reviewers`, three
+  `persistence` corrupt-state cases. The integration scenario stays in QL13; the example config
+  has a commented `models` line, the rest of the documentation is QL14's.

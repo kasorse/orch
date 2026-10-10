@@ -95,6 +95,23 @@ func TestRunSummary_ReviewCriteria(t *testing.T) {
 	}
 }
 
+func TestRunSummary_Reviewers(t *testing.T) {
+	if got := RunSummary(summaryRun(), nil); strings.Contains(got, "Reviewers") {
+		t.Errorf("a single review has no reviewers row\n%s", got)
+	}
+
+	run := summaryRun()
+	r := run.Executions[3].ReviewResult
+	r.Reviewers = []domain.ReviewerAnswer{{Model: "sonnet", Result: *r}, {Model: "opus", Result: *r}}
+	run.Executions[3].Call = &domain.CallReport{ExtraCalls: []domain.ExtraCall{{Model: "opus"}}}
+	got := RunSummary(run, nil)
+	for _, want := range []string{"| Reviewers | sonnet, opus |", "| Provider calls | 4 |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
+}
+
 func TestRunSummary_FailedCheck(t *testing.T) {
 	run := summaryRun()
 	run.Executions[2].TestResult = &domain.TestResult{Command: "go vet ./...", ExitCode: 1, FailedCheck: "vet",

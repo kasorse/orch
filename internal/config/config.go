@@ -39,11 +39,19 @@ type ActionConfig struct {
 	// §9). The provider is fixed per action. A key that is not a complexity is kept as
 	// written, so Validate can name it; read the table through Route.
 	ByComplexity map[domain.Complexity]ModelEffort
+	// Models are the extra reviewers of actions.review: model names on the action's provider,
+	// called one after another after the base model with the same prompt (specs/quality/SPEC.md
+	// §7.5). Only actions.review accepts it; Validate rejects the key anywhere else.
+	Models []string
 
-	// verifySet records that the verify key was written, so Validate can name it on an
+	// verifySet and modelsSet record that the key was written, so Validate can name it on an
 	// action that does not accept it.
 	verifySet bool
+	modelsSet bool
 }
+
+// MaxExtraReviewers bounds actions.review.models.
+const MaxExtraReviewers = 4
 
 // ModelEffort is one by_complexity entry. A field left empty falls back to the action's
 // base value. There is no provider: the strict parser rejects the key.
@@ -85,6 +93,10 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Timeout  string `yaml:"timeout"`
 		Verify   *bool  `yaml:"verify"`
 
+		// Models are pointers because yaml.v3 drops a null entry of a []string without a
+		// word; a pointer keeps it visible, so it can be refused.
+		Models []*string `yaml:"models"`
+
 		// ByComplexity keeps its keys as strings so Validate can report one that is not a
 		// complexity; ModelEffort has no provider key, so the strict parser rejects one.
 		ByComplexity map[string]ModelEffort `yaml:"by_complexity"`
@@ -97,6 +109,17 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Effort = raw.Effort
 	a.Verify = raw.Verify != nil && *raw.Verify
 	a.verifySet = raw.Verify != nil
+	a.Models = nil
+	if raw.Models != nil {
+		a.Models = make([]string, len(raw.Models))
+		for i, m := range raw.Models {
+			if m == nil {
+				return fmt.Errorf("models[%d] must not be null or empty", i)
+			}
+			a.Models[i] = *m
+		}
+	}
+	a.modelsSet = raw.Models != nil
 	a.ByComplexity = nil
 	if raw.ByComplexity != nil {
 		a.ByComplexity = make(map[domain.Complexity]ModelEffort, len(raw.ByComplexity))

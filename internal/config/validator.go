@@ -55,6 +55,7 @@ func Validate(cfg Config) error {
 
 	problems = append(problems, checkProblems(cfg)...)
 	problems = append(problems, byComplexityProblems(cfg)...)
+	problems = append(problems, extraReviewerProblems(cfg)...)
 
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 	problems = append(problems, verifyProblems(cfg)...)
@@ -215,6 +216,49 @@ func byComplexityProblems(cfg Config) []string {
 				problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, a.action.Provider))
 			}
 		}
+	}
+	return problems
+}
+
+// extraReviewerProblems validates actions.review.models (specs/quality/SPEC.md §7.5): at most
+// MaxExtraReviewers non-empty names, none repeated and none the base model or one of the
+// review by_complexity models, which would only ask the same question twice. The key belongs to review alone.
+func extraReviewerProblems(cfg Config) []string {
+	var problems []string
+	for _, o := range []struct {
+		name string
+		a    ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"implement", cfg.Actions.Implement},
+	} {
+		if o.a.modelsSet || len(o.a.Models) > 0 {
+			problems = append(problems, fmt.Sprintf("actions.%s.models: unknown key (models is accepted only on actions.review)", o.name))
+		}
+	}
+	review := cfg.Actions.Review
+	if len(review.Models) > MaxExtraReviewers {
+		problems = append(problems, fmt.Sprintf("actions.review.models: %d models, at most %d", len(review.Models), MaxExtraReviewers))
+	}
+	// The base reviewer is the base model, or the by_complexity model the decided complexity
+	// routes to, so an extra reviewer must differ from every one of them.
+	seen := map[string]bool{strings.TrimSpace(review.Model): true}
+	for _, e := range review.ByComplexity {
+		if name := strings.TrimSpace(e.Model); name != "" {
+			seen[name] = true
+		}
+	}
+	for i, m := range review.Models {
+		name := strings.TrimSpace(m)
+		switch {
+		case name == "":
+			problems = append(problems, fmt.Sprintf("actions.review.models[%d] must not be empty", i))
+		case seen[name]:
+			problems = append(problems, fmt.Sprintf("actions.review.models[%d] %q repeats the base model, a by_complexity model or an earlier entry", i, m))
+		}
+		seen[name] = true
 	}
 	return problems
 }

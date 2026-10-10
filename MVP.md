@@ -1022,6 +1022,9 @@ running something else - a live check against an installed tool, a build, lint o
 gate the test command does not run - is the operator's: implement names it in `summary` as
 left to the operator, never claims it done, and leaves the task tracking that waits on it
 open. The way to have such a gate checked by the run is to make it part of `test.command`.
+Review reports tracking left open this way as `operator:` medium, never high - also when it
+waits on the test command and the latest test passed: implement edits before the tests run
+and cannot know their result, so sending it back would loop until `max_fix_iterations`.
 
 Each stage's prompt carries what the earlier stages found that it can use
 (`specs/quality/SPEC.md` §4): plan gets the analysis `affected_files` and `risks`; implement
