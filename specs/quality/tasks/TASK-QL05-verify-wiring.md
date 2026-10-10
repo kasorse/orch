@@ -62,3 +62,44 @@ config is checked in the fail-fast chain, the calls are recorded in `run.json`, 
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-10)
+
+Built as planned, except as listed.
+
+- **Gates:** written without being able to run anything. The four gates are
+  `scripts/check.sh`, this repository's `test.command`, so the test step that follows runs
+  them. The golden files `implement_verify.golden` and `implement_verify_checks.golden` were
+  written by hand, not by `-update`: if the prompt test reports a difference, compare the
+  paragraph text first. Nothing was run against a real `claude` or `bwrap` (QL06).
+- **`verify` on another action** is rejected by `Validate`, not by the YAML decoder:
+  `ActionConfig` stays one type, with the key read in `UnmarshalYAML` and remembered in an
+  unexported field. The message is `actions.<a>.verify: unknown key (verify is accepted only on
+  actions.implement)`, and the exit code is 2 like any config error. `actions.implement.verify`
+  also needs provider `claude`.
+- **`limits.verify`** has its own `UnmarshalYAML` for `call_timeout` (an explicit `0s` is
+  refused, unset means 10m); `max_calls_per_step` is a pointer (unset means 8, an explicit 0 is
+  out of range). Reserved names: `extensions.mcp.orch` and any server name with `__`.
+- **`call` takes the built-in extension as a last parameter** and merges it after the hint is
+  built, so the knowledge-graph hint names only the operator's tools. `mergeExtensions` fails
+  on a server name in both documents. The tool order is the operator's (sorted) and then
+  `run_tests`, `run_check`: claude does not sort, and the task asks for that order.
+- **The sandbox is the test step's** (`Dispatcher.Runner.Sandbox`, set in `executeWorkflow`).
+  Without it the step fails before the call, with no directory left behind. The executable is
+  `Dispatcher.VerifyExecutable`, or `os.Executable()` with symlinks resolved.
+- **Reading the directory** (`action/verify.go`) uses `O_NOFOLLOW|O_NONBLOCK`, regular files
+  only, a 1 MiB bound on `calls.jsonl`, 512 KiB per call log (a cut is marked) and 20 lines of
+  `violation`. `calls.jsonl` is decoded strictly, and each line passes the new
+  `domain.VerifyCall.Validate`, the same check the loader applies, so a hostile line fails
+  the step instead of making `run.json` unloadable. Order of errors after a call: the guard's
+  own error or violation, then the verify `violation`, then an unreadable `calls.jsonl`. After a
+  provider error the provider's error is kept and the calls that parsed are recorded.
+- **Logs are not moved on disk.** They travel in `StepOutcome.VerifyLogs` (named `verify-<K>`,
+  `K` = the line number) and `runObserver` writes `logs/<NNN>-implement.verify-<K>.*` through
+  `AppendCheckLog`; a rename would fail across filesystems when `$TMPDIR` is a tmpfs.
+- **`verify_calls` validation** (`domain.VerifyCall.Validate`, called from `persistence`):
+  only on implement, at most 50, known tool, `check` only on `run_check` and required unless
+  the call was refused (QL04's note), `filter` only on `run_tests`, a refused call has a short
+  one-line reason and no result, and a call that ran has `success == (exit_code == 0)`.
+- **Startup sweep:** `removeStaleVerifyDirs` runs at the start of `executeWorkflow` (run and
+  resume). It uses `Lstat`, owner uid and a 24 h age, and ignores errors.

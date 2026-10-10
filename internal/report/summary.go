@@ -66,6 +66,19 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		tokens(u.PromptTokens()), tokens(u.InputTokens), tokens(u.CacheReadTokens), tokens(u.CacheCreationTokens), tokens(u.OutputTokens)))
 	row("Provider calls", fmt.Sprintf("%d", out.Usage.Calls))
 
+	if out.VerifyCalls > 0 {
+		// A refused call ran nothing, so it never passed.
+		passed := 0
+		for _, e := range run.Executions {
+			for _, c := range e.VerifyCalls {
+				if c.Refused == "" && c.Success {
+					passed++
+				}
+			}
+		}
+		row("Verify", fmt.Sprintf("%s, %d passed", plural(out.VerifyCalls, "call"), passed))
+	}
+
 	tests := "not run"
 	if p := out.TestsPassedFinal; p != nil {
 		tests = map[bool]string{true: "passed", false: "failed"}[*p]

@@ -4,13 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
+	"orchestrator/internal/verify"
 	"orchestrator/internal/workflow"
 )
+
+// prepareVerify writes the server's input into dir and returns the extension that starts it.
+func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardState) (provider.Extensions, error) {
+	// MkdirTemp creates the directory 0700 already; the server's files are only for us.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return provider.Extensions{}, err
+	}
+	spec, err := d.verifySpec(run, before)
+	if err != nil {
+		return provider.Extensions{}, err
+	}
+	if err := verify.WriteSpec(dir, spec); err != nil {
+		return provider.Extensions{}, err
+	}
+	exe, err := d.executable()
+	if err != nil {
+		return provider.Extensions{}, err
+	}
+	return verifyExtensions(dir, exe, len(spec.Checks) > 0), nil
+}
 
 // executeImplement always reports OutcomeSuccess if the provider process exits 0 -
 // whether the implementation is actually correct is verified by the next test/review
@@ -37,6 +60,25 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to snapshot protected paths before implement", Err: err}
 	}
+
+	// With verify on, the session gets the orch MCP server over a private directory that
+	// holds its input and, afterwards, its record of the calls. The directory is removed on
+	// every way out of this function.
+	var builtin provider.Extensions
+	verifyDir := ""
+	if d.Config.Actions.Implement.Verify {
+		dir, err := os.MkdirTemp("", "orch-verify-")
+		if err != nil {
+			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to create the verify directory", Err: err}
+		}
+		defer os.RemoveAll(dir)
+		verifyDir = dir
+		if builtin, err = d.prepareVerify(dir, run, before); err != nil {
+			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to set up the verify tools", Err: err}
+		}
+		in.Verify, in.VerifyChecks = true, len(d.Config.Checks) > 0
+	}
+
 	// The working tree as a git tree, to count what the step changes. Best effort: without
 	// it the step records no diff.
 	treeBefore, _ := d.Repo.WorktreeTree(ctx)
@@ -58,9 +100,16 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
 	}
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt, builtin)
+	// Read on every path: the calls are recorded in a step that failed as well.
+	var verified verifyOutput
+	if verifyDir != "" {
+		verified = readVerifyDir(verifyDir)
+	}
 	if err != nil {
-		return d.failureOutcome(ref, result), err
+		failed := d.failureOutcome(ref, result)
+		failed.VerifyCalls, failed.VerifyLogs = verified.calls, verified.logs
+		return failed, err
 	}
 
 	artifact := parseImplementation(result.Output)
@@ -80,12 +129,19 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ArtifactPath: path,
 		Artifact:     artifact,
 		RawStdout:    result.Output,
+		VerifyCalls:  verified.calls,
+		VerifyLogs:   verified.logs,
 	}
 	if err != nil {
 		return outcome, &apperr.WorkflowError{Msg: "failed to check protected paths after implement", Err: err}
 	}
 	if len(changed) > 0 {
 		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
+	}
+	// A violation the server found may have been undone by the model since, so the guard
+	// above can come back clean.
+	if err := verifyFailure(verified, run.PreRunRef); err != nil {
+		return outcome, err
 	}
 	// Only now, with the guard passed, may git look at what the call wrote.
 	if treeBefore != "" {

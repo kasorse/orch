@@ -8,7 +8,9 @@ and QL03 done (stage context in the prompts, `acceptance_criteria`, the retry di
 golden files; the review verdict per criterion and the read-the-surroundings prompt; the
 `checks:` in the test step and the pre-run test);
 QL04 done too (the `internal/verify` MCP server, the hidden `mcp-verify` subcommand, the guard
-moved to `internal/guard`; 2026-10-10); QL05–QL15 have not started.
+moved to `internal/guard`; 2026-10-10); QL05 done as well (`actions.implement.verify` wired
+into the implement step, `verify_calls` in `run.json`, the `summary.md` row; 2026-10-10), written
+without running anything, so its gates are the operator's; QL06–QL15 have not started.
 
 | document | role |
 |---|---|
@@ -40,7 +42,7 @@ step runs on one model regardless of how simple the task is. This phase:
 | [QL02](tasks/TASK-QL02-review-criteria.md) | review verdict per criterion, read-the-surroundings prompt ✓ | Q6.1–2 | S | QL01 |
 | [QL03](tasks/TASK-QL03-checks.md) | `checks:` in the test step and the pre-run test ✓ | Q5 | M | — |
 | [QL04](tasks/TASK-QL04-verify-server.md) | `internal/verify`: stdio MCP server, `run_tests`, `run_check` ✓ | Q2 | M | QL03 |
-| [QL05](tasks/TASK-QL05-verify-wiring.md) | verify in the implement step: config, fail-fast, dispatcher, record | Q2 | M | QL04 |
+| [QL05](tasks/TASK-QL05-verify-wiring.md) | verify in the implement step: config, fail-fast, dispatcher, record ✓ | Q2 | M | QL04 |
 | [QL06](tasks/TASK-QL06-verify-live.md) | live security checks for verify, decision D16 | Q2 | S | QL05 |
 | [QL07](tasks/TASK-QL07-testreport.md) | `internal/testreport`: failing test names | Q7.2 | M | — |
 | [QL08](tasks/TASK-QL08-no-progress.md) | stop without progress (tree, tests, review) | Q7.1, Q6.4 | M | QL07 |

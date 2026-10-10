@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 	"orchestrator/internal/workflow"
 )
 
@@ -15,7 +16,7 @@ func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workf
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionAnalyze),
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Analyze.ProviderModel, domain.ActionAnalyze, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Analyze.ProviderModel, domain.ActionAnalyze, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

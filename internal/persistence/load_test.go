@@ -55,7 +55,12 @@ func fullRun(t *testing.T, store *Store) *domain.Run {
 		{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted,
 			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit},
 			ArtifactPath: ArtifactRelPath(0, domain.ActionImplement),
-			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3}},
+			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3},
+			VerifyCalls: []domain.VerifyCall{
+				{Tool: domain.VerifyToolRunTests, Filter: "./internal/x", ExitCode: 1, Duration: 4 * time.Second, OutputCut: true},
+				{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true, Duration: time.Second},
+				{Tool: domain.VerifyToolRunCheck, Refused: "invalid arguments: name is required"},
+			}},
 		{Index: 1, Action: domain.ActionTest, Status: domain.StepCompleted,
 			TestResult:   &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL", Duration: time.Second},
 			ArtifactPath: ArtifactRelPath(1, domain.ActionTest)},

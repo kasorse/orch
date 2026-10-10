@@ -110,6 +110,12 @@ func TestPrompts_Golden(t *testing.T) {
 		{"implement_first", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan()})
 		}},
+		{"implement_verify", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(), Verify: true})
+		}},
+		{"implement_verify_checks", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(), Verify: true, VerifyChecks: true})
+		}},
 		{"implement_retry_test", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
 				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),

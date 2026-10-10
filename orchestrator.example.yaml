@@ -56,6 +56,15 @@ actions:
   implement:
     provider: claude
     model: opus
+    # Optional (implement only): give the session two tools served by the orchestrator itself,
+    # run_tests and, with `checks:` below, run_check, so it can run test.command and the
+    # checks before it answers. The model chooses only a name and a test filter, never a
+    # command; every run is sandboxed and preceded by the protected-paths guard, and a run
+    # after the model changed hooks, CI or this config fails the step. Needs test.command,
+    # test.sandbox bwrap and provider claude. The final test step stays the source of truth.
+    # Each call is recorded in run.json (verify_calls) and its output in
+    # logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log.
+    # verify: true
 
   review:
     provider: claude
@@ -117,6 +126,10 @@ limits:
   #                                 # (beginning, failure lines, end); 4096..1048576
   #   max_diff_bytes: 262144        # the review diff; 16384..4194304
   #   diff_summarize: []            # extra globs shown to review as a stat line only
+  # Bounds on actions.implement.verify.
+  # verify:
+  #   max_calls_per_step: 8         # both tools together, refused calls included; 1..50
+  #   call_timeout: 10m             # one run of the test command or a check
 
 execution:
   timeout: 15m

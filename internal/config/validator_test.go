@@ -341,6 +341,67 @@ func TestValidate_TestBaseline(t *testing.T) {
 	}
 }
 
+func TestValidate_Verify(t *testing.T) {
+	ok := validConfig()
+	ok.Actions.Implement.Verify = true
+	if err := Validate(ok); err != nil {
+		t.Fatalf("verify on a sandboxed implement: %v", err)
+	}
+
+	three, zero, fiftyOne := 3, 0, 51
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"no sandbox", func(c *Config) { c.Test.Sandbox = SandboxNone }, "actions.implement.verify needs test.sandbox bwrap"},
+		{"no test command", func(c *Config) { c.Test.Command = "" }, "actions.implement.verify needs test.command"},
+		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "codex" }, "actions.implement.verify is only supported with provider claude"},
+		{"on review", func(c *Config) { c.Actions.Review.Verify = true }, "actions.review.verify: unknown key"},
+		{"written on plan", func(c *Config) { c.Actions.Plan.verifySet = true }, "actions.plan.verify: unknown key"},
+		{"zero calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &zero }, "limits.verify.max_calls_per_step must be between 1 and 50, got 0"},
+		{"too many calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &fiftyOne }, "limits.verify.max_calls_per_step must be between 1 and 50, got 51"},
+		{"negative timeout", func(c *Config) { c.Limits.Verify.CallTimeout = -time.Second }, "limits.verify.call_timeout must be a positive duration"},
+		{"zero timeout written", func(c *Config) { c.Limits.Verify.callTimeoutSet = true }, "limits.verify.call_timeout must be a positive duration"},
+		{"reserved server name", func(c *Config) {
+			c.Extensions.MCP = map[string]MCPServerConfig{"orch": {Command: "x", Tools: []string{"t"}}}
+		}, "extensions.mcp.orch: the name orch is reserved"},
+		{"double underscore in a server name", func(c *Config) {
+			c.Extensions.MCP = map[string]MCPServerConfig{"a__b": {Command: "x", Tools: []string{"t"}}}
+		}, "extensions.mcp.a__b: the server name must not contain __"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Actions.Implement.Verify = true
+			tc.mutate(&cfg)
+			err := Validate(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+
+	cfg := validConfig()
+	cfg.Limits.Verify.MaxCallsPerStep = &three
+	cfg.Limits.Verify.CallTimeout = time.Minute
+	if err := Validate(cfg); err != nil {
+		t.Errorf("explicit limits.verify: %v", err)
+	}
+}
+
+func TestVerifyLimits_Defaults(t *testing.T) {
+	var v VerifyLimitsConfig
+	if v.MaxCalls() != 8 || v.Timeout() != 10*time.Minute {
+		t.Errorf("defaults = %d, %s; want 8, 10m", v.MaxCalls(), v.Timeout())
+	}
+	five := 5
+	v = VerifyLimitsConfig{MaxCallsPerStep: &five, CallTimeout: time.Minute}
+	if v.MaxCalls() != 5 || v.Timeout() != time.Minute {
+		t.Errorf("explicit = %d, %s; want 5, 1m", v.MaxCalls(), v.Timeout())
+	}
+}
+
 func nChecks(n int) []CheckConfig {
 	var checks []CheckConfig
 	for i := 0; i < n; i++ {

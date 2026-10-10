@@ -358,7 +358,10 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
 **Сделано (2026-10-10):** QL04 — пакет `internal/verify` (stdio MCP-сервер, `run_tests`,
 `run_check`) и скрытая подкоманда `mcp-verify --dir`; guard вынесен в `internal/guard`.
 Написано без запуска; гейты гоняет `scripts/check.sh` (он же `test.command`).
-Остаётся `[~]` до QL05 (подключение) и QL06 (live-проверки).
+QL05 — подключение: `actions.implement.verify: true` и `limits.verify`, встроенный сервер
+`orch` в `--mcp-config` шага implement, `verify_calls` в `run.json`, строка `Verify` в
+`summary.md`, очистка устаревших `orch-verify-*`. Тоже написано без запуска.
+Остаётся `[~]` до QL06 (live-проверки).
 
 ### [~] Q3. Сложность управляет моделью и effort — P1 · M
 **Зачем:** 0.1. Это главный источник экономии, который адаптивность может дать

@@ -56,6 +56,7 @@ func Validate(cfg Config) error {
 	problems = append(problems, checkProblems(cfg)...)
 
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
+	problems = append(problems, verifyProblems(cfg)...)
 
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
@@ -106,6 +107,46 @@ func Validate(cfg Config) error {
 		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n")),
 		nil,
 	)
+}
+
+// verifyProblems validates actions.implement.verify and limits.verify (specs/quality/SPEC.md
+// §6.3). The key belongs to implement alone; the model triggers these runs, so they need
+// the sandbox, and the server is built into the claude adapter's MCP support.
+func verifyProblems(cfg Config) []string {
+	var problems []string
+	others := []struct {
+		name string
+		a    ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"review", cfg.Actions.Review},
+	}
+	for _, o := range others {
+		if o.a.verifySet || o.a.Verify {
+			problems = append(problems, fmt.Sprintf("actions.%s.verify: unknown key (verify is accepted only on actions.implement)", o.name))
+		}
+	}
+	if cfg.Actions.Implement.Verify {
+		if strings.TrimSpace(cfg.Test.Command) == "" {
+			problems = append(problems, "actions.implement.verify needs test.command: it is the command the verify tool runs")
+		}
+		if !cfg.Test.Sandboxed() {
+			problems = append(problems, "actions.implement.verify needs test.sandbox bwrap: the model triggers these runs, so they never run unsandboxed")
+		}
+		if p := cfg.Actions.Implement.Provider; p != "" && p != "claude" {
+			problems = append(problems, fmt.Sprintf("actions.implement.verify is only supported with provider claude, got %s", p))
+		}
+	}
+	v := cfg.Limits.Verify
+	if v.MaxCallsPerStep != nil && (*v.MaxCallsPerStep < 1 || *v.MaxCallsPerStep > domain.MaxVerifyCalls) {
+		problems = append(problems, fmt.Sprintf("limits.verify.max_calls_per_step must be between 1 and %d, got %d", domain.MaxVerifyCalls, *v.MaxCallsPerStep))
+	}
+	if v.Timeout() <= 0 {
+		problems = append(problems, fmt.Sprintf("limits.verify.call_timeout must be a positive duration, got %s", v.Timeout()))
+	}
+	return problems
 }
 
 // checkProblems validates checks (specs/quality/SPEC.md §5.1): at most domain.MaxChecks,

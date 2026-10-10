@@ -125,6 +125,9 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("diff: %w", err)
 		}
 	}
+	if err := validateVerifyCalls(exec); err != nil {
+		return fmt.Errorf("verify_calls: %w", err)
+	}
 	if exec.TestResult != nil {
 		if err := validateChecks(*exec.TestResult); err != nil {
 			return fmt.Errorf("test_result: %w", err)
@@ -141,6 +144,27 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
+	}
+	return nil
+}
+
+// validateVerifyCalls checks the verify calls an implement step recorded (specs/quality/
+// SPEC.md §6.8, §12); each entry through domain.VerifyCall.Validate.
+func validateVerifyCalls(exec domain.StepExecution) error {
+	calls := exec.VerifyCalls
+	if len(calls) == 0 {
+		return nil
+	}
+	if exec.Action != domain.ActionImplement {
+		return fmt.Errorf("recorded on a %s step", exec.Action)
+	}
+	if len(calls) > domain.MaxVerifyCalls {
+		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxVerifyCalls)
+	}
+	for i, c := range calls {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("[%d]: %w", i, err)
+		}
 	}
 	return nil
 }
@@ -284,7 +308,7 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 	if o.Status != runStatus {
 		return fmt.Errorf("status %q is not the run's status %q", o.Status, runStatus)
 	}
-	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 {
+	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 || o.VerifyCalls < 0 {
 		return fmt.Errorf("negative counter")
 	}
 	if v := o.ReviewVerdict; v != "" && v != domain.ReviewPass && v != domain.ReviewFail {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 	"orchestrator/internal/workflow"
 )
 
@@ -14,7 +15,7 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionResearch),
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Research.ProviderModel, domain.ActionResearch, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Research.ProviderModel, domain.ActionResearch, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

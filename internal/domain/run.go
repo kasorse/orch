@@ -74,8 +74,11 @@ type StepExecution struct {
 	// Diff is what an implement step changed, from git. Nil for every other step, and for
 	// an implement whose call failed or whose changes the guard refused: git runs on the
 	// working tree only after the guard has passed it.
-	Diff  *StepDiff `json:"diff,omitempty"`
-	Error string    `json:"error,omitempty"`
+	Diff *StepDiff `json:"diff,omitempty"`
+	// VerifyCalls are the calls the implement session made to the verify tools, in order, also
+	// when the step failed (specs/quality/SPEC.md §12). Empty for every other step.
+	VerifyCalls []VerifyCall `json:"verify_calls,omitempty"`
+	Error       string       `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`

@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -39,4 +41,52 @@ type VerifyCall struct {
 	// files keep everything.
 	OutputCut bool   `json:"output_cut,omitempty"`
 	Refused   string `json:"refused,omitempty"`
+}
+
+// maxVerifyRefusedBytes bounds the reason of a refused call; the server's own reasons are
+// far shorter.
+const maxVerifyRefusedBytes = 300
+
+// Validate checks a recorded call. calls.jsonl is written by a process that runs model code,
+// so everything is checked as if it were hostile: a check name ends up in a log file name and
+// a reason in the report. A refused run_check may name no check, because its arguments were
+// the reason it was refused.
+func (c VerifyCall) Validate() error {
+	switch c.Tool {
+	case VerifyToolRunTests:
+		if c.Check != "" {
+			return fmt.Errorf("check %q on a %s call", c.Check, c.Tool)
+		}
+	case VerifyToolRunCheck:
+		if c.Check == "" && c.Refused == "" {
+			return fmt.Errorf("%s call without a check", c.Tool)
+		}
+		if c.Check != "" && !CheckNameRE.MatchString(c.Check) {
+			return fmt.Errorf("check %q is not a check name", c.Check)
+		}
+		if c.Filter != "" {
+			return fmt.Errorf("filter on a %s call", c.Tool)
+		}
+	default:
+		return fmt.Errorf("unknown tool %q", c.Tool)
+	}
+	if c.Filter != "" && !VerifyFilterRE.MatchString(c.Filter) {
+		return fmt.Errorf("filter %q does not match %s", c.Filter, VerifyFilterPattern)
+	}
+	if c.Duration < 0 {
+		return fmt.Errorf("duration is %s", c.Duration)
+	}
+	if c.Refused != "" {
+		switch {
+		case len(c.Refused) > maxVerifyRefusedBytes || strings.ContainsAny(c.Refused, "\r\n"):
+			return fmt.Errorf("refused is not a short single line")
+		case c.ExitCode != 0 || c.Success || c.Duration != 0 || c.OutputCut:
+			return fmt.Errorf("a refused call carries a result")
+		}
+		return nil
+	}
+	if c.Success != (c.ExitCode == 0) {
+		return fmt.Errorf("inconsistent result (exit code %d, success %v)", c.ExitCode, c.Success)
+	}
+	return nil
 }

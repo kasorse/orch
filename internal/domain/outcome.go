@@ -28,6 +28,9 @@ type Outcome struct {
 	// Diff is the run's net change: the last implement step's diff against the run's
 	// restore point. Nil without one.
 	Diff *DiffStat `json:"diff,omitempty"`
+	// VerifyCalls is the number of verify tool calls made over the run's implement steps,
+	// refused ones included. Absent when there were none.
+	VerifyCalls int `json:"verify_calls,omitempty"`
 }
 
 // OutcomeUsage is the usage summed over every provider call of a run, and how many calls
@@ -94,6 +97,7 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 			out.Diff = &d
 		}
 		out.ActiveMS += ExecutionMS(exec)
+		out.VerifyCalls += len(exec.VerifyCalls)
 	}
 	out.DurationMS = executionsDurationMS(run.Executions)
 

@@ -49,7 +49,10 @@ composition point that implements `StepExecutor` using config/provider/repositor
 `internal/app` is the composition root for everything. `internal/verify` is the in-session
 verify server behind the hidden `orchestrator mcp-verify --dir <dir>` (specs/quality §6): it
 speaks MCP with the standard library only, reads nothing but `<dir>/verify.json`, and imports
-`guard`, `testexec` and `domain`, never `action`.
+`guard`, `testexec` and `domain`, never `action`. `action` is its one client: with
+`actions.implement.verify` it writes the `verify.json` of a private `orch-verify-*` directory,
+merges the `orch` server into the step's `--mcp-config`, and reads `calls.jsonl` and `violation`
+back as untrusted input (`action/verify.go`).
 
 `bench/` is a black box to the core and the core is one to it. It is a separate Go module
 with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a

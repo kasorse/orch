@@ -61,6 +61,10 @@ var DefaultMCPActions = []string{"analyze", "plan", "review"}
 
 var mcpNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
+// reservedMCPServer is the name of the orchestrator's own verify server; an operator's
+// server cannot take it.
+const reservedMCPServer = "orch"
+
 var extensionActions = []string{"research", "analyze", "plan", "implement", "review"}
 
 // ActionsFor returns the actions s is offered to.
@@ -106,6 +110,12 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 		key := "extensions.mcp." + name
 		if !mcpNameRE.MatchString(name) {
 			problems = append(problems, fmt.Sprintf("%s: the server name may use only letters, digits, - and _", key))
+		}
+		if name == reservedMCPServer {
+			problems = append(problems, key+": the name orch is reserved for the orchestrator's verify server")
+		}
+		if strings.Contains(name, "__") {
+			problems = append(problems, key+": the server name must not contain __ (it is ambiguous in mcp__<server>__<tool>)")
 		}
 		switch {
 		case s.Command == "" && s.URL == "":

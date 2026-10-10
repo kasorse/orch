@@ -213,6 +213,21 @@ type ImplementPromptInput struct {
 	// (renderDiffStat, bounded by limits.prompt.max_diff_bytes). The dispatcher computes it,
 	// so this builder stays pure; "" leaves the section out.
 	RunDiffStat string
+	// Verify is true when the session has the orchestrator's verify tools
+	// (actions.implement.verify; specs/quality/SPEC.md §6.1), and VerifyChecks when it also
+	// has run_check, that is when the config lists checks.
+	Verify, VerifyChecks bool
+}
+
+// implementVerifyRule tells a session with the verify tools to use them. The tests it runs
+// are the operator's test command, so the closing sentence keeps the final run authoritative.
+func implementVerifyRule(withChecks bool) string {
+	tools := "the tool `mcp__orch__run_tests`"
+	if withChecks {
+		tools += " (and its checks with `mcp__orch__run_check`)"
+	}
+	return "You can run the project's tests with " + tools + ". Use them to check your change before you answer. " +
+		"The orchestrator runs the tests again after you finish, and only that run counts."
 }
 
 func BuildImplementPrompt(in ImplementPromptInput) string {
@@ -223,6 +238,9 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString(implementSummaryShortRule + "\n\n")
 	b.WriteString(implementConventionsRule + "\n\n")
 	b.WriteString(implementOperatorRule + "\n\n")
+	if in.Verify {
+		b.WriteString(implementVerifyRule(in.VerifyChecks) + "\n\n")
+	}
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 

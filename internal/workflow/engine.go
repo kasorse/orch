@@ -24,6 +24,11 @@ type StepOutcome struct {
 	// CheckLogs is the raw output of each check a test step ran, for logs/<NNN>-test.<check>.*;
 	// RawStdout/RawStderr stay the failing check's or the test command's.
 	CheckLogs []domain.CheckOutput
+	// VerifyCalls are the verify tool calls an implement step's session made, recorded also
+	// when the step failed; VerifyLogs is their raw output, for logs/<NNN>-implement.verify-<K>.*
+	// (the Name of each entry is verify-<K>). Only VerifyCalls is persisted in run.json.
+	VerifyCalls []domain.VerifyCall
+	VerifyLogs  []domain.CheckOutput
 	// Usage is what the step's provider call cost, when the CLI reported it - also on a
 	// failed call, so it is recorded whatever the outcome.
 	Usage *domain.Usage
@@ -183,6 +188,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		stepExec.Usage = outcome.Usage
 		stepExec.Call = outcome.Call
 		stepExec.Diff = outcome.Diff
+		stepExec.VerifyCalls = outcome.VerifyCalls
 		if outcome.Provider != nil {
 			stepExec.Provider = outcome.Provider
 		}

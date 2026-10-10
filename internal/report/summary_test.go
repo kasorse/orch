@@ -107,6 +107,24 @@ func TestRunSummary_FailedCheck(t *testing.T) {
 	}
 }
 
+func TestRunSummary_Verify(t *testing.T) {
+	run := summaryRun()
+	if got := RunSummary(run, nil); strings.Contains(got, "| Verify |") {
+		t.Errorf("a run without verify calls has no Verify row\n%s", got)
+	}
+	run.Executions[1].VerifyCalls = []domain.VerifyCall{
+		{Tool: domain.VerifyToolRunTests, Success: true},
+		{Tool: domain.VerifyToolRunTests, ExitCode: 1},
+		{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true},
+		{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true},
+		{Tool: domain.VerifyToolRunTests, Refused: "limit reached"},
+	}
+	got := RunSummary(run, nil)
+	if want := "| Verify | 5 calls, 3 passed |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+}
+
 // A run recorded before the call report existed still renders: the configured model
 // stands in, and what is unknown is a dash.
 func TestRunSummary_OldRun(t *testing.T) {

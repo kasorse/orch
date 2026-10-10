@@ -274,6 +274,49 @@ func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestLoad_Verify(t *testing.T) {
+	onImplement := strings.Replace(validV2(""), "implement: {provider: claude, model: opus}",
+		"implement: {provider: claude, model: opus, verify: true}", 1)
+	cfg, err := Load(writeTempConfig(t, onImplement))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Actions.Implement.Verify {
+		t.Error("actions.implement.verify was not read")
+	}
+	if cfg.Limits.Verify.MaxCalls() != 8 || cfg.Limits.Verify.Timeout() != 10*time.Minute {
+		t.Errorf("limits.verify defaults = %d, %s", cfg.Limits.Verify.MaxCalls(), cfg.Limits.Verify.Timeout())
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("Validate: %v", err)
+	}
+
+	limits := strings.Replace(onImplement, "limits: {max_steps: 12, max_fix_iterations: 2}",
+		"limits: {max_steps: 12, max_fix_iterations: 2, verify: {max_calls_per_step: 3, call_timeout: 2m}}", 1)
+	cfg, err = Load(writeTempConfig(t, limits))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Limits.Verify.MaxCalls() != 3 || cfg.Limits.Verify.Timeout() != 2*time.Minute {
+		t.Errorf("limits.verify = %d, %s; want 3, 2m", cfg.Limits.Verify.MaxCalls(), cfg.Limits.Verify.Timeout())
+	}
+
+	badTimeout := strings.Replace(limits, "call_timeout: 2m", "call_timeout: soon", 1)
+	if _, err := Load(writeTempConfig(t, badTimeout)); err == nil || !strings.Contains(err.Error(), "limits.verify.call_timeout") {
+		t.Errorf("a bad call_timeout must name the key, got %v", err)
+	}
+
+	onReview := strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
+		"review: {provider: claude, model: sonnet, verify: true}", 1)
+	cfg, err = Load(writeTempConfig(t, onReview))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "actions.review.verify: unknown key") {
+		t.Errorf("verify on review must be an unknown key, got %v", err)
+	}
+}
+
 func TestLoad_StrictKeepsTheDedicatedMessages(t *testing.T) {
 	// A literal secret is declared by the schema so Validate can explain the rejection.
 	cfg, err := Load(writeTempConfig(t, validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: bearer\n  token_env: T\n  token: abc\n")))

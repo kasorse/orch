@@ -695,6 +695,7 @@ type tailOptions struct {
 // final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
+	removeStaleVerifyDirs(os.TempDir(), time.Now())
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
 	if !cfg.Security.SecretScan.Enabled() {
 		s.reporter.SecretScanOff()
@@ -1164,6 +1165,14 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 		_ = o.store.AppendLog(run.ID, index, exec.Action, "stderr", outcome.RawStderr)
 	}
 	for _, c := range outcome.CheckLogs {
+		if c.Stdout != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stdout", c.Stdout)
+		}
+		if c.Stderr != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stderr", c.Stderr)
+		}
+	}
+	for _, c := range outcome.VerifyLogs {
 		if c.Stdout != "" {
 			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stdout", c.Stdout)
 		}

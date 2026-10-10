@@ -340,7 +340,30 @@ extensions:
   - **Your hooks run your code with your permissions** on every such step. Enable this for
     hooks you trust, ideally only on the actions that need them.
 
-Extensions are only supported with provider `claude`; `validate` refuses them elsewhere.
+Extensions are only supported with provider `claude`; `validate` refuses them elsewhere. The
+server names `orch` (the orchestrator's own) and any name with `__` are refused.
+
+### Verify: let `implement` run the tests (opt-in)
+
+With `actions.implement.verify: true` the implement session gets two tools served by the
+orchestrator itself (`orchestrator mcp-verify`, a hidden subcommand), `run_tests` and, when
+`checks:` are configured, `run_check`:
+
+- The model picks only a check name or a test filter (`[A-Za-z0-9_./:-]`, reaching the command
+  as `ORCH_TEST_FILTER`); the command is `test.command` or a check from your config, never
+  model text. It needs `test.command`, `test.sandbox: bwrap` and provider `claude`.
+- Each call runs under the test sandbox, after the protected-paths guard has compared the
+  repository with the start of the step. If the model has changed hooks, CI or the
+  orchestrator config, the call is refused, nothing more runs in the step, and the step fails
+  with "the model's code changed protected files during a verify call".
+- `limits.verify.max_calls_per_step` (default 8, at most 50, refused calls included) and
+  `limits.verify.call_timeout` (default 10m) bound it. The `test` step still runs afterwards
+  and is the only result that counts.
+- Every call is recorded in `run.json` (`executions[].verify_calls`, `outcome.verify_calls`),
+  its output in `logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log`, and `summary.md` has a
+  `Verify` row.
+- The step works in a private `orch-verify-*` directory of `$TMPDIR` that it removes when it
+  ends; a start of `run` or `resume` removes your own such directories older than a day.
 
 ### What is not protected
 

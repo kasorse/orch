@@ -29,6 +29,14 @@ type ProviderModel struct {
 type ActionConfig struct {
 	ProviderModel
 	Timeout time.Duration
+	// Verify gives the implement session the orchestrator's verify tools, which run
+	// test.command and the checks (specs/quality/SPEC.md §6). Only actions.implement accepts
+	// it; Validate rejects the key anywhere else.
+	Verify bool
+
+	// verifySet records that the verify key was written, so Validate can name it on an
+	// action that does not accept it.
+	verifySet bool
 }
 
 // UnmarshalYAML parses ActionConfig's own provider/model/timeout keys directly (rather
@@ -40,6 +48,7 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Model    string `yaml:"model"`
 		Effort   string `yaml:"effort"`
 		Timeout  string `yaml:"timeout"`
+		Verify   *bool  `yaml:"verify"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -47,6 +56,8 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Provider = raw.Provider
 	a.Model = raw.Model
 	a.Effort = raw.Effort
+	a.Verify = raw.Verify != nil && *raw.Verify
+	a.verifySet = raw.Verify != nil
 	d, err := parseDurationField("timeout", raw.Timeout)
 	if err != nil {
 		return err
@@ -149,6 +160,62 @@ type LimitsConfig struct {
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
 	Prompt PromptLimitsConfig `yaml:"prompt"`
+	// Verify bounds the verify tools of the implement step (specs/quality/SPEC.md §6.3).
+	Verify VerifyLimitsConfig `yaml:"verify"`
+}
+
+// Defaults of limits.verify.
+const (
+	DefaultVerifyMaxCalls    = 8
+	DefaultVerifyCallTimeout = 10 * time.Minute
+)
+
+// VerifyLimitsConfig is limits.verify. Both keys are optional; read them through MaxCalls and
+// Timeout. MaxCallsPerStep is a pointer so an explicit 0 is refused as out of range instead
+// of reading as unset.
+type VerifyLimitsConfig struct {
+	MaxCallsPerStep *int
+	CallTimeout     time.Duration
+
+	// callTimeoutSet records that call_timeout was written, so an explicit 0s is refused.
+	callTimeoutSet bool
+}
+
+// UnmarshalYAML parses call_timeout through the same duration-string parsing as the other
+// timeouts.
+func (v *VerifyLimitsConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		MaxCallsPerStep *int   `yaml:"max_calls_per_step"`
+		CallTimeout     string `yaml:"call_timeout"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	d, err := parseDurationField("limits.verify.call_timeout", raw.CallTimeout)
+	if err != nil {
+		return err
+	}
+	v.MaxCallsPerStep = raw.MaxCallsPerStep
+	v.CallTimeout = d
+	v.callTimeoutSet = raw.CallTimeout != ""
+	return nil
+}
+
+// MaxCalls is the most verify calls one implement step may make: max_calls_per_step, or its
+// default.
+func (v VerifyLimitsConfig) MaxCalls() int {
+	if v.MaxCallsPerStep == nil {
+		return DefaultVerifyMaxCalls
+	}
+	return *v.MaxCallsPerStep
+}
+
+// Timeout is the bound on one verify call: call_timeout, or its default.
+func (v VerifyLimitsConfig) Timeout() time.Duration {
+	if v.CallTimeout == 0 && !v.callTimeoutSet {
+		return DefaultVerifyCallTimeout
+	}
+	return v.CallTimeout
 }
 
 // Defaults and ranges of limits.prompt (specs/hardening/SPEC.md §5.1).

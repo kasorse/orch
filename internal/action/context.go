@@ -85,6 +85,9 @@ type Dispatcher struct {
 	// OnWarning, if set, is told of a problem a step went on despite (nothing a run stops
 	// for), such as context it could not add to a prompt.
 	OnWarning func(step domain.ActionType, msg string)
+	// VerifyExecutable is the orchestrator binary the verify server is started from; empty
+	// means this process's own executable, with symlinks resolved. Tests set it.
+	VerifyExecutable string
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
@@ -127,7 +130,10 @@ func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repos
 // call resolves the configured provider for pm, executes the prompt, and - on a
 // *apperr.ProviderError - fills in the Action field the adapter deliberately leaves blank
 // and, if Logs is set, the LogPath the failing step's output will be written to.
-func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string) (provider.Result, domain.ProviderRef, error) {
+//
+// builtin is what the orchestrator itself adds to the operator's extensions for this call
+// (the verify server of implement); the zero value adds nothing.
+func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string, builtin provider.Extensions) (provider.Result, domain.ProviderRef, error) {
 	authority := domain.AuthorityFor(actionName)
 	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority}
 
@@ -139,14 +145,21 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		}
 	}
 
+	// The hint is about the operator's tools only: the verify tools have their own paragraph
+	// in the implement prompt.
+	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
+	prompt = withExtensionsHint(prompt, ext)
+	ext, err = mergeExtensions(ext, builtin)
+	if err != nil {
+		return provider.Result{}, ref, &apperr.WorkflowError{Msg: "failed to merge the MCP servers of the step", Err: err}
+	}
+
 	if d.Observer != nil {
 		d.Observer.ProviderCallStarted(pm.Provider, pm.Model)
 	}
 	start := time.Now()
 
 	stopHeartbeat := d.startHeartbeat()
-	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
-	prompt = withExtensionsHint(prompt, ext)
 	d.stepPrompt = prompt
 	result, err := client.Execute(ctx, provider.Request{
 		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,

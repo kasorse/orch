@@ -9,6 +9,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/projectctx"
+	"orchestrator/internal/provider"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/secretscan"
 	"orchestrator/internal/workflow"
@@ -69,7 +70,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		DiffPartial:    diff.Count(repository.TreatFull) < len(diff.Files) || diff.Unlisted > 0,
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Review.ProviderModel, domain.ActionReview, prompt)
+	result, ref, err := d.call(ctx, run, d.Config.Actions.Review.ProviderModel, domain.ActionReview, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

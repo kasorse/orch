@@ -22,9 +22,21 @@ import (
 
 // Files the server writes inside its directory (specs/quality/SPEC.md §6.4, §6.6, §6.8).
 const (
-	callsFile     = "calls.jsonl"
-	violationFile = "violation"
+	callsFile     = CallsFile
+	violationFile = ViolationFile
 )
+
+// CallsFile and ViolationFile are the names the orchestrator reads after the session ends.
+const (
+	CallsFile     = "calls.jsonl"
+	ViolationFile = "violation"
+)
+
+// LogFile is the name of the file holding the full output of call k (1-based) on stream
+// ("stdout" or "stderr").
+func LogFile(k int, stream string) string {
+	return fmt.Sprintf("call-%d.%s.log", k, stream)
+}
 
 // Runner runs a command in the sandbox. *testexec.Runner is the real one; a test fakes it.
 type Runner interface {
@@ -192,8 +204,8 @@ func (t *Tools) Call(ctx context.Context, tool string, args json.RawMessage) Res
 	rec.Duration = res.Duration
 	rec.OutputCut = omitted.Any()
 	t.record(rec)
-	t.writeLog(fmt.Sprintf("call-%d.stdout.log", k), res.Stdout)
-	t.writeLog(fmt.Sprintf("call-%d.stderr.log", k), res.Stderr)
+	t.writeLog(LogFile(k, "stdout"), res.Stdout)
+	t.writeLog(LogFile(k, "stderr"), res.Stderr)
 
 	return Result{Text: t.answer(k, req, res, stdout, stderr)}
 }
