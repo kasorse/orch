@@ -19,7 +19,8 @@ func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionPlan),
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Plan.ProviderModel, domain.ActionPlan, prompt, provider.Extensions{})
+	pm, source := d.route(run, domain.ActionPlan)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionPlan, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

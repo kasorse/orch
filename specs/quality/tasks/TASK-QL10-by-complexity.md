@@ -52,3 +52,33 @@ when the config changed it (`SPEC.md` §9).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-10)
+
+Done as planned, except:
+
+- **Gates:** the change was written without being able to run anything, so the four gates
+  (`scripts/check.sh`) are the operator's to run; this task stays open until they pass.
+- **Parsing:** `ActionConfig.ByComplexity` is `map[domain.Complexity]ModelEffort`. The raw struct
+  of `UnmarshalYAML` reads it as `map[string]ModelEffort` and keeps every key as written
+  (including `trivial`), so `Validate` (`byComplexityProblems`) can name an invalid complexity.
+  `ModelEffort` has only `model` and `effort`, so the strict parser rejects a `provider` key.
+- **Route:** `ActionConfig.Route(c, manual)` as specified (an empty complexity is the base
+  too). `ActionsConfig.For` and `ActionsConfig.Route(action, *Decision)` pick the action and
+  read the decision (a nil decision or source `manual` is the base). `Dispatcher.route` and the
+  `app` trace and resume code share them. `call` takes the source as a new argument after `pm`.
+- **Record:** `domain.ProviderRef.ModelSource` (`base` or `by_complexity.<level>`,
+  `domain.ValidModelSource`) is validated on load. `DecisionTrace.Models`
+  (`map[string]ModelRoute{provider, model, effort, source}`) is filled in `internal/app`
+  (`modelRoutes`), not in `Result.Trace` or `ManualTrace`, because `domain` and
+  `classification` cannot import `config`. It is set where `run` saves the decision and again in
+  the review screen's `onEdit`, from the edited decision. A manual decision gets `base` for
+  every action. Only actions in the built workflow that make a call are listed (no `test`).
+- **Resume:** `modelChangeWarnings` compares model and effort for the remaining actions, one
+  line each (`implement model changed since the run started: opus → sonnet`, and `… effort
+  changed …`, an unset effort shown as `(default)`), printed with the other `Warning:` lines
+  on stderr. A `decision.json` that is missing, unreadable or without `models` gives none.
+- **Tests:** `config.TestActionConfig_Route`, `TestLoad_ByComplexity*`,
+  `TestByComplexity_ProviderSetUnchanged`; `action.TestExecute_RoutesByDecidedComplexity`;
+  `app.TestModelRoutes`, `TestModelChangeWarnings`; `persistence.TestLoadDecision_Models`.
+  The integration scenarios stay in QL13.

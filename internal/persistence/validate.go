@@ -108,6 +108,9 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	if exec.Provider != nil && exec.Provider.Authority != "" && !exec.Provider.Authority.Valid() {
 		return fmt.Errorf("unknown authority %q", exec.Provider.Authority)
 	}
+	if exec.Provider != nil && exec.Provider.ModelSource != "" && !domain.ValidModelSource(exec.Provider.ModelSource) {
+		return fmt.Errorf("unknown model_source %q", exec.Provider.ModelSource)
+	}
 	if exec.Attempt < 0 {
 		return fmt.Errorf("attempt is %d", exec.Attempt)
 	}
@@ -373,6 +376,20 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 }
 
 // validateDecisionUsage checks the usage decision.json records for each decision call.
+// validateDecisionModels checks decision.json's models: each key an action and each source
+// one a run can record.
+func validateDecisionModels(models map[string]domain.ModelRoute) error {
+	for action, r := range models {
+		if !domain.ActionType(action).Valid() {
+			return fmt.Errorf("models: unknown action %q", action)
+		}
+		if !domain.ValidModelSource(r.Source) {
+			return fmt.Errorf("models.%s: unknown source %q", action, r.Source)
+		}
+	}
+	return nil
+}
+
 func validateDecisionUsage(u *domain.DecisionUsage) error {
 	if u == nil {
 		return nil

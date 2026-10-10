@@ -130,15 +130,28 @@ func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repos
 	return &Dispatcher{Config: cfg, Registry: registry, Repo: repo, Runner: runner}
 }
 
+// route is the provider, model and effort an action runs with under the run's decision, and
+// the source of the model (domain.ProviderRef.ModelSource): the action's own, or its
+// by_complexity entry for the decided complexity. Every executor resolves its model here.
+// The extra reviewers of review.models are not routed (specs/quality/SPEC.md §9.2).
+func (d *Dispatcher) route(run *domain.Run, actionName domain.ActionType) (config.ProviderModel, string) {
+	pm, source, ok := d.Config.Actions.Route(actionName, run.Decision)
+	if !ok {
+		return config.ProviderModel{}, domain.ModelSourceBase
+	}
+	return pm, source
+}
+
 // call resolves the configured provider for pm, executes the prompt, and - on a
 // *apperr.ProviderError - fills in the Action field the adapter deliberately leaves blank
-// and, if Logs is set, the LogPath the failing step's output will be written to.
+// and, if Logs is set, the LogPath the failing step's output will be written to. source is
+// where pm came from (see route) and is recorded in the returned ProviderRef.
 //
 // builtin is what the orchestrator itself adds to the operator's extensions for this call
 // (the verify server of implement); the zero value adds nothing.
-func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string, builtin provider.Extensions) (provider.Result, domain.ProviderRef, error) {
+func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, source string, actionName domain.ActionType, prompt string, builtin provider.Extensions) (provider.Result, domain.ProviderRef, error) {
 	authority := domain.AuthorityFor(actionName)
-	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority}
+	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority, ModelSource: source}
 
 	client, err := d.Registry.Resolve(pm.Provider)
 	if err != nil {

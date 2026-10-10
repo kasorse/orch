@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,30 @@ type ProviderRef struct {
 	Model     string    `json:"model"`
 	Effort    string    `json:"effort,omitempty"`
 	Authority Authority `json:"authority,omitempty"`
+	// ModelSource says where the model and effort came from: ModelSourceBase, or
+	// ModelSourceByComplexity + the decided complexity (specs/quality/SPEC.md §9.3). Empty in
+	// a run written before the field.
+	ModelSource string `json:"model_source,omitempty"`
+}
+
+// Values of ProviderRef.ModelSource.
+const (
+	ModelSourceBase         = "base"
+	ModelSourceByComplexity = "by_complexity."
+)
+
+// ValidModelSource reports whether s is a model source a run records: base, or by_complexity
+// with one of the complexities.
+func ValidModelSource(s string) bool {
+	if s == ModelSourceBase {
+		return true
+	}
+	level, ok := strings.CutPrefix(s, ModelSourceByComplexity)
+	if !ok {
+		return false
+	}
+	_, err := ParseComplexity(level)
+	return err == nil
 }
 
 type StepExecStatus string

@@ -65,6 +65,15 @@ actions:
     # Each call is recorded in run.json (verify_calls) and its output in
     # logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log.
     # verify: true
+    # Optional, on any action: a model and/or effort per decided complexity (simple | medium |
+    # complex). A field left out keeps the action's own value above; the provider cannot be
+    # changed. A level without an entry, and a run started with --stage, use the action's own
+    # model. Each step records where its model came from (model_source in run.json), and
+    # decision.json lists the model every action gets. A resume warns when its config would
+    # route a remaining step to another model or effort than the run started with.
+    # by_complexity:
+    #   simple:  {model: haiku, effort: low}
+    #   complex: {model: opus, effort: high}
 
   review:
     provider: claude

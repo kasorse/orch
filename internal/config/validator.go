@@ -54,6 +54,7 @@ func Validate(cfg Config) error {
 	}
 
 	problems = append(problems, checkProblems(cfg)...)
+	problems = append(problems, byComplexityProblems(cfg)...)
 
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 	problems = append(problems, verifyProblems(cfg)...)
@@ -173,6 +174,57 @@ func checkProblems(cfg Config) []string {
 		}
 	}
 	return problems
+}
+
+// byComplexityProblems validates every action's by_complexity (specs/quality/SPEC.md §9.1):
+// the keys are complexities, each entry names a model or an effort, and an effort follows
+// the rules of the action's own effort - a level the CLI knows, on a provider that accepts it.
+func byComplexityProblems(cfg Config) []string {
+	var problems []string
+	for _, a := range []struct {
+		name   string
+		action ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"implement", cfg.Actions.Implement},
+		{"review", cfg.Actions.Review},
+	} {
+		levels := make([]string, 0, len(a.action.ByComplexity))
+		for c := range a.action.ByComplexity {
+			levels = append(levels, string(c))
+		}
+		slices.Sort(levels)
+		for _, level := range levels {
+			key := fmt.Sprintf("actions.%s.by_complexity.%s", a.name, level)
+			if _, err := domain.ParseComplexity(level); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: %q is not a complexity (want %s)", key, level, complexityNames()))
+				continue
+			}
+			entry := a.action.ByComplexity[domain.Complexity(level)]
+			if strings.TrimSpace(entry.Model) == "" && entry.Effort == "" {
+				problems = append(problems, key+" needs a model or an effort")
+				continue
+			}
+			switch {
+			case entry.Effort == "":
+			case !slices.Contains(EffortLevels, entry.Effort):
+				problems = append(problems, fmt.Sprintf("%s.effort %q must be one of: %s", key, entry.Effort, strings.Join(EffortLevels, ", ")))
+			case a.action.Provider != string(provider.Claude):
+				problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, a.action.Provider))
+			}
+		}
+	}
+	return problems
+}
+
+func complexityNames() string {
+	var names []string
+	for _, c := range domain.ComplexityOrder() {
+		names = append(names, string(c))
+	}
+	return strings.Join(names, ", ")
 }
 
 // EffortLevels are the accepted values of an action's effort, as the claude CLI names them.

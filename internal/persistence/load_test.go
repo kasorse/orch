@@ -53,7 +53,7 @@ func fullRun(t *testing.T, store *Store) *domain.Run {
 	run.ResumeBaseline = json.RawMessage(`{"git_fingerprint":"ab","protected":{}}`)
 	run.Executions = []domain.StepExecution{
 		{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted,
-			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit},
+			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit, ModelSource: "by_complexity.medium"},
 			ArtifactPath: ArtifactRelPath(0, domain.ActionImplement),
 			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3},
 			VerifyCalls: []domain.VerifyCall{
@@ -212,6 +212,9 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown authority", func(m map[string]any) {
 			execAt(m, 0)["provider"].(map[string]any)["authority"] = "root"
 		}, "unknown authority"},
+		{"unknown model source", func(m map[string]any) {
+			execAt(m, 0)["provider"].(map[string]any)["model_source"] = "by_complexity.trivial"
+		}, "unknown model_source"},
 		{"negative usage counter", func(m map[string]any) {
 			execAt(m, 0)["usage"].(map[string]any)["output_tokens"] = -1
 		}, "executions[0]: usage: negative counter"},

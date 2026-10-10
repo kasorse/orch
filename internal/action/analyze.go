@@ -16,7 +16,8 @@ func (d *Dispatcher) executeAnalyze(ctx context.Context, run *domain.Run) (workf
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionAnalyze),
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Analyze.ProviderModel, domain.ActionAnalyze, prompt, provider.Extensions{})
+	pm, source := d.route(run, domain.ActionAnalyze)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionAnalyze, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

@@ -70,7 +70,8 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		DiffPartial:    diff.Count(repository.TreatFull) < len(diff.Files) || diff.Unlisted > 0,
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Review.ProviderModel, domain.ActionReview, prompt, provider.Extensions{})
+	pm, source := d.route(run, domain.ActionReview)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionReview, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

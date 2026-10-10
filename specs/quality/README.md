@@ -17,7 +17,10 @@ running anything; QL08 written (the no-progress stop: `tree_after`, `workflow.No
 `limits.stop_without_progress`, resume into implement; 2026-10-10) without running anything, so
 it stays open until its gates have run; QL09 written (the old/new failure split in the retry
 prompt, `domain.SplitFailedTests`, the `summary.md` row; 2026-10-10) without running anything,
-so it stays open until its gates have run; QL10–QL15 have not started.
+so it stays open until its gates have run; QL10 written (`actions.*.by_complexity`,
+`ActionConfig.Route`, `ProviderRef.ModelSource`, `decision.json: models`, the resume warning;
+2026-10-10) without running anything, so it stays open until its gates have run; QL11–QL15
+have not started.
 
 | document | role |
 |---|---|

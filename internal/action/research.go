@@ -15,7 +15,8 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionResearch),
 	})
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Research.ProviderModel, domain.ActionResearch, prompt, provider.Extensions{})
+	pm, source := d.route(run, domain.ActionResearch)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionResearch, prompt, provider.Extensions{})
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}

@@ -31,6 +31,18 @@ type DecisionTrace struct {
 	Usage *DecisionUsage `json:"usage,omitempty"`
 	// Edit is the operator's override on the review screen, if any (Decision.Edit).
 	Edit *DecisionEdit `json:"edit,omitempty"`
+	// Models is the route each action in the workflow gets under this decision, keyed by
+	// action (specs/quality/SPEC.md §9.3). Absent in a trace written before by_complexity.
+	Models map[string]ModelRoute `json:"models,omitempty"`
+}
+
+// ModelRoute is the provider, model and effort one action runs with, and where the model
+// came from (ProviderRef.ModelSource).
+type ModelRoute struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Effort   string `json:"effort,omitempty"`
+	Source   string `json:"source"`
 }
 
 // TranslationTrace records the language step (T15).

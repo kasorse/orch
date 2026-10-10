@@ -555,7 +555,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	run.Decision = &out.decision
 	run.Workflow = &wf
 	reporter.SetRun(run)
-	if err := store.SaveDecision(run.ID, out.trace(wf)); err != nil {
+	trace := out.trace(wf)
+	trace.Models = modelRoutes(cfg, out.decision, wf)
+	if err := store.SaveDecision(run.ID, trace); err != nil {
 		return err
 	}
 	if err := store.SaveProjectContext(run.ID, out.project); err != nil {
@@ -596,6 +598,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 			run.Decision, run.Workflow = &d, &nwf
 			trace := out.trace(nwf)
 			trace.Complexity, trace.Stages, trace.Edit = d.Complexity, d.Stages.Stages, d.Edit
+			trace.Models = modelRoutes(cfg, d, nwf)
 			if err := store.SaveDecision(run.ID, trace); err != nil {
 				return err
 			}

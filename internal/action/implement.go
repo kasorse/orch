@@ -101,7 +101,8 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
 	}
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt, builtin)
+	pm, source := d.route(run, domain.ActionImplement)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionImplement, prompt, builtin)
 	// Read on every path: the calls are recorded in a step that failed as well.
 	var verified verifyOutput
 	if verifyDir != "" {

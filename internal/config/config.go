@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"orchestrator/internal/domain"
 )
 
 type ProviderModel struct {
@@ -33,10 +35,43 @@ type ActionConfig struct {
 	// test.command and the checks (specs/quality/SPEC.md §6). Only actions.implement accepts
 	// it; Validate rejects the key anywhere else.
 	Verify bool
+	// ByComplexity names a model and/or effort per decided complexity (specs/quality/SPEC.md
+	// §9). The provider is fixed per action. A key that is not a complexity is kept as
+	// written, so Validate can name it; read the table through Route.
+	ByComplexity map[domain.Complexity]ModelEffort
 
 	// verifySet records that the verify key was written, so Validate can name it on an
 	// action that does not accept it.
 	verifySet bool
+}
+
+// ModelEffort is one by_complexity entry. A field left empty falls back to the action's
+// base value. There is no provider: the strict parser rejects the key.
+type ModelEffort struct {
+	Model  string `yaml:"model"`
+	Effort string `yaml:"effort"`
+}
+
+// Route is the provider, model and effort for an action under the decided complexity c, and
+// where they came from. A manual decision (run --stage) and a complexity without an entry
+// get the base; otherwise the entry's non-empty fields override it. The provider is always
+// the base one.
+func (a ActionConfig) Route(c domain.Complexity, manual bool) (ProviderModel, string) {
+	if manual || c == "" {
+		return a.ProviderModel, domain.ModelSourceBase
+	}
+	entry, ok := a.ByComplexity[c]
+	if !ok {
+		return a.ProviderModel, domain.ModelSourceBase
+	}
+	pm := a.ProviderModel
+	if entry.Model != "" {
+		pm.Model = entry.Model
+	}
+	if entry.Effort != "" {
+		pm.Effort = entry.Effort
+	}
+	return pm, domain.ModelSourceByComplexity + string(c)
 }
 
 // UnmarshalYAML parses ActionConfig's own provider/model/timeout keys directly (rather
@@ -49,6 +84,10 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Effort   string `yaml:"effort"`
 		Timeout  string `yaml:"timeout"`
 		Verify   *bool  `yaml:"verify"`
+
+		// ByComplexity keeps its keys as strings so Validate can report one that is not a
+		// complexity; ModelEffort has no provider key, so the strict parser rejects one.
+		ByComplexity map[string]ModelEffort `yaml:"by_complexity"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -58,6 +97,13 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Effort = raw.Effort
 	a.Verify = raw.Verify != nil && *raw.Verify
 	a.verifySet = raw.Verify != nil
+	a.ByComplexity = nil
+	if raw.ByComplexity != nil {
+		a.ByComplexity = make(map[domain.Complexity]ModelEffort, len(raw.ByComplexity))
+		for k, v := range raw.ByComplexity {
+			a.ByComplexity[domain.Complexity(k)] = v
+		}
+	}
 	d, err := parseDurationField("timeout", raw.Timeout)
 	if err != nil {
 		return err
@@ -87,6 +133,40 @@ type ActionsConfig struct {
 	Plan      ActionConfig `yaml:"plan"`
 	Implement ActionConfig `yaml:"implement"`
 	Review    ActionConfig `yaml:"review"`
+}
+
+// For returns the configuration of a workflow action that makes a provider call; ok is false
+// for one that does not (test).
+func (a ActionsConfig) For(t domain.ActionType) (ac ActionConfig, ok bool) {
+	switch t {
+	case domain.ActionResearch:
+		return a.Research, true
+	case domain.ActionAnalyze:
+		return a.Analyze, true
+	case domain.ActionPlan:
+		return a.Plan, true
+	case domain.ActionImplement:
+		return a.Implement, true
+	case domain.ActionReview:
+		return a.Review, true
+	}
+	return ActionConfig{}, false
+}
+
+// Route is the model an action runs with under a run's decision: ActionConfig.Route with the
+// decision's complexity, and a manual decision (run --stage) or none getting the base. ok is
+// false for an action that makes no provider call.
+func (a ActionsConfig) Route(t domain.ActionType, d *domain.Decision) (pm ProviderModel, source string, ok bool) {
+	ac, ok := a.For(t)
+	if !ok {
+		return ProviderModel{}, "", false
+	}
+	if d == nil {
+		pm, source = ac.Route("", true)
+	} else {
+		pm, source = ac.Route(d.Complexity.Selected, d.Source == domain.DecisionSourceManual)
+	}
+	return pm, source, true
 }
 
 type TestConfig struct {
