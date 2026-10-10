@@ -367,6 +367,15 @@ func (r *ConsoleReporter) StepFinished(run *domain.Run, index int, exec domain.S
 	case workflow.OutcomeSuccess:
 		r.printSuccess(exec)
 		r.printResult(exec, outcome)
+	case workflow.OutcomeFixable:
+		// A review that passed, but whose medium issues send the run back to implement once
+		// (review.fix_medium): the pass is shown, then why implement runs again.
+		r.printSuccess(exec)
+		r.printResult(exec, outcome)
+		fmt.Fprintln(r.Out)
+		r.printReviewIssueCounts(exec.ReviewResult)
+		fmt.Fprintln(r.Out, "review.fix_medium is on: fixing the medium issues.")
+		r.printFixIterationNotice(run)
 	case workflow.OutcomeFailure:
 		r.printFailure(run, exec, outcome)
 	}

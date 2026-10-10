@@ -176,6 +176,17 @@ func (r ReviewResult) UnmetCriteria() []CriterionVerdict {
 	return unmet
 }
 
+// MediumIssues returns the issues of severity medium, in order.
+func (r ReviewResult) MediumIssues() []ReviewIssue {
+	var medium []ReviewIssue
+	for _, i := range r.Issues {
+		if i.Severity == SeverityMedium {
+			medium = append(medium, i)
+		}
+	}
+	return medium
+}
+
 // ValidateCriteria checks the shape of the verdicts without the plan: indexes within
 // 1..len(Criteria), each once, and evidence of 1..MaxCriterionEvidenceBytes bytes. The
 // count against the plan is checked where the review is parsed.

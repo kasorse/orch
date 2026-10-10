@@ -50,10 +50,11 @@ type dispatcherState struct {
 	PendingTest    *domain.TestResult
 	PendingReviews []domain.ReviewIssue
 	PendingUnmet   []domain.CriterionVerdict
+	PendingMedium  []domain.ReviewIssue
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria}
+	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -271,6 +272,45 @@ func TestRestore_UnmetCriteriaArePending(t *testing.T) {
 	}
 	if d.pendingUnmetCriteria != nil {
 		t.Errorf("an implement left %+v pending", d.pendingUnmetCriteria)
+	}
+}
+
+// A review that passed with a medium issue leaves it pending for the one retry
+// review.fix_medium asks for (QL11), and an implement consumes it.
+func TestRestore_MediumIssuesArePending(t *testing.T) {
+	review := domain.StepExecution{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+		ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Issues: []domain.ReviewIssue{
+			{Severity: domain.SeverityMedium, File: "a.go", Description: "no test for the empty input"},
+			{Severity: domain.SeverityLow, File: "b.go", Description: "naming"},
+		}}}
+	impl := domain.StepExecution{Index: 1, Action: domain.ActionImplement, Status: domain.StepCompleted}
+	reader := memReader{memKey(1, domain.ActionImplement): `{"summary":"i"}`}
+
+	d := &Dispatcher{}
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.pendingMediumIssues) != 1 || len(d.pendingReviewIssues) != 0 {
+		t.Fatalf("pending medium issues = %+v", d.pendingMediumIssues)
+	}
+	prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", MediumIssues: d.pendingMediumIssues})
+	for _, want := range []string{
+		"A code review passed but noted issues worth fixing. Fix them without changing behavior the task did not ask for:",
+		"- [medium] a.go: no test for the empty input\n",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the retry prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "naming") || strings.Contains(prompt, "FAILED") {
+		t.Errorf("the retry prompt has a low issue or a failure notice:\n%s", prompt)
+	}
+
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review, impl}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if d.pendingMediumIssues != nil {
+		t.Errorf("an implement left %+v pending", d.pendingMediumIssues)
 	}
 }
 

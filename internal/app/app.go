@@ -513,6 +513,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	}
 	run.ProviderCLI = clis
 	run.AllowRedTests = allowRedTests
+	run.Options = runOptions(cfg)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)
@@ -887,6 +888,12 @@ func preRunTest(ctx context.Context, s *session) error {
 			result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test", "stdout"), advice)}
 	}
 	return s.store.SaveRun(run)
+}
+
+// runOptions are the config rules a new run follows from here on; a resume reads them back from
+// run.json and never from the config (specs/quality/SPEC.md §7.3).
+func runOptions(cfg config.Config) domain.RunOptions {
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium}
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

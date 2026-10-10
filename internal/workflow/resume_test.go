@@ -62,7 +62,7 @@ func runWith(wf *domain.Workflow, execs ...domain.StepExecution) *domain.Run {
 func TestOutcomeOf_OnlyOldFailuresStillFail(t *testing.T) {
 	exec := domain.StepExecution{Action: domain.ActionTest, Status: domain.StepCompleted,
 		TestResult: &domain.TestResult{ExitCode: 1, FailedTests: []string{"pkg.TestA"}, ReportFormat: "gotext"}}
-	got, err := outcomeOf(exec)
+	got, err := outcomeOf(exec, &domain.Run{}, testLimits)
 	if err != nil || got != OutcomeFailure {
 		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
 	}
@@ -84,13 +84,13 @@ func TestOutcomeOf_UnmetCriterion(t *testing.T) {
 	if err := json.Unmarshal(data, &exec); err != nil {
 		t.Fatal(err)
 	}
-	got, err := outcomeOf(exec)
+	got, err := outcomeOf(exec, &domain.Run{}, testLimits)
 	if err != nil || got != OutcomeFailure {
 		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
 	}
 
 	full := wfp(domain.ActionImplement, domain.ActionTest, domain.ActionReview)
-	entry, _, err := Entry(runWith(full, done(domain.ActionImplement), done(domain.ActionTest), exec))
+	entry, _, err := Entry(runWith(full, done(domain.ActionImplement), done(domain.ActionTest), exec), testLimits)
 	if err != nil || entry != StateImplement {
 		t.Errorf("Entry = %s, %v; want implement", entry, err)
 	}
@@ -128,7 +128,7 @@ func TestEntry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, why, err := Entry(tc.run)
+			got, why, err := Entry(tc.run, testLimits)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
@@ -154,7 +154,7 @@ func TestCounters(t *testing.T) {
 		done(domain.ActionImplement), failedTest(),
 		done(domain.ActionImplement), done(domain.ActionTest), failedReview(),
 		hardFail(domain.ActionImplement, "x"))
-	total, fix, err := Counters(run)
+	total, fix, err := Counters(run, testLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestCounters(t *testing.T) {
 	}
 
 	// Without implement a failing test is not a fix iteration: nothing is retried.
-	_, fix, _ = Counters(runWith(wfp(domain.ActionTest), failedTest()))
+	_, fix, _ = Counters(runWith(wfp(domain.ActionTest), failedTest()), testLimits)
 	if fix != 0 {
 		t.Errorf("fix iterations without implement = %d, want 0", fix)
 	}
@@ -327,7 +327,7 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 		run.FixIterations = 1 // the persisted counter lost an increment (G12)
 		limits := domain.LimitsView{MaxSteps: 20, MaxFixIterations: 1}
 
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, limits)
 		err := CheckLimits(run, limits, entry)
 		var le *apperr.LimitExceededError
 		if !errors.As(err, &le) || !strings.Contains(err.Error(), "limits.max_fix_iterations") || !strings.Contains(err.Error(), "used 2") {
@@ -358,7 +358,7 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 
 	t.Run("max steps", func(t *testing.T) {
 		run := runWith(wf, done(domain.ActionImplement), hardFail(domain.ActionTest, "sandbox"))
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, testLimits)
 		err := CheckLimits(run, domain.LimitsView{MaxSteps: 2, MaxFixIterations: 5}, entry)
 		if err == nil || !strings.Contains(err.Error(), "limits.max_steps") {
 			t.Fatalf("CheckLimits = %v", err)
@@ -370,7 +370,7 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 
 	t.Run("a hard-failed implement is not a fix-iteration entry", func(t *testing.T) {
 		run := runWith(wf, done(domain.ActionImplement), failedTest(), hardFail(domain.ActionImplement, "timeout"))
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, testLimits)
 		// The fix iteration was already allowed when the test failed; retrying the
 		// failed implement does not enter it again.
 		if err := CheckLimits(run, domain.LimitsView{MaxSteps: 20, MaxFixIterations: 1}, entry); err != nil {
@@ -421,7 +421,7 @@ func TestEntry_ResumeAfterNoProgress(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, why, err := Entry(tc.run)
+			got, why, err := Entry(tc.run, testLimits)
 			if err != nil {
 				t.Fatal(err)
 			}

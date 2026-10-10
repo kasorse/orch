@@ -33,6 +33,7 @@ func (d *Dispatcher) applyImplementation(a domain.ImplementationArtifact) {
 	d.pendingTestFailure = nil
 	d.pendingReviewIssues = nil
 	d.pendingUnmetCriteria = nil
+	d.pendingMediumIssues = nil
 }
 
 func (d *Dispatcher) applyTest(r domain.TestResult) {
@@ -57,9 +58,11 @@ func (d *Dispatcher) applyReview(r domain.ReviewResult) {
 	if r.Decide() == domain.ReviewFail {
 		d.pendingReviewIssues = r.Issues
 		d.pendingUnmetCriteria = r.UnmetCriteria()
+		d.pendingMediumIssues = nil
 	} else {
 		d.pendingReviewIssues = nil
 		d.pendingUnmetCriteria = nil
+		d.pendingMediumIssues = r.MediumIssues()
 	}
 }
 
@@ -83,6 +86,7 @@ func (d *Dispatcher) Restore(run *domain.Run, r ArtifactReader) error {
 	d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest = nil, nil, nil, nil, nil
 	d.commitImpl = nil
 	d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.preRunFailure = nil, nil, nil, nil
+	d.pendingMediumIssues = nil
 	if run.PreRunTest != nil {
 		d.applyPreRunTest(*run.PreRunTest)
 	}

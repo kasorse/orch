@@ -98,7 +98,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 	// A fresh run enters at its first step; a resumed one where its history left off
 	// (specs/resume/SPEC.md §7). Counters and limits then count the whole history.
-	current, _, err := Entry(run)
+	current, _, err := Entry(run, e.Limits)
 	if err != nil {
 		return &apperr.WorkflowError{Msg: "cannot continue the run", Err: err}
 	}
@@ -107,7 +107,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		if err != nil {
 			return &apperr.WorkflowError{Msg: "cannot count the run's history", Err: err}
 		}
-		run.TotalSteps, run.FixIterations, _ = Counters(run)
+		run.TotalSteps, run.FixIterations, _ = Counters(run, e.Limits)
 		if reason != "" {
 			run.Status = domain.RunStopped
 			run.FailureReason = reason
@@ -213,6 +213,25 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		}
 		run.Executions = append(run.Executions, stepExec)
 		run.TotalSteps++
+
+		// A review's outcome comes from its persisted result with the same function a resume
+		// uses, so the two agree on a fixable review (specs/quality/SPEC.md §7.3). The observer
+		// gets it too, so what it prints matches where the run goes next. A review without a
+		// result keeps what the executor said. A history outcomeOf cannot read ends the run, as
+		// it ends a resume (Entry, Counters): continuing on a guess would let the two disagree.
+		if action == domain.ActionReview && stepExec.ReviewResult != nil {
+			derived, err := outcomeOf(stepExec, run, e.Limits)
+			if err != nil {
+				err = &apperr.WorkflowError{Msg: "cannot derive where to continue", Err: err}
+				run.Status = domain.RunFailed
+				run.FailureReason = err.Error()
+				e.stepFinished(run, index, stepExec, outcome)
+				e.persist(run)
+				e.runFinished(run)
+				return err
+			}
+			outcome.Outcome = derived
+		}
 		e.stepFinished(run, index, stepExec, outcome)
 		e.persist(run)
 

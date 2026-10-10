@@ -317,6 +317,39 @@ func TestLoad_Verify(t *testing.T) {
 	}
 }
 
+func TestLoad_ReviewFixMedium(t *testing.T) {
+	for name, tc := range map[string]struct {
+		extra string
+		want  bool
+	}{
+		"absent defaults to false": {"", false},
+		"explicit true":            {"\nreview:\n  fix_medium: true\n", true},
+		"explicit false":           {"\nreview:\n  fix_medium: false\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, validV2("")+tc.extra))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Review.FixMedium != tc.want {
+				t.Errorf("review.fix_medium = %v, want %v", cfg.Review.FixMedium, tc.want)
+			}
+			if err := Validate(cfg); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
+	}
+
+	for name, extra := range map[string]string{
+		"not a boolean": "\nreview:\n  fix_medium: soon\n",
+		"unknown key":   "\nreview:\n  fix_low: true\n",
+	} {
+		if _, err := Load(writeTempConfig(t, validV2("")+extra)); err == nil {
+			t.Errorf("%s: Load must refuse it", name)
+		}
+	}
+}
+
 func TestLoad_StopWithoutProgress(t *testing.T) {
 	const limits = "limits: {max_steps: 12, max_fix_iterations: 2}"
 	for name, tc := range map[string]struct {

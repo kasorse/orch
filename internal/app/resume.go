@@ -112,7 +112,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		opts.dirty = dirty
 		opts.resume.Entry, opts.resume.Why = run.Workflow.Steps[0].Action, "start"
 	} else {
-		entry, why, err := workflow.Entry(run)
+		entry, why, err := workflow.Entry(run, limitsView(cfg))
 		if err != nil {
 			return &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: run.ID, Msg: "cannot derive where to continue", Err: err}
 		}

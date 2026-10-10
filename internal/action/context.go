@@ -104,6 +104,10 @@ type Dispatcher struct {
 	pendingTestFailure   *domain.TestResult
 	pendingReviewIssues  []domain.ReviewIssue
 	pendingUnmetCriteria []domain.CriterionVerdict
+	// pendingMediumIssues are the medium issues of a review that passed. An implement only
+	// follows a passing review when review.fix_medium sent the run back (specs/quality/SPEC.md
+	// §7.3), so what is pending here is what that retry is for; it is cleared like the rest.
+	pendingMediumIssues []domain.ReviewIssue
 
 	// stepUsage and stepCall are the usage and the report of the current step's provider
 	// call; stepTruncated is what its prompt had cut, set by the action before the call;

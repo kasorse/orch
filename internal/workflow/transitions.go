@@ -24,6 +24,9 @@ type Outcome string
 const (
 	OutcomeSuccess Outcome = "success"
 	OutcomeFailure Outcome = "failure"
+	// OutcomeFixable is a review that passed but reported a medium issue while the run's
+	// review.fix_medium rule is on and unused (specs/quality/SPEC.md §7.3). Only a review has it.
+	OutcomeFixable Outcome = "fixable"
 )
 
 // Next implements the workflow state machine's transition rule (specs/JEV
@@ -64,6 +67,13 @@ func Next(current State, outcome Outcome, wf domain.Workflow) (next State, reaso
 		default:
 			return StateFailed, fmt.Sprintf("%s failed", current)
 		}
+	}
+
+	if outcome == OutcomeFixable && current == StateReview {
+		if wf.Contains(domain.ActionImplement) {
+			return StateImplement, "review passed with issues worth fixing, retrying implement"
+		}
+		return StateDone, ""
 	}
 
 	if next, ok := forward(current, wf); ok {

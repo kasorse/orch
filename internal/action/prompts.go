@@ -203,6 +203,9 @@ type ImplementPromptInput struct {
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
 	UnmetCriteria          []domain.CriterionVerdict
+	// MediumIssues are the medium issues of a review that passed, for the one retry
+	// review.fix_medium asks for (specs/quality/SPEC.md §7.3).
+	MediumIssues []domain.ReviewIssue
 	// PreRunFailure is the test command's red result before any change, when the operator
 	// started the run with --allow-red-tests (specs/hardening/SPEC.md §8.4).
 	PreRunFailure *domain.TestResult
@@ -328,6 +331,14 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 			}
 		}
 		for _, issue := range in.ReviewIssues {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", issue.Severity, issue.File, issue.Description)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(in.MediumIssues) > 0 {
+		b.WriteString("A code review passed but noted issues worth fixing. Fix them without changing behavior the task did not ask for:\n\n")
+		for _, issue := range in.MediumIssues {
 			fmt.Fprintf(&b, "- [%s] %s: %s\n", issue.Severity, issue.File, issue.Description)
 		}
 		b.WriteString("\n")

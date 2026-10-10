@@ -466,6 +466,11 @@ run'а конфликтов нет (разные копии), конфликт �
 **Готово, когда:** golden-тесты review обновлены, есть сценарий «критерий не выполнен →
 implement → выполнен».
 **В спеке:** `specs/quality/` §7, задачи QL02, QL11, QL12; п. 4 — вместе с Q7.1 (QL08).
+**Написано (2026-10-10):** QL11 — п. 3: `review.fix_medium`, `Run.Options{ReviewFixMedium}`
+(`options.review_fix_medium` в `run.json`, пишется при создании запуска), `OutcomeFixable`,
+`outcomeOf(exec, run, limits)` — одна функция для движка и `resume`, medium-замечания в промпте
+повтора. QL11 сделана: шлюзы (`go build`, `go vet`, `go test`, `gofmt -l`) прошли через
+`scripts/check.sh`. Остаётся `[~]` до QL12.
 
 ### [~] Q7. Умнее цикл исправлений — P2 · M
 **Как сделать:**

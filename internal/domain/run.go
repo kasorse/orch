@@ -165,6 +165,9 @@ type Run struct {
 	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its
 	// output goes to the first implement instead (specs/hardening/SPEC.md §8.4).
 	AllowRedTests bool `json:"allow_red_tests,omitempty"`
+	// Options are the config rules the run follows, recorded once when it is created and never
+	// changed by a resume (specs/quality/SPEC.md §7.3). Omitted while they are all off.
+	Options RunOptions `json:"options,omitzero"`
 	// PreRunTest is the test command's result before the first step, when the workflow
 	// implements and tests (specs/hardening/SPEC.md §8). It is not an execution.
 	// SecretScanBaseline are the fingerprints of what looked like secrets in the working
@@ -188,6 +191,15 @@ type Run struct {
 	// Commit is the commit the operator approved at the end of a completed run
 	// (MVP.md §42); empty when nothing was committed.
 	Commit string `json:"commit,omitempty"`
+}
+
+// RunOptions are the config choices that change how a run moves between steps. They are
+// copied into the run when it is created, so a resume follows the rule the run started with
+// whatever the config says now.
+type RunOptions struct {
+	// ReviewFixMedium is review.fix_medium: a passing review with a medium issue sends the run
+	// back to implement once.
+	ReviewFixMedium bool `json:"review_fix_medium,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

@@ -50,3 +50,45 @@ follows it (`SPEC.md` §7.3).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-10)
+
+Done as planned, except:
+
+- **Gates:** `scripts/check.sh` passed (`go build`, `go vet`, `go test`, `gofmt -l`). QL11 is
+  marked ✓ in `README.md`. The edits of the review round that followed (the derived outcome
+  reported to the observer, the engine failing on an unreadable history, their tests) were
+  written after that run; `scripts/check.sh` is to be run once more on them.
+- **Signatures:** `outcomeOf(exec, run, limits)` and, because it needs the limits, `Entry(run,
+  limits)` and `Counters(run, limits)` (the callers in `app/resume.go` and the engine pass
+  `limitsView(cfg)` / `e.Limits`). The history before the step is walked once by a small
+  `tally` (fix iterations spent, fixable already used), shared by `outcomeOf` and `Counters`,
+  so there is no recursion. `OutcomeFixable` also needs `implement` in the workflow.
+- **Engine:** the engine takes the derived outcome only for a review that carries a
+  `ReviewResult`; one without it (a scripted executor in the tests) keeps the executor's
+  outcome. The derived outcome is what the observer is told too, so `ConsoleReporter` prints a
+  fixable review as a pass followed by "review.fix_medium is on: fixing the medium issues." and
+  the "Returning to implementation" notice (`pretty`: the "↻ Returning to implement" line). If
+  `outcomeOf` cannot read the history (a completed test or review without its result) the run
+  fails with "cannot derive where to continue", as `Entry` and `Counters` do on a resume, so
+  the live run and a resume never take different paths.
+- **`run.json`:** `Run.Options` is tagged `json:"options,omitzero"` (not `omitempty`, which
+  never omits a struct), so a run with every option off writes no `options` key.
+- **Config:** `review.fix_medium` is `config.ReviewConfig.FixMedium` (a plain bool, strict
+  parsing already refuses a non-boolean and unknown `review` keys); there is nothing to add to
+  `validator.go`, and `persistence/validate.go` needed nothing (a bool inside a strictly
+  decoded struct). `app.runOptions(cfg)` sets it right after `store.NewRun`.
+- **Prompt:** `Dispatcher.pendingMediumIssues` (set by `applyReview` for a passing review,
+  cleared with the other pending context) feeds `ImplementPromptInput.MediumIssues`. An
+  implement after a passing review happens only through `OutcomeFixable`, so no flag is needed.
+- **Tests:** `workflow.TestOutcomeOf_FixMedium`, `TestNext_ReviewFixable`,
+  `TestCounters_FixableReviewIsAFixIteration`, `TestEntry_FixMedium` (including a run whose
+  option is off while the limits are unchanged), `TestEngine_FixMedium`,
+  `TestEngine_FixMediumOffIgnoresMediumIssues`; `action.TestRestore_MediumIssuesArePending`;
+  `config.TestLoad_ReviewFixMedium`; `app.TestRunOptions_ReviewFixMedium`;
+  `domain.TestReviewResult_MediumIssues`, `TestRun_OptionsJSON`;
+  `workflow.TestEngine_FixMediumObserverSeesTheDerivedOutcome`,
+  `TestEngine_UnreadableHistoryEndsTheRun`; `logging.TestStepFinished_ReviewFixable_ExplainsTheReturnToImplement`;
+  `app.TestResumeEntry_UsesTheRunsFixMediumNotTheConfigs` (the `Entry` call `resumeTask` makes,
+  with a config whose `review.fix_medium` differs from the run's options). The integration scenario stays
+  in QL13; MVP.md, CLAUDE.md and README.md are QL14's.

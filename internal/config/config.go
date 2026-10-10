@@ -375,6 +375,9 @@ type Config struct {
 	Limits    LimitsConfig    `yaml:"limits"`
 	Execution ExecutionConfig `yaml:"execution"`
 
+	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
+	Review ReviewConfig `yaml:"review"`
+
 	// Checks run in order before test.command, inside the test step and the pre-run test
 	// (specs/quality/SPEC.md §5). Absent means none, as before.
 	Checks []CheckConfig `yaml:"checks"`
@@ -401,6 +404,14 @@ type Config struct {
 	// AutoCommit commits a completed run's changes without asking, in every mode
 	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
 	AutoCommit bool `yaml:"auto_commit"`
+}
+
+// ReviewConfig is the top-level review section.
+type ReviewConfig struct {
+	// FixMedium sends a review that passes but reports a medium issue back to implement once,
+	// as a fix iteration. The run records it at creation (domain.RunOptions), so a resume follows
+	// the rule the run started with. Default false.
+	FixMedium bool `yaml:"fix_medium"`
 }
 
 type SecurityConfig struct {
