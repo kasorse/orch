@@ -829,8 +829,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
-	// Only when the operator is at the terminal: --mode auto asks nothing.
-	if opts.mode != domain.ModeAuto && isTerminal(s.stdin) {
+	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
+	// --mode auto asks nothing.
+	if s.cfg.AutoCommit || (opts.mode != domain.ModeAuto && isTerminal(s.stdin)) {
 		offerCommit(ctx, s)
 	}
 	return nil

@@ -241,6 +241,10 @@ type Config struct {
 	// Extensions opts provider calls into the operator's MCP servers and Claude user
 	// settings (extensions.go). Absent means none, as before.
 	Extensions ExtensionsConfig `yaml:"extensions"`
+
+	// AutoCommit commits a completed run's changes without asking, in every mode
+	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
+	AutoCommit bool `yaml:"auto_commit"`
 }
 
 type SecurityConfig struct {

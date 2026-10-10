@@ -3343,7 +3343,7 @@ result gains `diff`. Logs gain `logs/pre-run-test.{stdout,stderr}.log`.
 
 Normative. A completed run's changes stay in the working tree until the operator commits
 them; at the end of the run the orchestrator offers to do it, and commits only on an
-explicit yes.
+explicit yes - asked at the end, or given in advance with `auto_commit: true` (§42.6).
 
 ## 42.1 When it is offered
 
@@ -3351,7 +3351,7 @@ After the engine has finished and the final answer (if any) is printed, `run` an
 (the shared tail, `executeWorkflow`) offer a commit when all of these hold:
 
 * the operator is at the terminal: `--mode auto` was not given and stdin is a terminal.
-  `--mode auto` never asks and never commits;
+  `--mode auto` never asks, and commits only with `auto_commit` (§42.6);
 * the run is `completed` and its workflow contains `implement`;
 * the run started from a clean commit: `pre_run_ref` is set and equals `head_ref`. A run
   started on uncommitted changes (`security.require_clean_worktree: false`) would commit
@@ -3415,6 +3415,16 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 * A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
 * Committing a part of the changes: the operator commits by hand when they want that.
+
+## 42.6 `auto_commit`
+
+`auto_commit: true` (top level, default false) is the operator's yes given in advance. The
+commit is then made without the question, in every mode (`--mode auto` included) and
+without a terminal, after every check of §42.1 but the first. It is not made, and
+`Not committing automatically: <why>` is printed, when the question would have shown a
+warning (§42.2) or there is no proposed message (no `summary_short`): nobody is there to
+read the one or write the other. The message is the one §42.2 proposes; the commit is
+§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed.
 
 ---
 

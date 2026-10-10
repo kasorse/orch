@@ -210,7 +210,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   way.
 - **Commit only on an explicit yes** (MVP.md §42). At the end of a completed run with
   `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
-  never under `--mode auto`, never for a run started on uncommitted changes, and only after
+  never under `--mode auto` unless `auto_commit: true` gave the yes in advance (§42.6:
+  then no question, and no commit on a warning or without `summary_short`), never for a
+  run started on uncommitted changes, and only after
   `action.CheckBaseline` (fingerprint first) passes — `git commit` runs the repository's
   hooks. The message is the implementation's `summary_short` (without one, the operator
   types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
