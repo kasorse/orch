@@ -42,7 +42,12 @@ func TestExtensionsFor(t *testing.T) {
 	if research := extensionsFor(cfg, domain.ActionResearch, "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
 		t.Errorf("research must get nothing: %+v", research)
 	}
-	if extensionsHint(extensionsFor(config.ExtensionsConfig{}, domain.ActionAnalyze, "/r")) != "" {
-		t.Error("no extensions, no hint")
+	if got := withExtensionsHint("ACTION: analyze\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionAnalyze, "/r")); got != "ACTION: analyze\nbody" {
+		t.Errorf("no extensions, no hint: %q", got)
+	}
+	// The hint comes right after the first line, which stays "ACTION: <name>".
+	got := withExtensionsHint("ACTION: analyze\nbody", analyze)
+	if !strings.HasPrefix(got, "ACTION: analyze\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
+		t.Errorf("hint = %q", got)
 	}
 }

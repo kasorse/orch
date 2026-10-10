@@ -146,7 +146,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 
 	stopHeartbeat := d.startHeartbeat()
 	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
-	prompt += extensionsHint(ext)
+	prompt = withExtensionsHint(prompt, ext)
 	d.stepPrompt = prompt
 	result, err := client.Execute(ctx, provider.Request{
 		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,

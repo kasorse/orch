@@ -55,15 +55,19 @@ func extensionsFor(cfg config.ExtensionsConfig, action domain.ActionType, repoDi
 	return ext
 }
 
-// extensionsHint tells the model which extra tools this step has, so it reaches for them
-// instead of defaulting to grep. Empty when there are none.
-func extensionsHint(ext provider.Extensions) string {
+// withExtensionsHint tells the model which extra tools this step has, so it reaches for them
+// instead of defaulting to grep. It goes right after the "ACTION: <name>" first line: at the
+// end of a long prompt (a review diff) models ignored it. prompt is unchanged without tools.
+func withExtensionsHint(prompt string, ext provider.Extensions) string {
 	if len(ext.MCPTools) == 0 {
-		return ""
+		return prompt
 	}
-	return "\n\nExtra tools are available in this step: " + strings.Join(ext.MCPTools, ", ") +
-		". Prefer them over searching files one by one when they can answer a question about the codebase " +
-		"(for example a knowledge graph for structure, callers and relationships), then read the files they point to."
+	hint := "Extra tools are available in this step: " + strings.Join(ext.MCPTools, ", ") + ". " +
+		"Start with them: before searching with Grep or Glob, ask them about the code this step concerns " +
+		"(for example a knowledge graph for structure, callers and relationships), then read the files they point to. " +
+		"Use Grep and Glob for what they do not answer."
+	first, rest, _ := strings.Cut(prompt, "\n")
+	return first + "\n\n" + hint + "\n" + rest
 }
 
 func firstNonEmpty(v ...string) string {
