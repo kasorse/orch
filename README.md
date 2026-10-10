@@ -101,6 +101,7 @@ test:
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  stop_without_progress: true  # stop a fix loop that changes nothing or repeats a failure
   prompt:                    # optional bounds on repository data in prompts
     max_test_output_bytes: 32768
     max_diff_bytes: 262144
@@ -160,7 +161,11 @@ security:
   [Tests that already fail](#tests-that-already-fail).
 - `limits.max_steps` bounds total workflow steps; `limits.max_fix_iterations` bounds how many
   times a failing test or review can send the workflow back to `implement` — both exist purely
-  to guarantee termination. `limits.prompt` bounds what goes into a prompt: a failing test's
+  to guarantee termination. `limits.stop_without_progress` (default `true`) ends a fix loop
+  earlier when it goes nowhere: `implement` left the working tree as the previous implement
+  did, the same tests fail the same way, or review repeats its blocking issues. The run is
+  `stopped` with a `no progress: …` reason and exit code 4, and `orchestrator resume` goes back
+  into `implement`; `false` spends every iteration as before. `limits.prompt` bounds what goes into a prompt: a failing test's
   output in the implement retry (keeping the failure lines) and the diff review sees (lock
   files as a stat line, the rest in full while it fits). Artifacts and logs keep everything.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the

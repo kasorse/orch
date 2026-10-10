@@ -38,7 +38,12 @@ type configOptions struct {
 	providers        providerSet
 	maxSteps         int
 	maxFixIterations int
-	testCommand      string
+	// stopWithoutProgress is limits.stop_without_progress. defaultConfigOptions leaves it
+	// off: the fake implement either fixes the fixture or never changes it, so scenarios that
+	// loop to max_fix_iterations would otherwise stop earlier for making no progress. The
+	// no-progress scenarios turn it on.
+	stopWithoutProgress bool
+	testCommand         string
 	// testEnvPass renders test.env_pass when set.
 	testEnvPass []string
 	// testBaseline is test.baseline. defaultConfigOptions sets "off": most scenarios fix the
@@ -180,12 +185,13 @@ test:
 limits:
   max_steps: %d
   max_fix_iterations: %d
+  stop_without_progress: %t
 %s
 execution:
   timeout: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
-		opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.promptLimits, opts.timeout, opts.extraYAML)
+		opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.promptLimits, opts.timeout, opts.extraYAML)
 	content += opts.jira.yaml()
 
 	path := filepath.Join(dir, "orchestrator.yaml")

@@ -58,3 +58,41 @@ the same issues (`SPEC.md` §8.1).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-10)
+
+Done as planned, except:
+
+- **Gates:** the change was written without being able to run anything, so the four gates
+  (`scripts/check.sh`) are the operator's to run; this task stays open until they pass.
+- **Which signal is read:** `NoProgress` looks at the last completed execution only. After an
+  implement it reads the tree; after a test, the tests; after a review, the review. A hard-failed
+  last step is not judged. The engine calls it right after a recorded implement (tree), and after
+  a failed test or review that goes back to implement (tests, review).
+- **Order against `max_fix_iterations`:** the fix iteration is counted first and the hard limit
+  is read first, so a run that exhausted `max_fix_iterations` keeps the reason it always had
+  and the progress check only ends a loop earlier. The counters are those of the history and a
+  no-progress stop does not change them.
+- **Stricter than the table:** a test or review that passed between the two failures being
+  compared means the run moved, so the tests and review signals do not fire either (the tree
+  signal already had that rule). A failure with no output and no names has no key and is never
+  "the same". Two descriptions with no words are never "similar".
+- **Matching:** blocking issues are matched against the previous failed review's blocking
+  issues only (medium and low are ignored on both sides); an unmet criterion matches on its
+  `criterion` text against the previous review's unmet criteria. Words are lower-cased runs of
+  letters and digits of 3 or more characters; `normalizeWords` and `jaccard` are separate
+  functions and `similarityThreshold = 0.6` is inclusive.
+- **Resume:** `Entry` returns implement for a run whose status is `stopped` with a reason that
+  starts with `no progress:`, and also after the resume was approved - the app has cleared the
+  status and reason by then, so `Entry` reads `Resume.FromReason` of the resume records that no
+  step has run after (the n-th resume is `Resumes[n-1]`, its steps carry `Attempt` n). `Entry`
+  does not call `NoProgress`. Executions are compared across resumes: the implement a resume
+  enters is always run, and its own result is judged like any other, so an implement that again
+  changes nothing stops the run again. `app/resume.go` needed no change: it refuses only a
+  completed run.
+- **Integration tests:** the fake implement either fixes the fixture or never changes it, so
+  every scenario that loops to `max_fix_iterations` would now stop earlier. The integration
+  config writer therefore renders `limits.stop_without_progress: false` unless a scenario sets
+  `stopWithoutProgress`. The scenarios that exercise the stop are QL13's.
+- **Bench:** the bench configs and their golden files do not set the key, so benchmark runs
+  use the default (on); QL15 decides whether a configuration should turn it off.

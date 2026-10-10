@@ -368,6 +368,59 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 	})
 }
 
+// A run stopped for no progress resumes into implement, whatever Next says: after a tree
+// stop the last step is an implement, which Next sends to test. Entry never judges progress.
+func TestEntry_ResumeAfterNoProgress(t *testing.T) {
+	wf := wfp(domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	same := func() []domain.StepExecution {
+		return []domain.StepExecution{implTree(treeID('a')), failedTest(), implTree(treeID('a'))}
+	}
+	stopped := func(reason string, execs ...domain.StepExecution) *domain.Run {
+		run := runWith(wf, execs...)
+		run.Status, run.FailureReason = domain.RunStopped, reason
+		return run
+	}
+	approved := func(run *domain.Run, from ...string) *domain.Run {
+		for _, reason := range from {
+			run.Resumes = append(run.Resumes, domain.Resume{FromStatus: domain.RunStopped, FromReason: reason})
+		}
+		run.Status, run.FailureReason = domain.RunRunning, ""
+		return run
+	}
+	resumedImplement := implTree(treeID('b'))
+	resumedImplement.Attempt = 1
+	resumedTest := failedTest()
+	resumedTest.Attempt = 1
+
+	cases := []struct {
+		name string
+		run  *domain.Run
+		want State
+		why  string
+	}{
+		{"stopped after an unchanged implement", stopped(ReasonNoChange, same()...), StateImplement, "resume after no progress"},
+		{"stopped after the same failing tests", stopped(ReasonSameTests, implTree(treeID('a')), failedTest(), implTree(treeID('b')), failedTest()), StateImplement, "resume after no progress"},
+		{"stopped after a repeating review", stopped(ReasonSameReviewHits, implTree(treeID('a')), done(domain.ActionTest), failedReview()), StateImplement, "resume after no progress"},
+		{"the resume was approved: status and reason are cleared", approved(stopped(ReasonNoChange, same()...), ReasonNoChange), StateImplement, "resume after no progress"},
+		{"a resume that crashed before its first step", approved(stopped(ReasonNoChange, same()...), ReasonNoChange, ""), StateImplement, "resume after no progress"},
+		{"a step ran after the approved resume", approved(stopped(ReasonNoChange, append(same(), resumedImplement)...), ReasonNoChange), StateTest, "continue after implement"},
+		{"stopped for another reason", stopped("maximum steps exceeded", same()...), StateTest, "continue after implement"},
+		{"an earlier no-progress stop does not force implement once a step ran", approved(stopped("", append(same(), resumedImplement, resumedTest)...), ReasonNoChange), StateImplement, "tests failed"},
+		{"failed, not stopped", func() *domain.Run { r := runWith(wf, same()...); r.Status = domain.RunFailed; return r }(), StateTest, "continue after implement"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, why, err := Entry(tc.run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want || !strings.Contains(why, tc.why) {
+				t.Errorf("Entry = %s (%s), want %s (%s)", got, why, tc.want, tc.why)
+			}
+		})
+	}
+}
+
 func TestVerify(t *testing.T) {
 	p := 0.9
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{

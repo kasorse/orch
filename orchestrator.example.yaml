@@ -120,6 +120,11 @@ test:
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  # Stop a fix loop that goes nowhere instead of spending the remaining iterations: implement
+  # left the working tree as it was, the same tests fail the same way, or review repeats its
+  # blocking issues. The run stops with status stopped and exit code 4, and `resume` goes back
+  # into implement. false turns the check off; max_fix_iterations still applies.
+  # stop_without_progress: true
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:
   #   max_test_output_bytes: 32768  # a failing test's output in the implement retry prompt

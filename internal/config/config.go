@@ -157,11 +157,20 @@ func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
 type LimitsConfig struct {
 	MaxSteps         int `yaml:"max_steps"`
 	MaxFixIterations int `yaml:"max_fix_iterations"`
+	// StopWithoutProgress is a pointer so an absent key (nil) can default to true while an
+	// explicit false still means false; read it through StopsWithoutProgress.
+	StopWithoutProgress *bool `yaml:"stop_without_progress"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
 	Prompt PromptLimitsConfig `yaml:"prompt"`
 	// Verify bounds the verify tools of the implement step (specs/quality/SPEC.md §6.3).
 	Verify VerifyLimitsConfig `yaml:"verify"`
+}
+
+// StopsWithoutProgress reports whether the fix loop stops when an iteration makes no progress
+// (specs/quality/SPEC.md §8.1): limits.stop_without_progress, true when absent.
+func (l LimitsConfig) StopsWithoutProgress() bool {
+	return l.StopWithoutProgress == nil || *l.StopWithoutProgress
 }
 
 // Defaults of limits.verify.

@@ -38,7 +38,8 @@ type StepOutcome struct {
 	// Diff is what a completed implement changed, from git.
 	Diff *domain.StepDiff
 	// TreeBefore and TreeAfter are the git trees of the working tree around a completed
-	// implement, for showing its diff; not recorded.
+	// implement, for showing its diff. TreeAfter is also recorded, as the execution's
+	// tree_after, for the no-progress check; TreeBefore is not.
 	TreeBefore, TreeAfter string
 }
 
@@ -207,10 +208,22 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		}
 
 		stepExec.Status = domain.StepCompleted
+		if action == domain.ActionImplement {
+			stepExec.TreeAfter = outcome.TreeAfter
+		}
 		run.Executions = append(run.Executions, stepExec)
 		run.TotalSteps++
 		e.stepFinished(run, index, stepExec, outcome)
 		e.persist(run)
+
+		// An implement that left the tree as the previous one did is caught here, before the
+		// test step is spent on it. Only a finished implement is judged: Entry never calls
+		// NoProgress, so the implement a resume enters is always run.
+		if action == domain.ActionImplement && e.Limits.StopWithoutProgress {
+			if reason := NoProgress(run); reason != "" {
+				return e.stopWithoutProgress(run, reason)
+			}
+		}
 
 		next, reason := Next(current, outcome.Outcome, *run.Workflow)
 		if next == StateFailed {
@@ -219,6 +232,8 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 		if isBackwardEntryToImplement(current, next) {
 			run.FixIterations++
+			// max_fix_iterations is the hard limit and is read first, so a run that exhausted it
+			// keeps the reason it always had; the progress check only ends a loop earlier.
 			if run.FixIterations > e.Limits.MaxFixIterations {
 				run.Status = domain.RunStopped
 				run.FailureReason = "maximum fix iterations exceeded"
@@ -226,10 +241,26 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 				e.runFinished(run)
 				return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: maximum fix iterations exceeded"}
 			}
+			if e.Limits.StopWithoutProgress {
+				if reason := NoProgress(run); reason != "" {
+					return e.stopWithoutProgress(run, reason)
+				}
+			}
 		}
 
 		current = next
 	}
+}
+
+// stopWithoutProgress ends the run as stopped with the reason NoProgress gave; a resume
+// continues it in implement (Entry).
+func (e *Engine) stopWithoutProgress(run *domain.Run, reason string) error {
+	run.Status = domain.RunStopped
+	run.FailureReason = reason
+	e.persist(run)
+	e.runFinished(run)
+	return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: " + reason +
+		"\n\nSet limits.stop_without_progress: false to turn this check off."}
 }
 
 func (e *Engine) persist(run *domain.Run) {

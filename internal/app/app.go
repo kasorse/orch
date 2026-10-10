@@ -887,7 +887,11 @@ func preRunTest(ctx context.Context, s *session) error {
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {
-	return domain.LimitsView{MaxSteps: cfg.Limits.MaxSteps, MaxFixIterations: cfg.Limits.MaxFixIterations}
+	return domain.LimitsView{
+		MaxSteps:            cfg.Limits.MaxSteps,
+		MaxFixIterations:    cfg.Limits.MaxFixIterations,
+		StopWithoutProgress: cfg.Limits.StopsWithoutProgress(),
+	}
 }
 
 // recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a

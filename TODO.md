@@ -478,6 +478,10 @@ implement → выполнен».
 **Сделано (2026-10-10):** QL07 — п. 2: пакет `internal/testreport` (`go test -json`, jest
 `--json`, pytest, текст `go test` и jest), `failed_tests` и `report_format` в `TestResult`,
 строка `Failing tests (parsed from the output): …` в промпте повтора. Написано без запуска.
+**Написано (2026-10-10):** QL08 — п. 1: `tree_after` в `StepExecution`, `workflow.NoProgress`
+(дерево, те же тесты, повтор замечаний ревью), `limits.stop_without_progress` (по умолчанию
+`true`), `resume` останова без прогресса идёт в implement. Написано без запуска: шлюзы
+(`go build`, `go vet`, `go test`, `gofmt -l`) за оператором, задача QL08 открыта до них.
 Остаётся `[~]` до QL08 (п. 1) и QL09 (п. 3).
 
 ### [ ] Q8. Пересмотреть цену decision rounds — P2 · S (после B4)

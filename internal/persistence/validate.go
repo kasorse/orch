@@ -129,6 +129,14 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("diff: %w", err)
 		}
 	}
+	if exec.TreeAfter != "" {
+		if exec.Action != domain.ActionImplement {
+			return fmt.Errorf("tree_after recorded on a %s step", exec.Action)
+		}
+		if !isCommitSHA(exec.TreeAfter) {
+			return fmt.Errorf("tree_after %q is not a git tree id", exec.TreeAfter)
+		}
+	}
 	if err := validateVerifyCalls(exec); err != nil {
 		return fmt.Errorf("verify_calls: %w", err)
 	}

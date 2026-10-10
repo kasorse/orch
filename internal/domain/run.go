@@ -75,6 +75,11 @@ type StepExecution struct {
 	// an implement whose call failed or whose changes the guard refused: git runs on the
 	// working tree only after the guard has passed it.
 	Diff *StepDiff `json:"diff,omitempty"`
+	// TreeAfter is the git tree id of the working tree after a completed implement, which the
+	// no-progress check compares between implements (specs/quality/SPEC.md §8.1). Empty for
+	// every other step, when git could not compute it, and in a run written before the field
+	// existed.
+	TreeAfter string `json:"tree_after,omitempty"`
 	// VerifyCalls are the calls the implement session made to the verify tools, in order, also
 	// when the step failed (specs/quality/SPEC.md §12). Empty for every other step.
 	VerifyCalls []VerifyCall `json:"verify_calls,omitempty"`

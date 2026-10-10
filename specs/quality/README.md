@@ -13,7 +13,9 @@ into the implement step, `verify_calls` in `run.json`, the `summary.md` row; 202
 without running anything, so its gates are the operator's; QL06 is written (the V-verify tests
 and D16) but stays open until the live suite has run; QL07 done (`internal/testreport`, the
 failing test names in `TestResult` and in the retry prompt; 2026-10-10), also written without
-running anything; QL08–QL15 have not started.
+running anything; QL08 written (the no-progress stop: `tree_after`, `workflow.NoProgress`,
+`limits.stop_without_progress`, resume into implement; 2026-10-10) without running anything, so
+it stays open until its gates have run; QL09–QL15 have not started.
 
 | document | role |
 |---|---|

@@ -111,7 +111,9 @@ over a fixed list: success → the next step of the workflow (done after the las
 failure → implement if the workflow has it, else the run fails; review fail → implement if
 present, else the run completes with the verdict; any other failure fails the run. Execution
 history is append-only (`run.Executions`), never overwritten. Two independent limits guard
-against infinite loops: `max_steps`, `max_fix_iterations`. Without `implement`, the last
+against infinite loops: `max_steps`, `max_fix_iterations`; `limits.stop_without_progress`
+(`workflow.NoProgress`, over persisted executions only) ends a fix loop earlier when implement
+changed nothing or the same failure repeats. Without `implement`, the last
 read-only step (research/analyze/plan) writes the final `answer`, printed at the end.
 `Engine.Run` always enters through `workflow.Entry(run)`: the first step for an empty
 history, otherwise the state the history and the transition table give (MVP.md §37.5).

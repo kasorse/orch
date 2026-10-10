@@ -19,7 +19,9 @@ import (
 //   - last execution completed -> Next(last, its outcome), with the outcome derived only
 //     from trusted persisted results (see outcomeOf);
 //   - ... and when Next says the run failed ("tests failed" without implement), the step
-//     that failed it is run again: the operator presumably fixed something (Q3).
+//     that failed it is run again: the operator presumably fixed something (Q3);
+//   - last execution completed, but the run was stopped for no progress -> implement,
+//     whatever Next says (specs/quality/SPEC.md §8.1).
 //
 // StateDone means the history already finished the workflow.
 func Entry(run *domain.Run) (state State, why string, err error) {
@@ -34,6 +36,13 @@ func Entry(run *domain.Run) (state State, why string, err error) {
 	current := State(last.Action)
 	if last.Status == domain.StepFailed {
 		return current, fmt.Sprintf("retry %s (failed: %s)", last.Action, firstLine(last.Error)), nil
+	}
+
+	// The operator resuming a run that stopped for no progress means "try again", so it goes
+	// back into implement, also when the stop came right after an implement, where Next
+	// would say test. The check itself is not applied here (specs/quality/SPEC.md §8.1).
+	if run.Workflow.Contains(domain.ActionImplement) && stoppedWithoutProgress(run, last) {
+		return StateImplement, "resume after no progress", nil
 	}
 
 	outcome, err := outcomeOf(last)
@@ -52,6 +61,23 @@ func Entry(run *domain.Run) (state State, why string, err error) {
 		return next, reason, nil
 	}
 	return next, fmt.Sprintf("continue after %s", last.Action), nil
+}
+
+// stoppedWithoutProgress reports whether the run's last stop was a no-progress stop that no
+// step has run after yet. A run still marked stopped says so itself; once a resume has been
+// approved, the status and reason are cleared, and the resume's record keeps the reason it
+// found (Resume.FromReason). The n-th resume is Resumes[n-1] and its steps carry Attempt n,
+// so the records from index last.Attempt on are the ones with no step after them.
+func stoppedWithoutProgress(run *domain.Run, last domain.StepExecution) bool {
+	if run.Status == domain.RunStopped && strings.HasPrefix(run.FailureReason, NoProgressPrefix) {
+		return true
+	}
+	for i := max(last.Attempt, 0); i < len(run.Resumes); i++ {
+		if strings.HasPrefix(run.Resumes[i].FromReason, NoProgressPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // outcomeOf derives a completed execution's outcome from what the orchestrator itself

@@ -104,6 +104,29 @@ func TestValidate_InvalidLimits(t *testing.T) {
 	}
 }
 
+func TestLimitsConfig_StopsWithoutProgress(t *testing.T) {
+	yes, no := true, false
+	for name, tc := range map[string]struct {
+		limits LimitsConfig
+		want   bool
+	}{
+		"unset":          {LimitsConfig{}, true},
+		"true":           {LimitsConfig{StopWithoutProgress: &yes}, true},
+		"explicit false": {LimitsConfig{StopWithoutProgress: &no}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.limits.StopsWithoutProgress(); got != tc.want {
+				t.Errorf("StopsWithoutProgress = %v, want %v", got, tc.want)
+			}
+			cfg := validConfig()
+			cfg.Limits.StopWithoutProgress = tc.limits.StopWithoutProgress
+			if err := Validate(cfg); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidate_NegativeActionTimeout(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Review.Timeout = -1 * time.Minute

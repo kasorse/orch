@@ -317,6 +317,36 @@ func TestLoad_Verify(t *testing.T) {
 	}
 }
 
+func TestLoad_StopWithoutProgress(t *testing.T) {
+	const limits = "limits: {max_steps: 12, max_fix_iterations: 2}"
+	for name, tc := range map[string]struct {
+		limits string
+		want   bool
+	}{
+		"absent defaults to true": {limits, true},
+		"explicit true":           {"limits: {max_steps: 12, max_fix_iterations: 2, stop_without_progress: true}", true},
+		"explicit false":          {"limits: {max_steps: 12, max_fix_iterations: 2, stop_without_progress: false}", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), limits, tc.limits, 1)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if got := cfg.Limits.StopsWithoutProgress(); got != tc.want {
+				t.Errorf("StopsWithoutProgress = %v, want %v", got, tc.want)
+			}
+			if err := Validate(cfg); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
+	}
+
+	notABool := strings.Replace(validV2(""), limits, "limits: {max_steps: 12, max_fix_iterations: 2, stop_without_progress: soon}", 1)
+	if _, err := Load(writeTempConfig(t, notABool)); err == nil {
+		t.Error("a stop_without_progress that is not a boolean must be refused")
+	}
+}
+
 func TestLoad_StrictKeepsTheDedicatedMessages(t *testing.T) {
 	// A literal secret is declared by the schema so Validate can explain the rejection.
 	cfg, err := Load(writeTempConfig(t, validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: bearer\n  token_env: T\n  token: abc\n")))

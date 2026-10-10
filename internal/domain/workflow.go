@@ -52,4 +52,8 @@ func (w Workflow) RequiresReview() bool { return w.Contains(ActionReview) }
 type LimitsView struct {
 	MaxSteps         int
 	MaxFixIterations int
+	// StopWithoutProgress stops the fix loop when an iteration changes nothing or repeats the
+	// previous failure (specs/quality/SPEC.md §8.1). The zero value is off, so a view built
+	// by hand keeps the plain max_fix_iterations behavior.
+	StopWithoutProgress bool
 }
