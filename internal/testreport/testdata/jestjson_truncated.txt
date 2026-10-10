@@ -1,0 +1,14 @@
+{
+  "numFailedTests": 2,
+  "testResults": [
+    {
+      "assertionResults": [
+        {"ancestorTitles": ["Store"], "fullName": "Store gets", "status": "failed", "title": "gets"}
+      ],
+      "name": "/work/src/store.test.js",
+      "status": "failed"
+    },
+    {
+      "assertionResults": [
+        {"ancestorTitles": ["Other"], "fullName": "Other fails", "status": "failed", "title": "fails"},
+        {"ancestorTitles": ["Other"], "fullName": "Other cut", "status": "fai

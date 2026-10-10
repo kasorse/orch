@@ -221,6 +221,56 @@ func TestPreRunTest_RunsTheChecksAndKeepsTheRedOne(t *testing.T) {
 	}
 }
 
+const goTextFailure = "--- FAIL: TestPut (0.00s)\n    store_test.go:12: boom\nFAIL\nFAIL\texample.com/m/store\t0.004s\n"
+
+func TestGuardedTest_NamesTheFailingTests(t *testing.T) {
+	d, _ := checkDispatcher(nil, &countingGuard{}, execution.ProcessResult{Stdout: goTextFailure, ExitCode: 1})
+	outcome, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := outcome.TestResult
+	if r.Success || !slices.Equal(r.FailedTests, []string{"example.com/m/store.TestPut"}) || r.ReportFormat != "gotext" {
+		t.Errorf("failed tests = %q, format = %q", r.FailedTests, r.ReportFormat)
+	}
+	if d.pendingTestFailure == nil || len(d.pendingTestFailure.FailedTests) != 1 {
+		t.Errorf("the retry context must carry the names: %+v", d.pendingTestFailure)
+	}
+}
+
+func TestGuardedTest_NoNamesForAPassOrAnUnknownFormat(t *testing.T) {
+	// The output of a green run may well show failures (a test that expects one): only the
+	// exit code decides, and the names are recorded for a failed run alone.
+	d, _ := checkDispatcher(nil, &countingGuard{}, execution.ProcessResult{Stdout: goTextFailure})
+	outcome, err := d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := outcome.TestResult; !r.Success || r.FailedTests != nil || r.ReportFormat != "" {
+		t.Errorf("a green result carries test names: %+v", r)
+	}
+
+	d, _ = checkDispatcher(nil, &countingGuard{}, execution.ProcessResult{Stderr: "segfault", ExitCode: 139})
+	outcome, err = d.Execute(context.Background(), domain.ActionTest, &domain.Run{ID: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := outcome.TestResult; r.Success || r.FailedTests != nil || r.ReportFormat != "" {
+		t.Errorf("an unrecognised output must leave the result as before: %+v", r)
+	}
+}
+
+func TestPreRunTest_NamesTheFailingTests(t *testing.T) {
+	d, _ := checkDispatcher(nil, &countingGuard{}, execution.ProcessResult{Stdout: goTextFailure, ExitCode: 1})
+	result, _, err := d.PreRunTest(context.Background(), &domain.Run{ID: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(result.FailedTests, []string{"example.com/m/store.TestPut"}) || result.ReportFormat != "gotext" {
+		t.Errorf("pre-run result = %+v", result)
+	}
+}
+
 func TestGuardedTest_RunnerErrorHasNoResult(t *testing.T) {
 	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}, Errs: []error{nil, errors.New("spawn failed")}}
 	cfg := testConfig()

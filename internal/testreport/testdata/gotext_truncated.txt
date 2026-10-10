@@ -1,0 +1,4 @@
+--- FAIL: TestPut (0.00s)
+    store_test.go:12: Put panicked
+--- FAIL: TestGet (0.00s)
+    store_test.go:20: Get returned a long message that the output bound cut in the mid

@@ -1,0 +1,3 @@
+jesttext
+src/a.test.js › A › breaks
+src/b.test.js › B › also breaks

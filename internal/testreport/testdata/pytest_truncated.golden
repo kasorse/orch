@@ -1,0 +1,3 @@
+pytest
+tests/test_store.py::test_get
+tests/test_store.py::test_put_fresh

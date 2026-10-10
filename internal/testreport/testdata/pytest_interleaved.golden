@@ -1,0 +1,3 @@
+pytest
+tests/test_a.py::test_one
+tests/test_b.py::test_four[x]

@@ -1,0 +1,22 @@
+FAIL src/a.test.js
+  ● Console
+
+    console.log
+      ✕ printed by the code under test is not a result
+
+  ● A › breaks
+
+    expect(received).toBe(expected)
+
+  ● Test suite failed to run
+
+ FAIL  src/b.test.js
+  ● B › also breaks
+
+Summary of all failing tests
+ FAIL  src/a.test.js
+  ● A › breaks
+
+    expect(received).toBe(expected)
+
+Test Suites: 2 failed, 2 total

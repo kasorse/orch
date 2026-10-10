@@ -1,0 +1,6 @@
+ FAIL  src/store.test.js
+  Store
+    ✓ puts (2 ms)
+    ✕ gets (3 ms)
+    ✕ lists (1 ms)
+    ✕ remo

@@ -52,7 +52,10 @@ speaks MCP with the standard library only, reads nothing but `<dir>/verify.json`
 `guard`, `testexec` and `domain`, never `action`. `action` is its one client: with
 `actions.implement.verify` it writes the `verify.json` of a private `orch-verify-*` directory,
 merges the `orch` server into the step's `--mcp-config`, and reads `calls.jsonl` and `violation`
-back as untrusted input (`action/verify.go`).
+back as untrusted input (`action/verify.go`). `internal/testreport` is a leaf (standard library
+only, enforced by a test): it reads failing test names out of a failed test step's output into
+`TestResult.failed_tests`/`report_format` for the retry prompt, and what it finds never decides
+pass/fail (specs/quality §8.2).
 
 `bench/` is a black box to the core and the core is one to it. It is a separate Go module
 with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a

@@ -1,0 +1,13 @@
+{"Time":"2026-10-10T10:00:00Z","Action":"start","Package":"example.com/m/store"}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestPut"}
+{"Time":"2026-10-10T10:00:01Z","Action":"output","Package":"example.com/m/store","Test":"TestPut","Output":"=== RUN   TestPut\n"}
+{"Time":"2026-10-10T10:00:01Z","Action":"output","Package":"example.com/m/store","Test":"TestPut","Output":"--- FAIL: TestPut (0.00s)\n"}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/store","Test":"TestPut","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestGet"}
+{"Time":"2026-10-10T10:00:01Z","Action":"pass","Package":"example.com/m/store","Test":"TestGet","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestTable"}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestTable/empty"}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/store","Test":"TestTable/empty","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/store","Test":"TestTable","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"output","Package":"example.com/m/store","Output":"FAIL\n"}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/store","Elapsed":0.01}

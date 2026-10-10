@@ -1,0 +1,13 @@
+=== RUN   TestPut
+--- FAIL: TestPut (0.00s)
+    store_test.go:12: Put panicked
+=== RUN   TestGet
+--- PASS: TestGet (0.00s)
+=== RUN   TestTable
+=== RUN   TestTable/empty
+    --- FAIL: TestTable/empty (0.00s)
+        store_test.go:30: got "", want "x"
+--- FAIL: TestTable (0.00s)
+FAIL
+FAIL	example.com/m/store	0.004s
+ok  	example.com/m/other	0.002s

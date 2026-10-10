@@ -1,0 +1,4 @@
+pytest
+tests/test_store.py::TestTable::test_row[a - b]
+tests/test_store.py::test_get
+tests/test_store.py::test_put_fresh

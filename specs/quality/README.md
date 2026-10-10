@@ -11,7 +11,9 @@ QL04 done too (the `internal/verify` MCP server, the hidden `mcp-verify` subcomm
 moved to `internal/guard`; 2026-10-10); QL05 done as well (`actions.implement.verify` wired
 into the implement step, `verify_calls` in `run.json`, the `summary.md` row; 2026-10-10), written
 without running anything, so its gates are the operator's; QL06 is written (the V-verify tests
-and D16) but stays open until the live suite has run; QL07–QL15 have not started.
+and D16) but stays open until the live suite has run; QL07 done (`internal/testreport`, the
+failing test names in `TestResult` and in the retry prompt; 2026-10-10), also written without
+running anything; QL08–QL15 have not started.
 
 | document | role |
 |---|---|
@@ -45,7 +47,7 @@ step runs on one model regardless of how simple the task is. This phase:
 | [QL04](tasks/TASK-QL04-verify-server.md) | `internal/verify`: stdio MCP server, `run_tests`, `run_check` ✓ | Q2 | M | QL03 |
 | [QL05](tasks/TASK-QL05-verify-wiring.md) | verify in the implement step: config, fail-fast, dispatcher, record ✓ | Q2 | M | QL04 |
 | [QL06](tasks/TASK-QL06-verify-live.md) | live security checks for verify, decision D16 | Q2 | S | QL05 |
-| [QL07](tasks/TASK-QL07-testreport.md) | `internal/testreport`: failing test names | Q7.2 | M | — |
+| [QL07](tasks/TASK-QL07-testreport.md) | `internal/testreport`: failing test names ✓ | Q7.2 | M | — |
 | [QL08](tasks/TASK-QL08-no-progress.md) | stop without progress (tree, tests, review) | Q7.1, Q6.4 | M | QL07 |
 | [QL09](tasks/TASK-QL09-baseline-names.md) | old vs new failures in the retry prompt | Q7.3 | S | QL03, QL07 |
 | [QL10](tasks/TASK-QL10-by-complexity.md) | `by_complexity`: model and effort per decided complexity | Q3 | M | — |

@@ -1,0 +1,2 @@
+ok  	example.com/m/store	0.003s
+ok  	example.com/m/other	(cached)

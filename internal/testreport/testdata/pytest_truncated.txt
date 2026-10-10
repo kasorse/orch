@@ -1,0 +1,5 @@
+tests/test_store.py .F.F                                                 [100%]
+
+=========================== short test summary info ============================
+FAILED tests/test_store.py::test_put_fresh - KeyError: 'a'
+FAILED tests/test_store.py::test_get - AssertionError: a very long message that was cut in the

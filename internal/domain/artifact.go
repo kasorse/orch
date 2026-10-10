@@ -45,6 +45,12 @@ type TestResult struct {
 	// not run.
 	Checks      []CheckResult `json:"checks,omitempty"`
 	FailedCheck string        `json:"failed_check,omitempty"`
+	// FailedTests are the failing tests parsed from a failed run's output (internal/testreport;
+	// specs/quality/SPEC.md §8.2), and ReportFormat the format they were read in. Both are
+	// absent for a pass and when no parser recognised the output. They name tests in a prompt
+	// and never decide the result: the exit code does.
+	FailedTests  []string `json:"failed_tests,omitempty"`
+	ReportFormat string   `json:"report_format,omitempty"`
 }
 
 type Severity string

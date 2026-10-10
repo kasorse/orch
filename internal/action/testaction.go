@@ -7,6 +7,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/testexec"
+	"orchestrator/internal/testreport"
 	"orchestrator/internal/workflow"
 )
 
@@ -93,11 +94,16 @@ func (d *Dispatcher) guardedTest(ctx context.Context, run *domain.Run, step doma
 		outputs []domain.CheckOutput
 		total   time.Duration
 	)
-	// finish makes res the result's top-level fields, with the checks that ran so far.
+	// finish makes res the result's top-level fields, with the checks that ran so far. A red
+	// run also names the failing tests its output shows; the exit code stays the verdict.
 	finish := func(res domain.TestResult, failedCheck string) *domain.TestResult {
 		res.Checks = checks
 		res.FailedCheck = failedCheck
 		res.Duration = total
+		if !res.Success {
+			report := testreport.Parse(res.Stdout, res.Stderr)
+			res.FailedTests, res.ReportFormat = report.Failed, report.Format
+		}
 		return &res
 	}
 

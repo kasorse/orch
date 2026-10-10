@@ -12,6 +12,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/secretscan"
+	"orchestrator/internal/testreport"
 )
 
 // validateRun applies the structural checks of specs/resume/SPEC.md §6.3 to a decoded
@@ -56,6 +57,9 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
 		}
 		if err := validateChecks(*t); err != nil {
+			return fmt.Errorf("pre_run_test: %w", err)
+		}
+		if err := validateReport(*t); err != nil {
 			return fmt.Errorf("pre_run_test: %w", err)
 		}
 	}
@@ -132,6 +136,9 @@ func validateExecution(exec domain.StepExecution, i int) error {
 		if err := validateChecks(*exec.TestResult); err != nil {
 			return fmt.Errorf("test_result: %w", err)
 		}
+		if err := validateReport(*exec.TestResult); err != nil {
+			return fmt.Errorf("test_result: %w", err)
+		}
 	}
 	if exec.ReviewResult != nil {
 		if exec.Action != domain.ActionReview {
@@ -206,6 +213,34 @@ func validateChecks(t domain.TestResult) error {
 	}
 	if t.Success {
 		return fmt.Errorf("failed_check %q on a successful result", t.FailedCheck)
+	}
+	return nil
+}
+
+// validateReport checks the failing tests a test result lists (specs/quality/SPEC.md §8.2,
+// §12). They are only recorded for a failed run, in a known format, at most testreport.MaxNames
+// of them and each a single line of at most testreport.MaxNameBytes. A result written before
+// the fields existed has neither. The names reach a prompt, so a run directory edited by
+// hand cannot smuggle a line break or an oversized name into one.
+func validateReport(t domain.TestResult) error {
+	if t.ReportFormat == "" && len(t.FailedTests) == 0 {
+		return nil
+	}
+	switch {
+	case t.Success:
+		return fmt.Errorf("failed_tests or report_format on a successful result")
+	case !testreport.KnownFormat(t.ReportFormat):
+		return fmt.Errorf("report_format %q is not a known format", t.ReportFormat)
+	case len(t.FailedTests) > testreport.MaxNames:
+		return fmt.Errorf("failed_tests: %d entries, at most %d", len(t.FailedTests), testreport.MaxNames)
+	}
+	for i, n := range t.FailedTests {
+		switch {
+		case n == "" || len(n) > testreport.MaxNameBytes:
+			return fmt.Errorf("failed_tests[%d]: %d bytes, want 1 to %d", i, len(n), testreport.MaxNameBytes)
+		case strings.ContainsFunc(n, unicode.IsControl):
+			return fmt.Errorf("failed_tests[%d]: has a control character", i)
+		}
 	}
 	return nil
 }

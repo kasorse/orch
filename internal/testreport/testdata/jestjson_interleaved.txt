@@ -1,0 +1,4 @@
+Determining test suites to run...
+console.warn: deprecated option in the config
+{"numFailedTests":1,"testResults":[{"assertionResults":[{"ancestorTitles":["Store"],"status":"failed","title":"gets"}],"name":"/work/src/store.test.js","status":"failed"}],"success":false}
+Done in 1.20s.

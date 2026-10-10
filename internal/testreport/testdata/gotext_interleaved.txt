@@ -1,0 +1,12 @@
+# example.com/m/bad [example.com/m/bad.test]
+bad/bad.go:3:1: syntax error: unexpected }
+--- FAIL: TestServe (0.01s)
+    api_test.go:9: status 500
+FAIL
+FAIL	example.com/m/api	0.020s
+FAIL	example.com/m/bad [build failed]
+--- FAIL: TestPut (0.00s)
+    store_test.go:12: Put panicked
+FAIL
+FAIL	example.com/m/store	0.004s
+FAIL

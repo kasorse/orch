@@ -1,0 +1,12 @@
+tests/test_a.py::test_one FAILED                                          [ 50%]
+Captured log call
+WARNING  root:a.py:3 FAILED tests/not_a_summary.py::test_x - printed by the code under test
+tests/test_b.py::test_two PASSED                                          [100%]
+
+=========================== short test summary info ============================
+FAILED tests/test_a.py::test_one - assert False
+some stderr noise in the middle of the section
+ERROR tests/test_c.py::test_three - fixture 'db' not found
+FAILED tests/test_b.py::test_four[x] - assert 0
+============================ 2 failed, 1 passed in 0.05s =======================
+FAILED tests/after_the_section.py::test_late - not part of the summary

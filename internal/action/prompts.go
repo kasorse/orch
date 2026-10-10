@@ -348,10 +348,39 @@ const testOutputOwner = "the test command's"
 
 func checkOutputOwner(check string) string { return fmt.Sprintf("the check %q's", check) }
 
+// maxPromptTests is the most failing test names a retry prompt lists.
+const maxPromptTests = 30
+
+// writeFailingTests names the tests parsed from the output (internal/testreport) on one line
+// above the fenced output, so they survive when the output is cut. The names are a hint: the
+// exit code decided that the run failed. Without names it writes nothing.
+func writeFailingTests(b *strings.Builder, names []string) {
+	var shown []string
+	for _, n := range names {
+		if n = oneLine(n); n != "" {
+			shown = append(shown, n)
+		}
+	}
+	if len(shown) == 0 {
+		return
+	}
+	more := 0
+	if len(shown) > maxPromptTests {
+		more = len(shown) - maxPromptTests
+		shown = shown[:maxPromptTests]
+	}
+	b.WriteString("Failing tests (parsed from the output): " + strings.Join(shown, ", "))
+	if more > 0 {
+		fmt.Fprintf(b, ", … and %d more", more)
+	}
+	b.WriteString("\n\n")
+}
+
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
 // bounded by maxBytes (BoundTestOutput; 0 embeds them whole), and says so when it cut.
 // owner is whose output it is (testOutputOwner or checkOutputOwner).
 func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owner string) {
+	writeFailingTests(b, r.FailedTests)
 	stdout, stderr := r.Stdout, r.Stderr
 	var omitted Omitted
 	if maxBytes > 0 {
