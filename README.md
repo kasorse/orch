@@ -180,6 +180,54 @@ security:
   present, but its credential variables are needed only by `run --jira` (and checked by
   `validate`). See [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket).
 
+### Getting more from the same stages (opt-in)
+
+Every stage already gets what the earlier ones found (the analysis and plan files and risks, the
+plan's acceptance criteria, and on a retry the diff stat of what the run changed so far), and
+review checks each acceptance criterion. The keys below are all optional and off unless
+written; a run with none of them behaves as before, apart from those richer prompts and
+`limits.stop_without_progress`:
+
+```yaml
+checks:                          # run in order before test.command; the first non-zero exit stops the step
+  - {name: vet,  command: "go vet ./..."}
+  - {name: lint, command: "golangci-lint run --new-from-rev=$ORCH_BASE_REF"}
+test:
+  command: 'go test ./... ${ORCH_TEST_FILTER:+-run "$ORCH_TEST_FILTER"}'
+actions:
+  implement:
+    provider: claude
+    model: sonnet
+    effort: medium
+    timeout: 30m                 # the verify calls run inside this step: raise its timeout
+    verify: true                 # implement may run test.command and the checks (sandbox, guard)
+    by_complexity:               # model and effort per decided complexity; --stage uses the base
+      simple:  {model: haiku, effort: low}
+      complex: {model: opus,  effort: high}
+  review:
+    provider: claude
+    model: sonnet
+    models: [opus]               # extra reviewers, one after the other; issues are merged
+review:
+  fix_medium: true               # a passing review with a medium issue sends implement back once
+limits:
+  verify: {max_calls_per_step: 8, call_timeout: 10m}
+```
+
+- **`checks`** are exit-code gates like the tests: build, vet, lint or a SAST scan, each run
+  under the test sandbox, environment and guard, with `ORCH_BASE_REF` set to the commit the run
+  started from. A failed check is named in the retry prompt, and the pre-run test runs them too.
+  Checks only run in a workflow with a `testing` stage.
+- **`verify`** is described under [Verify](#verify-let-implement-run-the-tests-opt-in); the
+  `${ORCH_TEST_FILTER:+…}` in `test.command` lets the model run a subset of the tests, and a
+  command that does not use it simply runs everything.
+- **`by_complexity`** is a static table: Go reads the complexity the decision already made and
+  picks the entry; nothing is chosen by a model, and the provider cannot be overridden.
+- **`review.fix_medium`** and **`actions.review.models`** make review stricter; the second
+  costs one more call per extra model.
+- Nothing here changes what decides success: the `test` step's exit code and, for review,
+  `ReviewResult.Decide`. Details: `MVP.md` §44 and `specs/quality/`.
+
 ## Security model
 
 Every provider call gets the least tools its job needs, chosen by a fixed table in Go code —
@@ -745,7 +793,14 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls
   logs/pre-run-test.{stdout,stderr}.log    # the tests before any change, when red
+  logs/<NNN>-test.<check>.{stdout,stderr}.log  # each `checks:` command (pre-run-test.<check>.* before the run)
+  logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log  # each verify call of an implement step
 ```
+
+The quality-loop keys add `checks`, `failed_check` and `failed_tests` to a test result,
+`options`, `tree_after`, `verify_calls`, `model_source`, `criteria`, `reviewers` and
+`extra_calls` to `run.json`, `models` to `decision.json` and `acceptance_criteria` to the plan
+artifact; the field reference is `MVP.md` §44.9.
 
 A review artifact also records what the reviewer was shown: `diff: {bytes, files, shown,
 summarized, withheld, truncated}`.

@@ -63,9 +63,12 @@ actions:
     # after the model changed hooks, CI or this config fails the step. Needs test.command,
     # test.sandbox bwrap and provider claude. The final test step stays the source of truth.
     # Each call is recorded in run.json (verify_calls) and its output in
-    # logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log.
+    # logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log. Default false. The calls run inside
+    # the implement step, so raise its timeout (this action's `timeout:`, within execution.timeout)
+    # when verify is on.
     # verify: true
-    # Optional, on any action: a model and/or effort per decided complexity (simple | medium |
+    # timeout: 30m
+    # Optional, default none, on any action: a model and/or effort per decided complexity (simple | medium |
     # complex). A field left out keeps the action's own value above; the provider cannot be
     # changed. A level without an entry, and a run started with --stage, use the action's own
     # model. Each step records where its model came from (model_source in run.json), and
@@ -78,7 +81,7 @@ actions:
   review:
     provider: claude
     model: sonnet
-    # Optional, review only: extra reviewers, up to 4 model names on this provider. After the
+    # Optional, default [], review only: extra reviewers, up to 4 model names on this provider. After the
     # model above each one reviews the same diff in turn, and the issues are merged (a
     # criterion is met only if every reviewer says so). Each is another call, so it costs.
     # models: [opus]
@@ -113,7 +116,7 @@ test:
   # is about making failing tests pass, start it with `run --allow-red-tests`.
   # baseline: require_green          # require_green (default) | off
 
-# Optional: your own deterministic checks (build, vet, lint, SAST). The test step runs each
+# Optional, default none: your own deterministic checks (build, vet, lint, SAST). The test step runs each
 # one in order, then test.command, and stops at the first non-zero exit code; the retry
 # prompt names the failed check and says the tests did not run. The pre-run test runs the
 # same sequence, so a check that already fails stops the run like a failing test

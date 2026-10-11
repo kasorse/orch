@@ -1,8 +1,9 @@
 # Spec: Quality — a better result from the same stages (phase 2)
 
 Status: **specified** (2026-10-08). The design questions are answered (§14), the author's
-defaults are in §15. MVP.md becomes the normative home when QL14 lands (a new §44, plus
-§31.1 and §38); until then this file is the design source.
+defaults are in §15. MVP.md is the normative home since QL14 (2026-10-11: a new §44, plus
+§12, §18, §19, §31.1, §37, §38.1, §41.5 and §43); this file stays the design record, and where
+it differs from what was built, the task files' `## As built` sections say so.
 Scope: TODO.md phase 2, items Q1, Q2, Q3, Q5, Q6 and Q7. Q4 (worktree isolation) goes to its
 own spec together with W1; Q8 (the cost of the decision rounds) waits for the benchmark
 decision B4 (§16). Touches MVP.md §11–§12 (engine, limits), §18–§19 (test, review), §25

@@ -26,7 +26,10 @@ QL12 done (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
 `CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10), `scripts/check.sh`
 passed; QL13 written (integration scenarios 33–46, the fake CLI's per-call implement answers
 and prompts, an MCP client mode and a planted hook; 2026-10-10) without running anything, so it
-stays open until its gates have run; QL14 and QL15 have not started.
+stays open until its gates have run; QL14 written (MVP.md §44 and the sections that point to
+it, CLAUDE.md, README.md, the example config; 2026-10-11) without running anything, so it stays
+open until its gates have run, and the TODO.md statuses it names stay `[~]` until QL06, QL08–QL10
+and QL13 are closed; QL15 has not started.
 
 | document | role |
 |---|---|
