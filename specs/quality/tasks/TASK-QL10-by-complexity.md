@@ -58,7 +58,8 @@ when the config changed it (`SPEC.md` §9).
 Done as planned, except:
 
 - **Gates:** the change was written without being able to run anything, so the four gates
-  (`scripts/check.sh`) are the operator's to run; this task stays open until they pass.
+  (`scripts/check.sh`) are the operator's to run. They passed on 2026-10-11 (root and `bench/`, outside
+  the sandbox).
 - **Parsing:** `ActionConfig.ByComplexity` is `map[domain.Complexity]ModelEffort`. The raw struct
   of `UnmarshalYAML` reads it as `map[string]ModelEffort` and keeps every key as written
   (including `trivial`), so `Validate` (`byComplexityProblems`) can name an invalid complexity.

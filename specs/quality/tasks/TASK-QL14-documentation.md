@@ -52,8 +52,8 @@ is loaded by an existing test)
 Done as planned, except as listed.
 
 - **Gates:** only documentation and comments changed, but nothing was run: the four gates
-  (`scripts/check.sh`) are the operator's, and QL14 stays unticked in `README.md` until they
-  pass. The example config changed in comments only, so the test that loads it is unaffected.
+  (`scripts/check.sh`) are the operator's. They passed on 2026-10-11 (root and `bench/`,
+  outside the sandbox). The example config changed in comments only, so the test that loads it is unaffected.
 - **TODO.md is not ticked.** Step 6 asked for Q1, Q2, Q3, Q5, Q6 and Q7. Each of them still waits
   on something this task cannot close: the live suite of QL06 (Q2), the gates of QL08–QL10 and
   QL13 (Q1, Q3, Q5, Q6, Q7) and the benchmark comparison of QL15 (Q2, Q3). They stay `[~]`; the

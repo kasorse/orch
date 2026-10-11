@@ -1,37 +1,18 @@
 # Quality — a better result from the same stages (phase 2)
 
-Status: **in progress** (specified 2026-10-08): the owner went through TODO.md Q1–Q8 one by one. Q1, Q2,
-Q3, Q5, Q6 and Q7 are in this spec. Q4 (worktree isolation) gets its own spec together with
-W1. Q8 (the cost of the decision rounds) waits for the benchmark decision B4. The decisions
-are in `SPEC.md` §14 and the author's defaults in §15. In progress (2026-10-09): QL01, QL02
-and QL03 done (stage context in the prompts, `acceptance_criteria`, the retry diff stat, prompt
-golden files; the review verdict per criterion and the read-the-surroundings prompt; the
-`checks:` in the test step and the pre-run test);
-QL04 done too (the `internal/verify` MCP server, the hidden `mcp-verify` subcommand, the guard
-moved to `internal/guard`; 2026-10-10); QL05 done as well (`actions.implement.verify` wired
-into the implement step, `verify_calls` in `run.json`, the `summary.md` row; 2026-10-10), written
-without running anything, so its gates are the operator's; QL06 is written (the V-verify tests
-and D16) but stays open until the live suite has run; QL07 done (`internal/testreport`, the
-failing test names in `TestResult` and in the retry prompt; 2026-10-10), also written without
-running anything; QL08 written (the no-progress stop: `tree_after`, `workflow.NoProgress`,
-`limits.stop_without_progress`, resume into implement; 2026-10-10) without running anything, so
-it stays open until its gates have run; QL09 written (the old/new failure split in the retry
-prompt, `domain.SplitFailedTests`, the `summary.md` row; 2026-10-10) without running anything,
-so it stays open until its gates have run; QL10 written (`actions.*.by_complexity`,
-`ActionConfig.Route`, `ProviderRef.ModelSource`, `decision.json: models`, the resume warning;
-2026-10-10) without running anything, so it stays open until its gates have run; QL11 done
-(`review.fix_medium`, `Run.Options`, `OutcomeFixable`, `outcomeOf` shared by the engine and
-resume, the derived outcome reported to the observer; 2026-10-10), `scripts/check.sh` passed;
-QL12 done (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
-`CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10), `scripts/check.sh`
-passed; QL13 written (integration scenarios 33–46, the fake CLI's per-call implement answers
-and prompts, an MCP client mode and a planted hook; 2026-10-10) without running anything, so it
-stays open until its gates have run; QL14 written (MVP.md §44 and the sections that point to
-it, CLAUDE.md, README.md, the example config; 2026-10-11) without running anything, so it stays
-open until its gates have run, and the TODO.md statuses it names stay `[~]` until QL06, QL08–QL10
-and QL13 are closed; QL15 written in part (the templates `bench/configs/E.yaml` and `F.yaml`,
-their golden files and tests, the `bench/README.md` rows; 2026-10-11) without running anything:
-the benchmark run and `summary.md` are the operator's, so QL15 stays open and Q2 and Q3 stay `[~]`.
+Status: **in progress** (specified 2026-10-08; 2026-10-11): QL01–QL14 done. The four gates
+(`scripts/check.sh`, root and `bench/`, outside the sandbox) passed on 2026-10-11 over all of
+them, including the tasks that were written without running anything (QL05, QL07–QL10, QL13,
+QL14), and the live suite (`go test -tags security ./test/security/...`, V-verify-1…4) passed
+on claude 2.1.293 the same day (QL06, D16). One remains, the operator's: QL15 (the templates
+`bench/configs/E.yaml` and `F.yaml`, their golden files and tests are done; the benchmark run
+of E, D, F and B and its `summary.md` wait for BM15 and BM16). TODO.md Q1, Q5, Q6 and Q7 are
+`[x]`; Q2 and Q3 wait for QL15.
+
+The owner went through TODO.md Q1–Q8 one by one. Q1, Q2, Q3, Q5, Q6 and Q7 are in this spec.
+Q4 (worktree isolation) gets its own spec together with W1. Q8 (the cost of the decision rounds)
+waits for the benchmark decision B4. The decisions are in `SPEC.md` §14 and the author's
+defaults in §15. What was built differently, and why, is in each task's "As built" section.
 
 | document | role |
 |---|---|
@@ -64,15 +45,15 @@ step runs on one model regardless of how simple the task is. This phase:
 | [QL03](tasks/TASK-QL03-checks.md) | `checks:` in the test step and the pre-run test ✓ | Q5 | M | — |
 | [QL04](tasks/TASK-QL04-verify-server.md) | `internal/verify`: stdio MCP server, `run_tests`, `run_check` ✓ | Q2 | M | QL03 |
 | [QL05](tasks/TASK-QL05-verify-wiring.md) | verify in the implement step: config, fail-fast, dispatcher, record ✓ | Q2 | M | QL04 |
-| [QL06](tasks/TASK-QL06-verify-live.md) | live security checks for verify, decision D16 | Q2 | S | QL05 |
+| [QL06](tasks/TASK-QL06-verify-live.md) | live security checks for verify, decision D16 ✓ | Q2 | S | QL05 |
 | [QL07](tasks/TASK-QL07-testreport.md) | `internal/testreport`: failing test names ✓ | Q7.2 | M | — |
-| [QL08](tasks/TASK-QL08-no-progress.md) | stop without progress (tree, tests, review) | Q7.1, Q6.4 | M | QL07 |
-| [QL09](tasks/TASK-QL09-baseline-names.md) | old vs new failures in the retry prompt | Q7.3 | S | QL03, QL07 |
-| [QL10](tasks/TASK-QL10-by-complexity.md) | `by_complexity`: model and effort per decided complexity | Q3 | M | — |
+| [QL08](tasks/TASK-QL08-no-progress.md) | stop without progress (tree, tests, review) ✓ | Q7.1, Q6.4 | M | QL07 |
+| [QL09](tasks/TASK-QL09-baseline-names.md) | old vs new failures in the retry prompt ✓ | Q7.3 | S | QL03, QL07 |
+| [QL10](tasks/TASK-QL10-by-complexity.md) | `by_complexity`: model and effort per decided complexity ✓ | Q3 | M | — |
 | [QL11](tasks/TASK-QL11-fix-medium.md) | `review.fix_medium` ✓ | Q6.3 | M | QL02 |
 | [QL12](tasks/TASK-QL12-extra-reviewers.md) | extra reviewers `actions.review.models` ✓ | Q6.5 | M | QL02 |
-| [QL13](tasks/TASK-QL13-integration.md) | integration scenarios 33+ | — | M | QL01–QL12 |
-| [QL14](tasks/TASK-QL14-documentation.md) | MVP.md §44 and others, CLAUDE.md, README, example config, TODO.md | — | S | QL13 |
+| [QL13](tasks/TASK-QL13-integration.md) | integration scenarios 33+ ✓ | — | M | QL01–QL12 |
+| [QL14](tasks/TASK-QL14-documentation.md) | MVP.md §44 and others, CLAUDE.md, README, example config, TODO.md ✓ | — | S | QL13 |
 | [QL15](tasks/TASK-QL15-bench-configs.md) | benchmark configurations E (verify) and F (by_complexity) | Q2, Q3 | S | QL14, BM16 |
 
 ```

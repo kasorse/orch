@@ -43,9 +43,14 @@ D16.
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty ·
 `go test -tags security ./test/security/...`
 
-## Status
+## As built (2026-10-11)
 
-Open. Written without running anything; what remains is the operator's:
+Done. The operator ran `go test -tags security ./test/security/...` on claude
+2.1.293 with a working bubblewrap 0.9.0: green, V-verify-1…4 included. The four other gates
+(`scripts/check.sh`, root and `bench/`) passed the same day. D16's "Results" in
+`specs/permissions/DECISIONS.md` record it.
+
+What remained for the operator when the task was written (now done):
 
 - run the gates above, the last one on a host with `claude`, network and a working `bwrap`
   (the V-verify tests skip without bwrap);

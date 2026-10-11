@@ -1,6 +1,6 @@
 # Spec: Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-08): BM01–BM13 are built, and §13 is written up as built in
+Status: **in progress** (2026-10-11): BM01–BM14 are done, and §13 is written up as built in
 `bench/README.md` (BM14; kept in sync with `orchbench --help` by
 `bench/cmd/orchbench/readme_test.go`); where they differ, the code and `bench/README.md` win.
 Not built yet: the task set (BM15), the runs (BM16), the decision (BM17), §17 (BM18). The questions of §14 are answered (2026-10-06, all as

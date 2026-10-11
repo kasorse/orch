@@ -203,10 +203,14 @@ cannot reach it.
 of `specs/quality/SPEC.md` §6.10): only the configured commands run and a filter with shell
 syntax is refused; a planted protected file is refused by claude or by the server; the model
 can neither write nor read the verify directory; the argv keeps `--tools
-Read,Grep,Glob,Edit,Write`, and a Bash call does nothing. Results: **not yet recorded.**
-The run needs the installed `claude`, the network and `bwrap`, which the change that added
-the tests could not use. Whoever runs the suite adds the output of `claude --version`, the
-date, and the result of each V-verify here, as D15 does.
+Read,Grep,Glob,Edit,Write`, and a Bash call does nothing.
+
+**Results.** 2026-10-11, claude 2.1.293, bubblewrap 0.9.0 (its sandbox probe passes on the
+host, so the V-verify tests ran rather than skipped): the whole live suite
+(`go test -tags security ./test/security/...`) is green, V-verify-1…4 included, and every
+earlier authority check still holds. The run was not verbose, so which of its two accepted
+outcomes V-verify-2 took (claude refusing the writes, or the server refusing the run and
+writing `violation`) is not recorded; both mean nothing ran over a planted file.
 
 ## Fate of v1
 

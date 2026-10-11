@@ -63,11 +63,11 @@ outside the sandbox
 Scenarios 33–46 and the fake-CLI changes are written as planned, except as listed.
 
 - **Gates:** written without being able to run anything, so the four gates (`scripts/check.sh`)
-  are the operator's to run, and QL13 stays unticked in `README.md` until they pass. The
-  scenarios were checked against the code by reading only. Nothing was run against a real
-  `bwrap` or `claude`. A red scenario may expose a bug in QL04, QL05 or QL08–QL10, which were
-  written the same way: read the failing assertion against the as-built note of the task it
-  tests before changing either side. Scenarios 1–32 were not touched; their only exposure is
+  are the operator's to run. They passed on 2026-10-11 (root and `bench/`, outside the
+  sandbox). The scenarios were first checked against the code by reading only. Nothing was
+  run against a real `bwrap` or `claude`. A red scenario may expose a bug in QL04, QL05 or
+  QL08–QL10, which were written the same way: read the failing assertion against the as-built
+  note of the task it tests before changing either side. Scenarios 1–32 were not touched; their only exposure is
   the shared fake CLI and `writeConfig`, whose output for a config that sets none of the new
   options is the text it was before.
 - **Fake CLI (`fakeexec.ProviderScript`):**

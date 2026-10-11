@@ -64,7 +64,8 @@ the same issues (`SPEC.md` §8.1).
 Done as planned, except:
 
 - **Gates:** the change was written without being able to run anything, so the four gates
-  (`scripts/check.sh`) are the operator's to run; this task stays open until they pass.
+  (`scripts/check.sh`) are the operator's to run. They passed on 2026-10-11 (root and `bench/`, outside
+  the sandbox).
 - **Which signal is read:** `NoProgress` looks at the last completed execution only. After an
   implement it reads the tree; after a test, the tests; after a review, the review. A hard-failed
   last step is not judged. The engine calls it right after a recorded implement (tree), and after

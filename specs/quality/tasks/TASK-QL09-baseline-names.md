@@ -36,3 +36,29 @@ exit code (`SPEC.md` §8.3).
 ## Gates
 
 `go build ./...` · `go vet ./...` · `go test ./...` · `gofmt -l .` empty
+
+## As built (2026-10-11)
+
+Done as planned (commit b292455, 2026-10-10), except:
+
+- **Gates:** written without being able to run anything; the four gates (`scripts/check.sh`, root
+  and `bench/`) passed on 2026-10-11, outside the sandbox.
+- **Fewer files.** The pre-run test and the `test` step share one path (`action/testaction.go`),
+  which since QL07 runs `testreport.Parse` on every test result, so `run.json: pre_run_test`
+  already carried `failed_tests` and `report_format`. No change was needed in `internal/app`,
+  `domain/run.go` (`PreRunTest` is a `*TestResult`) or `persistence` (QL07 validates the
+  fields). On resume the names come back through `Restore` → `applyPreRunTest`, as before.
+- **Split:** `domain.SplitFailedTests(pre, cur)` (in `artifact.go`, so `action` and `report`
+  share it) gives old, new and `ok`; `ok` is false unless both sides have names in the same,
+  non-empty format. The implement request gets the red pre-run result as a new `PreRunTest`
+  field, kept after the first test step (the pre-run output itself is shown only until then);
+  `writeFailureSplit` in `prompts.go` prints the two lines (each capped at 30 names) instead of
+  the QL07 line, or the QL07 line alone when there is no split.
+- **Tests:** prompt tests in `action/prompts_failingtests_test.go` (`TestPrompts_OldAndNewFailures`,
+  `TestPrompts_NoSplit`, `TestWriteFailureSplit_CapsAndOneLine`) assert the text in place of a
+  golden file; `TestImplementRetry_SplitsOldAndNewFailures` covers the dispatcher and a pre-run
+  record without names; `workflow.TestOutcomeOf_OnlyOldFailuresStillFail` holds that a failure
+  made only of old tests is still a failure. The run-level check is integration scenario 44
+  (QL13).
+- **summary.md:** the "N failing before the run, M new" text is in `report/summary.go`, shown
+  only when the split applies.
