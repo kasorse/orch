@@ -68,7 +68,7 @@ func TestShippedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"A", "B", "Bmock", "C", "D"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"A", "B", "Bmock", "C", "D", "E", "F"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("configs = %v, want %v", names, want)
 	}
 
@@ -82,6 +82,8 @@ func TestShippedConfigs(t *testing.T) {
 		{"Bmock", KindOrchestrator, nil},
 		{"C", KindOrchestrator, []string{"research", "analysis", "planning", "development", "testing", "review"}},
 		{"D", KindOrchestrator, []string{"development", "testing"}},
+		{"E", KindOrchestrator, []string{"development", "testing"}},
+		{"F", KindOrchestrator, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,7 +107,7 @@ func TestShippedConfigs(t *testing.T) {
 }
 
 func TestRenderGolden(t *testing.T) {
-	for _, name := range []string{"B", "C", "D", "Bmock"} {
+	for _, name := range []string{"B", "C", "D", "E", "F", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			c := load(t, name)
 			out, sha, err := c.RenderConfig(goldenTask())
@@ -189,6 +191,37 @@ func TestOrchestratorConfigsDifferOnlyInTheDecision(t *testing.T) {
 	}
 }
 
+// E is D and F is B, each with one change to actions.implement: E turns verify on, F routes
+// a simple task to a cheaper model at low effort. The comparison E against D and F against B
+// measures that change only, so nothing else may differ.
+func TestEAndFDifferFromDAndBOnlyInImplement(t *testing.T) {
+	for _, tc := range []struct {
+		name, base string
+		extra      map[string]any
+	}{
+		{"E", "D", map[string]any{"verify": true}},
+		{"F", "B", map[string]any{"by_complexity": map[string]any{"simple": map[string]any{"model": "haiku", "effort": "low"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := renderedMap(t, tc.base)
+			actions, ok := want["actions"].(map[string]any)
+			if !ok {
+				t.Fatalf("actions is not a mapping: %v", want["actions"])
+			}
+			implement, ok := actions["implement"].(map[string]any)
+			if !ok {
+				t.Fatalf("actions.implement is not a mapping: %v", actions["implement"])
+			}
+			for k, v := range tc.extra {
+				implement[k] = v
+			}
+			if got := renderedMap(t, tc.name); !reflect.DeepEqual(got, want) {
+				t.Errorf("%s differs from %s beyond actions.implement:\n got %v\nwant %v", tc.name, tc.base, got, want)
+			}
+		})
+	}
+}
+
 // The configs are orchestrator.example.yaml with the per-task fields filled in, as the
 // template comment says. A change to the example's thresholds, limits or models must be made
 // here too, or the benchmark measures a configuration nobody runs.
@@ -198,6 +231,7 @@ func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// E and F are not listed: they are held to D and B above, which are held to the example.
 	for _, name := range []string{"B", "C", "D", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			var example map[string]any
@@ -437,7 +471,7 @@ func TestRenderedConfigsPassOrchestratorValidate(t *testing.T) {
 	tk.TestCommand = "true"
 	tk.Sandbox = task.Sandbox{}
 
-	for _, name := range []string{"B", "C", "D", "Bmock"} {
+	for _, name := range []string{"B", "C", "D", "E", "F", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			out, _, err := load(t, name).RenderConfig(tk)
 			if err != nil {

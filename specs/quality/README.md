@@ -29,7 +29,9 @@ and prompts, an MCP client mode and a planted hook; 2026-10-10) without running 
 stays open until its gates have run; QL14 written (MVP.md §44 and the sections that point to
 it, CLAUDE.md, README.md, the example config; 2026-10-11) without running anything, so it stays
 open until its gates have run, and the TODO.md statuses it names stay `[~]` until QL06, QL08–QL10
-and QL13 are closed; QL15 has not started.
+and QL13 are closed; QL15 written in part (the templates `bench/configs/E.yaml` and `F.yaml`,
+their golden files and tests, the `bench/README.md` rows; 2026-10-11) without running anything:
+the benchmark run and `summary.md` are the operator's, so QL15 stays open and Q2 and Q3 stay `[~]`.
 
 | document | role |
 |---|---|

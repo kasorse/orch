@@ -244,7 +244,8 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
    - **B. orchestrator auto** (decision provider = claude).
    - **C. orchestrator, все стадии** (`--stage` × 6).
    - **D. orchestrator, только implement + test.**
-   - **E.** после Q1/Q2 — новые варианты.
+   - **E.** после Q1/Q2 — новые варианты. Шаблоны E (D + verify) и F (B + `by_complexity`)
+     лежат в `bench/configs/` (QL15); прогона по ним ещё не было.
 4. Метрики: pass rate по оракулу, стоимость в $ (из `usage` в stream-json и таблицы цен в
    конфиге бенча), общее время, число LLM-вызовов, доля времени и стоимости на decision
    rounds, число fix-итераций, размер diff, совпадение выбранных стадий с
@@ -367,7 +368,9 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
 QL05 — подключение: `actions.implement.verify: true` и `limits.verify`, встроенный сервер
 `orch` в `--mcp-config` шага implement, `verify_calls` в `run.json`, строка `Verify` в
 `summary.md`, очистка устаревших `orch-verify-*`. Тоже написано без запуска.
-Остаётся `[~]` до QL06 (live-проверки).
+QL15 (2026-10-11) — шаблон `bench/configs/E.yaml` (D + `implement.verify: true`, без
+`checks:`); сам прогон E против D не сделан (нужны живой claude, bwrap и набор задач BM15).
+Остаётся `[~]` до QL06 (live-проверки) и прогона E против D в бенче.
 
 ### [~] Q3. Сложность управляет моделью и effort — P1 · M
 **Зачем:** 0.1. Это главный источник экономии, который адаптивность может дать
@@ -396,7 +399,9 @@ pass rate.
 **Написано (2026-10-10):** QL10 — пп. 1–5: `by_complexity` в конфиге действия, `Route`,
 `model_source` в `run.json`, `models` в `decision.json`, предупреждение при `resume`, если
 модель или effort оставшегося шага изменились. Написано без запуска: шлюзы за оператором,
-задача QL10 открыта до них. Остаётся `[~]` до QL10 и QL15 (сравнение в бенче).
+задача QL10 открыта до них. QL15 (2026-10-11) — шаблон `bench/configs/F.yaml` (B +
+`by_complexity.simple: {model: haiku, effort: low}` у implement); сам прогон F против B не
+сделан. Остаётся `[~]` до QL10 и прогона F против B в бенче.
 
 ### [ ] Q4. Изоляция run'а в git worktree — P1 · L
 **Зачем:** 0.4. Разработчик продолжает работать. Чистое дерево не требуется. Откат
