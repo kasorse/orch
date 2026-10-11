@@ -24,7 +24,9 @@ so it stays open until its gates have run; QL10 written (`actions.*.by_complexit
 resume, the derived outcome reported to the observer; 2026-10-10), `scripts/check.sh` passed;
 QL12 done (`actions.review.models`, `mergeReviews`, `ReviewResult.reviewers`,
 `CallReport.extra_calls`, the `summary.md` "Reviewers" row; 2026-10-10), `scripts/check.sh`
-passed; QL13–QL15 have not started.
+passed; QL13 written (integration scenarios 33–46, the fake CLI's per-call implement answers
+and prompts, an MCP client mode and a planted hook; 2026-10-10) without running anything, so it
+stays open until its gates have run; QL14 and QL15 have not started.
 
 | document | role |
 |---|---|
