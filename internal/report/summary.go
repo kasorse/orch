@@ -66,16 +66,46 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		tokens(u.PromptTokens()), tokens(u.InputTokens), tokens(u.CacheReadTokens), tokens(u.CacheCreationTokens), tokens(u.OutputTokens)))
 	row("Provider calls", fmt.Sprintf("%d", out.Usage.Calls))
 
+	if out.VerifyCalls > 0 {
+		// A refused call ran nothing, so it never passed.
+		passed := 0
+		for _, e := range run.Executions {
+			for _, c := range e.VerifyCalls {
+				if c.Refused == "" && c.Success {
+					passed++
+				}
+			}
+		}
+		row("Verify", fmt.Sprintf("%s, %d passed", plural(out.VerifyCalls, "call"), passed))
+	}
+
 	tests := "not run"
 	if p := out.TestsPassedFinal; p != nil {
 		tests = map[bool]string{true: "passed", false: "failed"}[*p]
+		if !*p {
+			// A failed check means the tests did not run (specs/quality/SPEC.md §5.3).
+			for i := len(run.Executions) - 1; i >= 0; i-- {
+				if t := run.Executions[i].TestResult; t != nil {
+					if t.FailedCheck != "" {
+						tests = "failed (check " + t.FailedCheck + ")"
+					}
+					break
+				}
+			}
+		}
 	}
 	row("Tests (last run)", tests)
+	if line := baselineSplit(run); line != "" {
+		row("Failing tests", line)
+	}
 	verdict := noValue
 	if out.ReviewVerdict != "" {
 		verdict = string(out.ReviewVerdict)
 	}
 	row("Review verdict", verdict)
+	if names := reviewerNames(run); names != "" {
+		row("Reviewers", names)
+	}
 	change := noValue
 	if out.Diff != nil {
 		change = diffLine(*out.Diff)
@@ -84,6 +114,44 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
+}
+
+// reviewerNames lists the models whose answers the last review merged (actions.review.models),
+// "sonnet, opus"; "" when it had a single reviewer or the run has no review.
+func reviewerNames(run domain.Run) string {
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		r := run.Executions[i].ReviewResult
+		if r == nil {
+			continue
+		}
+		names := make([]string, len(r.Reviewers))
+		for j, a := range r.Reviewers {
+			names[j] = a.Model
+		}
+		return strings.Join(names, ", ")
+	}
+	return ""
+}
+
+// baselineSplit is how many of the last failed test's parsed failures were already failing
+// before the run started (run --allow-red-tests) and how many are new; "" when the run did not
+// start red or the two have no names in the same format. A hint: the exit code decides.
+func baselineSplit(run domain.Run) string {
+	if run.PreRunTest == nil || run.PreRunTest.Success {
+		return ""
+	}
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		t := run.Executions[i].TestResult
+		if t == nil {
+			continue
+		}
+		old, fresh, ok := domain.SplitFailedTests(run.PreRunTest, t)
+		if !ok || t.Success {
+			return ""
+		}
+		return fmt.Sprintf("%d failing before the run, %d new", len(old), len(fresh))
+	}
+	return ""
 }
 
 func decisionLine(run domain.Run, trace *domain.DecisionTrace) string {
@@ -179,11 +247,24 @@ func stepResult(e domain.StepExecution) string {
 		if e.TestResult.Success {
 			return "passed"
 		}
+		if c := e.TestResult.FailedCheck; c != "" {
+			return fmt.Sprintf("failed (check %s, exit %d)", c, e.TestResult.ExitCode)
+		}
 		return fmt.Sprintf("failed (exit %d)", e.TestResult.ExitCode)
 	case e.ReviewResult != nil:
-		return fmt.Sprintf("%s (%s)", e.ReviewResult.Decide(), plural(len(e.ReviewResult.Issues), "issue"))
+		return fmt.Sprintf("%s (%s)", e.ReviewResult.Decide(), reviewCounts(*e.ReviewResult))
 	}
 	return string(e.Status)
+}
+
+// reviewCounts is the issue count, and the criteria met out of the total when the review
+// judged any.
+func reviewCounts(r domain.ReviewResult) string {
+	s := plural(len(r.Issues), "issue")
+	if n := len(r.Criteria); n > 0 {
+		s += fmt.Sprintf(", %d/%d criteria met", n-len(r.UnmetCriteria()), n)
+	}
+	return s
 }
 
 func writeTools(b *strings.Builder, run domain.Run) {
@@ -247,6 +328,10 @@ func writeNotes(b *strings.Builder, run domain.Run) {
 		if e.Usage != nil && e.Usage.Partial {
 			notes = append(notes, fmt.Sprintf("#%d %s ended without the CLI's final report: its tokens are summed from the "+
 				"messages it streamed, the output tokens are a lower bound, and its cost is unknown.", e.Index, e.Action))
+		}
+		if e.Call != nil && len(e.Call.MCPFailed) > 0 {
+			notes = append(notes, fmt.Sprintf("#%d %s ran without MCP server(s) %s: the CLI could not start them "+
+				"(run the configured command by hand to see why).", e.Index, e.Action, strings.Join(e.Call.MCPFailed, ", ")))
 		}
 		if e.Error != "" {
 			notes = append(notes, fmt.Sprintf("#%d %s failed: %s", e.Index, e.Action, failureLine(e.Error)))

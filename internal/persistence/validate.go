@@ -12,6 +12,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/secretscan"
+	"orchestrator/internal/testreport"
 )
 
 // validateRun applies the structural checks of specs/resume/SPEC.md §6.3 to a decoded
@@ -51,8 +52,16 @@ func validateRun(run *domain.Run, runID string) error {
 	if err := validateSecretScan(run); err != nil {
 		return err
 	}
-	if t := run.PreRunTest; t != nil && (t.Success != (t.ExitCode == 0) || t.Duration < 0) {
-		return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+	if t := run.PreRunTest; t != nil {
+		if t.Success != (t.ExitCode == 0) || t.Duration < 0 {
+			return fmt.Errorf("pre_run_test: inconsistent result (exit code %d, success %v, duration %s)", t.ExitCode, t.Success, t.Duration)
+		}
+		if err := validateChecks(*t); err != nil {
+			return fmt.Errorf("pre_run_test: %w", err)
+		}
+		if err := validateReport(*t); err != nil {
+			return fmt.Errorf("pre_run_test: %w", err)
+		}
 	}
 	if o := run.Outcome; o != nil {
 		if err := validateOutcome(o, run.Status); err != nil {
@@ -99,6 +108,9 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	if exec.Provider != nil && exec.Provider.Authority != "" && !exec.Provider.Authority.Valid() {
 		return fmt.Errorf("unknown authority %q", exec.Provider.Authority)
 	}
+	if exec.Provider != nil && exec.Provider.ModelSource != "" && !domain.ValidModelSource(exec.Provider.ModelSource) {
+		return fmt.Errorf("unknown model_source %q", exec.Provider.ModelSource)
+	}
 	if exec.Attempt < 0 {
 		return fmt.Errorf("attempt is %d", exec.Attempt)
 	}
@@ -120,9 +132,132 @@ func validateExecution(exec domain.StepExecution, i int) error {
 			return fmt.Errorf("diff: %w", err)
 		}
 	}
+	if exec.TreeAfter != "" {
+		if exec.Action != domain.ActionImplement {
+			return fmt.Errorf("tree_after recorded on a %s step", exec.Action)
+		}
+		if !isCommitSHA(exec.TreeAfter) {
+			return fmt.Errorf("tree_after %q is not a git tree id", exec.TreeAfter)
+		}
+	}
+	if err := validateVerifyCalls(exec); err != nil {
+		return fmt.Errorf("verify_calls: %w", err)
+	}
+	if exec.TestResult != nil {
+		if err := validateChecks(*exec.TestResult); err != nil {
+			return fmt.Errorf("test_result: %w", err)
+		}
+		if err := validateReport(*exec.TestResult); err != nil {
+			return fmt.Errorf("test_result: %w", err)
+		}
+	}
+	if exec.ReviewResult != nil {
+		if exec.Action != domain.ActionReview {
+			return fmt.Errorf("review_result recorded on step action %s", exec.Action)
+		}
+		if err := exec.ReviewResult.ValidateCriteria(); err != nil {
+			return fmt.Errorf("review_result.criteria: %w", err)
+		}
+		// A run.json is read back without ReviewResult.Validate, which only runs where
+		// a review is parsed, so the reviewers (nested, model-answered, and the part that
+		// breaks a resume if nested again) are checked here on their own.
+		if err := exec.ReviewResult.ValidateReviewers(); err != nil {
+			return fmt.Errorf("review_result.reviewers: %w", err)
+		}
+	}
 	// The path is only compared, never used: readers derive it from index and action.
 	if want := ArtifactRelPath(i, exec.Action); exec.ArtifactPath != "" && exec.ArtifactPath != want {
 		return fmt.Errorf("artifact_path is %q, want %q", exec.ArtifactPath, want)
+	}
+	return nil
+}
+
+// validateVerifyCalls checks the verify calls an implement step recorded (specs/quality/
+// SPEC.md §6.8, §12); each entry through domain.VerifyCall.Validate.
+func validateVerifyCalls(exec domain.StepExecution) error {
+	calls := exec.VerifyCalls
+	if len(calls) == 0 {
+		return nil
+	}
+	if exec.Action != domain.ActionImplement {
+		return fmt.Errorf("recorded on a %s step", exec.Action)
+	}
+	if len(calls) > domain.MaxVerifyCalls {
+		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxVerifyCalls)
+	}
+	for i, c := range calls {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// validateChecks checks the checks a test result lists and its failed_check
+// (specs/quality/SPEC.md §5.3). A result written before checks existed has neither. The
+// names end up in log file names, so each must have the shape a config allows.
+//
+// The sequence stops at the first non-zero exit, so a failed check is the last one listed and
+// every earlier one passed; without a failed check every listed one passed, and the top-level
+// result can only be red through test.command.
+func validateChecks(t domain.TestResult) error {
+	if len(t.Checks) > domain.MaxChecks {
+		return fmt.Errorf("checks: %d entries, at most %d", len(t.Checks), domain.MaxChecks)
+	}
+	seen := map[string]bool{}
+	for i, c := range t.Checks {
+		switch {
+		case !domain.CheckNameRE.MatchString(c.Name):
+			return fmt.Errorf("checks[%d]: name %q is not a check name", i, c.Name)
+		case seen[c.Name]:
+			return fmt.Errorf("checks[%d]: name %q appears more than once", i, c.Name)
+		case c.Success != (c.ExitCode == 0) || c.Duration < 0:
+			return fmt.Errorf("checks[%d]: inconsistent result (exit code %d, success %v, duration %s)", i, c.ExitCode, c.Success, c.Duration)
+		}
+		seen[c.Name] = true
+		if last := i == len(t.Checks)-1; !c.Success && !(last && t.FailedCheck == c.Name) {
+			return fmt.Errorf("checks[%d]: %q failed, but the sequence goes on after it or failed_check does not name it", i, c.Name)
+		}
+	}
+	if t.FailedCheck == "" {
+		return nil
+	}
+	if !domain.CheckNameRE.MatchString(t.FailedCheck) {
+		return fmt.Errorf("failed_check %q is not a check name", t.FailedCheck)
+	}
+	if n := len(t.Checks); n == 0 || t.Checks[n-1].Name != t.FailedCheck || t.Checks[n-1].Success {
+		return fmt.Errorf("failed_check %q is not the last entry of checks, or that entry did not fail", t.FailedCheck)
+	}
+	if t.Success {
+		return fmt.Errorf("failed_check %q on a successful result", t.FailedCheck)
+	}
+	return nil
+}
+
+// validateReport checks the failing tests a test result lists (specs/quality/SPEC.md §8.2,
+// §12). They are only recorded for a failed run, in a known format, at most testreport.MaxNames
+// of them and each a single line of at most testreport.MaxNameBytes. A result written before
+// the fields existed has neither. The names reach a prompt, so a run directory edited by
+// hand cannot smuggle a line break or an oversized name into one.
+func validateReport(t domain.TestResult) error {
+	if t.ReportFormat == "" && len(t.FailedTests) == 0 {
+		return nil
+	}
+	switch {
+	case t.Success:
+		return fmt.Errorf("failed_tests or report_format on a successful result")
+	case !testreport.KnownFormat(t.ReportFormat):
+		return fmt.Errorf("report_format %q is not a known format", t.ReportFormat)
+	case len(t.FailedTests) > testreport.MaxNames:
+		return fmt.Errorf("failed_tests: %d entries, at most %d", len(t.FailedTests), testreport.MaxNames)
+	}
+	for i, n := range t.FailedTests {
+		switch {
+		case n == "" || len(n) > testreport.MaxNameBytes:
+			return fmt.Errorf("failed_tests[%d]: %d bytes, want 1 to %d", i, len(n), testreport.MaxNameBytes)
+		case strings.ContainsFunc(n, unicode.IsControl):
+			return fmt.Errorf("failed_tests[%d]: has a control character", i)
+		}
 	}
 	return nil
 }
@@ -225,7 +360,7 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 	if o.Status != runStatus {
 		return fmt.Errorf("status %q is not the run's status %q", o.Status, runStatus)
 	}
-	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 {
+	if o.FixIterations < 0 || o.DurationMS < 0 || o.ActiveMS < 0 || o.VerifyCalls < 0 {
 		return fmt.Errorf("negative counter")
 	}
 	if v := o.ReviewVerdict; v != "" && v != domain.ReviewPass && v != domain.ReviewFail {
@@ -247,6 +382,20 @@ func validateOutcome(o *domain.Outcome, runStatus domain.RunStatus) error {
 }
 
 // validateDecisionUsage checks the usage decision.json records for each decision call.
+// validateDecisionModels checks decision.json's models: each key an action and each source
+// one a run can record.
+func validateDecisionModels(models map[string]domain.ModelRoute) error {
+	for action, r := range models {
+		if !domain.ActionType(action).Valid() {
+			return fmt.Errorf("models: unknown action %q", action)
+		}
+		if !domain.ValidModelSource(r.Source) {
+			return fmt.Errorf("models.%s: unknown source %q", action, r.Source)
+		}
+	}
+	return nil
+}
+
 func validateDecisionUsage(u *domain.DecisionUsage) error {
 	if u == nil {
 		return nil

@@ -53,7 +53,12 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Sprintf("limits.max_fix_iterations must be positive, got %d", cfg.Limits.MaxFixIterations))
 	}
 
+	problems = append(problems, checkProblems(cfg)...)
+	problems = append(problems, byComplexityProblems(cfg)...)
+	problems = append(problems, extraReviewerProblems(cfg)...)
+
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
+	problems = append(problems, verifyProblems(cfg)...)
 
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
@@ -104,6 +109,166 @@ func Validate(cfg Config) error {
 		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n")),
 		nil,
 	)
+}
+
+// verifyProblems validates actions.implement.verify and limits.verify (specs/quality/SPEC.md
+// §6.3). The key belongs to implement alone; the model triggers these runs, so they need
+// the sandbox, and the server is built into the claude adapter's MCP support.
+func verifyProblems(cfg Config) []string {
+	var problems []string
+	others := []struct {
+		name string
+		a    ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"review", cfg.Actions.Review},
+	}
+	for _, o := range others {
+		if o.a.verifySet || o.a.Verify {
+			problems = append(problems, fmt.Sprintf("actions.%s.verify: unknown key (verify is accepted only on actions.implement)", o.name))
+		}
+	}
+	if cfg.Actions.Implement.Verify {
+		if strings.TrimSpace(cfg.Test.Command) == "" {
+			problems = append(problems, "actions.implement.verify needs test.command: it is the command the verify tool runs")
+		}
+		if !cfg.Test.Sandboxed() {
+			problems = append(problems, "actions.implement.verify needs test.sandbox bwrap: the model triggers these runs, so they never run unsandboxed")
+		}
+		if p := cfg.Actions.Implement.Provider; p != "" && p != "claude" {
+			problems = append(problems, fmt.Sprintf("actions.implement.verify is only supported with provider claude, got %s", p))
+		}
+	}
+	v := cfg.Limits.Verify
+	if v.MaxCallsPerStep != nil && (*v.MaxCallsPerStep < 1 || *v.MaxCallsPerStep > domain.MaxVerifyCalls) {
+		problems = append(problems, fmt.Sprintf("limits.verify.max_calls_per_step must be between 1 and %d, got %d", domain.MaxVerifyCalls, *v.MaxCallsPerStep))
+	}
+	if v.Timeout() <= 0 {
+		problems = append(problems, fmt.Sprintf("limits.verify.call_timeout must be a positive duration, got %s", v.Timeout()))
+	}
+	return problems
+}
+
+// checkProblems validates checks (specs/quality/SPEC.md §5.1): at most domain.MaxChecks,
+// each with a name matching domain.CheckNameRE, unique, and a command; and test.command,
+// since checks run inside the test step.
+func checkProblems(cfg Config) []string {
+	var problems []string
+	if len(cfg.Checks) > domain.MaxChecks {
+		problems = append(problems, fmt.Sprintf("checks: %d checks, at most %d", len(cfg.Checks), domain.MaxChecks))
+	}
+	if len(cfg.Checks) > 0 && strings.TrimSpace(cfg.Test.Command) == "" {
+		problems = append(problems, "checks need test.command: they run inside the test step, which needs its command")
+	}
+	seen := map[string]bool{}
+	for i, c := range cfg.Checks {
+		if !domain.CheckNameRE.MatchString(c.Name) {
+			problems = append(problems, fmt.Sprintf("checks[%d].name %q must match %s", i, c.Name, domain.CheckNameRE))
+		} else if seen[c.Name] {
+			problems = append(problems, fmt.Sprintf("checks[%d].name %q is used by an earlier check", i, c.Name))
+		}
+		seen[c.Name] = true
+		if strings.TrimSpace(c.Command) == "" {
+			problems = append(problems, fmt.Sprintf("checks[%d].command is required", i))
+		}
+	}
+	return problems
+}
+
+// byComplexityProblems validates every action's by_complexity (specs/quality/SPEC.md §9.1):
+// the keys are complexities, each entry names a model or an effort, and an effort follows
+// the rules of the action's own effort - a level the CLI knows, on a provider that accepts it.
+func byComplexityProblems(cfg Config) []string {
+	var problems []string
+	for _, a := range []struct {
+		name   string
+		action ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"implement", cfg.Actions.Implement},
+		{"review", cfg.Actions.Review},
+	} {
+		levels := make([]string, 0, len(a.action.ByComplexity))
+		for c := range a.action.ByComplexity {
+			levels = append(levels, string(c))
+		}
+		slices.Sort(levels)
+		for _, level := range levels {
+			key := fmt.Sprintf("actions.%s.by_complexity.%s", a.name, level)
+			if _, err := domain.ParseComplexity(level); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: %q is not a complexity (want %s)", key, level, complexityNames()))
+				continue
+			}
+			entry := a.action.ByComplexity[domain.Complexity(level)]
+			if strings.TrimSpace(entry.Model) == "" && entry.Effort == "" {
+				problems = append(problems, key+" needs a model or an effort")
+				continue
+			}
+			switch {
+			case entry.Effort == "":
+			case !slices.Contains(EffortLevels, entry.Effort):
+				problems = append(problems, fmt.Sprintf("%s.effort %q must be one of: %s", key, entry.Effort, strings.Join(EffortLevels, ", ")))
+			case a.action.Provider != string(provider.Claude):
+				problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, a.action.Provider))
+			}
+		}
+	}
+	return problems
+}
+
+// extraReviewerProblems validates actions.review.models (specs/quality/SPEC.md §7.5): at most
+// MaxExtraReviewers non-empty names, none repeated and none the base model or one of the
+// review by_complexity models, which would only ask the same question twice. The key belongs to review alone.
+func extraReviewerProblems(cfg Config) []string {
+	var problems []string
+	for _, o := range []struct {
+		name string
+		a    ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"implement", cfg.Actions.Implement},
+	} {
+		if o.a.modelsSet || len(o.a.Models) > 0 {
+			problems = append(problems, fmt.Sprintf("actions.%s.models: unknown key (models is accepted only on actions.review)", o.name))
+		}
+	}
+	review := cfg.Actions.Review
+	if len(review.Models) > MaxExtraReviewers {
+		problems = append(problems, fmt.Sprintf("actions.review.models: %d models, at most %d", len(review.Models), MaxExtraReviewers))
+	}
+	// The base reviewer is the base model, or the by_complexity model the decided complexity
+	// routes to, so an extra reviewer must differ from every one of them.
+	seen := map[string]bool{strings.TrimSpace(review.Model): true}
+	for _, e := range review.ByComplexity {
+		if name := strings.TrimSpace(e.Model); name != "" {
+			seen[name] = true
+		}
+	}
+	for i, m := range review.Models {
+		name := strings.TrimSpace(m)
+		switch {
+		case name == "":
+			problems = append(problems, fmt.Sprintf("actions.review.models[%d] must not be empty", i))
+		case seen[name]:
+			problems = append(problems, fmt.Sprintf("actions.review.models[%d] %q repeats the base model, a by_complexity model or an earlier entry", i, m))
+		}
+		seen[name] = true
+	}
+	return problems
+}
+
+func complexityNames() string {
+	var names []string
+	for _, c := range domain.ComplexityOrder() {
+		names = append(names, string(c))
+	}
+	return strings.Join(names, ", ")
 }
 
 // EffortLevels are the accepted values of an action's effort, as the claude CLI names them.

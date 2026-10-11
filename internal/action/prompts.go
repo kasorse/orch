@@ -21,6 +21,13 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 // an operator skimming the run.
 const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
 
+// acceptanceCriteriaRule tells plan what a criterion is (specs/quality/SPEC.md §4.2). parsePlan
+// enforces the same cap.
+const acceptanceCriteriaRule = `"acceptance_criteria" lists what must be true of the result for the task to be done. ` +
+	`Each criterion is one observable, checkable statement about the result, for example ` +
+	`"function X returns ErrEmpty for an empty input" or "` + "`go test ./internal/store`" + ` passes". ` +
+	`Give at most 8; write none rather than vague ones.`
+
 // implementSummaryShortRule is implement's variant: its "summary_short" becomes the
 // commit message offered at the end of the run (MVP.md §42.2).
 const implementSummaryShortRule = `"summary_short" is one line of at most 72 characters, without a trailing period, ` +
@@ -56,13 +63,16 @@ const implementOperatorRule = `You can read and edit files; you cannot run comma
 
 // reviewOperatorRule keeps review from failing on what another implement attempt cannot do:
 // sent back as high, such a step loops until max_fix_iterations. It also keeps the reviewer
-// from reading more into the test result than the command covers.
+// from reading more into the test result than the command covers. Tracking that waits on the
+// test command is the operator's too: implement runs before the tests and cannot tick it honestly.
 const reviewOperatorRule = `Implement can only read and edit files: it cannot run commands, use installed tools or reach the network. ` +
 	`The run executes nothing but the test command shown under "Latest test result", from the repository root; ` +
 	`do not assume it covers what it does not run (another module, a linter, a formatter, a live check). ` +
 	`A requirement that can only be met by running something else cannot be fixed by another implementation attempt: ` +
 	`report it as medium with "operator: " at the start of its description, never as critical or high. ` +
-	`The same holds for task tracking left open because it waits on such a step. ` +
+	`The same holds for task tracking left open because it waits on such a step, or on the test command itself: ` +
+	`implement edits before the tests run and cannot know their result, so tracking that waits on a gate is the operator's ` +
+	`to close, even when the latest test result passed. ` +
 	`A claim in the diff or the implementation summary that such a step was done is not evidence that it was.
 
 `
@@ -115,16 +125,45 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: plan\n\n")
 	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
+	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
 	if in.Analysis != nil {
 		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
 			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
+		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
+		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
 	}
 	return b.String()
+}
+
+// writeList writes heading and one "- item" line per non-blank item. Without one it writes
+// nothing, so an empty list leaves no heading behind.
+func writeList(b *strings.Builder, heading string, items []string) {
+	writeItems(b, heading, items, func(int) string { return "- " })
+}
+
+// writeNumberedList is writeList with "1. item" lines, for a list the reader refers to by
+// number.
+func writeNumberedList(b *strings.Builder, heading string, items []string) {
+	writeItems(b, heading, items, func(n int) string { return fmt.Sprintf("%d. ", n) })
+}
+
+func writeItems(b *strings.Builder, heading string, items []string, marker func(n int) string) {
+	n := 0
+	for _, item := range items {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		if n == 0 {
+			b.WriteString(heading + ":\n")
+		}
+		n++
+		b.WriteString(marker(n) + item + "\n")
+	}
 }
 
 func answerField(final bool) string {
@@ -157,7 +196,8 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 // attempt, Analysis/Plan (whichever the workflow produced) are set and
 // PreviousImplementation/LastTestResult/ReviewIssues are nil/empty. On a retry after test
 // failure, LastTestResult carries the failing command/stdout/stderr. On a retry after
-// review failure, ReviewIssues carries the structured issues.
+// review failure, ReviewIssues carries the structured issues and UnmetCriteria the
+// acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
 	Task                   string
 	Analysis               *domain.AnalysisArtifact
@@ -165,12 +205,39 @@ type ImplementPromptInput struct {
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
+	UnmetCriteria          []domain.CriterionVerdict
+	// MediumIssues are the medium issues of a review that passed, for the one retry
+	// review.fix_medium asks for (specs/quality/SPEC.md §7.3).
+	MediumIssues []domain.ReviewIssue
 	// PreRunFailure is the test command's red result before any change, when the operator
 	// started the run with --allow-red-tests (specs/hardening/SPEC.md §8.4).
 	PreRunFailure *domain.TestResult
+	// PreRunTest is the same red pre-run result, kept for a retry after a failed test, where
+	// PreRunFailure is nil: its failing test names are split from the current ones (QL09;
+	// specs/quality/SPEC.md §8.3). It never changes what the step reports.
+	PreRunTest *domain.TestResult
 	// MaxTestOutput bounds LastTestResult's stdout and stderr together, in bytes
 	// (limits.prompt.max_test_output_bytes; BoundTestOutput). 0 embeds them whole.
 	MaxTestOutput int
+	// RunDiffStat is the git diff --stat of what the run has changed so far, for a retry
+	// (renderDiffStat, bounded by limits.prompt.max_diff_bytes). The dispatcher computes it,
+	// so this builder stays pure; "" leaves the section out.
+	RunDiffStat string
+	// Verify is true when the session has the orchestrator's verify tools
+	// (actions.implement.verify; specs/quality/SPEC.md §6.1), and VerifyChecks when it also
+	// has run_check, that is when the config lists checks.
+	Verify, VerifyChecks bool
+}
+
+// implementVerifyRule tells a session with the verify tools to use them. The tests it runs
+// are the operator's test command, so the closing sentence keeps the final run authoritative.
+func implementVerifyRule(withChecks bool) string {
+	tools := "the tool `mcp__orch__run_tests`"
+	if withChecks {
+		tools += " (and its checks with `mcp__orch__run_check`)"
+	}
+	return "You can run the project's tests with " + tools + ". Use them to check your change before you answer. " +
+		"The orchestrator runs the tests again after you finish, and only that run counts."
 }
 
 func BuildImplementPrompt(in ImplementPromptInput) string {
@@ -181,36 +248,100 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString(implementSummaryShortRule + "\n\n")
 	b.WriteString(implementConventionsRule + "\n\n")
 	b.WriteString(implementOperatorRule + "\n\n")
+	if in.Verify {
+		b.WriteString(implementVerifyRule(in.VerifyChecks) + "\n\n")
+	}
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
 	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n\n",
+		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
 			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
+		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
+		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
+		b.WriteString("\n")
 	}
 	if in.Plan != nil {
-		fmt.Fprintf(&b, "Plan:\n%s\nSteps:\n- %s\n\n", in.Plan.Summary, strings.Join(in.Plan.Steps, "\n- "))
+		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
+		writeList(&b, "Steps", in.Plan.Steps)
+		writeList(&b, "Affected files (from plan)", in.Plan.AffectedFiles)
+		writeList(&b, "Risks (from plan)", in.Plan.Risks)
+		writeList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		b.WriteString("\n")
 	}
 	if in.PreviousImplementation != nil {
 		fmt.Fprintf(&b, "Previous implementation attempt:\n%s\n\n", in.PreviousImplementation.Summary)
+		if in.RunDiffStat != "" {
+			b.WriteString("What the run has changed so far (git diff --stat against the run's start):\n")
+			b.WriteString(fence("diffstat", "the git diff --stat of the run so far", in.RunDiffStat))
+			b.WriteString("\n")
+		}
 	}
 
-	if in.PreRunFailure != nil && in.LastTestResult == nil {
-		b.WriteString("The test command already FAILS before any change, and the operator expects that: the task is " +
-			"to make it pass. Its output from before the change:\n\n")
-		fmt.Fprintf(&b, "Test command: %s\nExit code: %d\n\n", in.PreRunFailure.Command, in.PreRunFailure.ExitCode)
-		writeTestOutput(&b, *in.PreRunFailure, in.MaxTestOutput)
+	if r := in.PreRunFailure; r != nil && in.LastTestResult == nil {
+		if r.FailedCheck != "" {
+			fmt.Fprintf(&b, "The check %q (one of the operator's checks, run before the tests) already FAILS before any change, "+
+				"and the operator expects that: the task is to make it pass. The tests did not run. "+
+				"Its output from before the change:\n\n", r.FailedCheck)
+			fmt.Fprintf(&b, "Check command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, checkOutputOwner(r.FailedCheck))
+		} else {
+			b.WriteString("The test command already FAILS before any change, and the operator expects that: the task is " +
+				"to make it pass. Its output from before the change:\n\n")
+			fmt.Fprintf(&b, "Test command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, testOutputOwner)
+		}
 	}
 
-	if in.LastTestResult != nil {
-		b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
-		fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", in.LastTestResult.Command, in.LastTestResult.ExitCode)
-		writeTestOutput(&b, *in.LastTestResult, in.MaxTestOutput)
+	if r := in.LastTestResult; r != nil {
+		if r.FailedCheck != "" {
+			// SPEC §5.4: the check is named, and the prompt says the tests did not run - it
+			// never lets the model assume they pass.
+			fmt.Fprintf(&b, "The previous implementation FAILED the check %q (one of the operator's checks, run before the tests). "+
+				"Fix the implementation so the check passes.\nThe tests did not run: do not assume they pass.\n\n", r.FailedCheck)
+			fmt.Fprintf(&b, "Failing command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			writeTestOutput(&b, *r, in.MaxTestOutput, checkOutputOwner(r.FailedCheck))
+		} else {
+			b.WriteString("The previous implementation FAILED the test command. Fix the implementation so the tests pass.\n\n")
+			fmt.Fprintf(&b, "Failing test command: %s\nExit code: %d\n\n", r.Command, r.ExitCode)
+			shown := *r
+			if writeFailureSplit(&b, in.PreRunTest, r) {
+				shown.FailedTests = nil // the split replaces the plain line
+			}
+			writeTestOutput(&b, shown, in.MaxTestOutput, testOutputOwner)
+		}
 	}
 
-	if len(in.ReviewIssues) > 0 {
-		b.WriteString("A code review FAILED on the previous implementation. Address every issue below.\n\n")
+	if len(in.UnmetCriteria) > 0 || len(in.ReviewIssues) > 0 {
+		switch {
+		case len(in.UnmetCriteria) == 0:
+			b.WriteString("A code review FAILED on the previous implementation. Address every issue below.\n\n")
+		case len(in.ReviewIssues) == 0:
+			b.WriteString("A code review FAILED on the previous implementation. Address every unmet criterion below.\n\n")
+		default:
+			b.WriteString("A code review FAILED on the previous implementation. Address every unmet criterion and every issue below.\n\n")
+		}
+		if len(in.UnmetCriteria) > 0 {
+			// The criterion comes from the plan and the evidence from the review: both are
+			// model output, kept to one line each so they stay list items.
+			b.WriteString("Unmet acceptance criteria:\n")
+			for _, c := range in.UnmetCriteria {
+				fmt.Fprintf(&b, "- %d. %s\n  evidence: %s\n", c.Index, oneLine(c.Criterion), oneLine(c.Evidence))
+			}
+			b.WriteString("\n")
+			if len(in.ReviewIssues) > 0 {
+				b.WriteString("Review issues:\n")
+			}
+		}
 		for _, issue := range in.ReviewIssues {
+			fmt.Fprintf(&b, "- [%s] %s: %s\n", issue.Severity, issue.File, issue.Description)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(in.MediumIssues) > 0 {
+		b.WriteString("A code review passed but noted issues worth fixing. Fix them without changing behavior the task did not ask for:\n\n")
+		for _, issue := range in.MediumIssues {
 			fmt.Fprintf(&b, "- [%s] %s: %s\n", issue.Severity, issue.File, issue.Description)
 		}
 		b.WriteString("\n")
@@ -233,17 +364,84 @@ func TestOutputCut(in ImplementPromptInput) bool {
 	return omitted.Any()
 }
 
+// testOutputOwner and checkOutputOwner say whose output a fence holds, in the fence's
+// description: the test command's, or the failed check's.
+const testOutputOwner = "the test command's"
+
+func checkOutputOwner(check string) string { return fmt.Sprintf("the check %q's", check) }
+
+// maxPromptTests is the most failing test names a retry prompt lists.
+const maxPromptTests = 30
+
+// writeFailingTests names the tests parsed from the output (internal/testreport) on one line
+// above the fenced output, so they survive when the output is cut. The names are a hint: the
+// exit code decided that the run failed. Without names it writes nothing.
+func writeFailingTests(b *strings.Builder, names []string) {
+	if list := nameList(names); list != "" {
+		b.WriteString("Failing tests (parsed from the output): " + list + "\n\n")
+	}
+}
+
+// nameList is the test names on one line, each through oneLine, at most maxPromptTests of
+// them and then "… and N more"; "" when there is no name.
+func nameList(names []string) string {
+	var shown []string
+	for _, n := range names {
+		if n = oneLine(n); n != "" {
+			shown = append(shown, n)
+		}
+	}
+	if len(shown) == 0 {
+		return ""
+	}
+	more := 0
+	if len(shown) > maxPromptTests {
+		more = len(shown) - maxPromptTests
+		shown = shown[:maxPromptTests]
+	}
+	s := strings.Join(shown, ", ")
+	if more > 0 {
+		s += fmt.Sprintf(", … and %d more", more)
+	}
+	return s
+}
+
+// writeFailureSplit tells which of the current failing tests were failing before the run
+// started and which are new (specs/quality/SPEC.md §8.3), and reports whether it wrote
+// anything. It is a hint: the exit code decided that the run failed. When pre and cur have no
+// names in the same format it writes nothing, and the caller writes the plain line.
+func writeFailureSplit(b *strings.Builder, pre, cur *domain.TestResult) bool {
+	old, fresh, ok := domain.SplitFailedTests(pre, cur)
+	if !ok {
+		return false
+	}
+	oldList, freshList := nameList(old), nameList(fresh)
+	if oldList == "" && freshList == "" {
+		return false
+	}
+	if oldList != "" {
+		b.WriteString("Failing before this run started (the task may be to fix them): " + oldList + "\n")
+	}
+	if freshList != "" {
+		b.WriteString("New failures since the run started: " + freshList + "\n")
+	}
+	b.WriteString("\n")
+	return true
+}
+
 // writeTestOutput embeds a test result's stdout and stderr as fenced repository data,
 // bounded by maxBytes (BoundTestOutput; 0 embeds them whole), and says so when it cut.
-func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int) {
+// owner is whose output it is (testOutputOwner or checkOutputOwner).
+func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owner string) {
+	writeFailingTests(b, r.FailedTests)
 	stdout, stderr := r.Stdout, r.Stderr
 	var omitted Omitted
 	if maxBytes > 0 {
 		stdout, stderr, omitted = BoundTestOutput(stdout, stderr, maxBytes)
 	}
-	b.WriteString(fence("stdout", "the test command's stdout", stdout))
+	b.WriteString(fence("stdout", owner+" stdout", stdout))
 	b.WriteString("\n")
-	b.WriteString(fence("stderr", "the test command's stderr", stderr))
+	b.WriteString(fence("stderr", owner+" stderr", stderr))
 	b.WriteString("\n")
 	if omitted.Any() {
 		fmt.Fprintf(b, "The test output above was shortened to fit this prompt: %d lines (%d bytes) were left out "+
@@ -272,18 +470,60 @@ const reviewSeverityRubric = `Severity rubric - choose by impact, not by how cer
 - high: incorrect behavior, a missed requirement of the task, or a regression in existing behavior.
 - medium: a real but non-blocking problem - a missing edge-case test, fragile or unclear code.
 - low: style, naming, comments, minor cleanups.
-Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue. Base every issue on the diff below, one per distinct problem.
+Any critical or high issue fails the review and the change is sent back for another implementation attempt with every issue you list; medium and low issues are reported as warnings and do not block. Set "status" to "fail" exactly when you report a critical or high issue or an acceptance criterion is not met. Base every issue on the change, one per distinct problem.
 
 `
 
+// reviewSurroundingsRule asks review to read beyond the diff (specs/quality/SPEC.md §7.2).
+const reviewSurroundingsRule = `You have Read, Grep and Glob. Read the code around each changed function ` +
+	`(callers, the interface it implements, the tests that cover it), not only the diff. ` +
+	`An issue about code outside the diff is valid if the change causes it.`
+
+// reviewCriteriaRule asks for one verdict per numbered acceptance criterion of the plan
+// (specs/quality/SPEC.md §7.1). parseReviewStrict enforces the same.
+const reviewCriteriaRule = `"criteria" has exactly one entry for each numbered acceptance criterion below: ` +
+	`"index" is the criterion's number and every number appears exactly once. ` +
+	`"met" is true only when the change satisfies the criterion. "evidence" is not empty and at most 500 bytes: ` +
+	`the file:line that shows the criterion is met, or why it is not. ` +
+	`A criterion that is not met fails the review like a high issue.`
+
+// oneLine collapses s to a single line, so model text printed in a list stays one item.
+func oneLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// planCriteria are the plan's acceptance criteria as the prompts number them: the blank
+// ones are skipped, as writeNumberedList does, so a verdict's index counts the same list.
+func planCriteria(p *domain.PlanArtifact) []string {
+	var out []string
+	if p == nil {
+		return out
+	}
+	for _, c := range p.AcceptanceCriteria {
+		if strings.TrimSpace(c) != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 func BuildReviewPrompt(in ReviewPromptInput) string {
+	hasCriteria := len(planCriteria(in.Plan)) > 0
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]\n}\n\n")
+	criteriaShape := ""
+	if hasCriteria {
+		criteriaShape = ",\n  \"criteria\": [\n    {\"index\": 1, \"met\": true, \"evidence\": \"file:line or why not\"}\n  ]"
+	}
+	b.WriteString("{\n  \"status\": \"pass\",\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"issues\": [\n    {\"severity\": \"high\", \"file\": \"...\", \"description\": \"...\"}\n  ]" + criteriaShape + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
+	if hasCriteria {
+		b.WriteString(reviewCriteriaRule + "\n\n")
+	}
 	b.WriteString("\"severity\" must be exactly one of: critical, high, medium, low.\n\n")
 	b.WriteString(reviewSeverityRubric)
+	b.WriteString(reviewSurroundingsRule + "\n\n")
 	b.WriteString(reviewConventionsRule)
 	b.WriteString(reviewOperatorRule)
 
@@ -293,7 +533,11 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 		fmt.Fprintf(&b, "Analysis:\n%s\n\n", in.Analysis.Summary)
 	}
 	if in.Plan != nil {
-		fmt.Fprintf(&b, "Plan:\n%s\n\n", in.Plan.Summary)
+		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
+		writeList(&b, "Steps", in.Plan.Steps)
+		writeList(&b, "Risks (from plan)", in.Plan.Risks)
+		writeNumberedList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		b.WriteString("\n")
 	}
 	if in.Implementation != nil {
 		fmt.Fprintf(&b, "Implementation summary:\n%s\n\n", in.Implementation.Summary)

@@ -151,6 +151,16 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 			}
 			r.stepDiff = ""
 		}
+	case workflow.OutcomeFixable:
+		// A passing review whose medium issues send the run back to implement once
+		// (review.fix_medium).
+		meta := took
+		if counts := issueCounts(exec.ReviewResult); counts != "" {
+			meta = counts + " · " + took
+		}
+		r.detail(st.green("✓ Review passed") + " " + st.gray("("+meta+")"))
+		r.printResult(exec, outcome)
+		r.prettyFixNotice(run)
 	case workflow.OutcomeFailure:
 		switch exec.Action {
 		case domain.ActionTest:

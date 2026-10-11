@@ -56,10 +56,35 @@ actions:
   implement:
     provider: claude
     model: opus
+    # Optional (implement only): give the session two tools served by the orchestrator itself,
+    # run_tests and, with `checks:` below, run_check, so it can run test.command and the
+    # checks before it answers. The model chooses only a name and a test filter, never a
+    # command; every run is sandboxed and preceded by the protected-paths guard, and a run
+    # after the model changed hooks, CI or this config fails the step. Needs test.command,
+    # test.sandbox bwrap and provider claude. The final test step stays the source of truth.
+    # Each call is recorded in run.json (verify_calls) and its output in
+    # logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log. Default false. The calls run inside
+    # the implement step, so raise its timeout (this action's `timeout:`, within execution.timeout)
+    # when verify is on.
+    # verify: true
+    # timeout: 30m
+    # Optional, default none, on any action: a model and/or effort per decided complexity (simple | medium |
+    # complex). A field left out keeps the action's own value above; the provider cannot be
+    # changed. A level without an entry, and a run started with --stage, use the action's own
+    # model. Each step records where its model came from (model_source in run.json), and
+    # decision.json lists the model every action gets. A resume warns when its config would
+    # route a remaining step to another model or effort than the run started with.
+    # by_complexity:
+    #   simple:  {model: haiku, effort: low}
+    #   complex: {model: opus, effort: high}
 
   review:
     provider: claude
     model: sonnet
+    # Optional, default [], review only: extra reviewers, up to 4 model names on this provider. After the
+    # model above each one reviews the same diff in turn, and the issues are merged (a
+    # criterion is met only if every reviewer says so). Each is another call, so it costs.
+    # models: [opus]
     # codex and gemini are refused for every action until their permission flags are
     # verified against the real CLI (specs/permissions/SPEC.md §6.4):
     # provider: codex
@@ -91,15 +116,41 @@ test:
   # is about making failing tests pass, start it with `run --allow-red-tests`.
   # baseline: require_green          # require_green (default) | off
 
+# Optional, default none: your own deterministic checks (build, vet, lint, SAST). The test step runs each
+# one in order, then test.command, and stops at the first non-zero exit code; the retry
+# prompt names the failed check and says the tests did not run. The pre-run test runs the
+# same sequence, so a check that already fails stops the run like a failing test
+# (`run --allow-red-tests` goes on). Every command runs like test.command: through `sh -c`,
+# under the same sandbox, environment and guard. ORCH_BASE_REF is set to the commit the run
+# started from (empty if it could not be recorded), so a linter can report only what the run
+# introduced. A name matches ^[a-z0-9][a-z0-9_-]{0,31}$ and is unique; at most 16 checks;
+# test.command is required. Checks only run when the workflow has a testing stage: to always
+# have them, force it with policy.stages.force. Each check's output goes to
+# logs/<NNN>-test.<name>.{stdout,stderr}.log in the run directory.
+# checks:
+#   - {name: build, command: "go build ./..."}
+#   - {name: vet,   command: "go vet ./..."}
+#   - {name: lint,  command: "golangci-lint run --new-from-rev=$ORCH_BASE_REF"}
+#   - {name: sast,  command: "semgrep --error --config p/golang"}
+
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  # Stop a fix loop that goes nowhere instead of spending the remaining iterations: implement
+  # left the working tree as it was, the same tests fail the same way, or review repeats its
+  # blocking issues. The run stops with status stopped and exit code 4, and `resume` goes back
+  # into implement. false turns the check off; max_fix_iterations still applies.
+  # stop_without_progress: true
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:
   #   max_test_output_bytes: 32768  # a failing test's output in the implement retry prompt
   #                                 # (beginning, failure lines, end); 4096..1048576
   #   max_diff_bytes: 262144        # the review diff; 16384..4194304
   #   diff_summarize: []            # extra globs shown to review as a stat line only
+  # Bounds on actions.implement.verify.
+  # verify:
+  #   max_calls_per_step: 8         # both tools together, refused calls included; 1..50
+  #   call_timeout: 10m             # one run of the test command or a check
 
 execution:
   timeout: 15m
@@ -136,6 +187,16 @@ security:
 #       actions: [analyze, plan, implement, review]   # default: analyze, plan, review
 #   user_settings: true                               # plugins, skills, hooks
 #   user_settings_actions: [implement, review]        # default: every model step
+
+# Optional: a review that passes but reports a medium issue sends the run back to implement
+# once, as a fix iteration, while max_fix_iterations has room (specs/quality/SPEC.md §7.3).
+# The run records the choice when it starts; a resume follows the run, not this file.
+# review:
+#   fix_medium: true               # default false
+
+# Optional: commit a completed run's changes without asking, also under --mode auto
+# (MVP.md §42.6). The same checks as the question; a warning or no summary_short skips it.
+# auto_commit: true
 
 # Optional: where `run --jira <KEY|URL>` reads the task from (MVP.md §39). Only run --jira
 # needs the credential variables; a plain run and resume work without them.

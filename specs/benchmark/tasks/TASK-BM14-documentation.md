@@ -48,6 +48,18 @@ done:
 When both pass: tick BM14 in `README.md`, change its status line to BM01–BM14, and update the
 status line of `SPEC.md`.
 
+**Both done (2026-10-11).** `scripts/check.sh` passed outside the sandbox, after rebuilding
+`bin/orchestrator` (the `bench/` test that runs `orchestrator validate` uses that binary, and a
+stale one rejects the keys of configs E and F). The run directory of a scenario-32 run (the fake
+executables of `test/integration`, kept by a throwaway test) matched the "Run artifacts"
+paragraph of `CLAUDE.md`: `outcome` with `status`, `fix_iterations`, `tests_passed_final`,
+`review_verdict`, `duration_ms`, `active_ms`, `usage` (with `calls`), `decision_overhead` and
+`diff`; `executions[].usage`, `provider.authority`, `provider.model_source`, `call`, an
+implement's `diff` and `tree_after`; `decision.json` `usage` for `translation`,
+`context_depth` and `classification`, and `models`. What that run did not write (`pre_run_test`,
+`secret_scan_baseline`, `attempt`, `options`, `partial_calls`, `*.stderr.log`) is
+`omitempty` or written only when it has something to record.
+
 - **The first acceptance item is a test, not a one-off script.** `bench/cmd/orchbench/readme_test.go`
   runs `orchbench --help` and `orchbench <command> --help` and compares them with
   `bench/README.md`: the same commands (the `### \`orchbench <name>\`` headings), the same

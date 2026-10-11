@@ -27,7 +27,7 @@ func TestSandboxArgs(t *testing.T) {
 	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
 	runner := &Runner{Executor: exec, Sandbox: testSandbox()}
 
-	result, err := runner.Run(context.Background(), "go test ./... && echo done", "/home/u/repo/sub")
+	result, err := runner.Run(context.Background(), "go test ./... && echo done", "/home/u/repo/sub", RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestSandboxEnv(t *testing.T) {
 	// its reset helper is private to package execution.
 	t.Setenv("ORCH_SANDBOX_TEST_TOKEN", "planted")
 	execution.ScrubCredentials("ORCH_SANDBOX_TEST_TOKEN")
-	env := testSandbox().env()
+	env := testSandbox().env(execution.TestEnv())
 	tmp := slices.DeleteFunc(slices.Clone(env), func(kv string) bool { return !strings.HasPrefix(kv, "TMPDIR=") })
 	if !slices.Equal(tmp, []string{"TMPDIR=/tmp"}) {
 		t.Errorf("TMPDIR entries = %q, want exactly TMPDIR=/tmp", tmp)
@@ -70,20 +70,46 @@ func TestSandboxEnv(t *testing.T) {
 		t.Error("the sandboxed environment must not carry a credential variable")
 	}
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "planted")
-	if slices.ContainsFunc(testSandbox().env(), func(kv string) bool { return strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") }) {
+	if slices.ContainsFunc(testSandbox().env(execution.TestEnv()), func(kv string) bool { return strings.HasPrefix(kv, "AWS_SECRET_ACCESS_KEY=") }) {
 		t.Error("the sandboxed environment must be the allowlist, not the scrubbed environment")
 	}
 }
 
 func TestRunner_WithoutSandboxIsUnchanged(t *testing.T) {
 	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
-	result, err := New(exec).Run(context.Background(), "go test ./...", "/repo")
+	result, err := New(exec).Run(context.Background(), "go test ./...", "/repo", RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	call := exec.Calls[0]
 	if call.Executable != "sh" || !slices.Equal(call.Args, []string{"-c", "go test ./..."}) || result.Sandboxed {
 		t.Errorf("call = %+v, sandboxed = %v", call, result.Sandboxed)
+	}
+}
+
+// TestSandboxExtraEnv: the extra pair is a --setenv after every mount and isolation flag,
+// before --chdir and the command.
+func TestSandboxExtraEnv(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}}
+	runner := &Runner{Executor: exec, Sandbox: testSandbox()}
+	opts := RunOptions{Env: []string{"ORCH_BASE_REF=abc"}}
+	if _, err := runner.Run(context.Background(), "lint", "/home/u/repo", opts); err != nil {
+		t.Fatal(err)
+	}
+	args := exec.Calls[0].Args
+	set := slices.Index(args, "--setenv")
+	if set < 0 || !slices.Equal(args[set:set+3], []string{"--setenv", "ORCH_BASE_REF", "abc"}) {
+		t.Fatalf("argv = %q, want --setenv ORCH_BASE_REF abc", args)
+	}
+	if last := slices.Index(args, "--die-with-parent"); set < last {
+		t.Errorf("--setenv at %d comes before the isolation flags (%d)", set, last)
+	}
+	if shell := slices.Index(args, "sh"); set > shell || args[set+3] != "--chdir" {
+		t.Errorf("--setenv at %d must come right before --chdir and sh -c: %q", set, args)
+	}
+	// bwrap passes its own environment on, and ORCH_BASE_REF is not in it: it is --setenv's.
+	if slices.Contains(exec.Calls[0].Env, "ORCH_BASE_REF=abc") {
+		t.Errorf("the sandbox environment must stay the allowlist: %q", exec.Calls[0].Env)
 	}
 }
 

@@ -2,11 +2,15 @@ package action
 
 import (
 	"context"
+	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
+	"orchestrator/internal/workflow"
 )
 
 func TestExecuteReview_ShowsNewFilesAndWithholdsSecrets(t *testing.T) {
@@ -72,6 +76,97 @@ func TestExecuteReview_FullDiffNeedsNoNote(t *testing.T) {
 	if strings.Contains(client.lastReq.Prompt, "Not every file's content is in it") {
 		t.Error("a diff shown in full was annotated as partial")
 	}
+}
+
+func TestParseReviewStrict_Criteria(t *testing.T) {
+	plan := []string{"first", "second", "third"}
+	verdicts := func(vs ...string) string {
+		return `{"status":"pass","summary":"s","issues":[],"criteria":[` + strings.Join(vs, ",") + `]}`
+	}
+	v := func(index int, evidence string) string {
+		return `{"index":` + strconv.Itoa(index) + `,"met":true,"evidence":"` + evidence + `"}`
+	}
+	long := strings.Repeat("x", domain.MaxCriterionEvidenceBytes+1)
+
+	for name, tc := range map[string]struct {
+		output   string
+		criteria []string
+		wantErr  bool
+	}{
+		"two verdicts for three":  {verdicts(v(1, "a"), v(2, "b")), plan, true},
+		"four verdicts for three": {verdicts(v(1, "a"), v(2, "b"), v(3, "c"), v(4, "d")), plan, true},
+		"index zero":              {verdicts(v(0, "a"), v(2, "b"), v(3, "c")), plan, true},
+		"index four":              {verdicts(v(1, "a"), v(2, "b"), v(4, "c")), plan, true},
+		"duplicate":               {verdicts(v(1, "a"), v(2, "b"), v(2, "c")), plan, true},
+		"empty evidence":          {verdicts(v(1, "a"), v(2, ""), v(3, "c")), plan, true},
+		"evidence too long":       {verdicts(v(1, "a"), v(2, long), v(3, "c")), plan, true},
+		"none for three":          {`{"status":"pass","summary":"s","issues":[]}`, plan, true},
+		"criteria without a plan": {verdicts(v(1, "a")), nil, true},
+		"no criteria, no plan":    {`{"status":"pass","summary":"s","issues":[]}`, nil, false},
+		"empty list, no plan":     {verdicts(), nil, false},
+		"out of order":            {verdicts(v(3, "c"), v(1, "a"), v(2, "b")), plan, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := parseReviewStrict(tc.output, tc.criteria)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error: %v", err, tc.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			for i, c := range got.Criteria {
+				if c.Index != i+1 || c.Criterion != tc.criteria[i] {
+					t.Errorf("verdict %d = %+v, want index %d and criterion %q", i, c, i+1, tc.criteria[i])
+				}
+			}
+		})
+	}
+}
+
+func TestExecuteReview_Criteria(t *testing.T) {
+	plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"first", " ", "second"}}
+	run := func(t *testing.T, output string) (*fakeClient, workflow.StepOutcome, error) {
+		repo, dir := guardRepo(t)
+		put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+		client := &fakeClient{output: output}
+		registry := provider.NewRegistry()
+		registry.Register(provider.Claude, client)
+		d := New(testConfig(), registry, repo, nil)
+		d.lastPlan = plan
+		outcome, err := d.Execute(context.Background(), domain.ActionReview, &domain.Run{ID: "r"})
+		if err == nil && len(d.pendingUnmetCriteria) != len(outcome.ReviewResult.UnmetCriteria()) {
+			t.Errorf("pendingUnmetCriteria = %+v", d.pendingUnmetCriteria)
+		}
+		return client, outcome, err
+	}
+
+	t.Run("missing verdicts are malformed", func(t *testing.T) {
+		_, _, err := run(t, `{"status":"pass","summary":"ok","issues":[]}`)
+		var we *apperr.WorkflowError
+		if !errors.As(err, &we) || we.Msg != "malformed review output" {
+			t.Fatalf("err = %v, want a WorkflowError \"malformed review output\"", err)
+		}
+	})
+
+	t.Run("an unmet criterion fails the review", func(t *testing.T) {
+		client, outcome, err := run(t, `{"status":"pass","summary":"ok","issues":[],"criteria":[`+
+			`{"index":2,"met":false,"evidence":"no test"},{"index":1,"met":true,"evidence":"main.go:3"}]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome.Outcome != workflow.OutcomeFailure {
+			t.Errorf("outcome = %v, want failure", outcome.Outcome)
+		}
+		c := outcome.ReviewResult.Criteria
+		if len(c) != 2 || c[0].Criterion != "first" || c[1].Criterion != "second" || c[1].Met {
+			t.Errorf("criteria = %+v", c)
+		}
+		for _, want := range []string{`"criteria": [`, "You have Read, Grep and Glob.", "1. first\n2. second\n"} {
+			if !strings.Contains(client.lastReq.Prompt, want) {
+				t.Errorf("review prompt lacks %q", want)
+			}
+		}
+	})
 }
 
 func TestReviewResultValidate_DiffCounts(t *testing.T) {

@@ -19,6 +19,9 @@ version check, the pre-run test, the secret scan: MVP.md §41, with its design r
 the commit offered at the end of a completed run: MVP.md §42;
 the run summary and step metrics (`summary.md`, the call report, the diff from git, active
 time): MVP.md §43, which is also the field reference for `summary.md`;
+the quality loop (stage context, `checks:`, the in-session verify tools, review criteria,
+`fix_medium` and extra reviewers, the no-progress stop, `by_complexity`): MVP.md §44, with its
+design record in `specs/quality/`;
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`.
 This file is a summary to keep future work aligned with them, not a replacement.
@@ -46,7 +49,16 @@ are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it
 `internal/workflow` and `internal/policy` must never import anything but `domain` (the
 workflow package also defines its own `StepExecutor` interface). `internal/action` is the
 composition point that implements `StepExecutor` using config/provider/repository/testexec;
-`internal/app` is the composition root for everything.
+`internal/app` is the composition root for everything. `internal/verify` is the in-session
+verify server behind the hidden `orchestrator mcp-verify --dir <dir>` (specs/quality §6): it
+speaks MCP with the standard library only, reads nothing but `<dir>/verify.json`, and imports
+`guard`, `testexec` and `domain`, never `action`. `action` is its one client: with
+`actions.implement.verify` it writes the `verify.json` of a private `orch-verify-*` directory,
+merges the `orch` server into the step's `--mcp-config`, and reads `calls.jsonl` and `violation`
+back as untrusted input (`action/verify.go`). `internal/testreport` is a leaf (standard library
+only, enforced by a test): it reads failing test names out of a failed test step's output into
+`TestResult.failed_tests`/`report_format` for the retry prompt, and what it finds never decides
+pass/fail (specs/quality §8.2).
 
 `bench/` is a black box to the core and the core is one to it. It is a separate Go module
 with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a
@@ -102,7 +114,9 @@ over a fixed list: success → the next step of the workflow (done after the las
 failure → implement if the workflow has it, else the run fails; review fail → implement if
 present, else the run completes with the verdict; any other failure fails the run. Execution
 history is append-only (`run.Executions`), never overwritten. Two independent limits guard
-against infinite loops: `max_steps`, `max_fix_iterations`. Without `implement`, the last
+against infinite loops: `max_steps`, `max_fix_iterations`; `limits.stop_without_progress`
+(`workflow.NoProgress`, over persisted executions only) ends a fix loop earlier when implement
+changed nothing or the same failure repeats. Without `implement`, the last
 read-only step (research/analyze/plan) writes the final `answer`, printed at the end.
 `Engine.Run` always enters through `workflow.Entry(run)`: the first step for an empty
 history, otherwise the state the history and the transition table give (MVP.md §37.5).
@@ -137,7 +151,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   `bypassPermissions` or any equivalent.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
-  run records `pre_run_ref`; `action.Guard` compares protected paths (git-ignored ones
+  run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)
+  compares protected paths (git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
@@ -149,15 +164,37 @@ history, otherwise the state the history and the transition table give (MVP.md �
   runs under bwrap unless `test.sandbox: none` is written out (`testexec.Sandbox`, probed in
   the fail-fast chain; its mount order is load-bearing). A workflow with `implement` and
   `test` runs the tests once before the first step and refuses a red suite unless
-  `run --allow-red-tests` (MVP.md §41.5). After the guard check of every `implement` and
-  `test`, what the tree adds is scanned (`internal/secretscan`, stdlib only): a finding
+  `run --allow-red-tests` (MVP.md §41.5). The `test` step runs the `checks:` in order before
+  `test.command`, each under the same sandbox, environment and guard, with a guard comparison
+  after **each** command, so the next one never runs on a planted hook (MVP.md §44.2). After
+  the guard check of every `implement` and `test`, what the tree adds is scanned (`internal/secretscan`, stdlib only): a finding
   outside the run-start baseline stops the step (`security.secret_scan.mode: stop`) or is
   recorded (`warn`); the review diff is redacted; a secret's value is never printed, logged,
   persisted or put in a prompt.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
   `git diff`, not just an implementation summary. Never parse phrases like "all tests should
-  pass" out of model output as a substitute for running the tests.
+  pass" out of model output as a substitute for running the tests. Checks are exit codes too.
+  Failing test names parsed from the output (`internal/testreport`), and the split into old
+  and new failures, only appear in a prompt: they never decide pass/fail, a transition or a
+  stop (MVP.md §31.4, §44.7). The in-session `run_tests` is a hint, and the `test` step stays
+  the truth.
+- **Verify is not a shell** (MVP.md §38.1, §44.3, `specs/permissions/DECISIONS.md` D16). With
+  `actions.implement.verify: true` the session gets `mcp__orch__run_tests` and
+  `mcp__orch__run_check` from the orchestrator's own MCP server; the adapter's `--tools` does
+  not change. The command comes from config (`test.command`, a configured check), never from
+  the model; the model picks only whether to run, a check name from a closed list, and a
+  filter matching `^[A-Za-z0-9_./:-]{1,200}$` that reaches the process only as
+  `ORCH_TEST_FILTER` (the `test` step never sets it). The sandbox is mandatory (`verify` with
+  `test.sandbox: none` is a config error), the guard compares the repository with the step's
+  before-state before **every** call, and the `violation` marker the server writes fails the
+  step even if the tree looks clean afterwards. The server reads only `verify.json`; `action`
+  reads `calls.jsonl` and `violation` back as untrusted input. The server name `orch` and any
+  name with `__` are reserved.
+- **Go decides the quality loop, from config and the persisted run** (MVP.md §44). The
+  no-progress stop, `review.fix_medium` (read from `options.review_fix_medium` on the run, never
+  from the current config), the extra reviewers' merge and the `by_complexity` route are Go code
+  over config and `run.json`; every transition they add is derivable on resume.
 - **Decision providers return probabilities; Go decides** (MVP.md §31.2). Never let a
   provider's own pick (e.g. Jev's `choice` field), an LLM, or a caller choose stages or their
   order. Every provider answer is strictly validated; anything unexpected is an
@@ -167,6 +204,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
 - **Static provider routing** (MVP.md §31.1): provider/model per action — and the decision
   provider — come from config. No automatic "best model" selection or fallback; a failing
   decision provider leads to the user's manual choice, never to another provider.
+  `actions.<name>.by_complexity` is static routing too: a config table keyed by the decided
+  complexity, model and effort only (never the provider), so the same decision always gives the
+  same models; `run --stage` has no complexity and uses the base.
 - **Secrets never leave the machine**: the Context Manager applies its deny list (`.env*`,
   `*.pem`, `*.key`, `credentials*`, `secrets*`, `context.extra_deny`, to every path segment)
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads
@@ -186,7 +226,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   task/prompt — the one documented exception is `test.command`, which is trusted operator
   config and does go through `sh -c` to support shell syntax. The prompt itself goes on
   stdin, never in argv (MVP.md §41.1). Repository data in a prompt is bounded
-  (`limits.prompt`): test output by `action.BoundTestOutput`, the review diff by
+  (`limits.prompt`): test output by `testexec.BoundTestOutput` (aliased in `action`), the
+  review diff by
   `Repository.ReviewDiff` (new files included, deny-listed files by name only); artifacts
   and logs keep everything. User text inside prompts
   (request, project context) is embedded as delimited data that cannot close its block;
@@ -205,7 +246,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   way.
 - **Commit only on an explicit yes** (MVP.md §42). At the end of a completed run with
   `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
-  never under `--mode auto`, never for a run started on uncommitted changes, and only after
+  never under `--mode auto` unless `auto_commit: true` gave the yes in advance (§42.6:
+  then no question, and no commit on a warning or without `summary_short`), never for a
+  run started on uncommitted changes, and only after
   `action.CheckBaseline` (fingerprint first) passes — `git commit` runs the repository's
   hooks. The message is the implementation's `summary_short` (without one, the operator
   types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
@@ -256,7 +299,9 @@ Jev (`test/integration/jev_test.go`) and a fake Jira (`test/integration/jira_tes
 live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
 `go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
-`go test ./internal/jira -update`. Never commit a token-shaped literal (an `AKIA…` key, a
+`go test ./internal/jira -update`, and the six stage prompts
+`go test ./internal/action -update` (`internal/action/testdata/prompts/`; the test fixes
+`action.nonce`, so read the diff of a rewritten file before committing it). Never commit a token-shaped literal (an `AKIA…` key, a
 `ghp_…` token): secret scanners and push protection would flag the repository itself;
 tests assemble such values at run time (`internal/secretscan`, scenario 27).
 
@@ -265,23 +310,30 @@ tests assemble such values at run time (`internal/secretscan`, scenario 27).
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
-`allow_red_tests`, `pre_run_test`, `secret_scan_baseline`, `secret_findings` (never a
+`allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
+`options` (`review_fix_medium`, recorded at run start), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
-`provider.authority`, `attempt`, `usage` (with `partial` for a call cut off before its final
-report), `call` (prompt size and cuts, models, API time, tool calls) and, for an implement the
-guard passed, `diff` from git; a review result also records its `diff` summary) and `outcome`
+`provider.authority`, `provider.model_source` (`base` or `by_complexity.<level>`), `attempt`,
+`usage` (with `partial` for a call cut off before its final report), `call` (prompt size and
+cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
+guard passed, `diff` from git, and for any implement `tree_after` and `verify_calls`; a test
+result's `checks`, `failed_check`, `failed_tests` and `report_format`; a review result's `diff`
+summary, `criteria` and `reviewers`) and `outcome`
 (written when the run reaches a terminal status, recomputed over the whole history by a
 resume, derived and never read back for a decision: `status`, `failure_reason`,
-`fix_iterations`, `tests_passed_final`, `review_verdict`, `duration_ms`, `active_ms`,
+`fix_iterations`, `tests_passed_final`, `review_verdict`, `verify_calls`, `duration_ms`, `active_ms`,
 `usage` summed over the steps and the decision calls with `calls` and `partial_calls`,
 `decision_overhead` {`cost_usd`, `ms`, `calls`}, the net `diff`), `summary.md` (rendered
 from run.json and decision.json when
-the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; full trace:
+the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
+provider, model, effort and source each action gets; full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies, and `usage` of each decision call that
 reported one: `translation`, `context_depth`, `classification`),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
-`artifacts/<NNN>-<action>.json`, `logs/<NNN>-<action>.{stdout,stderr}.log`, and for calls
-outside steps `logs/translate.*`, `logs/decide-{context,classify}.*` and
-`logs/pre-run-test.*`.
+`artifacts/<NNN>-<action>.json` (a model step's with the `prompt` exactly as sent - a record,
+removed when a resume reads the artifact back), `logs/<NNN>-<action>.{stdout,stderr}.log` (a test step with
+`checks:` adds `logs/<NNN>-test.<check>.*`, an implement with verify calls adds
+`logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
+`logs/decide-{context,classify}.*`, `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.

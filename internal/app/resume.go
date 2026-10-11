@@ -12,6 +12,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/interaction"
+	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/workflow"
@@ -111,7 +112,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		opts.dirty = dirty
 		opts.resume.Entry, opts.resume.Why = run.Workflow.Steps[0].Action, "start"
 	} else {
-		entry, why, err := workflow.Entry(run)
+		entry, why, err := workflow.Entry(run, limitsView(cfg))
 		if err != nil {
 			return &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: run.ID, Msg: "cannot derive where to continue", Err: err}
 		}
@@ -140,7 +141,15 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	reporter.ResumeHeader(run, store.RunDir(run.ID))
 	reporter.History(run)
 	reporter.WorkingTree(treeSummary, treeErr)
-	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remainingSteps(*run.Workflow, opts.resume.Entry))
+	remaining := remainingSteps(*run.Workflow, opts.resume.Entry)
+	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remaining)
+	// Advisory only: a decision.json that is missing or unreadable costs the warning, not
+	// the resume.
+	if trace, _, err := store.LoadDecision(run.ID); err == nil {
+		for _, w := range modelChangeWarnings(cfg, run.Decision, trace.Models, remaining) {
+			logging.GapWarning(stderr, w)
+		}
+	}
 	// The overview above is read in full width; the sidebar opens for the steps.
 	if reporter.Pretty {
 		reporter.SetRepoInfo(repoInfo(ctx, repo))

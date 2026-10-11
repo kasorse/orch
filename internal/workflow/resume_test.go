@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -56,6 +57,45 @@ func runWith(wf *domain.Workflow, execs ...domain.StepExecution) *domain.Run {
 	return &domain.Run{Workflow: wf, Executions: execs}
 }
 
+// A red suite whose parsed failures were all failing before the run (QL09) is still a failed
+// test: the old/new split is a prompt hint and never reaches the outcome.
+func TestOutcomeOf_OnlyOldFailuresStillFail(t *testing.T) {
+	exec := domain.StepExecution{Action: domain.ActionTest, Status: domain.StepCompleted,
+		TestResult: &domain.TestResult{ExitCode: 1, FailedTests: []string{"pkg.TestA"}, ReportFormat: "gotext"}}
+	got, err := outcomeOf(exec, &domain.Run{}, testLimits)
+	if err != nil || got != OutcomeFailure {
+		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
+	}
+}
+
+// A review that failed only on an unmet criterion (no issues) is still a failure after the
+// run.json round trip a resume goes through (QL02).
+func TestOutcomeOf_UnmetCriterion(t *testing.T) {
+	review := &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+		{Index: 1, Criterion: "a", Met: true, Evidence: "a.go:1"},
+		{Index: 2, Criterion: "b", Met: false, Evidence: "no test"},
+		{Index: 3, Criterion: "c", Met: true, Evidence: "c.go:3"},
+	}}
+	data, err := json.Marshal(domain.StepExecution{Action: domain.ActionReview, Status: domain.StepCompleted, ReviewResult: review})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exec domain.StepExecution
+	if err := json.Unmarshal(data, &exec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := outcomeOf(exec, &domain.Run{}, testLimits)
+	if err != nil || got != OutcomeFailure {
+		t.Errorf("outcomeOf = %v, %v; want failure", got, err)
+	}
+
+	full := wfp(domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	entry, _, err := Entry(runWith(full, done(domain.ActionImplement), done(domain.ActionTest), exec), testLimits)
+	if err != nil || entry != StateImplement {
+		t.Errorf("Entry = %s, %v; want implement", entry, err)
+	}
+}
+
 func TestEntry(t *testing.T) {
 	full := wfp(domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
 	cases := []struct {
@@ -88,7 +128,7 @@ func TestEntry(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, why, err := Entry(tc.run)
+			got, why, err := Entry(tc.run, testLimits)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("want error containing %q, got %v", tc.wantErr, err)
@@ -114,7 +154,7 @@ func TestCounters(t *testing.T) {
 		done(domain.ActionImplement), failedTest(),
 		done(domain.ActionImplement), done(domain.ActionTest), failedReview(),
 		hardFail(domain.ActionImplement, "x"))
-	total, fix, err := Counters(run)
+	total, fix, err := Counters(run, testLimits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +163,7 @@ func TestCounters(t *testing.T) {
 	}
 
 	// Without implement a failing test is not a fix iteration: nothing is retried.
-	_, fix, _ = Counters(runWith(wfp(domain.ActionTest), failedTest()))
+	_, fix, _ = Counters(runWith(wfp(domain.ActionTest), failedTest()), testLimits)
 	if fix != 0 {
 		t.Errorf("fix iterations without implement = %d, want 0", fix)
 	}
@@ -287,7 +327,7 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 		run.FixIterations = 1 // the persisted counter lost an increment (G12)
 		limits := domain.LimitsView{MaxSteps: 20, MaxFixIterations: 1}
 
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, limits)
 		err := CheckLimits(run, limits, entry)
 		var le *apperr.LimitExceededError
 		if !errors.As(err, &le) || !strings.Contains(err.Error(), "limits.max_fix_iterations") || !strings.Contains(err.Error(), "used 2") {
@@ -318,7 +358,7 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 
 	t.Run("max steps", func(t *testing.T) {
 		run := runWith(wf, done(domain.ActionImplement), hardFail(domain.ActionTest, "sandbox"))
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, testLimits)
 		err := CheckLimits(run, domain.LimitsView{MaxSteps: 2, MaxFixIterations: 5}, entry)
 		if err == nil || !strings.Contains(err.Error(), "limits.max_steps") {
 			t.Fatalf("CheckLimits = %v", err)
@@ -330,13 +370,66 @@ func TestResume_LimitsCountTheWholeHistory(t *testing.T) {
 
 	t.Run("a hard-failed implement is not a fix-iteration entry", func(t *testing.T) {
 		run := runWith(wf, done(domain.ActionImplement), failedTest(), hardFail(domain.ActionImplement, "timeout"))
-		entry, _, _ := Entry(run)
+		entry, _, _ := Entry(run, testLimits)
 		// The fix iteration was already allowed when the test failed; retrying the
 		// failed implement does not enter it again.
 		if err := CheckLimits(run, domain.LimitsView{MaxSteps: 20, MaxFixIterations: 1}, entry); err != nil {
 			t.Fatalf("CheckLimits = %v", err)
 		}
 	})
+}
+
+// A run stopped for no progress resumes into implement, whatever Next says: after a tree
+// stop the last step is an implement, which Next sends to test. Entry never judges progress.
+func TestEntry_ResumeAfterNoProgress(t *testing.T) {
+	wf := wfp(domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	same := func() []domain.StepExecution {
+		return []domain.StepExecution{implTree(treeID('a')), failedTest(), implTree(treeID('a'))}
+	}
+	stopped := func(reason string, execs ...domain.StepExecution) *domain.Run {
+		run := runWith(wf, execs...)
+		run.Status, run.FailureReason = domain.RunStopped, reason
+		return run
+	}
+	approved := func(run *domain.Run, from ...string) *domain.Run {
+		for _, reason := range from {
+			run.Resumes = append(run.Resumes, domain.Resume{FromStatus: domain.RunStopped, FromReason: reason})
+		}
+		run.Status, run.FailureReason = domain.RunRunning, ""
+		return run
+	}
+	resumedImplement := implTree(treeID('b'))
+	resumedImplement.Attempt = 1
+	resumedTest := failedTest()
+	resumedTest.Attempt = 1
+
+	cases := []struct {
+		name string
+		run  *domain.Run
+		want State
+		why  string
+	}{
+		{"stopped after an unchanged implement", stopped(ReasonNoChange, same()...), StateImplement, "resume after no progress"},
+		{"stopped after the same failing tests", stopped(ReasonSameTests, implTree(treeID('a')), failedTest(), implTree(treeID('b')), failedTest()), StateImplement, "resume after no progress"},
+		{"stopped after a repeating review", stopped(ReasonSameReviewHits, implTree(treeID('a')), done(domain.ActionTest), failedReview()), StateImplement, "resume after no progress"},
+		{"the resume was approved: status and reason are cleared", approved(stopped(ReasonNoChange, same()...), ReasonNoChange), StateImplement, "resume after no progress"},
+		{"a resume that crashed before its first step", approved(stopped(ReasonNoChange, same()...), ReasonNoChange, ""), StateImplement, "resume after no progress"},
+		{"a step ran after the approved resume", approved(stopped(ReasonNoChange, append(same(), resumedImplement)...), ReasonNoChange), StateTest, "continue after implement"},
+		{"stopped for another reason", stopped("maximum steps exceeded", same()...), StateTest, "continue after implement"},
+		{"an earlier no-progress stop does not force implement once a step ran", approved(stopped("", append(same(), resumedImplement, resumedTest)...), ReasonNoChange), StateImplement, "tests failed"},
+		{"failed, not stopped", func() *domain.Run { r := runWith(wf, same()...); r.Status = domain.RunFailed; return r }(), StateTest, "continue after implement"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, why, err := Entry(tc.run, testLimits)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want || !strings.Contains(why, tc.why) {
+				t.Errorf("Entry = %s (%s), want %s (%s)", got, why, tc.want, tc.why)
+			}
+		})
+	}
 }
 
 func TestVerify(t *testing.T) {

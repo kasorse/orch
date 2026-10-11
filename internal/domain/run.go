@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,30 @@ type ProviderRef struct {
 	Model     string    `json:"model"`
 	Effort    string    `json:"effort,omitempty"`
 	Authority Authority `json:"authority,omitempty"`
+	// ModelSource says where the model and effort came from: ModelSourceBase, or
+	// ModelSourceByComplexity + the decided complexity (specs/quality/SPEC.md §9.3). Empty in
+	// a run written before the field.
+	ModelSource string `json:"model_source,omitempty"`
+}
+
+// Values of ProviderRef.ModelSource.
+const (
+	ModelSourceBase         = "base"
+	ModelSourceByComplexity = "by_complexity."
+)
+
+// ValidModelSource reports whether s is a model source a run records: base, or by_complexity
+// with one of the complexities.
+func ValidModelSource(s string) bool {
+	if s == ModelSourceBase {
+		return true
+	}
+	level, ok := strings.CutPrefix(s, ModelSourceByComplexity)
+	if !ok {
+		return false
+	}
+	_, err := ParseComplexity(level)
+	return err == nil
 }
 
 type StepExecStatus string
@@ -74,8 +99,16 @@ type StepExecution struct {
 	// Diff is what an implement step changed, from git. Nil for every other step, and for
 	// an implement whose call failed or whose changes the guard refused: git runs on the
 	// working tree only after the guard has passed it.
-	Diff  *StepDiff `json:"diff,omitempty"`
-	Error string    `json:"error,omitempty"`
+	Diff *StepDiff `json:"diff,omitempty"`
+	// TreeAfter is the git tree id of the working tree after a completed implement, which the
+	// no-progress check compares between implements (specs/quality/SPEC.md §8.1). Empty for
+	// every other step, when git could not compute it, and in a run written before the field
+	// existed.
+	TreeAfter string `json:"tree_after,omitempty"`
+	// VerifyCalls are the calls the implement session made to the verify tools, in order, also
+	// when the step failed (specs/quality/SPEC.md §12). Empty for every other step.
+	VerifyCalls []VerifyCall `json:"verify_calls,omitempty"`
+	Error       string       `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`
@@ -132,6 +165,9 @@ type Run struct {
 	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its
 	// output goes to the first implement instead (specs/hardening/SPEC.md §8.4).
 	AllowRedTests bool `json:"allow_red_tests,omitempty"`
+	// Options are the config rules the run follows, recorded once when it is created and never
+	// changed by a resume (specs/quality/SPEC.md §7.3). Omitted while they are all off.
+	Options RunOptions `json:"options,omitzero"`
 	// PreRunTest is the test command's result before the first step, when the workflow
 	// implements and tests (specs/hardening/SPEC.md §8). It is not an execution.
 	// SecretScanBaseline are the fingerprints of what looked like secrets in the working
@@ -155,6 +191,15 @@ type Run struct {
 	// Commit is the commit the operator approved at the end of a completed run
 	// (MVP.md §42); empty when nothing was committed.
 	Commit string `json:"commit,omitempty"`
+}
+
+// RunOptions are the config choices that change how a run moves between steps. They are
+// copied into the run when it is created, so a resume follows the rule the run started with
+// whatever the config says now.
+type RunOptions struct {
+	// ReviewFixMedium is review.fix_medium: a passing review with a medium issue sends the run
+	// back to implement once.
+	ReviewFixMedium bool `json:"review_fix_medium,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

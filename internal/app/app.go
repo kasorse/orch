@@ -99,6 +99,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return err
 		}
 		return runsReport(stdout, dir)
+	case "mcp-verify":
+		// Hidden: not in the usage text. parseArgs has run, but --dir is not a global flag,
+		// so it is still in rest.
+		dir, err := mcpVerifyArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return runMCPVerify(ctx, dir, stdin, stdout, stderr)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
@@ -505,6 +513,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	}
 	run.ProviderCLI = clis
 	run.AllowRedTests = allowRedTests
+	run.Options = runOptions(cfg)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)
@@ -547,7 +556,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	run.Decision = &out.decision
 	run.Workflow = &wf
 	reporter.SetRun(run)
-	if err := store.SaveDecision(run.ID, out.trace(wf)); err != nil {
+	trace := out.trace(wf)
+	trace.Models = modelRoutes(cfg, out.decision, wf)
+	if err := store.SaveDecision(run.ID, trace); err != nil {
 		return err
 	}
 	if err := store.SaveProjectContext(run.ID, out.project); err != nil {
@@ -588,6 +599,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 			run.Decision, run.Workflow = &d, &nwf
 			trace := out.trace(nwf)
 			trace.Complexity, trace.Stages, trace.Edit = d.Complexity, d.Stages.Stages, d.Edit
+			trace.Models = modelRoutes(cfg, d, nwf)
 			if err := store.SaveDecision(run.ID, trace); err != nil {
 				return err
 			}
@@ -687,6 +699,7 @@ type tailOptions struct {
 // final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
+	removeStaleVerifyDirs(os.TempDir(), time.Now())
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
 	if !cfg.Security.SecretScan.Enabled() {
 		s.reporter.SecretScanOff()
@@ -788,6 +801,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		}
 	}
 	s.dispatcher.OnSecret = s.reporter.SecretFound
+	s.dispatcher.OnWarning = s.reporter.Warning
 
 	s.reporter.MaxFixIterations = cfg.Limits.MaxFixIterations
 
@@ -820,8 +834,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
-	// Only when the operator is at the terminal: --mode auto asks nothing.
-	if opts.mode != domain.ModeAuto && isTerminal(s.stdin) {
+	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
+	// --mode auto asks nothing.
+	if s.cfg.AutoCommit || (opts.mode != domain.ModeAuto && isTerminal(s.stdin)) {
 		offerCommit(ctx, s)
 	}
 	return nil
@@ -835,36 +850,58 @@ func needsPreRunTest(cfg config.Config, run *domain.Run) bool {
 		run.Workflow.Contains(domain.ActionImplement) && run.Workflow.Contains(domain.ActionTest)
 }
 
-// preRunTest runs the test command once before the first step and records the result. A
-// red suite stops the run - implement would be sent to fix failures it did not cause -
-// unless the operator started it with --allow-red-tests, which makes the failure part of
-// the task (§8.4). Only the exit code decides.
+// preRunTest runs the checks and the test command once before the first step and records
+// the result. A red check or suite stops the run - implement would be sent to fix failures
+// it did not cause - unless the operator started it with --allow-red-tests, which makes the
+// failure part of the task (§8.4, specs/quality/SPEC.md §5.5). Only the exit codes decide.
 func preRunTest(ctx context.Context, s *session) error {
 	run := s.run
 	s.reporter.PreRunTestStarted()
-	result, err := s.dispatcher.PreRunTest(ctx, run)
+	result, checkLogs, err := s.dispatcher.PreRunTest(ctx, run)
 	s.reporter.PreRunTestFinished(result, run.AllowRedTests)
 	if result != nil {
 		run.PreRunTest = result
 		if !result.Success || err != nil {
 			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stdout", result.Stdout)
 			_ = s.store.AppendCallLog(run.ID, "pre-run-test", "stderr", result.Stderr)
+			for _, c := range checkLogs {
+				// The name is checked again: it becomes part of a file name.
+				if !domain.CheckNameRE.MatchString(c.Name) {
+					continue
+				}
+				_ = s.store.AppendCallLog(run.ID, "pre-run-test."+c.Name, "stdout", c.Stdout)
+				_ = s.store.AppendCallLog(run.ID, "pre-run-test."+c.Name, "stderr", c.Stderr)
+			}
 		}
 	}
 	if err != nil {
 		return err
 	}
 	if !result.Success && !run.AllowRedTests {
-		return &apperr.WorkflowError{Msg: fmt.Sprintf("tests fail before any change (pre-run test exited %d; output in %s)\n\n"+
-			"Fix them first. If the task is to make them pass, run it again with --allow-red-tests; "+
-			"to skip this check for every run, set test.baseline: off.",
-			result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test", "stdout"))}
+		advice := "Fix them first. If the task is to make them pass, run it again with --allow-red-tests; " +
+			"to skip this check for every run, set test.baseline: off."
+		if check := result.FailedCheck; check != "" {
+			return &apperr.WorkflowError{Msg: fmt.Sprintf("check %q fails before any change (pre-run test: %q exited %d; output in %s)\n\n%s",
+				check, result.Command, result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test."+check, "stdout"), advice)}
+		}
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("tests fail before any change (pre-run test exited %d; output in %s)\n\n%s",
+			result.ExitCode, s.store.CallLogPath(run.ID, "pre-run-test", "stdout"), advice)}
 	}
 	return s.store.SaveRun(run)
 }
 
+// runOptions are the config rules a new run follows from here on; a resume reads them back from
+// run.json and never from the config (specs/quality/SPEC.md §7.3).
+func runOptions(cfg config.Config) domain.RunOptions {
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium}
+}
+
 func limitsView(cfg config.Config) domain.LimitsView {
-	return domain.LimitsView{MaxSteps: cfg.Limits.MaxSteps, MaxFixIterations: cfg.Limits.MaxFixIterations}
+	return domain.LimitsView{
+		MaxSteps:            cfg.Limits.MaxSteps,
+		MaxFixIterations:    cfg.Limits.MaxFixIterations,
+		StopWithoutProgress: cfg.Limits.StopsWithoutProgress(),
+	}
 }
 
 // recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a
@@ -1140,6 +1177,22 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 	}
 	if outcome.RawStderr != "" {
 		_ = o.store.AppendLog(run.ID, index, exec.Action, "stderr", outcome.RawStderr)
+	}
+	for _, c := range outcome.CheckLogs {
+		if c.Stdout != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stdout", c.Stdout)
+		}
+		if c.Stderr != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stderr", c.Stderr)
+		}
+	}
+	for _, c := range outcome.VerifyLogs {
+		if c.Stdout != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stdout", c.Stdout)
+		}
+		if c.Stderr != "" {
+			_ = o.store.AppendCheckLog(run.ID, index, exec.Action, c.Name, "stderr", c.Stderr)
+		}
 	}
 	// Only after a completed implement: the step guard has already checked that nothing
 	// protected (git config, hooks) changed, so running git here is safe.

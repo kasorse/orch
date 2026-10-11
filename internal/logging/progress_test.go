@@ -235,6 +235,26 @@ func TestStepFinished_ReviewFailure_PrintsIssueCountsAndFixIterationNotice(t *te
 	}
 }
 
+func TestStepFinished_ReviewFixable_ExplainsTheReturnToImplement(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+	r.MaxFixIterations = 5
+
+	run := &domain.Run{FixIterations: 0}
+	exec := domain.StepExecution{
+		Action: domain.ActionReview,
+		ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Issues: []domain.ReviewIssue{
+			{Severity: domain.SeverityMedium},
+		}},
+	}
+	r.StepFinished(run, 0, exec, workflow.StepOutcome{Outcome: workflow.OutcomeFixable})
+
+	want := "✓ PASS\n\n1 medium severity issue found.\nreview.fix_medium is on: fixing the medium issues.\nReturning to implementation (iteration 1/5).\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
 func TestRunFinished_Completed(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)

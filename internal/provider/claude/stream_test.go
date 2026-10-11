@@ -71,7 +71,7 @@ func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 // The result event of claude 2.1.293 also says which models answered, what each cost, and
 // how long the call waited on the API; tool calls are counted from the assistant messages.
 func TestParseStream_ReportsModelsAPITimeAndTools(t *testing.T) {
-	stdout := `{"type":"system","subtype":"init","model":"claude-sonnet-5-5"}
+	stdout := `{"type":"system","subtype":"init","model":"claude-sonnet-5-5","mcp_servers":[{"name":"graphify","status":"failed"},{"name":"mem","status":"connected"}]}
 {"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":3},"content":[{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}
 {"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5-5","usage":{"input_tokens":2,"output_tokens":9},"content":[{"type":"tool_use","id":"t2","name":"Read","input":{}}]}}
 {"type":"assistant","message":{"id":"m2","model":"claude-sonnet-5-5","content":[{"type":"tool_use","id":"t3","name":"Edit","input":{}},{"type":"tool_use","id":"t3","name":"Edit","input":{}}]}}
@@ -92,6 +92,10 @@ func TestParseStream_ReportsModelsAPITimeAndTools(t *testing.T) {
 	// A tool_use block repeated under the same id is one call.
 	if want := map[string]int{"Read": 2, "Edit": 1}; !reflect.DeepEqual(c.Tools, want) {
 		t.Errorf("tools = %v, want %v", c.Tools, want)
+	}
+	// A server that did not start is recorded; a connected one is not.
+	if !reflect.DeepEqual(c.MCPFailed, []string{"graphify"}) {
+		t.Errorf("mcp_failed = %v, want [graphify]", c.MCPFailed)
 	}
 }
 

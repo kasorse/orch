@@ -101,6 +101,7 @@ test:
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  stop_without_progress: true  # stop a fix loop that changes nothing or repeats a failure
   prompt:                    # optional bounds on repository data in prompts
     max_test_output_bytes: 32768
     max_diff_bytes: 262144
@@ -160,7 +161,11 @@ security:
   [Tests that already fail](#tests-that-already-fail).
 - `limits.max_steps` bounds total workflow steps; `limits.max_fix_iterations` bounds how many
   times a failing test or review can send the workflow back to `implement` — both exist purely
-  to guarantee termination. `limits.prompt` bounds what goes into a prompt: a failing test's
+  to guarantee termination. `limits.stop_without_progress` (default `true`) ends a fix loop
+  earlier when it goes nowhere: `implement` left the working tree as the previous implement
+  did, the same tests fail the same way, or review repeats its blocking issues. The run is
+  `stopped` with a `no progress: …` reason and exit code 4, and `orchestrator resume` goes back
+  into `implement`; `false` spends every iteration as before. `limits.prompt` bounds what goes into a prompt: a failing test's
   output in the implement retry (keeping the failure lines) and the diff review sees (lock
   files as a stat line, the rest in full while it fits). Artifacts and logs keep everything.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the
@@ -174,6 +179,54 @@ security:
 - **`jira`** (optional) is where `run --jira` reads a ticket from. It is validated whenever
   present, but its credential variables are needed only by `run --jira` (and checked by
   `validate`). See [Taking the task from a Jira ticket](#taking-the-task-from-a-jira-ticket).
+
+### Getting more from the same stages (opt-in)
+
+Every stage already gets what the earlier ones found (the analysis and plan files and risks, the
+plan's acceptance criteria, and on a retry the diff stat of what the run changed so far), and
+review checks each acceptance criterion. The keys below are all optional and off unless
+written; a run with none of them behaves as before, apart from those richer prompts and
+`limits.stop_without_progress`:
+
+```yaml
+checks:                          # run in order before test.command; the first non-zero exit stops the step
+  - {name: vet,  command: "go vet ./..."}
+  - {name: lint, command: "golangci-lint run --new-from-rev=$ORCH_BASE_REF"}
+test:
+  command: 'go test ./... ${ORCH_TEST_FILTER:+-run "$ORCH_TEST_FILTER"}'
+actions:
+  implement:
+    provider: claude
+    model: sonnet
+    effort: medium
+    timeout: 30m                 # the verify calls run inside this step: raise its timeout
+    verify: true                 # implement may run test.command and the checks (sandbox, guard)
+    by_complexity:               # model and effort per decided complexity; --stage uses the base
+      simple:  {model: haiku, effort: low}
+      complex: {model: opus,  effort: high}
+  review:
+    provider: claude
+    model: sonnet
+    models: [opus]               # extra reviewers, one after the other; issues are merged
+review:
+  fix_medium: true               # a passing review with a medium issue sends implement back once
+limits:
+  verify: {max_calls_per_step: 8, call_timeout: 10m}
+```
+
+- **`checks`** are exit-code gates like the tests: build, vet, lint or a SAST scan, each run
+  under the test sandbox, environment and guard, with `ORCH_BASE_REF` set to the commit the run
+  started from. A failed check is named in the retry prompt, and the pre-run test runs them too.
+  Checks only run in a workflow with a `testing` stage.
+- **`verify`** is described under [Verify](#verify-let-implement-run-the-tests-opt-in); the
+  `${ORCH_TEST_FILTER:+…}` in `test.command` lets the model run a subset of the tests, and a
+  command that does not use it simply runs everything.
+- **`by_complexity`** is a static table: Go reads the complexity the decision already made and
+  picks the entry; nothing is chosen by a model, and the provider cannot be overridden.
+- **`review.fix_medium`** and **`actions.review.models`** make review stricter; the second
+  costs one more call per extra model.
+- Nothing here changes what decides success: the `test` step's exit code and, for review,
+  `ReviewResult.Decide`. Details: `MVP.md` §44 and `specs/quality/`.
 
 ## Security model
 
@@ -340,7 +393,30 @@ extensions:
   - **Your hooks run your code with your permissions** on every such step. Enable this for
     hooks you trust, ideally only on the actions that need them.
 
-Extensions are only supported with provider `claude`; `validate` refuses them elsewhere.
+Extensions are only supported with provider `claude`; `validate` refuses them elsewhere. The
+server names `orch` (the orchestrator's own) and any name with `__` are refused.
+
+### Verify: let `implement` run the tests (opt-in)
+
+With `actions.implement.verify: true` the implement session gets two tools served by the
+orchestrator itself (`orchestrator mcp-verify`, a hidden subcommand), `run_tests` and, when
+`checks:` are configured, `run_check`:
+
+- The model picks only a check name or a test filter (`[A-Za-z0-9_./:-]`, reaching the command
+  as `ORCH_TEST_FILTER`); the command is `test.command` or a check from your config, never
+  model text. It needs `test.command`, `test.sandbox: bwrap` and provider `claude`.
+- Each call runs under the test sandbox, after the protected-paths guard has compared the
+  repository with the start of the step. If the model has changed hooks, CI or the
+  orchestrator config, the call is refused, nothing more runs in the step, and the step fails
+  with "the model's code changed protected files during a verify call".
+- `limits.verify.max_calls_per_step` (default 8, at most 50, refused calls included) and
+  `limits.verify.call_timeout` (default 10m) bound it. The `test` step still runs afterwards
+  and is the only result that counts.
+- Every call is recorded in `run.json` (`executions[].verify_calls`, `outcome.verify_calls`),
+  its output in `logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log`, and `summary.md` has a
+  `Verify` row.
+- The step works in a private `orch-verify-*` directory of `$TMPDIR` that it removes when it
+  ends; a start of `run` or `resume` removes your own such directories older than a day.
 
 ### What is not protected
 
@@ -553,6 +629,11 @@ It is not offered with `--mode auto`, when the run started on uncommitted change
 would end up in the same commit), or when git's config or hooks or a protected path
 changed since the run started (`git commit` runs those hooks). See `MVP.md` §42.
 
+`auto_commit: true` in the config commits without the question, in every mode including
+`--mode auto`, after the same checks. It does not commit when there is a warning (a failing
+review, a likely secret) or no `summary_short` to use as the message; it says why and the
+changes stay in the working tree.
+
 ### Resuming a run
 
 ```
@@ -706,12 +787,20 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
   ticket.json           # run --jira only: the issue as fetched (a record; never read back)
-  artifacts/<NNN>-<action>.json          # structured output per step
+  artifacts/<NNN>-<action>.json          # structured output per step, and for a model step
+                                         # the "prompt" it was sent (a record; never read back)
   logs/<NNN>-<action>.{stdout,stderr}.log  # raw provider/test output per step
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls
   logs/pre-run-test.{stdout,stderr}.log    # the tests before any change, when red
+  logs/<NNN>-test.<check>.{stdout,stderr}.log  # each `checks:` command (pre-run-test.<check>.* before the run)
+  logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log  # each verify call of an implement step
 ```
+
+The quality-loop keys add `checks`, `failed_check` and `failed_tests` to a test result,
+`options`, `tree_after`, `verify_calls`, `model_source`, `criteria`, `reviewers` and
+`extra_calls` to `run.json`, `models` to `decision.json` and `acceptance_criteria` to the plan
+artifact; the field reference is `MVP.md` §44.9.
 
 A review artifact also records what the reviewer was shown: `diff: {bytes, files, shown,
 summarized, withheld, truncated}`.

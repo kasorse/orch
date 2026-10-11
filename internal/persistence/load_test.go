@@ -53,9 +53,14 @@ func fullRun(t *testing.T, store *Store) *domain.Run {
 	run.ResumeBaseline = json.RawMessage(`{"git_fingerprint":"ab","protected":{}}`)
 	run.Executions = []domain.StepExecution{
 		{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted,
-			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit},
+			Provider:     &domain.ProviderRef{Provider: "claude", Model: "sonnet", Authority: domain.AuthorityEdit, ModelSource: "by_complexity.medium"},
 			ArtifactPath: ArtifactRelPath(0, domain.ActionImplement),
-			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3}},
+			Usage:        &domain.Usage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 300, CostUSD: 0.42, Turns: 3},
+			VerifyCalls: []domain.VerifyCall{
+				{Tool: domain.VerifyToolRunTests, Filter: "./internal/x", ExitCode: 1, Duration: 4 * time.Second, OutputCut: true},
+				{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true, Duration: time.Second},
+				{Tool: domain.VerifyToolRunCheck, Refused: "invalid arguments: name is required"},
+			}},
 		{Index: 1, Action: domain.ActionTest, Status: domain.StepCompleted,
 			TestResult:   &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL", Duration: time.Second},
 			ArtifactPath: ArtifactRelPath(1, domain.ActionTest)},
@@ -149,6 +154,44 @@ func sourceOf(m map[string]any) map[string]any {
 	return m["task"].(map[string]any)["source"].(map[string]any)
 }
 
+func verdict(index int, evidence string) map[string]any {
+	return map[string]any{"index": index, "criterion": "c", "met": false, "evidence": evidence}
+}
+
+// setCriteria puts verdicts on the run's review result (execution 3 of fullRun).
+func setCriteria(m map[string]any, verdicts ...map[string]any) {
+	list := make([]any, len(verdicts))
+	for i, v := range verdicts {
+		list[i] = v
+	}
+	execAt(m, 3)["review_result"].(map[string]any)["criteria"] = list
+}
+
+// A review result with well-formed criteria loads and keeps them; one written before the
+// field existed (fullRun's) loads without.
+func TestLoadRun_ReviewCriteria(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run := fullRun(t, store)
+	loaded, err := store.LoadRun(run.ID)
+	if err != nil {
+		t.Fatalf("a review result without criteria: %v", err)
+	}
+	if got := loaded.Executions[3].ReviewResult.Criteria; got != nil {
+		t.Errorf("criteria = %+v, want none", got)
+	}
+
+	editRunJSON(t, store, run.ID, func(m map[string]any) {
+		setCriteria(m, verdict(2, "b.go:2"), verdict(1, "a.go:1"))
+	})
+	loaded, err = store.LoadRun(run.ID)
+	if err != nil {
+		t.Fatalf("a review result with criteria: %v", err)
+	}
+	if got := loaded.Executions[3].ReviewResult; len(got.Criteria) != 2 || got.Decide() != domain.ReviewFail {
+		t.Errorf("review result = %+v", got)
+	}
+}
+
 func TestLoadRun_RefusesCorruptState(t *testing.T) {
 	cases := []struct {
 		name string
@@ -169,6 +212,9 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown authority", func(m map[string]any) {
 			execAt(m, 0)["provider"].(map[string]any)["authority"] = "root"
 		}, "unknown authority"},
+		{"unknown model source", func(m map[string]any) {
+			execAt(m, 0)["provider"].(map[string]any)["model_source"] = "by_complexity.trivial"
+		}, "unknown model_source"},
 		{"negative usage counter", func(m map[string]any) {
 			execAt(m, 0)["usage"].(map[string]any)["output_tokens"] = -1
 		}, "executions[0]: usage: negative counter"},
@@ -181,6 +227,32 @@ func TestLoadRun_RefusesCorruptState(t *testing.T) {
 		{"unknown resume status", func(m map[string]any) {
 			m["resumes"].([]any)[0].(map[string]any)["from_status"] = "odd"
 		}, "resumes[0]"},
+		{"criterion index out of range", func(m map[string]any) {
+			setCriteria(m, verdict(1, "a.go:1"), verdict(3, "b.go:2"))
+		}, "review_result.criteria"},
+		{"duplicate criterion index", func(m map[string]any) {
+			setCriteria(m, verdict(1, "a.go:1"), verdict(1, "b.go:2"))
+		}, "more than once"},
+		{"criterion evidence too long", func(m map[string]any) {
+			setCriteria(m, verdict(1, strings.Repeat("x", domain.MaxCriterionEvidenceBytes+1)))
+		}, "evidence"},
+		{"criterion without evidence", func(m map[string]any) { setCriteria(m, verdict(1, "")) }, "no evidence"},
+		{"reviewer without a model", func(m map[string]any) {
+			execAt(m, 3)["review_result"].(map[string]any)["reviewers"] = []any{
+				map[string]any{"model": "", "result": map[string]any{"status": "pass", "summary": "s", "issues": []any{}}},
+			}
+		}, "review_result.reviewers"},
+		{"reviewer with an invalid result", func(m map[string]any) {
+			execAt(m, 3)["review_result"].(map[string]any)["reviewers"] = []any{
+				map[string]any{"model": "opus", "result": map[string]any{"status": "maybe"}},
+			}
+		}, "review_result.reviewers"},
+		{"extra call without a model", func(m map[string]any) {
+			execAt(m, 3)["call"] = map[string]any{"prompt_bytes": 1, "extra_calls": []any{map[string]any{"model": "", "input_tokens": 1, "output_tokens": 1}}}
+		}, "extra call 0"},
+		{"review result on another step", func(m map[string]any) {
+			execAt(m, 0)["review_result"] = execAt(m, 3)["review_result"]
+		}, "review_result recorded on step action implement"},
 		{"unknown task source field", func(m map[string]any) { sourceOf(m)["extra"] = 1 }, "unknown field"},
 		{"task source kind", func(m map[string]any) { sourceOf(m)["kind"] = "github" }, `task.source: unknown kind "github"`},
 		{"task source kind empty", func(m map[string]any) { sourceOf(m)["kind"] = "" }, "task.source: unknown kind"},
@@ -371,7 +443,7 @@ func TestArtifactRelPath_MatchesSaveArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.SaveArtifact(run.ID, 7, domain.ActionPlan, map[string]string{})
+	got, err := store.SaveArtifact(run.ID, 7, domain.ActionPlan, map[string]string{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}

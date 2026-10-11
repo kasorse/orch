@@ -112,7 +112,7 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 	}
 
 	artifact := domain.AnalysisArtifact{Summary: "root cause found"}
-	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionAnalyze, artifact)
+	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionAnalyze, artifact, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -131,6 +131,57 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 	}
 	if saved.Summary != "root cause found" {
 		t.Errorf("expected summary to round-trip, got %q", saved.Summary)
+	}
+}
+
+// The prompt is the artifact's last field on disk and never comes back from ReadArtifact;
+// without one the file has no such field.
+func TestSaveArtifact_PromptIsWrittenAndNotReadBack(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := "ACTION: plan\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"
+	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p", Steps: []string{"s"}}, prompt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveArtifact(run.ID, 1, domain.ActionTest, domain.TestResult{Command: "go test"}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(store.runDir(run.ID), ArtifactRelPath(0, domain.ActionPlan)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var onDisk struct {
+		Summary string `json:"summary"`
+		Prompt  string `json:"prompt"`
+	}
+	if err := json.Unmarshal(raw, &onDisk); err != nil || onDisk.Prompt != prompt || onDisk.Summary != "p" {
+		t.Errorf("on disk = %+v (%v), want the summary and the prompt", onDisk, err)
+	}
+	if !strings.HasSuffix(string(raw), `"prompt": "ACTION: plan\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"`+"\n}") {
+		t.Errorf("prompt is not the last field, unescaped:\n%s", raw)
+	}
+
+	data, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.DisallowUnknownFields()
+	var plan domain.PlanArtifact
+	if err := dec.Decode(&plan); err != nil || plan.Summary != "p" || len(plan.Steps) != 1 {
+		t.Errorf("read back = %+v (%v), want the plan without the prompt", plan, err)
+	}
+
+	raw, err = os.ReadFile(filepath.Join(store.runDir(run.ID), ArtifactRelPath(1, domain.ActionTest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"prompt"`) {
+		t.Errorf("an artifact saved without a prompt has the field:\n%s", raw)
 	}
 }
 
@@ -179,6 +230,32 @@ func TestAppendCallLog_NamedUnindexedPath(t *testing.T) {
 	data, err := os.ReadFile(want)
 	if err != nil || string(data) != "warning\n" {
 		t.Errorf("log = %q, %v", data, err)
+	}
+}
+
+func TestAppendCheckLog_PathAndName(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, "vet", "stdout", "one\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, "vet", "stdout", "two\n"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(store.runDir(run.ID), "logs", "004-test.vet.stdout.log"))
+	if err != nil || string(data) != "one\ntwo\n" {
+		t.Errorf("log = %q, %v", data, err)
+	}
+
+	// The name is part of a path: whatever the config said, a bad one is refused.
+	for _, bad := range []string{"", "../x", "a/b", "A", "-x", ".", "..", "a.b", strings.Repeat("a", 33)} {
+		if err := store.AppendCheckLog(run.ID, 4, domain.ActionTest, bad, "stdout", "x"); err == nil {
+			t.Errorf("check name %q must be refused", bad)
+		}
 	}
 }
 

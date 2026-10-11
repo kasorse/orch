@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.2.0, pluggy-1.5.0
+collected 5 items
+
+tests/test_store.py .F.FF                                                [100%]
+
+=================================== FAILURES ===================================
+______________________________ test_put_fresh __________________________________
+
+    def test_put_fresh():
+>       Store().put("a", 1)
+E       KeyError: 'a'
+
+tests/test_store.py:9: KeyError
+=========================== short test summary info ============================
+FAILED tests/test_store.py::test_put_fresh - KeyError: 'a'
+SKIPPED [1] tests/test_store.py:30: not on windows
+FAILED tests/test_store.py::TestTable::test_row[a - b] - assert 1 == 2
+FAILED tests/test_store.py::test_get
+========================= 3 failed, 2 passed, 1 skipped in 0.12s ===============

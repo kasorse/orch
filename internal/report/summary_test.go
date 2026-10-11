@@ -29,7 +29,7 @@ func summaryRun() domain.Run {
 				Provider: &domain.ProviderRef{Provider: "claude", Model: "sonnet"},
 				Usage:    &domain.Usage{InputTokens: 38, OutputTokens: 40315, CacheReadTokens: 1374052, CacheCreationTokens: 110786, CostUSD: 1.1211804, Turns: 41},
 				Call: &domain.CallReport{PromptBytes: 20480, Truncated: []domain.PromptPart{domain.PromptTestOutput}, APIMS: 183_000,
-					Models: []domain.ModelUse{{Model: "claude-sonnet-5-5", CostUSD: 1.1}}, Tools: map[string]int{"Edit": 7}},
+					Models: []domain.ModelUse{{Model: "claude-sonnet-5-5", CostUSD: 1.1}}, Tools: map[string]int{"Edit": 7}, MCPFailed: []string{"graphify"}},
 				Diff: &domain.StepDiff{Step: domain.DiffStat{Files: 3, Insertions: 120, Deletions: 4}, Run: &domain.DiffStat{Files: 6, Insertions: 420, Deletions: 35, Binary: 1},
 					NotReported: []string{"internal/x.go"}, ReportedUnchanged: []string{"ghost.go"}}},
 			{Index: 2, Action: domain.ActionTest, Status: domain.StepCompleted, Attempt: 1, StartedAt: t0.Add(75 * time.Minute), FinishedAt: t0.Add(75*time.Minute + 3200*time.Millisecond),
@@ -71,6 +71,7 @@ func TestRunSummary(t *testing.T) {
 		"| 0 | implement | 24 | Read 17, Glob 3, Grep 3, Write 1 |",
 		"| 1 | 3 files, +120 −4 | 6 files, +420 −35 (1 binary) | internal/x.go | ghost.go |",
 		"- #0 implement ended without the CLI's final report",
+		"- #1 implement ran without MCP server(s) graphify: the CLI could not start them",
 		"- #0 implement failed: failure: timeout (exceeded actions.implement.timeout = 10m0s)\n",
 		"MVP.md §43",
 	} {
@@ -80,6 +81,88 @@ func TestRunSummary(t *testing.T) {
 	}
 	if strings.Contains(got, "second line") {
 		t.Error("the task excerpt must be its first line only")
+	}
+}
+
+func TestRunSummary_ReviewCriteria(t *testing.T) {
+	run := summaryRun()
+	run.Executions[3].ReviewResult = &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+		{Index: 1, Met: true, Evidence: "a"}, {Index: 2, Met: false, Evidence: "b"}, {Index: 3, Met: true, Evidence: "c"},
+	}}
+	got := RunSummary(run, nil)
+	if want := "| fail (0 issues, 2/3 criteria met) |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+}
+
+func TestRunSummary_Reviewers(t *testing.T) {
+	if got := RunSummary(summaryRun(), nil); strings.Contains(got, "Reviewers") {
+		t.Errorf("a single review has no reviewers row\n%s", got)
+	}
+
+	run := summaryRun()
+	r := run.Executions[3].ReviewResult
+	r.Reviewers = []domain.ReviewerAnswer{{Model: "sonnet", Result: *r}, {Model: "opus", Result: *r}}
+	run.Executions[3].Call = &domain.CallReport{ExtraCalls: []domain.ExtraCall{{Model: "opus"}}}
+	got := RunSummary(run, nil)
+	for _, want := range []string{"| Reviewers | sonnet, opus |", "| Provider calls | 4 |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
+}
+
+func TestRunSummary_FailedCheck(t *testing.T) {
+	run := summaryRun()
+	run.Executions[2].TestResult = &domain.TestResult{Command: "go vet ./...", ExitCode: 1, FailedCheck: "vet",
+		Checks: []domain.CheckResult{{Name: "build", Success: true}, {Name: "vet", ExitCode: 1}}}
+	got := RunSummary(run, nil)
+	for _, want := range []string{"| Tests (last run) | failed (check vet) |", "| test (resume 1) | failed (check vet, exit 1) |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
+}
+
+func TestRunSummary_BaselineSplit(t *testing.T) {
+	run := summaryRun()
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("a run without a red pre-run test has no Failing tests row\n%s", got)
+	}
+
+	run.PreRunTest = &domain.TestResult{ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestB"}, ReportFormat: "gotext"}
+	run.Executions[2].TestResult = &domain.TestResult{ExitCode: 1, FailedTests: []string{"p.TestA", "p.TestC", "p.TestD"}, ReportFormat: "gotext"}
+	got := RunSummary(run, nil)
+	if want := "| Failing tests | 1 failing before the run, 2 new |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+
+	run.Executions[2].TestResult.ReportFormat = "pytest"
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("names in different formats must not be split\n%s", got)
+	}
+
+	run.Executions[2].TestResult = &domain.TestResult{Success: true}
+	if got := RunSummary(run, nil); strings.Contains(got, "| Failing tests |") {
+		t.Errorf("a green last test has no split\n%s", got)
+	}
+}
+
+func TestRunSummary_Verify(t *testing.T) {
+	run := summaryRun()
+	if got := RunSummary(run, nil); strings.Contains(got, "| Verify |") {
+		t.Errorf("a run without verify calls has no Verify row\n%s", got)
+	}
+	run.Executions[1].VerifyCalls = []domain.VerifyCall{
+		{Tool: domain.VerifyToolRunTests, Success: true},
+		{Tool: domain.VerifyToolRunTests, ExitCode: 1},
+		{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true},
+		{Tool: domain.VerifyToolRunCheck, Check: "vet", Success: true},
+		{Tool: domain.VerifyToolRunTests, Refused: "limit reached"},
+	}
+	got := RunSummary(run, nil)
+	if want := "| Verify | 5 calls, 3 passed |"; !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
 	}
 }
 

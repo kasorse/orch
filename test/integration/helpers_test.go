@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -38,7 +39,12 @@ type configOptions struct {
 	providers        providerSet
 	maxSteps         int
 	maxFixIterations int
-	testCommand      string
+	// stopWithoutProgress is limits.stop_without_progress. defaultConfigOptions leaves it
+	// off: the fake implement either fixes the fixture or never changes it, so scenarios that
+	// loop to max_fix_iterations would otherwise stop earlier for making no progress. The
+	// no-progress scenarios turn it on.
+	stopWithoutProgress bool
+	testCommand         string
 	// testEnvPass renders test.env_pass when set.
 	testEnvPass []string
 	// testBaseline is test.baseline. defaultConfigOptions sets "off": most scenarios fix the
@@ -63,6 +69,86 @@ type configOptions struct {
 	// jira renders a jira: section when set (specs/jira/SPEC.md §7); nil leaves it out,
 	// so every other scenario's config is unchanged.
 	jira *jiraOptions
+
+	// The quality phase's keys (specs/quality/SPEC.md §11). Each is rendered only when set, so
+	// a config that does not use one is the config it was before.
+	//
+	// testSandbox is test.sandbox; "" renders none. verify needs a sandbox, so its scenarios put
+	// a fake bwrap on PATH (installFakeBwrap) and set "bwrap".
+	testSandbox string
+	// checks is the top-level checks: list, run in order before test.command.
+	checks []checkOption
+	// verify is actions.implement.verify, and verifyMaxCalls (when above 0)
+	// limits.verify.max_calls_per_step.
+	verify         bool
+	verifyMaxCalls int
+	// byComplexity is actions.<action>.by_complexity as action -> complexity -> model.
+	byComplexity map[string]map[string]string
+	// fixMedium is review.fix_medium.
+	fixMedium bool
+	// reviewModels is actions.review.models: the extra reviewers.
+	reviewModels []string
+}
+
+// checkOption is one entry of the checks: list.
+type checkOption struct{ name, command string }
+
+// yamlQuote renders s as a single-quoted YAML scalar, which needs no other escaping.
+func yamlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// actionsYAML renders the actions: entries, each with the keys the options add to it.
+func (o configOptions) actionsYAML() string {
+	p := o.providers
+	var b strings.Builder
+	for _, a := range []struct{ name, provider string }{
+		{"research", p.Research}, {"analyze", p.Analyze}, {"plan", p.Plan}, {"implement", p.Implement}, {"review", p.Review},
+	} {
+		fmt.Fprintf(&b, "  %s:\n    provider: %s\n    model: fake\n", a.name, a.provider)
+		if levels := o.byComplexity[a.name]; len(levels) > 0 {
+			b.WriteString("    by_complexity:\n")
+			names := make([]string, 0, len(levels))
+			for level := range levels {
+				names = append(names, level)
+			}
+			sort.Strings(names)
+			for _, level := range names {
+				fmt.Fprintf(&b, "      %s: {model: %s}\n", level, levels[level])
+			}
+		}
+		if a.name == "implement" && o.verify {
+			b.WriteString("    verify: true\n")
+		}
+		if a.name == "review" && len(o.reviewModels) > 0 {
+			fmt.Fprintf(&b, "    models: [%s]\n", strings.Join(o.reviewModels, ", "))
+		}
+	}
+	return b.String()
+}
+
+// limitsYAML is what goes under limits: after stop_without_progress.
+func (o configOptions) limitsYAML() string {
+	s := o.promptLimits
+	if o.verifyMaxCalls > 0 {
+		s += fmt.Sprintf("  verify:\n    max_calls_per_step: %d\n", o.verifyMaxCalls)
+	}
+	return s
+}
+
+// tailYAML is the top-level checks: and review: sections, after the rest of the config.
+func (o configOptions) tailYAML() string {
+	var b strings.Builder
+	if len(o.checks) > 0 {
+		b.WriteString("\nchecks:\n")
+		for _, c := range o.checks {
+			fmt.Fprintf(&b, "  - name: %s\n    command: %s\n", c.name, yamlQuote(c.command))
+		}
+	}
+	if o.fixMedium {
+		b.WriteString("\nreview:\n  fix_medium: true\n")
+	}
+	return b.String()
 }
 
 // jiraOptions is the jira: section: a basic-auth instance at baseURL reading
@@ -120,6 +206,10 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	if opts.decisionModel != "" {
 		decisionModel = opts.decisionModel
 	}
+	sandbox := opts.testSandbox
+	if sandbox == "" {
+		sandbox = "none"
+	}
 	content := fmt.Sprintf(`version: 2
 
 decision:
@@ -156,36 +246,23 @@ context:
   max_bytes: 24576
 
 actions:
-  research:
-    provider: %s
-    model: fake
-  analyze:
-    provider: %s
-    model: fake
-  plan:
-    provider: %s
-    model: fake
-  implement:
-    provider: %s
-    model: fake
-  review:
-    provider: %s
-    model: fake
-
+%s
 test:
-  sandbox: none
+  sandbox: %s
   baseline: %s
   command: %q
 %s
 limits:
   max_steps: %d
   max_fix_iterations: %d
+  stop_without_progress: %t
 %s
 execution:
   timeout: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
-		p.Research, p.Analyze, p.Plan, p.Implement, p.Review,
-		opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.promptLimits, opts.timeout, opts.extraYAML)
+		opts.actionsYAML(),
+		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, opts.extraYAML)
+	content += opts.tailYAML()
 	content += opts.jira.yaml()
 
 	path := filepath.Join(dir, "orchestrator.yaml")

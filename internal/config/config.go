@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"orchestrator/internal/domain"
 )
 
 type ProviderModel struct {
@@ -29,6 +31,55 @@ type ProviderModel struct {
 type ActionConfig struct {
 	ProviderModel
 	Timeout time.Duration
+	// Verify gives the implement session the orchestrator's verify tools, which run
+	// test.command and the checks (specs/quality/SPEC.md §6). Only actions.implement accepts
+	// it; Validate rejects the key anywhere else.
+	Verify bool
+	// ByComplexity names a model and/or effort per decided complexity (specs/quality/SPEC.md
+	// §9). The provider is fixed per action. A key that is not a complexity is kept as
+	// written, so Validate can name it; read the table through Route.
+	ByComplexity map[domain.Complexity]ModelEffort
+	// Models are the extra reviewers of actions.review: model names on the action's provider,
+	// called one after another after the base model with the same prompt (specs/quality/SPEC.md
+	// §7.5). Only actions.review accepts it; Validate rejects the key anywhere else.
+	Models []string
+
+	// verifySet and modelsSet record that the key was written, so Validate can name it on an
+	// action that does not accept it.
+	verifySet bool
+	modelsSet bool
+}
+
+// MaxExtraReviewers bounds actions.review.models.
+const MaxExtraReviewers = 4
+
+// ModelEffort is one by_complexity entry. A field left empty falls back to the action's
+// base value. There is no provider: the strict parser rejects the key.
+type ModelEffort struct {
+	Model  string `yaml:"model"`
+	Effort string `yaml:"effort"`
+}
+
+// Route is the provider, model and effort for an action under the decided complexity c, and
+// where they came from. A manual decision (run --stage) and a complexity without an entry
+// get the base; otherwise the entry's non-empty fields override it. The provider is always
+// the base one.
+func (a ActionConfig) Route(c domain.Complexity, manual bool) (ProviderModel, string) {
+	if manual || c == "" {
+		return a.ProviderModel, domain.ModelSourceBase
+	}
+	entry, ok := a.ByComplexity[c]
+	if !ok {
+		return a.ProviderModel, domain.ModelSourceBase
+	}
+	pm := a.ProviderModel
+	if entry.Model != "" {
+		pm.Model = entry.Model
+	}
+	if entry.Effort != "" {
+		pm.Effort = entry.Effort
+	}
+	return pm, domain.ModelSourceByComplexity + string(c)
 }
 
 // UnmarshalYAML parses ActionConfig's own provider/model/timeout keys directly (rather
@@ -40,6 +91,15 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Model    string `yaml:"model"`
 		Effort   string `yaml:"effort"`
 		Timeout  string `yaml:"timeout"`
+		Verify   *bool  `yaml:"verify"`
+
+		// Models are pointers because yaml.v3 drops a null entry of a []string without a
+		// word; a pointer keeps it visible, so it can be refused.
+		Models []*string `yaml:"models"`
+
+		// ByComplexity keeps its keys as strings so Validate can report one that is not a
+		// complexity; ModelEffort has no provider key, so the strict parser rejects one.
+		ByComplexity map[string]ModelEffort `yaml:"by_complexity"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -47,6 +107,26 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Provider = raw.Provider
 	a.Model = raw.Model
 	a.Effort = raw.Effort
+	a.Verify = raw.Verify != nil && *raw.Verify
+	a.verifySet = raw.Verify != nil
+	a.Models = nil
+	if raw.Models != nil {
+		a.Models = make([]string, len(raw.Models))
+		for i, m := range raw.Models {
+			if m == nil {
+				return fmt.Errorf("models[%d] must not be null or empty", i)
+			}
+			a.Models[i] = *m
+		}
+	}
+	a.modelsSet = raw.Models != nil
+	a.ByComplexity = nil
+	if raw.ByComplexity != nil {
+		a.ByComplexity = make(map[domain.Complexity]ModelEffort, len(raw.ByComplexity))
+		for k, v := range raw.ByComplexity {
+			a.ByComplexity[domain.Complexity(k)] = v
+		}
+	}
 	d, err := parseDurationField("timeout", raw.Timeout)
 	if err != nil {
 		return err
@@ -78,6 +158,40 @@ type ActionsConfig struct {
 	Review    ActionConfig `yaml:"review"`
 }
 
+// For returns the configuration of a workflow action that makes a provider call; ok is false
+// for one that does not (test).
+func (a ActionsConfig) For(t domain.ActionType) (ac ActionConfig, ok bool) {
+	switch t {
+	case domain.ActionResearch:
+		return a.Research, true
+	case domain.ActionAnalyze:
+		return a.Analyze, true
+	case domain.ActionPlan:
+		return a.Plan, true
+	case domain.ActionImplement:
+		return a.Implement, true
+	case domain.ActionReview:
+		return a.Review, true
+	}
+	return ActionConfig{}, false
+}
+
+// Route is the model an action runs with under a run's decision: ActionConfig.Route with the
+// decision's complexity, and a manual decision (run --stage) or none getting the base. ok is
+// false for an action that makes no provider call.
+func (a ActionsConfig) Route(t domain.ActionType, d *domain.Decision) (pm ProviderModel, source string, ok bool) {
+	ac, ok := a.For(t)
+	if !ok {
+		return ProviderModel{}, "", false
+	}
+	if d == nil {
+		pm, source = ac.Route("", true)
+	} else {
+		pm, source = ac.Route(d.Complexity.Selected, d.Source == domain.DecisionSourceManual)
+	}
+	return pm, source, true
+}
+
 type TestConfig struct {
 	Command string `yaml:"command"`
 	// Sandbox is "bwrap" (or empty, the default): run the command under bubblewrap with the
@@ -96,6 +210,14 @@ type TestConfig struct {
 	// implement and test runs the test command once before the first step and refuses a red
 	// suite (specs/hardening/SPEC.md §8). Read it through PreRunTest.
 	Baseline string `yaml:"baseline"`
+}
+
+// CheckConfig is one operator-defined deterministic check (specs/quality/SPEC.md §5): a
+// command the test step runs before test.command, and the pre-run test too. Like
+// test.command it is trusted operator configuration and goes through `sh -c`.
+type CheckConfig struct {
+	Name    string `yaml:"name"`
+	Command string `yaml:"command"`
 }
 
 // test.baseline values.
@@ -138,9 +260,74 @@ func (t TestConfig) ResolveBinds(home string) (ro, rw []string) {
 type LimitsConfig struct {
 	MaxSteps         int `yaml:"max_steps"`
 	MaxFixIterations int `yaml:"max_fix_iterations"`
+	// StopWithoutProgress is a pointer so an absent key (nil) can default to true while an
+	// explicit false still means false; read it through StopsWithoutProgress.
+	StopWithoutProgress *bool `yaml:"stop_without_progress"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
 	Prompt PromptLimitsConfig `yaml:"prompt"`
+	// Verify bounds the verify tools of the implement step (specs/quality/SPEC.md §6.3).
+	Verify VerifyLimitsConfig `yaml:"verify"`
+}
+
+// StopsWithoutProgress reports whether the fix loop stops when an iteration makes no progress
+// (specs/quality/SPEC.md §8.1): limits.stop_without_progress, true when absent.
+func (l LimitsConfig) StopsWithoutProgress() bool {
+	return l.StopWithoutProgress == nil || *l.StopWithoutProgress
+}
+
+// Defaults of limits.verify.
+const (
+	DefaultVerifyMaxCalls    = 8
+	DefaultVerifyCallTimeout = 10 * time.Minute
+)
+
+// VerifyLimitsConfig is limits.verify. Both keys are optional; read them through MaxCalls and
+// Timeout. MaxCallsPerStep is a pointer so an explicit 0 is refused as out of range instead
+// of reading as unset.
+type VerifyLimitsConfig struct {
+	MaxCallsPerStep *int
+	CallTimeout     time.Duration
+
+	// callTimeoutSet records that call_timeout was written, so an explicit 0s is refused.
+	callTimeoutSet bool
+}
+
+// UnmarshalYAML parses call_timeout through the same duration-string parsing as the other
+// timeouts.
+func (v *VerifyLimitsConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		MaxCallsPerStep *int   `yaml:"max_calls_per_step"`
+		CallTimeout     string `yaml:"call_timeout"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	d, err := parseDurationField("limits.verify.call_timeout", raw.CallTimeout)
+	if err != nil {
+		return err
+	}
+	v.MaxCallsPerStep = raw.MaxCallsPerStep
+	v.CallTimeout = d
+	v.callTimeoutSet = raw.CallTimeout != ""
+	return nil
+}
+
+// MaxCalls is the most verify calls one implement step may make: max_calls_per_step, or its
+// default.
+func (v VerifyLimitsConfig) MaxCalls() int {
+	if v.MaxCallsPerStep == nil {
+		return DefaultVerifyMaxCalls
+	}
+	return *v.MaxCallsPerStep
+}
+
+// Timeout is the bound on one verify call: call_timeout, or its default.
+func (v VerifyLimitsConfig) Timeout() time.Duration {
+	if v.CallTimeout == 0 && !v.callTimeoutSet {
+		return DefaultVerifyCallTimeout
+	}
+	return v.CallTimeout
 }
 
 // Defaults and ranges of limits.prompt (specs/hardening/SPEC.md §5.1).
@@ -211,6 +398,13 @@ type Config struct {
 	Limits    LimitsConfig    `yaml:"limits"`
 	Execution ExecutionConfig `yaml:"execution"`
 
+	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
+	Review ReviewConfig `yaml:"review"`
+
+	// Checks run in order before test.command, inside the test step and the pre-run test
+	// (specs/quality/SPEC.md §5). Absent means none, as before.
+	Checks []CheckConfig `yaml:"checks"`
+
 	// Decision, Translation, Policy, and Context configure how the workflow is decided
 	// (specs/JEV integration/TASKS.md T02, T22); see decision.go.
 	Decision    DecisionConfig    `yaml:"decision"`
@@ -229,6 +423,18 @@ type Config struct {
 	// Extensions opts provider calls into the operator's MCP servers and Claude user
 	// settings (extensions.go). Absent means none, as before.
 	Extensions ExtensionsConfig `yaml:"extensions"`
+
+	// AutoCommit commits a completed run's changes without asking, in every mode
+	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
+	AutoCommit bool `yaml:"auto_commit"`
+}
+
+// ReviewConfig is the top-level review section.
+type ReviewConfig struct {
+	// FixMedium sends a review that passes but reports a medium issue back to implement once,
+	// as a fix iteration. The run records it at creation (domain.RunOptions), so a resume follows
+	// the rule the run started with. Default false.
+	FixMedium bool `yaml:"fix_medium"`
 }
 
 type SecurityConfig struct {

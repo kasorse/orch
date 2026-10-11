@@ -2,8 +2,34 @@ package domain
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
+
+// CheckNameRE is the shape of a check's name (config `checks[].name`); the name becomes part
+// of a log file name, so it is checked again wherever it is used for a path.
+var CheckNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+
+// MaxChecks is the most checks a config may define.
+const MaxChecks = 16
+
+// CheckResult is one check of the test step that ran (specs/quality/SPEC.md §5.3). Its
+// output is not kept here: it goes to logs/<NNN>-test.<check>.{stdout,stderr}.log.
+type CheckResult struct {
+	Name     string        `json:"name"`
+	ExitCode int           `json:"exit_code"`
+	Success  bool          `json:"success"`
+	Duration time.Duration `json:"duration"`
+}
+
+// CheckOutput is the raw output of one check, on its way to the log files. It is not
+// persisted in run.json.
+type CheckOutput struct {
+	Name   string
+	Stdout string
+	Stderr string
+}
 
 type TestResult struct {
 	Command  string        `json:"command"`
@@ -14,6 +40,41 @@ type TestResult struct {
 	Duration time.Duration `json:"duration"`
 	// Sandboxed is true when the command ran under test.sandbox (bwrap).
 	Sandboxed bool `json:"sandboxed,omitempty"`
+	// Checks lists every check that ran before test.command, in order. When a check fails,
+	// the fields above are the failing check's and FailedCheck names it; the test command did
+	// not run.
+	Checks      []CheckResult `json:"checks,omitempty"`
+	FailedCheck string        `json:"failed_check,omitempty"`
+	// FailedTests are the failing tests parsed from a failed run's output (internal/testreport;
+	// specs/quality/SPEC.md §8.2), and ReportFormat the format they were read in. Both are
+	// absent for a pass and when no parser recognised the output. They name tests in a prompt
+	// and never decide the result: the exit code does.
+	FailedTests  []string `json:"failed_tests,omitempty"`
+	ReportFormat string   `json:"report_format,omitempty"`
+}
+
+// SplitFailedTests tells the failing tests that were already failing before a run started
+// (pre, the red pre-run test) from the new ones (cur, a later test result): old is each of
+// cur's names that pre also lists, fresh each that it does not (specs/quality/SPEC.md §8.3).
+// ok is false unless both sides have names read in the same, non-empty format, since names
+// of different formats cannot be compared. It is a hint and never decides a result.
+func SplitFailedTests(pre, cur *TestResult) (old, fresh []string, ok bool) {
+	if pre == nil || cur == nil || len(pre.FailedTests) == 0 || len(cur.FailedTests) == 0 ||
+		pre.ReportFormat == "" || pre.ReportFormat != cur.ReportFormat {
+		return nil, nil, false
+	}
+	before := make(map[string]bool, len(pre.FailedTests))
+	for _, n := range pre.FailedTests {
+		before[n] = true
+	}
+	for _, n := range cur.FailedTests {
+		if before[n] {
+			old = append(old, n)
+		} else {
+			fresh = append(fresh, n)
+		}
+	}
+	return old, fresh, true
 }
 
 type Severity string
@@ -45,17 +106,48 @@ type ReviewIssue struct {
 	Description string   `json:"description"`
 }
 
+// MaxCriterionEvidenceBytes bounds the evidence of one CriterionVerdict.
+const MaxCriterionEvidenceBytes = 500
+
+// CriterionVerdict is the review's verdict on one acceptance criterion of the plan
+// (specs/quality/SPEC.md §7.1). Index counts from 1; the model echoes only the index and
+// Go fills Criterion from the plan after parsing.
+type CriterionVerdict struct {
+	Index     int    `json:"index"`
+	Criterion string `json:"criterion"`
+	Met       bool   `json:"met"`
+	Evidence  string `json:"evidence"`
+}
+
 type ReviewResult struct {
 	// Status is the raw self-reported value from the LLM - informational only. Decide()
-	// is the authoritative pass/fail computation based on issue severities, since the
-	// orchestrator never trusts an LLM's self-assessment of its own review.
+	// is the authoritative pass/fail computation based on issue severities and criteria
+	// verdicts, since the orchestrator never trusts an LLM's self-assessment of its own
+	// review.
 	Status       ReviewStatus  `json:"status"`
 	Summary      string        `json:"summary"`
 	SummaryShort string        `json:"summary_short,omitempty"`
 	Issues       []ReviewIssue `json:"issues"`
+	// Criteria is one verdict per acceptance criterion of the plan; absent when the plan
+	// had none, and in a result written before the field existed.
+	Criteria []CriterionVerdict `json:"criteria,omitempty"`
 	// Diff records what the reviewer was shown (specs/hardening/SPEC.md §5.3). The
 	// orchestrator sets it after parsing; whatever the model wrote there is replaced.
 	Diff *ReviewDiffSummary `json:"diff,omitempty"`
+	// Reviewers are the answers the merged result is made of, the base model first, when
+	// actions.review.models asked for extra reviewers; absent for a single review
+	// (specs/quality/SPEC.md §7.5). A reviewer's own result has none.
+	Reviewers []ReviewerAnswer `json:"reviewers,omitempty"`
+}
+
+// MaxReviewers bounds ReviewResult.Reviewers: the base model and the extra reviewers a
+// config allows (config.MaxExtraReviewers).
+const MaxReviewers = 5
+
+// ReviewerAnswer is one reviewer's own, unmerged result.
+type ReviewerAnswer struct {
+	Model  string       `json:"model"`
+	Result ReviewResult `json:"result"`
 }
 
 // ReviewDiffSummary counts the files of the review diff by how they were shown. Files
@@ -71,14 +163,65 @@ type ReviewDiffSummary struct {
 }
 
 // Decide computes the authoritative pass/fail outcome: critical or high severity issues
-// fail the review; medium/low issues pass with warning.
+// fail the review, and so does an unmet acceptance criterion, which counts as a high
+// issue; medium/low issues pass with warning.
 func (r ReviewResult) Decide() ReviewStatus {
 	for _, i := range r.Issues {
 		if i.Severity == SeverityCritical || i.Severity == SeverityHigh {
 			return ReviewFail
 		}
 	}
+	for _, c := range r.Criteria {
+		if !c.Met {
+			return ReviewFail
+		}
+	}
 	return ReviewPass
+}
+
+// UnmetCriteria returns the verdicts with Met false, in order.
+func (r ReviewResult) UnmetCriteria() []CriterionVerdict {
+	var unmet []CriterionVerdict
+	for _, c := range r.Criteria {
+		if !c.Met {
+			unmet = append(unmet, c)
+		}
+	}
+	return unmet
+}
+
+// MediumIssues returns the issues of severity medium, in order.
+func (r ReviewResult) MediumIssues() []ReviewIssue {
+	var medium []ReviewIssue
+	for _, i := range r.Issues {
+		if i.Severity == SeverityMedium {
+			medium = append(medium, i)
+		}
+	}
+	return medium
+}
+
+// ValidateCriteria checks the shape of the verdicts without the plan: indexes within
+// 1..len(Criteria), each once, and evidence of 1..MaxCriterionEvidenceBytes bytes. The
+// count against the plan is checked where the review is parsed.
+func (r ReviewResult) ValidateCriteria() error {
+	seen := make(map[int]bool, len(r.Criteria))
+	for _, c := range r.Criteria {
+		if c.Index < 1 || c.Index > len(r.Criteria) {
+			return fmt.Errorf("criterion index %d is out of range 1..%d", c.Index, len(r.Criteria))
+		}
+		if seen[c.Index] {
+			return fmt.Errorf("criterion index %d appears more than once", c.Index)
+		}
+		seen[c.Index] = true
+		if strings.TrimSpace(c.Evidence) == "" {
+			return fmt.Errorf("criterion %d has no evidence", c.Index)
+		}
+		if len(c.Evidence) > MaxCriterionEvidenceBytes {
+			return fmt.Errorf("criterion %d evidence is %d bytes, at most %d", c.Index, len(c.Evidence), MaxCriterionEvidenceBytes)
+		}
+	}
+	return nil
 }
 
 func (r ReviewResult) Validate() error {
@@ -90,10 +233,33 @@ func (r ReviewResult) Validate() error {
 			return fmt.Errorf("unsupported review issue severity %q", issue.Severity)
 		}
 	}
+	if err := r.ValidateCriteria(); err != nil {
+		return err
+	}
 	if d := r.Diff; d != nil {
 		if d.Bytes < 0 || d.Files < 0 || d.Shown < 0 || d.Summarized < 0 || d.Withheld < 0 ||
 			d.Shown+d.Summarized+d.Withheld > d.Files {
 			return fmt.Errorf("inconsistent review diff counts %+v", *d)
+		}
+	}
+	return r.ValidateReviewers()
+}
+
+// ValidateReviewers checks the reviewers' answers: bounded, each with a model name and a
+// valid result of its own that merges nothing further.
+func (r ReviewResult) ValidateReviewers() error {
+	if len(r.Reviewers) > MaxReviewers {
+		return fmt.Errorf("%d reviewers, at most %d", len(r.Reviewers), MaxReviewers)
+	}
+	for i, a := range r.Reviewers {
+		if err := reportName(a.Model); err != nil {
+			return fmt.Errorf("reviewers[%d].model: %w", i, err)
+		}
+		if len(a.Result.Reviewers) > 0 {
+			return fmt.Errorf("reviewers[%d] has reviewers of its own", i)
+		}
+		if err := a.Result.Validate(); err != nil {
+			return fmt.Errorf("reviewers[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -130,6 +296,10 @@ type PlanArtifact struct {
 	Steps         []string `json:"steps"`
 	AffectedFiles []string `json:"affected_files"`
 	Risks         []string `json:"risks"`
+	// AcceptanceCriteria are the checkable statements about the result the plan commits to,
+	// at most 8 of 300 bytes (specs/quality/SPEC.md §4.2). An artifact written before the
+	// field existed has none.
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	// Answer: see ResearchArtifact.Answer.
 	Answer string `json:"answer,omitempty"`
 }

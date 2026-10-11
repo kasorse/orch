@@ -61,6 +61,7 @@ type savedArtifact struct {
 	stepIndex  int
 	actionType domain.ActionType
 	artifact   any
+	prompt     string
 }
 
 type fakeArtifactWriter struct {
@@ -68,8 +69,8 @@ type fakeArtifactWriter struct {
 	err   error
 }
 
-func (f *fakeArtifactWriter) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any) (string, error) {
-	f.calls = append(f.calls, savedArtifact{runID, stepIndex, actionType, artifact})
+func (f *fakeArtifactWriter) SaveArtifact(runID string, stepIndex int, actionType domain.ActionType, artifact any, prompt string) (string, error) {
+	f.calls = append(f.calls, savedArtifact{runID, stepIndex, actionType, artifact, prompt})
 	if f.err != nil {
 		return "", f.err
 	}
@@ -141,6 +142,35 @@ func TestExecuteAnalyze_Success(t *testing.T) {
 	}
 	if outcome.ArtifactPath == "" {
 		t.Error("expected artifact path to be set")
+	}
+}
+
+// The artifact carries the prompt exactly as the provider got it, extension hint included;
+// a later step without a model call saves none, not the previous step's.
+func TestSaveArtifact_CarriesThePromptSent(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"s"}`}
+	d := newDispatcher(client)
+	d.Config.Extensions.MCP = map[string]config.MCPServerConfig{"graph": {Command: "g", Tools: []string{"query"}}}
+	d.Runner = testexec.New(&execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "PASS"}}})
+	d.Guard = &fakeGuard{}
+	writer := &fakeArtifactWriter{}
+	d.Artifacts = writer
+
+	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix the bug"}}
+	if _, err := d.Execute(context.Background(), domain.ActionAnalyze, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Execute(context.Background(), domain.ActionTest, run); err != nil {
+		t.Fatal(err)
+	}
+	if len(writer.calls) != 2 {
+		t.Fatalf("saved %d artifacts, want 2", len(writer.calls))
+	}
+	if got := writer.calls[0].prompt; got != client.lastReq.Prompt || !strings.Contains(got, "mcp__graph__query") {
+		t.Errorf("analyze artifact prompt = %q, want the prompt sent: %q", got, client.lastReq.Prompt)
+	}
+	if got := writer.calls[1].prompt; got != "" {
+		t.Errorf("test artifact prompt = %q, want none", got)
 	}
 }
 

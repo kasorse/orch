@@ -1,0 +1,11 @@
+# example.com/m/other
+other/other.go:7:2: undefined: missing
+{"Time":"2026-10-10T10:00:00Z","Action":"build-output","ImportPath":"example.com/m/other [example.com/m/other.test]","Output":"other/other.go:7:2: undefined: missing\n"}
+{"Time":"2026-10-10T10:00:00Z","Action":"build-fail","ImportPath":"example.com/m/other [example.com/m/other.test]"}
+warning: something on stderr {"not":"an event"}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestPut"}
+{"Time":"2026-10-10T10:00:01Z","Action":"run","Package":"example.com/m/store","Test":"TestGet"}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/store","Test":"TestGet","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"pass","Package":"example.com/m/store","Test":"TestPut","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/api","Test":"TestServe","Elapsed":0}
+{"Time":"2026-10-10T10:00:01Z","Action":"fail","Package":"example.com/m/api","Elapsed":0.2}

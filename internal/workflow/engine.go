@@ -21,6 +21,14 @@ type StepOutcome struct {
 	ReviewResult *domain.ReviewResult
 	RawStdout    string
 	RawStderr    string
+	// CheckLogs is the raw output of each check a test step ran, for logs/<NNN>-test.<check>.*;
+	// RawStdout/RawStderr stay the failing check's or the test command's.
+	CheckLogs []domain.CheckOutput
+	// VerifyCalls are the verify tool calls an implement step's session made, recorded also
+	// when the step failed; VerifyLogs is their raw output, for logs/<NNN>-implement.verify-<K>.*
+	// (the Name of each entry is verify-<K>). Only VerifyCalls is persisted in run.json.
+	VerifyCalls []domain.VerifyCall
+	VerifyLogs  []domain.CheckOutput
 	// Usage is what the step's provider call cost, when the CLI reported it - also on a
 	// failed call, so it is recorded whatever the outcome.
 	Usage *domain.Usage
@@ -30,7 +38,8 @@ type StepOutcome struct {
 	// Diff is what a completed implement changed, from git.
 	Diff *domain.StepDiff
 	// TreeBefore and TreeAfter are the git trees of the working tree around a completed
-	// implement, for showing its diff; not recorded.
+	// implement, for showing its diff. TreeAfter is also recorded, as the execution's
+	// tree_after, for the no-progress check; TreeBefore is not.
 	TreeBefore, TreeAfter string
 }
 
@@ -89,7 +98,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 	// A fresh run enters at its first step; a resumed one where its history left off
 	// (specs/resume/SPEC.md §7). Counters and limits then count the whole history.
-	current, _, err := Entry(run)
+	current, _, err := Entry(run, e.Limits)
 	if err != nil {
 		return &apperr.WorkflowError{Msg: "cannot continue the run", Err: err}
 	}
@@ -98,7 +107,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		if err != nil {
 			return &apperr.WorkflowError{Msg: "cannot count the run's history", Err: err}
 		}
-		run.TotalSteps, run.FixIterations, _ = Counters(run)
+		run.TotalSteps, run.FixIterations, _ = Counters(run, e.Limits)
 		if reason != "" {
 			run.Status = domain.RunStopped
 			run.FailureReason = reason
@@ -180,6 +189,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		stepExec.Usage = outcome.Usage
 		stepExec.Call = outcome.Call
 		stepExec.Diff = outcome.Diff
+		stepExec.VerifyCalls = outcome.VerifyCalls
 		if outcome.Provider != nil {
 			stepExec.Provider = outcome.Provider
 		}
@@ -198,10 +208,41 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		}
 
 		stepExec.Status = domain.StepCompleted
+		if action == domain.ActionImplement {
+			stepExec.TreeAfter = outcome.TreeAfter
+		}
 		run.Executions = append(run.Executions, stepExec)
 		run.TotalSteps++
+
+		// A review's outcome comes from its persisted result with the same function a resume
+		// uses, so the two agree on a fixable review (specs/quality/SPEC.md §7.3). The observer
+		// gets it too, so what it prints matches where the run goes next. A review without a
+		// result keeps what the executor said. A history outcomeOf cannot read ends the run, as
+		// it ends a resume (Entry, Counters): continuing on a guess would let the two disagree.
+		if action == domain.ActionReview && stepExec.ReviewResult != nil {
+			derived, err := outcomeOf(stepExec, run, e.Limits)
+			if err != nil {
+				err = &apperr.WorkflowError{Msg: "cannot derive where to continue", Err: err}
+				run.Status = domain.RunFailed
+				run.FailureReason = err.Error()
+				e.stepFinished(run, index, stepExec, outcome)
+				e.persist(run)
+				e.runFinished(run)
+				return err
+			}
+			outcome.Outcome = derived
+		}
 		e.stepFinished(run, index, stepExec, outcome)
 		e.persist(run)
+
+		// An implement that left the tree as the previous one did is caught here, before the
+		// test step is spent on it. Only a finished implement is judged: Entry never calls
+		// NoProgress, so the implement a resume enters is always run.
+		if action == domain.ActionImplement && e.Limits.StopWithoutProgress {
+			if reason := NoProgress(run); reason != "" {
+				return e.stopWithoutProgress(run, reason)
+			}
+		}
 
 		next, reason := Next(current, outcome.Outcome, *run.Workflow)
 		if next == StateFailed {
@@ -210,6 +251,8 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 		if isBackwardEntryToImplement(current, next) {
 			run.FixIterations++
+			// max_fix_iterations is the hard limit and is read first, so a run that exhausted it
+			// keeps the reason it always had; the progress check only ends a loop earlier.
 			if run.FixIterations > e.Limits.MaxFixIterations {
 				run.Status = domain.RunStopped
 				run.FailureReason = "maximum fix iterations exceeded"
@@ -217,10 +260,26 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 				e.runFinished(run)
 				return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: maximum fix iterations exceeded"}
 			}
+			if e.Limits.StopWithoutProgress {
+				if reason := NoProgress(run); reason != "" {
+					return e.stopWithoutProgress(run, reason)
+				}
+			}
 		}
 
 		current = next
 	}
+}
+
+// stopWithoutProgress ends the run as stopped with the reason NoProgress gave; a resume
+// continues it in implement (Entry).
+func (e *Engine) stopWithoutProgress(run *domain.Run, reason string) error {
+	run.Status = domain.RunStopped
+	run.FailureReason = reason
+	e.persist(run)
+	e.runFinished(run)
+	return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: " + reason +
+		"\n\nSet limits.stop_without_progress: false to turn this check off."}
 }
 
 func (e *Engine) persist(run *domain.Run) {

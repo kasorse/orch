@@ -253,6 +253,8 @@ A config is a file named after it in `bench/configs/`; `common.yaml` is shared b
 | `B` | the orchestrator, stages chosen by the decision (`--mode auto`) | `B.yaml` |
 | `C` | the orchestrator, all six stages | `C.yaml` |
 | `D` | the orchestrator, `development` and `testing` only | `D.yaml` |
+| `E` | D plus `actions.implement.verify: true`: the implement session can run the task's test command through the `run_tests` tool; no `checks:`; not in the default `--configs`: `--configs D,E` | `E.yaml` |
+| `F` | B plus `actions.implement.by_complexity.simple: {model: haiku, effort: low}`: a simple task is implemented by a cheaper model; not in the default `--configs`: `--configs B,F` | `F.yaml` |
 | `Bmock` | B with the offline keyword heuristic as the decision provider (`decision.jev.mock: true`); not in the default `--configs`, name it: `--configs A,B,Bmock` | `Bmock.yaml` |
 
 ```yaml
@@ -274,7 +276,15 @@ template. Placeholders filled per task: `{{.Model}}`, `{{.TestCommand}}`, `{{.Ro
 (an unknown key is an error) and its templates are run once at load time, so a typo fails
 before a benchmark starts. The config generated for a task is saved as
 `<out>/configs/<task>-<config>.yaml` and its hash goes into the result line. To add a config,
-add `E.yaml` and run `--configs E` on the same `--out`.
+add `<name>.yaml` and run `--configs <name>` on the same `--out`.
+
+E and F answer the two questions of the quality phase (specs/quality/SPEC.md): does verify raise
+the pass rate over D without more guard violations (E against D), and does `by_complexity`
+lower the cost at an equal pass rate (F against B). Each differs from its base in one key of
+`actions.implement`, which a test holds. Run them on the same `--out` as their base and compare
+with the baseline set to the base: `orchbench summarize --out <out> --baseline D` for E,
+`--baseline B` for F. The number of `verify_calls` per task is in each cell's `run.json` in the
+run directory, and `model_source` in each step's provider; `orchbench` does not summarise them.
 
 ## Task files
 

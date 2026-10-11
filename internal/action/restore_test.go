@@ -45,13 +45,16 @@ type dispatcherState struct {
 	Analysis       *domain.AnalysisArtifact
 	Plan           *domain.PlanArtifact
 	Impl           *domain.ImplementationArtifact
+	CommitImpl     *domain.ImplementationArtifact
 	Test           *domain.TestResult
 	PendingTest    *domain.TestResult
 	PendingReviews []domain.ReviewIssue
+	PendingUnmet   []domain.CriterionVerdict
+	PendingMedium  []domain.ReviewIssue
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues}
+	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -190,6 +193,10 @@ func TestRestore_RefusesMissingOrInvalidState(t *testing.T) {
 		{"review with an unknown severity", []domain.StepExecution{{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
 			ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Issues: []domain.ReviewIssue{{Severity: "catastrophic"}}}}},
 			memReader{}, "severity"},
+		{"review with a duplicate criterion index", []domain.StepExecution{{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+			ReviewResult: &domain.ReviewResult{Status: domain.ReviewFail, Criteria: []domain.CriterionVerdict{
+				{Index: 1, Evidence: "a"}, {Index: 1, Evidence: "b"}}}}},
+			memReader{}, "more than once"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -202,6 +209,108 @@ func TestRestore_RefusesMissingOrInvalidState(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// A plan artifact written before acceptance_criteria existed loads, with no criteria, and the
+// prompts built from it work; one written after it loads with its criteria (QL01).
+func TestRestore_PlanArtifactWithAndWithoutCriteria(t *testing.T) {
+	old := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[]}`
+	current := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[],"acceptance_criteria":["a.go compiles","a test covers it"]}`
+	cases := []struct {
+		name, artifact string
+		want           []string
+	}{
+		{"before the field", old, nil},
+		{"with the field", current, []string{"a.go compiles", "a test covers it"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := &domain.Run{ID: "r", Executions: []domain.StepExecution{
+				{Index: 0, Action: domain.ActionPlan, Status: domain.StepCompleted},
+			}}
+			d := &Dispatcher{}
+			if err := d.Restore(run, memReader{memKey(0, domain.ActionPlan): tc.artifact}); err != nil {
+				t.Fatal(err)
+			}
+			if d.lastPlan == nil || !slices.Equal(d.lastPlan.AcceptanceCriteria, tc.want) {
+				t.Fatalf("restored plan = %+v, want criteria %q", d.lastPlan, tc.want)
+			}
+			prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: d.lastPlan})
+			if got := strings.Contains(prompt, "Acceptance criteria:\n"); got != (tc.want != nil) {
+				t.Errorf("criteria in the implement prompt = %v, want %v:\n%s", got, tc.want != nil, prompt)
+			}
+		})
+	}
+}
+
+// A review that failed only on an unmet criterion leaves it pending for the retry, and an
+// implement consumes it.
+func TestRestore_UnmetCriteriaArePending(t *testing.T) {
+	review := domain.StepExecution{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+		ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Criteria: []domain.CriterionVerdict{
+			{Index: 1, Criterion: "a", Met: true, Evidence: "a.go:1"},
+			{Index: 2, Criterion: "b", Met: false, Evidence: "no test"},
+		}}}
+	impl := domain.StepExecution{Index: 1, Action: domain.ActionImplement, Status: domain.StepCompleted}
+	reader := memReader{memKey(1, domain.ActionImplement): `{"summary":"i"}`}
+
+	d := &Dispatcher{}
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.pendingUnmetCriteria) != 1 || d.pendingUnmetCriteria[0].Index != 2 || len(d.pendingReviewIssues) != 0 {
+		t.Fatalf("pending unmet criteria = %+v", d.pendingUnmetCriteria)
+	}
+	prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", UnmetCriteria: d.pendingUnmetCriteria, ReviewIssues: d.pendingReviewIssues})
+	if !strings.Contains(prompt, "- 2. b\n  evidence: no test\n") {
+		t.Errorf("the retry prompt lacks the unmet criterion:\n%s", prompt)
+	}
+
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review, impl}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if d.pendingUnmetCriteria != nil {
+		t.Errorf("an implement left %+v pending", d.pendingUnmetCriteria)
+	}
+}
+
+// A review that passed with a medium issue leaves it pending for the one retry
+// review.fix_medium asks for (QL11), and an implement consumes it.
+func TestRestore_MediumIssuesArePending(t *testing.T) {
+	review := domain.StepExecution{Index: 0, Action: domain.ActionReview, Status: domain.StepCompleted,
+		ReviewResult: &domain.ReviewResult{Status: domain.ReviewPass, Issues: []domain.ReviewIssue{
+			{Severity: domain.SeverityMedium, File: "a.go", Description: "no test for the empty input"},
+			{Severity: domain.SeverityLow, File: "b.go", Description: "naming"},
+		}}}
+	impl := domain.StepExecution{Index: 1, Action: domain.ActionImplement, Status: domain.StepCompleted}
+	reader := memReader{memKey(1, domain.ActionImplement): `{"summary":"i"}`}
+
+	d := &Dispatcher{}
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.pendingMediumIssues) != 1 || len(d.pendingReviewIssues) != 0 {
+		t.Fatalf("pending medium issues = %+v", d.pendingMediumIssues)
+	}
+	prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", MediumIssues: d.pendingMediumIssues})
+	for _, want := range []string{
+		"A code review passed but noted issues worth fixing. Fix them without changing behavior the task did not ask for:",
+		"- [medium] a.go: no test for the empty input\n",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the retry prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "naming") || strings.Contains(prompt, "FAILED") {
+		t.Errorf("the retry prompt has a low issue or a failure notice:\n%s", prompt)
+	}
+
+	if err := d.Restore(&domain.Run{ID: "r", Executions: []domain.StepExecution{review, impl}}, reader); err != nil {
+		t.Fatal(err)
+	}
+	if d.pendingMediumIssues != nil {
+		t.Errorf("an implement left %+v pending", d.pendingMediumIssues)
 	}
 }
 
@@ -235,7 +344,7 @@ type orderWriter struct {
 	savedTooSoon bool
 }
 
-func (w *orderWriter) SaveArtifact(string, int, domain.ActionType, any) (string, error) {
+func (w *orderWriter) SaveArtifact(string, int, domain.ActionType, any, string) (string, error) {
 	if !w.guard.changedCalled {
 		w.savedTooSoon = true
 	}
@@ -270,7 +379,7 @@ func TestStoreImplementsArtifactReader(t *testing.T) {
 	if _, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan); !os.IsNotExist(err) {
 		t.Errorf("missing artifact: %v, want not-exist", err)
 	}
-	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p"}); err != nil {
+	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p"}, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan)
@@ -294,4 +403,20 @@ func (t treeless) Run(ctx context.Context, spec execution.Spec) (execution.Proce
 		}
 	}
 	return t.next.Run(ctx, spec)
+}
+
+func TestCommitImplementation(t *testing.T) {
+	d := &Dispatcher{}
+	if d.CommitImplementation() != nil {
+		t.Fatal("no implementation yet, want nil")
+	}
+	d.applyImplementation(domain.ImplementationArtifact{Summary: "unparsed"})
+	if got := d.CommitImplementation(); got == nil || got.Summary != "unparsed" {
+		t.Errorf("without a summary_short, want the last implementation, got %+v", got)
+	}
+	d.applyImplementation(domain.ImplementationArtifact{SummaryShort: "Add the feature"})
+	d.applyImplementation(domain.ImplementationArtifact{SummaryShort: "Fix the feature's test"})
+	if got := d.CommitImplementation(); got.SummaryShort != "Add the feature" {
+		t.Errorf("want the first summary_short, got %q", got.SummaryShort)
+	}
 }

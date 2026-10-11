@@ -1,0 +1,27 @@
+{
+  "numFailedTestSuites": 1,
+  "numFailedTests": 2,
+  "numPassedTests": 2,
+  "testResults": [
+    {
+      "assertionResults": [
+        {"ancestorTitles": ["Store"], "fullName": "Store puts", "status": "passed", "title": "puts"},
+        {"ancestorTitles": ["Store"], "fullName": "Store gets", "status": "failed", "title": "gets"},
+        {"ancestorTitles": ["Store", "table"], "fullName": "Store table empty", "status": "failed", "title": "empty"}
+      ],
+      "endTime": 1760000000000,
+      "message": "  ● Store › gets\n",
+      "name": "/work/src/store.test.js",
+      "startTime": 1759999999000,
+      "status": "failed"
+    },
+    {
+      "assertionResults": [
+        {"ancestorTitles": [], "fullName": "ok", "status": "passed", "title": "ok"}
+      ],
+      "name": "/work/src/other.test.js",
+      "status": "passed"
+    }
+  ],
+  "success": false
+}

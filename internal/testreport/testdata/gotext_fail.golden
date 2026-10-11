@@ -1,0 +1,4 @@
+gotext
+example.com/m/store.TestPut
+example.com/m/store.TestTable
+example.com/m/store.TestTable/empty

@@ -50,6 +50,36 @@ func TestArgs_MCPKeepsRestrictedAndAllowlists(t *testing.T) {
 	}
 }
 
+// The verify server of an implement step (specs/quality/SPEC.md §6.3): its tools join Edit
+// and Write in --allowed-tools, and the built-in tool list is untouched.
+func TestArgs_VerifyServer(t *testing.T) {
+	const doc = `{"mcpServers":{"orch":{"args":["mcp-verify","--dir","/tmp/orch-verify-1"],"command":"/usr/bin/orchestrator"}}}`
+	for _, tc := range []struct {
+		name  string
+		tools []string
+		want  string
+	}{
+		{"tests only", []string{"mcp__orch__run_tests"}, "Edit,Write,mcp__orch__run_tests"},
+		{"with checks", []string{"mcp__orch__run_tests", "mcp__orch__run_check"}, "Edit,Write,mcp__orch__run_tests,mcp__orch__run_check"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildArgs(domain.AuthorityEdit, nil, "opus", "", provider.Extensions{MCPConfig: doc, MCPTools: tc.tools})
+			if v, _ := flag(got, "--mcp-config"); v != doc {
+				t.Errorf("--mcp-config = %q", v)
+			}
+			if v, _ := flag(got, "--allowed-tools"); v != tc.want {
+				t.Errorf("--allowed-tools = %q, want %q", v, tc.want)
+			}
+			if v, _ := flag(got, "--tools"); v != "Read,Grep,Glob,Edit,Write" {
+				t.Errorf("built-in tools must not change: %q", v)
+			}
+			if !slices.Contains(got, "--restricted") || !slices.Contains(got, "--strict-mcp-config") {
+				t.Errorf("must stay restricted and strict: %q", got)
+			}
+		})
+	}
+}
+
 // User settings drop --restricted (it ignores settings files) and load user settings
 // only; the tool list, dontAsk and strict MCP stay.
 func TestArgs_UserSettings(t *testing.T) {

@@ -787,6 +787,7 @@ Config:
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  stop_without_progress: true   # default; §44.6
 ```
 
 Track:
@@ -804,6 +805,13 @@ Reason: maximum fix iterations exceeded
 ```
 
 Do not continue invoking AI clients after a limit is exceeded.
+
+`limits.stop_without_progress` (default `true`) ends a fix loop before `max_fix_iterations` when
+it goes nowhere: implement left the working tree as the previous implement did, the same
+tests fail the same way, or review repeats its blocking issues. The run stops with status
+`stopped`, a reason that starts with `no progress:` and exit code 4. The check is Go's, over the
+persisted executions only (§44.6); `max_fix_iterations` still applies when it is off.
+`limits.verify` bounds the in-session verify tools (§44.3).
 
 ---
 
@@ -1022,6 +1030,28 @@ running something else - a live check against an installed tool, a build, lint o
 gate the test command does not run - is the operator's: implement names it in `summary` as
 left to the operator, never claims it done, and leaves the task tracking that waits on it
 open. The way to have such a gate checked by the run is to make it part of `test.command`.
+Review reports tracking left open this way as `operator:` medium, never high - also when it
+waits on the test command and the latest test passed: implement edits before the tests run
+and cannot know their result, so sending it back would loop until `max_fix_iterations`.
+
+Each stage's prompt carries what the earlier stages found that it can use
+(`specs/quality/SPEC.md` §4): plan gets the analysis `affected_files` and `risks`; implement
+gets those of the analysis and the plan, and the plan's steps and `acceptance_criteria`;
+review gets the plan's steps, `risks` and criteria (numbered). Empty lists are left out. A
+retried implement also gets the git diff --stat of what the run has changed so far (against
+`pre_run_ref`), fenced and bounded by `limits.prompt.max_diff_bytes`; if git cannot tell, the
+step goes on without it and a warning is shown. The plan's optional `acceptance_criteria`
+(at most 8, each at most 300 bytes) are checkable statements about the result; the parser
+keeps the first 8 non-empty ones and cuts each on a UTF-8 boundary.
+
+When the plan has criteria, review must return a verdict for each one
+(`criteria: [{index, met, evidence}]`, `specs/quality/SPEC.md` §7.1): exactly one entry per
+criterion, indexes `1…N` each once, `evidence` of 1 to 500 bytes. Any other answer is a
+malformed review (a hard step error). Go fills `criterion` from the plan. An unmet criterion
+fails the review like a `high` issue, and the retried implement is told which criteria were
+unmet, with the evidence, before the issues. Without criteria the answer has none. Every
+review prompt also tells the reviewer it has Read, Grep and Glob and should read the code
+around the change (§7.2).
 
 Example analysis artifact:
 
@@ -1115,6 +1145,13 @@ the step log keep everything. A workflow with `implement` and `test` also runs t
 once before the first step and refuses a red suite unless the run was started with
 `--allow-red-tests` (§41.5).
 
+An optional top-level `checks:` list (build, vet, lint, SAST) runs inside this step, in
+order, before `test.command`, and stops at the first non-zero exit code. Checks are exit codes
+like the test, run under the same sandbox, environment and guard (a guard comparison after each
+command), and `TestResult` records them in `checks` and `failed_check` (§44.2). From a failed
+test's output Go may also read the names of the failing tests for the retry prompt
+(`failed_tests`, §44.7); that never decides pass/fail.
+
 ---
 
 # 19. Review
@@ -1196,6 +1233,11 @@ review
 ```
 
 The next implementation action must receive the review issues.
+
+The rule above is extended by the quality loop (§44.4): an unmet acceptance criterion counts
+as a `high` issue; with `review.fix_medium` a passing review that reports a `medium` issue
+sends the run back to implement once; `actions.review.models` adds extra reviewers whose
+answers Go merges before `Decide()` runs.
 
 ---
 
@@ -1290,7 +1332,7 @@ Location:
       summary.md               # the run's report for a reader, once it ends (§43)
 
       artifacts/
-        <NNN>-<action>.json
+        <NNN>-<action>.json    # a model step's also has "prompt": exactly what was sent
 
       logs/
         <NNN>-<action>.{stdout,stderr}.log
@@ -1644,6 +1686,9 @@ internal/
   repository/       git (read-only helpers)
   action/           step executors and prompt builders
   testexec/         test runner
+  guard/            the protected-paths and git-fingerprint guard (§38.3); aliased in action
+  verify/           the in-session verify MCP server behind `mcp-verify` (§44.3); standard library, guard, testexec, domain
+  testreport/       failing test names out of a test step's output (§44.7); standard library and domain only
   report/           runs report and decisions report over the persisted runs (§4); imports only domain
   interaction/      approval, mode select, manual-mode gate, manual choice
   persistence/      run directory
@@ -2260,6 +2305,13 @@ Do not implement automatic "best model" routing. The decision provider is chosen
 way (`decision.provider`); a failing provider leads to the manual choice (§8.6), never to
 another provider.
 
+A static table in config, keyed by the decided complexity, is still static routing:
+`actions.<name>.by_complexity` maps `simple | medium | complex` to a model and/or effort of the
+same provider, Go picks the entry once per step from `decision.complexity`, and the same
+decision always gives the same models (§44.8). A run started with `--stage` has no complexity
+and uses the action's own model. Nothing picks a model from cost so far, failures or a
+model's own answer, and there is no fallback.
+
 ### 31.2 Deterministic workflows
 
 The decision provider returns probabilities.
@@ -2283,6 +2335,11 @@ Never trust text like:
 ```
 
 Only actual process exit code determines test status.
+
+Test names parsed out of a failed run's output (§44.7), and the split of them into failures
+that were there before the run and new ones, are a hint in a prompt. They never decide
+pass/fail, a transition or a stop. The in-session `run_tests` of the verify tools (§44.3)
+is a hint to the model too: the `test` step stays the source of truth.
 
 ### 31.5 Review is independent validation
 
@@ -2643,6 +2700,13 @@ through it; a fresh run is the empty-history case.
 
 A completed step's outcome comes only from trusted persisted results: `test_result.success`
 (the exit code) and `ReviewResult.Decide()`, never the model's own `status` (§19).
+A review that passes with a `medium` issue is a third outcome, `fixable`, derived from the
+review result, the run's recorded `options.review_fix_medium` (never the current config) and
+the history; it goes to implement if the workflow has it (§44.4). A run `stopped` for a reason
+that starts with `no progress:` resumes into implement, and so does one whose approved resume
+cleared that reason (`Resume.FromReason`): the operator choosing to resume means "try again",
+and `max_fix_iterations` still applies (§44.6). `workflow.NoProgress` reads only the persisted
+executions (`tree_after`, `failed_tests`, review issues), so a live run and a resume agree.
 
 `(*action.Dispatcher).Restore(run, store)` replays the context changes of every completed
 execution in order, through the same `apply*` methods the live steps use: research,
@@ -2658,8 +2722,8 @@ inconsistent is `corrupt`. A resume never continues with a thinner prompt.
 
 * `max_steps` and `max_fix_iterations` (§12) count the **whole** history, across resumes.
   `workflow.Counters` derives `total_steps` (`len(executions)`) and `fix_iterations`
-  (completed tests/reviews that failed, in a workflow with implement) from the history.
-  The persisted counters are not trusted.
+  (completed tests/reviews that failed, in a workflow with implement, and a `fixable` review
+  that went back to implement) from the history. The persisted counters are not trusted.
 * `workflow.CheckLimits` refuses before the approval prompt when the entry would exceed a
   limit (`LimitExceededError`, exit 4). Its message states the used and configured
   values, and the config key to raise. The engine applies the same check when it starts
@@ -2775,11 +2839,22 @@ boundary here.
 | translation, decide-context, decide-classify | `none` | work on the request text in the prompt |
 | research | `web` | external knowledge; its prompt carries only the task, so no repository data can leak |
 | analyze, plan, review | `read` | inspect the repository; review also gets the diff in its prompt |
-| implement | `edit` | the only step that changes code; compiling and testing is the test step's job |
+| implement | `edit` | the only step that changes code; compiling and testing is the test step's job (opt-in: the two verify tools below) |
 | test | - | no AI call: the orchestrator runs `test.command` itself |
 
 No call has both repository access and a way out (network, shell). An action without an
 entry in `domain.AuthorityFor` gets `none`.
+
+**Verify tools (opt-in, `actions.implement.verify: true`, §44.3).** Under `edit` the session
+gets two more tools from an MCP server named `orch` that the orchestrator itself serves,
+`mcp__orch__run_tests` and `mcp__orch__run_check`. This is not a shell and does not change the
+authority: the adapter's `--tools` stays `Read,Grep,Glob,Edit,Write` and only the two MCP names
+join `--allowed-tools`. The command is `test.command` or a configured check, chosen in Go,
+never by the model; the model picks only whether to run it, which configured check (a closed
+list) and a filter string that cannot hold shell syntax and reaches the process only as
+`ORCH_TEST_FILTER`. Every run is under bwrap (`test.sandbox: none` with verify is a config
+error), preceded by a guard comparison, and a `violation` marker fails the step. Decision D16
+in `specs/permissions/DECISIONS.md` records why this keeps "no authority has a shell".
 
 Modes (§4) do not change authority. Every authority denies whatever it does not grant
 without prompting, so every mode is safe to run unattended; modes differ only in what the
@@ -2852,8 +2927,8 @@ human sees and confirms between steps.
   ignored), without the resume-input patterns, which change with every step. If that
   snapshot fails, the run stops before its first step. A resume compares the tree with the
   baseline, fingerprint first, before anything runs (§37.8).
-* **The test step.** The same guard runs around the test command, which executes code the
-  model wrote; the guard compares the git fingerprint before running `git status`, which
+* **The test step.** The same guard runs around the test command (and around each of the
+  `checks:` before it, §44.2), which executes code the model wrote; the guard compares the git fingerprint before running `git status`, which
   would itself run a planted `core.fsmonitor`. Unless `test.sandbox: none` (the sandbox is
   the default, §41.3) the command runs under bubblewrap: filesystem read-only, the repository and a private `/tmp` writable, the
   git directories read-only, `$HOME` an empty tmpfs, no network, only `test.ro_binds` /
@@ -3263,7 +3338,11 @@ that version and an entry in `specs/permissions/DECISIONS.md`.
 When the workflow contains both `implement` and `test`, `test.baseline` is not `off`
 (`require_green` is the default) and no step has run yet, the test command runs once after
 approval, right before the engine - same runner, sandbox, environment and guard as the test
-step, inside `execution.timeout`. It is not an execution.
+step, inside `execution.timeout`. It is not an execution. With `checks:` (§44.2) it is the
+same sequence as the test step's: each check in order, then `test.command`, stopping at the
+first non-zero exit code. A red check refuses the run like a red test (its output is in
+`logs/pre-run-test.<check>.{stdout,stderr}.log`), and `pre_run_test` records `checks` and
+`failed_check`. `test.baseline: off` skips the whole sequence.
 
 * Exit 0: `run.json: pre_run_test` (the whole `TestResult`), console `pre-run test: passed`.
 * Non-zero: the run fails before any AI step (exit 4), naming the log
@@ -3273,7 +3352,9 @@ step, inside `execution.timeout`. It is not an execution.
   to make failing tests pass. A red pre-run test is recorded and the run goes on; the first
   implement prompt gets its bounded output ("already FAILS before any change, and the
   operator expects that") until the first test step has run, also after a resume. The run
-  still ends green or not by the test step's exit code.
+  still ends green or not by the test step's exit code. When the pre-run test and a failed
+  test step both have parsed failing test names in the same format, the retry prompt splits
+  them into failures from before the run and new ones - a hint only (§44.7).
 
 ## 41.6 Secret scan
 
@@ -3324,7 +3405,7 @@ result gains `diff`. Logs gain `logs/pre-run-test.{stdout,stderr}.log`.
 
 Normative. A completed run's changes stay in the working tree until the operator commits
 them; at the end of the run the orchestrator offers to do it, and commits only on an
-explicit yes.
+explicit yes - asked at the end, or given in advance with `auto_commit: true` (§42.6).
 
 ## 42.1 When it is offered
 
@@ -3332,7 +3413,7 @@ After the engine has finished and the final answer (if any) is printed, `run` an
 (the shared tail, `executeWorkflow`) offer a commit when all of these hold:
 
 * the operator is at the terminal: `--mode auto` was not given and stdin is a terminal.
-  `--mode auto` never asks and never commits;
+  `--mode auto` never asks, and commits only with `auto_commit` (§42.6);
 * the run is `completed` and its workflow contains `implement`;
 * the run started from a clean commit: `pre_run_ref` is set and equals `head_ref`. A run
   started on uncommitted changes (`security.require_clean_worktree: false`) would commit
@@ -3365,8 +3446,10 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
 
 * Warnings: a failing last review verdict (a run that completes with the verdict,
   §11; its `summary_short`, else its `summary`) and every `secret_findings` entry (`security.secret_scan.mode: warn`). Never a value.
-* The message is written by Go, with no provider call: the header is the last
-  implementation's `summary_short` (restored from its artifact on resume), cut to its first
+* The message is written by Go, with no provider call: the header is the `summary_short`
+  of the run's first implementation that has one - a fix iteration's describes only the
+  fix, not the change being committed - else of the last implementation (restored from
+  the artifacts on resume), cut to its first
   line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
   `run --jira` task. What the cut left out goes into the body; the body ends with the
   `Orchestrator-Run: <run-id>` trailer.
@@ -3396,6 +3479,16 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 * A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
 * Committing a part of the changes: the operator commits by hand when they want that.
+
+## 42.6 `auto_commit`
+
+`auto_commit: true` (top level, default false) is the operator's yes given in advance. The
+commit is then made without the question, in every mode (`--mode auto` included) and
+without a terminal, after every check of §42.1 but the first. It is not made, and
+`Not committing automatically: <why>` is printed, when the question would have shown a
+warning (§42.2) or there is no proposed message (no `summary_short`): nobody is there to
+read the one or write the other. The message is the one §42.2 proposes; the commit is
+§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed.
 
 ---
 
@@ -3448,9 +3541,12 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Cost | `outcome.usage.cost_usd`: every provider call of the run, the decision calls included. With partial calls it reads `$X or more: N calls ended without a report`, since their cost is unknown. |
 | Decision cost | The part of the cost spent deciding the workflow, and how many decision calls reported usage. |
 | Tokens | Summed over every call: `prompt` is every input token (`input` uncached + `cache read` + `cache write`); `output` the generated tokens. |
-| Provider calls | Calls that reported usage (`outcome.usage.calls`). |
-| Tests (last run) | The last test step's result: `passed`, `failed`, or `not run`. |
-| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue fails). |
+| Provider calls | Calls that reported usage (`outcome.usage.calls`); each extra reviewer's call (§44.4) counts. |
+| Verify | Only when the implement session made verify calls (§44.3): how many (`outcome.verify_calls`) and how many of them ran and passed; a refused call never passed. |
+| Tests (last run) | The last test step's result: `passed`, `failed`, `failed (check <name>)` when a check failed and the tests did not run (§44.2), or `not run`. |
+| Failing tests | Only when the run started red (`--allow-red-tests`) and the last failed test step and the pre-run test have parsed names in the same format: `N failing before the run, M new` (§44.7). A hint. |
+| Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue, or any unmet acceptance criterion, fails). |
+| Reviewers | Only when the last review had extra reviewers (§44.4): the models whose answers were merged, base model first, e.g. `sonnet, opus`. |
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
 
@@ -3462,7 +3558,7 @@ One row per execution, in order.
 | --- | --- |
 | # | The execution's index; it is also the `NNN` of its artifact and log files. |
 | Step | The action, with `(resume N)` when the N-th resume ran it. |
-| Result | `completed` or `failed`; a test's `passed` / `failed (exit N)`; a review's verdict and issue count. |
+| Result | `completed` or `failed`; a test's `passed` / `failed (exit N)` / `failed (check <name>, exit N)`; a review's verdict and issue count, with `N/M criteria met` when the plan had criteria. |
 | Time | The step's own duration, git and guard checks included. |
 | API time | `call.api_ms`: how long the call waited on the model API. Time minus API time went to tools, the CLI and the orchestrator's checks. |
 | Cost | `usage.cost_usd`; `unknown` for a partial call. |
@@ -3493,8 +3589,9 @@ answer in JSON), and hold at most 50 paths each.
 
 ### Notes
 
-One line per partial call (what its numbers mean) and per failed step (its telling error
-line). The full error is in `run.json` and the step's logs.
+One line per partial call (what its numbers mean), per step that ran without an MCP server
+it was given (`call.mcp_failed`), and per failed step (its telling error line). The full
+error is in `run.json` and the step's logs.
 
 ## 43.3 run.json fields
 
@@ -3511,6 +3608,7 @@ implement step only).
 | `executions[].call.models[]` | `{model, cost_usd}` for each model that answered, sorted by name; `cost_usd` is absent when not reported. |
 | `executions[].call.api_ms` | Time spent waiting on the model API (claude's `duration_api_ms`). |
 | `executions[].call.tools` | Tool name → number of calls. |
+| `executions[].call.mcp_failed` | The `extensions.mcp` servers the CLI reported as failed to start, sorted; the step ran without their tools. Absent when all started. |
 | `executions[].diff.step` | `{files, insertions, deletions, binary}` of the step's own change. Binary files count in `files` and `binary`, never in the line counts. |
 | `executions[].diff.run` | The same, for the working tree after the step against `pre_run_ref`; absent without a restore point. |
 | `executions[].diff.not_reported`, `.reported_unchanged` | As in §43.2's Code changes. |
@@ -3518,6 +3616,10 @@ implement step only).
 | `outcome.active_ms` | Sum of the steps' durations. |
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
+| `outcome.verify_calls` | The verify calls of the whole run (§44.3), 0 and absent when there were none. |
+
+The fields of the quality loop (checks, verify, criteria, `by_complexity`, no progress) are
+listed in §44.9.
 
 A step's `diff` is recorded only for an implement whose call succeeded and whose changes
 the guard passed (§38.3): git runs on the working tree only after the fingerprint and the
@@ -3534,3 +3636,300 @@ have changed, records no diff; the next completed implement's `diff.run` covers 
 * The changes a test command makes, and a diff for research/analyze/plan (read-only).
 * A machine-readable summary beyond `run.json` itself; `orchestrator runs report`
   aggregates over many runs.
+
+---
+
+# 44. Quality loop
+
+Normative. Design record, decisions and what was built differently: `specs/quality/`
+(`SPEC.md`, `README.md`, `tasks/`). Each stage is a separate cold call, so the result is only as
+good as what a stage is told and how soon the run learns that it is wrong. This section makes
+the stages pass on more of what they found, adds deterministic gates, lets `implement` run the
+tests during its session without a shell, checks the plan's criteria in review, ends a fix loop
+that goes nowhere and lets a config table pick the model per decided complexity.
+
+Rules that hold for all of it:
+
+* **Only exit codes decide** (§31.4). Checks are exit codes. Parsed test names only name tests in
+  a prompt. The in-session `run_tests` is a hint; the `test` step is the truth.
+* **No shell for `implement`** (§38). The verify tools run a command from config, never from the
+  model, in the sandbox, after a guard comparison.
+* **Go decides, from config and the persisted run.** No model picks a model, a stage, a
+  transition or a stop. Every transition is derivable on resume from `run.json` (§37).
+* **Opt-in where it costs money or changes behavior:** `actions.implement.verify`,
+  `actions.<name>.by_complexity`, `review.fix_medium` and `actions.review.models` are off
+  unless configured. The richer prompts, `checks` (once listed) and the no-progress stop are on.
+* Every new config key is declared in the schema (strict parsing, no version bump) and every
+  new `run.json` field is validated strictly on load.
+
+## 44.1 Stage context
+
+What each stage's prompt carries (§17, §20):
+
+| stage | gets, besides what it always had |
+|---|---|
+| plan | the analysis `affected_files` and `risks` |
+| implement | the analysis' and the plan's `affected_files` and `risks`; the plan's `acceptance_criteria` |
+| implement (retry) | the git diff --stat of what the run changed so far, against `pre_run_ref` |
+| review | the plan's `steps`, `risks` and numbered `acceptance_criteria` |
+
+Lists are `- item` lines under a heading; an empty list is left out. The plan's JSON gains
+`"acceptance_criteria": ["..."]`: at most 8 observable, checkable statements about the result.
+The parser stays lenient (a missing field is an empty list); Go keeps the first 8 non-empty
+entries and cuts each to 300 bytes on a UTF-8 boundary, so a resume reads the same list from
+the artifact. The retry's diff stat is rendered by Go from `Repository.DiffNumstat` between the
+tree of `pre_run_ref` and the working tree, fenced (`action.fence`) and bounded by
+`limits.prompt.max_diff_bytes` (the first files, the totals line, then `… N more files`). It is
+computed when the prompt is built and never stored. If git cannot tell, the step goes on
+without it and a warning is shown. The six stage prompts have golden files under
+`internal/action/testdata/prompts/` (`go test ./internal/action -update`).
+
+## 44.2 Checks
+
+```yaml
+checks:                      # optional, at most 16
+  - {name: build, command: "go build ./..."}
+  - {name: vet,   command: "go vet ./..."}
+  - {name: lint,  command: "golangci-lint run --new-from-rev=$ORCH_BASE_REF"}
+test:
+  command: "go test ./..."   # required when checks is set
+```
+
+* `name` matches `^[a-z0-9][a-z0-9_-]{0,31}$` and is unique; `command` is not empty. A check is
+  trusted operator config like `test.command` and runs through `sh -c`, the documented
+  exception to argv-only execution.
+* Checks are **not a new action type** (§30). The `test` step runs every check in order, then
+  `test.command`, and stops at the first non-zero exit code. A workflow without a `testing`
+  stage never runs them; to always have them, force `testing` in `policy.stages.force`.
+* Every command runs through the same `testexec.Runner`, under the same sandbox and with the
+  same `execution.TestEnv()` allowlist plus `test.env_pass`, with `ORCH_BASE_REF=<pre_run_ref>`
+  added (empty when no restore point was recorded; set for `test.command` too). The guard takes
+  one snapshot before the first command and compares after **each** one, fingerprint first: a
+  violation stops the step and the next command never runs. The secret scan runs once after
+  the step.
+* `TestResult` gains `checks` (every command that ran: `name`, `exit_code`, `success`,
+  `duration`) and `failed_check`. When a check fails, the top-level `command`, `exit_code`,
+  `stdout` and `stderr` are the failing check's; when every check passes they are
+  `test.command`'s. `success` is true only if every command exited 0.
+* A retry after a failed check says which check failed, shows its command, exit code and
+  fenced, bounded output, and says the tests did not run.
+* The pre-run test (§41.5) runs the same sequence.
+* Each check's full output goes to `logs/<NNN>-test.<check>.{stdout,stderr}.log`, and the
+  pre-run test's to `logs/pre-run-test.<check>.{stdout,stderr}.log`.
+
+## 44.3 Verify inside implement
+
+```yaml
+actions:
+  implement:
+    provider: claude
+    verify: true             # default false; implement only
+limits:
+  verify:
+    max_calls_per_step: 8    # default 8, 1..50; both tools together, refused calls included
+    call_timeout: 10m        # default 10m; one run of the test command or a check
+```
+
+With `verify: true` the implement session gets two tools from an MCP server named `orch`,
+which the orchestrator serves itself (`orchestrator mcp-verify --dir <dir>`, a hidden
+subcommand claude starts over stdio):
+
+| tool | arguments | runs |
+|---|---|---|
+| `mcp__orch__run_tests` | `filter` (optional string) | `test.command`; returns the exit code and bounded output |
+| `mcp__orch__run_check` | `name` (one of the configured check names, an `enum`) | that one check; offered only when `checks` is not empty |
+
+* **Not a shell** (D16, §38.1). The command comes from config; the model supplies only whether to
+  run, which configured check, and a `filter` matching `^[A-Za-z0-9_./:-]{1,200}$`. Anything
+  else (`;`, a space, `$(…)`, a quote, an empty string, 201 bytes) is refused and runs
+  nothing. A valid filter is passed only as `ORCH_TEST_FILTER` of that one run, never put
+  into a command line; whether `test.command` uses it is the operator's choice
+  (`'go test ./... ${ORCH_TEST_FILTER:+-run "$ORCH_TEST_FILTER"}'`). The `test` step never sets it.
+* **Fail fast** (`Validate`, `ValidateDependencies`): `verify: true` needs `test.command`,
+  `test.sandbox` other than `none` and provider `claude`; `verify` on any other action is an
+  unknown key; `extensions.mcp.orch` and any server name containing `__` are refused.
+* **Wiring.** The dispatcher creates a private `orch-verify-*` directory (0700) outside the
+  repository, writes `verify.json` (version 1: the repository root, `test.command`, the checks,
+  `pre_run_ref`, the sandbox, the computed test environment, the guard's before-state, the
+  limits) and merges the `orch` server into the step's `--mcp-config` with the two tool
+  names in `--allowed-tools`; the adapter's `--tools` is unchanged. The server reads nothing
+  but `verify.json` and its stdin, opens no run directory, makes no network call, and writes only
+  `calls.jsonl`, `violation` and per-call logs inside the directory. The directory is removed
+  when the step ends, and a start of `run` or `resume` removes your own `orch-verify-*`
+  directories older than a day.
+* **Guard before every run.** The server compares the repository with the step's before-state
+  (fingerprint first) before each call. A change, or a guard error, makes it run nothing, write
+  `violation`, answer `isError: true` and refuse every later call in the step. The `violation`
+  marker fails the step even if the tree was restored afterwards; the dispatcher's own guard
+  comparison after the call is a second signal. The runs happen only in bwrap, with the git
+  directories read-only, no network and a tmpfs `$HOME`.
+* **Limits.** `max_calls_per_step` counts every call of the two tools, refused ones included;
+  past it calls are refused with "limit reached". `call_timeout` kills the process group and
+  answers exit code -1 with "timed out". The implement step's own timeout
+  (`execution.timeout`, `actions.implement.timeout`) bounds the total, so raise it when verify
+  is on.
+* **Record.** `executions[].verify_calls` and `outcome.verify_calls` (§44.9), full output in
+  `logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log`, and the `Verify` row of `summary.md`.
+  The implement prompt gains one paragraph about the tools only when verify is on, and says
+  the orchestrator runs the tests again and only that run counts.
+* The server speaks a JSON-RPC 2.0 subset over newline-delimited stdio (`initialize`,
+  `notifications/initialized`, `tools/list`, `tools/call`, `ping`), with the standard library only.
+
+## 44.4 Review
+
+* **A verdict per criterion.** When the plan has `acceptance_criteria`, the review answer has
+  `criteria: [{index, met, evidence}]`: exactly one entry per criterion, indexes `1…N` each once,
+  `evidence` of 1 to 500 bytes; anything else is a malformed review (a hard step error). Go
+  fills `criterion` from the plan. An unmet criterion counts as a `high` issue, so
+  `ReviewResult.Decide()` fails the review, and the retried implement is told which criteria
+  were unmet, with the evidence, before the issues. Without criteria the answer has none.
+* **Read the surroundings.** The review prompt says the reviewer has Read, Grep and Glob and
+  should read the callers, the interfaces and the tests around each changed function; an issue
+  about code outside the diff is valid if the change causes it.
+* **`review.fix_medium`** (default `false`). A review that passes (no critical or high issue,
+  every criterion met) but reports a `medium` issue sends the run back to implement once, with
+  the medium issues in the retry prompt. It happens only if `fix_iterations <
+  max_fix_iterations` and at most once per run; it is a fix iteration. Then test and review run
+  as usual, and the second review decides as always. The workflow outcome is `fixable`
+  (§37.5). The option is recorded when the run starts (`options.review_fix_medium`) and read
+  from there, so a resume with a changed config follows the original run.
+* **Extra reviewers** (`actions.review.models`, default `[]`, review only). A list of up to 4
+  model names on the action's provider, never repeating the base model, a `by_complexity`
+  model of review or an earlier entry. The step calls the base model, then each listed model,
+  **sequentially**, with the same prompt, the same authority (`read`) and the base effort
+  (`by_complexity` does not apply to them). Each answer is parsed and validated strictly on its
+  own; one malformed answer fails the step. Go merges them (`mergeReviews`): issues are the
+  union, de-duplicated by (severity, file, normalised description); a criterion is met only if
+  every reviewer says so, with the evidence of the first that does not; `Decide()` runs on the
+  merged result. The review artifact and `run.json` keep every reviewer's answer
+  (`review_result.reviewers: [{model, result}]`, the base model first); `executions[].usage`
+  sums the calls and `call.extra_calls` holds one compact entry per extra reviewer. This is one
+  step with calls in a fixed order and a merge Go decides, not a parallel or multi-agent
+  workflow (§30).
+
+## 44.5 Configuration summary
+
+```yaml
+checks:                          # §44.2
+  - {name: vet, command: "go vet ./..."}
+actions:
+  implement:
+    verify: false                # §44.3, implement only
+    by_complexity: {}            # §44.8, any action with a provider
+  review:
+    models: []                   # §44.4, review only
+review:
+  fix_medium: false              # §44.4
+limits:
+  stop_without_progress: true    # §44.6
+  verify:                        # §44.3
+    max_calls_per_step: 8
+    call_timeout: 10m
+```
+
+Every key is optional. For a config that sets none of them the behavior changes only where it
+is on by default: the richer prompts (§44.1) and the no-progress stop (§44.6). Invalid values
+are config errors (exit 2) before any call: a bad `checks` entry, `checks` without
+`test.command`, `verify` without a sandbox or on another action, a reserved or ambiguous MCP
+server name, an invalid `by_complexity`, `models` on a non-review action.
+
+## 44.6 Stop without progress
+
+With `limits.stop_without_progress` (default `true`) the engine, after a step that sends the run
+back to implement, compares the last completed execution with the previous failure of the same
+kind in this run (`workflow.NoProgress`, persisted data only, no model call):
+
+| signal | compared with | reason |
+|---|---|---|
+| implement's `tree_after` (a git tree id) | the tree after the previous implement | `no progress: implement changed nothing` |
+| a failed test: `failed_check`, exit code and parsed failing names, else a hash of the bounded output with digits replaced by `#` | the previous failed test | `no progress: the same tests fail` |
+| a failed review: every critical/high issue and unmet criterion matches one of the previous failed review | the previous failed review | `no progress: review repeats the same issues` |
+
+"Matches" for an issue: the same `file` and descriptions whose word sets (lower case, letters
+and digits, words of 3+ characters) have a Jaccard similarity of at least 0.6; an unmet
+criterion matches on its text. A test or review that passed between the two failures means the
+run moved, so no signal fires. The run stops with status `stopped`, exit code 4, and spends no
+more iterations. `max_fix_iterations` is read first, so a run that exhausted it keeps its
+usual reason. A resume of such a run goes into implement (§37.5), and `max_fix_iterations`
+still applies. `false` restores spending every iteration.
+
+## 44.7 Failing test names
+
+`internal/testreport` (standard library and `domain`) reads failing test names out of a failed
+test step's stdout and stderr for `go test -json`, `go test` text, pytest (`FAILED` lines
+of the short summary) and jest (`--json` or the text tree). The result is `{format, failed}`
+with sorted, de-duplicated names, at most 200, each at most 300 bytes. An unrecognised format
+gives no format and no names and changes nothing. `TestResult` gains `failed_tests` and
+`report_format` (and so does `pre_run_test`); the implement retry prompt adds `Failing tests
+(parsed from the output): a, b, c` (at most 30, then `, … and N more`) above the fenced output,
+so the names survive when the output is cut.
+
+When the run started red (`run --allow-red-tests`) and both the pre-run test and the failed
+test step have names in the same format, the retry prompt splits them: `Failing before this run
+started (the task may be to fix them): …` and `New failures since the run started: …`, and
+`summary.md` shows `N failing before the run, M new`. Both are hints: the step still fails on a
+non-zero exit code even if every failure is old, and nothing in `outcomeOf`, `Next` or a stop
+depends on a name except the no-progress signal above, which compares them with each other.
+
+## 44.8 Complexity chooses the model
+
+```yaml
+actions:
+  implement:
+    provider: claude
+    model: sonnet
+    effort: medium
+    by_complexity:
+      simple:  {model: haiku, effort: low}
+      complex: {model: opus,  effort: high}
+```
+
+* `by_complexity` is optional on every action that has a provider (research, analyze, plan,
+  implement, review). Its keys are `simple`, `medium` and `complex`; each value has `model`
+  and/or `effort`, and a missing field falls back to the action's base value. There is no
+  `provider` key (the strict parser rejects it): the provider is fixed per action, so the
+  dependency and authority checks of §7 still cover every call. `effort` follows the usual
+  rules and applies only to providers that accept it (claude).
+* Go picks once per step: if the run's decision has a complexity and the table has an entry
+  for it, that entry; otherwise the base. A manual decision (`run --stage`) has none and gets
+  the base. Extra reviewers (§44.4) are not routed.
+* **Record.** `executions[].provider.model_source` is `base` or `by_complexity.<level>`, and
+  `decision.json: models` lists, for every action of the workflow that makes a call, the
+  provider, model, effort and source the decision implies, written when the decision is made.
+  A resume recomputes the route from the persisted decision and the current config and prints
+  a `Warning:` line for each remaining action whose model or effort differs from
+  `decision.json: models` (`implement model changed since the run started: opus → sonnet`),
+  for any model change, not only for `by_complexity`.
+
+## 44.9 Field reference
+
+`run.json`, each validated strictly on load (`persistence/validate.go`):
+
+| field | where | meaning and validation |
+|---|---|---|
+| `options.review_fix_medium` | run | the `review.fix_medium` of the config when the run started; absent when every option is off |
+| `checks[]` | `test_result`, `pre_run_test` | `{name, exit_code, success, duration}` of each command that ran; names valid per §44.2; a failed check is the last entry |
+| `failed_check` | `test_result`, `pre_run_test` | the name of the failing `checks[]` entry; absent when every check passed |
+| `failed_tests`, `report_format` | `test_result`, `pre_run_test` | §44.7; a failed result only, a known format, at most 200 names of 1 to 300 bytes without control characters |
+| `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused}`; `tool` is `run_tests` or `run_check`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 50 |
+| `tree_after` | implement executions | the git tree of the working tree after the step; 40 or 64 hex characters |
+| `provider.model_source` | executions | `base` or `by_complexity.{simple,medium,complex}` |
+| `review_result.criteria[]` | review executions | `{index, criterion, met, evidence}`; indexes `1…N` unique; evidence at most 500 bytes |
+| `review_result.reviewers[]` | review executions | `[{model, result}]`, the base model first, absent for a single reviewer; a reviewer has no reviewers of its own |
+| `call.extra_calls[]` | review executions | `{model, api_ms, input_tokens, …}` per extra reviewer; at most 4 |
+| `outcome.verify_calls` | outcome | the verify calls of the whole run, not negative |
+
+`decision.json` gains `models` (§44.8). Artifacts: the plan gains `acceptance_criteria`, the
+review artifact `reviewers`. Logs gain `<NNN>-test.<check>.*`, `pre-run-test.<check>.*` and
+`<NNN>-implement.verify-<K>.*`. `summary.md` gains the rows `Verify`, `Failing tests` and
+`Reviewers` and the `failed (check …)` and `N/M criteria met` results (§43.2).
+
+## 44.10 Not covered
+
+* **Worktree isolation** (TODO Q4) and **the cost of the decision rounds** (TODO Q8): later,
+  with their own specs.
+* **Parsed names as a gate.** Letting a run pass while "only old" tests fail would make success
+  depend on parsed text (§31.4).
+* **A shell, parallel verify calls or any tool beyond `run_tests` and `run_check`**, and verify
+  for codex or gemini (no adapter is verified, §38.2).
+* **Model choice by anything but the decided complexity** (cost so far, failures).

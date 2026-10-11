@@ -4,13 +4,36 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
+	"orchestrator/internal/verify"
 	"orchestrator/internal/workflow"
 )
+
+// prepareVerify writes the server's input into dir and returns the extension that starts it.
+func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardState) (provider.Extensions, error) {
+	// MkdirTemp creates the directory 0700 already; the server's files are only for us.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return provider.Extensions{}, err
+	}
+	spec, err := d.verifySpec(run, before)
+	if err != nil {
+		return provider.Extensions{}, err
+	}
+	if err := verify.WriteSpec(dir, spec); err != nil {
+		return provider.Extensions{}, err
+	}
+	exe, err := d.executable()
+	if err != nil {
+		return provider.Extensions{}, err
+	}
+	return verifyExtensions(dir, exe, len(spec.Checks) > 0), nil
+}
 
 // executeImplement always reports OutcomeSuccess if the provider process exits 0 -
 // whether the implementation is actually correct is verified by the next test/review
@@ -23,12 +46,11 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,
 		PreRunFailure:          d.preRunFailureForImplement(),
+		PreRunTest:             d.preRunFailure,
 		ReviewIssues:           d.pendingReviewIssues,
+		UnmetCriteria:          d.pendingUnmetCriteria,
+		MediumIssues:           d.pendingMediumIssues,
 		MaxTestOutput:          d.Config.Limits.Prompt.TestOutputBytes(),
-	}
-	prompt := BuildImplementPrompt(in)
-	if TestOutputCut(in) {
-		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
 	}
 
 	// Fail closed: without a guard nothing would stop a write that turns into execution
@@ -40,13 +62,57 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to snapshot protected paths before implement", Err: err}
 	}
+
+	// With verify on, the session gets the orch MCP server over a private directory that
+	// holds its input and, afterwards, its record of the calls. The directory is removed on
+	// every way out of this function.
+	var builtin provider.Extensions
+	verifyDir := ""
+	if d.Config.Actions.Implement.Verify {
+		dir, err := os.MkdirTemp("", "orch-verify-")
+		if err != nil {
+			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to create the verify directory", Err: err}
+		}
+		defer os.RemoveAll(dir)
+		verifyDir = dir
+		if builtin, err = d.prepareVerify(dir, run, before); err != nil {
+			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to set up the verify tools", Err: err}
+		}
+		in.Verify, in.VerifyChecks = true, len(d.Config.Checks) > 0
+	}
+
 	// The working tree as a git tree, to count what the step changes. Best effort: without
 	// it the step records no diff.
 	treeBefore, _ := d.Repo.WorktreeTree(ctx)
 
-	result, ref, err := d.call(ctx, run, d.Config.Actions.Implement.ProviderModel, domain.ActionImplement, prompt)
+	// A retry also sees what the run has changed so far. Not fatal: without the stat the
+	// prompt is the one it was before.
+	if d.lastImpl != nil && run.PreRunRef != "" {
+		const noStat = "could not compute the run's diff stat for the retry prompt"
+		if treeBefore == "" {
+			d.warn(domain.ActionImplement, noStat+": the working tree could not be read")
+		} else if files, err := d.Repo.DiffNumstat(ctx, run.PreRunRef, treeBefore, d.runsExclude()); err != nil {
+			d.warn(domain.ActionImplement, noStat+": "+err.Error())
+		} else {
+			in.RunDiffStat = renderDiffStat(files, d.Config.Limits.Prompt.DiffBytes())
+		}
+	}
+	prompt := BuildImplementPrompt(in)
+	if TestOutputCut(in) {
+		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
+	}
+
+	pm, source := d.route(run, domain.ActionImplement)
+	result, ref, err := d.call(ctx, run, pm, source, domain.ActionImplement, prompt, builtin)
+	// Read on every path: the calls are recorded in a step that failed as well.
+	var verified verifyOutput
+	if verifyDir != "" {
+		verified = readVerifyDir(verifyDir)
+	}
 	if err != nil {
-		return d.failureOutcome(ref, result), err
+		failed := d.failureOutcome(ref, result)
+		failed.VerifyCalls, failed.VerifyLogs = verified.calls, verified.logs
+		return failed, err
 	}
 
 	artifact := parseImplementation(result.Output)
@@ -66,12 +132,19 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		ArtifactPath: path,
 		Artifact:     artifact,
 		RawStdout:    result.Output,
+		VerifyCalls:  verified.calls,
+		VerifyLogs:   verified.logs,
 	}
 	if err != nil {
 		return outcome, &apperr.WorkflowError{Msg: "failed to check protected paths after implement", Err: err}
 	}
 	if len(changed) > 0 {
 		return outcome, &apperr.WorkflowError{Msg: protectedViolation(domain.ActionImplement, changed, run.PreRunRef)}
+	}
+	// A violation the server found may have been undone by the model since, so the guard
+	// above can come back clean.
+	if err := verifyFailure(verified, run.PreRunRef); err != nil {
+		return outcome, err
 	}
 	// Only now, with the guard passed, may git look at what the call wrote.
 	if treeBefore != "" {
@@ -131,9 +204,13 @@ func (d *Dispatcher) preRunFailureForImplement() *domain.TestResult {
 	return d.preRunFailure
 }
 
-// LastImplementation is the artifact of the last implement step, restored from its
-// artifact on resume, or nil when none ran. The commit offered at the end of a run takes
-// its message from it (MVP.md §42).
-func (d *Dispatcher) LastImplementation() *domain.ImplementationArtifact {
+// CommitImplementation is the implementation the commit offered at the end of a run takes
+// its message from (MVP.md §42): the first one with a summary_short, since a fix
+// iteration's describes only the fix, else the last one; restored from the artifacts on
+// resume, or nil when none ran.
+func (d *Dispatcher) CommitImplementation() *domain.ImplementationArtifact {
+	if d.commitImpl != nil {
+		return d.commitImpl
+	}
 	return d.lastImpl
 }

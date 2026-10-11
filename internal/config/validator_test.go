@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,29 @@ func TestValidate_InvalidLimits(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "max_steps must be positive") || !strings.Contains(msg, "max_fix_iterations must be positive") {
 		t.Errorf("unexpected error message: %s", msg)
+	}
+}
+
+func TestLimitsConfig_StopsWithoutProgress(t *testing.T) {
+	yes, no := true, false
+	for name, tc := range map[string]struct {
+		limits LimitsConfig
+		want   bool
+	}{
+		"unset":          {LimitsConfig{}, true},
+		"true":           {LimitsConfig{StopWithoutProgress: &yes}, true},
+		"explicit false": {LimitsConfig{StopWithoutProgress: &no}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := tc.limits.StopsWithoutProgress(); got != tc.want {
+				t.Errorf("StopsWithoutProgress = %v, want %v", got, tc.want)
+			}
+			cfg := validConfig()
+			cfg.Limits.StopWithoutProgress = tc.limits.StopWithoutProgress
+			if err := Validate(cfg); err != nil {
+				t.Errorf("Validate: %v", err)
+			}
+		})
 	}
 }
 
@@ -337,6 +361,122 @@ func TestValidate_TestBaseline(t *testing.T) {
 	}
 	if !(TestConfig{}).PreRunTest() || (TestConfig{Baseline: BaselineOff}).PreRunTest() {
 		t.Error("PreRunTest disagrees with test.baseline")
+	}
+}
+
+func TestValidate_Verify(t *testing.T) {
+	ok := validConfig()
+	ok.Actions.Implement.Verify = true
+	if err := Validate(ok); err != nil {
+		t.Fatalf("verify on a sandboxed implement: %v", err)
+	}
+
+	three, zero, fiftyOne := 3, 0, 51
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"no sandbox", func(c *Config) { c.Test.Sandbox = SandboxNone }, "actions.implement.verify needs test.sandbox bwrap"},
+		{"no test command", func(c *Config) { c.Test.Command = "" }, "actions.implement.verify needs test.command"},
+		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "codex" }, "actions.implement.verify is only supported with provider claude"},
+		{"on review", func(c *Config) { c.Actions.Review.Verify = true }, "actions.review.verify: unknown key"},
+		{"written on plan", func(c *Config) { c.Actions.Plan.verifySet = true }, "actions.plan.verify: unknown key"},
+		{"zero calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &zero }, "limits.verify.max_calls_per_step must be between 1 and 50, got 0"},
+		{"too many calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &fiftyOne }, "limits.verify.max_calls_per_step must be between 1 and 50, got 51"},
+		{"negative timeout", func(c *Config) { c.Limits.Verify.CallTimeout = -time.Second }, "limits.verify.call_timeout must be a positive duration"},
+		{"zero timeout written", func(c *Config) { c.Limits.Verify.callTimeoutSet = true }, "limits.verify.call_timeout must be a positive duration"},
+		{"reserved server name", func(c *Config) {
+			c.Extensions.MCP = map[string]MCPServerConfig{"orch": {Command: "x", Tools: []string{"t"}}}
+		}, "extensions.mcp.orch: the name orch is reserved"},
+		{"double underscore in a server name", func(c *Config) {
+			c.Extensions.MCP = map[string]MCPServerConfig{"a__b": {Command: "x", Tools: []string{"t"}}}
+		}, "extensions.mcp.a__b: the server name must not contain __"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Actions.Implement.Verify = true
+			tc.mutate(&cfg)
+			err := Validate(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+
+	cfg := validConfig()
+	cfg.Limits.Verify.MaxCallsPerStep = &three
+	cfg.Limits.Verify.CallTimeout = time.Minute
+	if err := Validate(cfg); err != nil {
+		t.Errorf("explicit limits.verify: %v", err)
+	}
+}
+
+func TestVerifyLimits_Defaults(t *testing.T) {
+	var v VerifyLimitsConfig
+	if v.MaxCalls() != 8 || v.Timeout() != 10*time.Minute {
+		t.Errorf("defaults = %d, %s; want 8, 10m", v.MaxCalls(), v.Timeout())
+	}
+	five := 5
+	v = VerifyLimitsConfig{MaxCallsPerStep: &five, CallTimeout: time.Minute}
+	if v.MaxCalls() != 5 || v.Timeout() != time.Minute {
+		t.Errorf("explicit = %d, %s; want 5, 1m", v.MaxCalls(), v.Timeout())
+	}
+}
+
+func nChecks(n int) []CheckConfig {
+	var checks []CheckConfig
+	for i := 0; i < n; i++ {
+		checks = append(checks, CheckConfig{Name: fmt.Sprintf("check-%d", i), Command: "true"})
+	}
+	return checks
+}
+
+func TestValidate_Checks(t *testing.T) {
+	ok := validConfig()
+	ok.Checks = []CheckConfig{
+		{Name: "build", Command: "go build ./..."},
+		{Name: "vet", Command: "go vet ./..."},
+		{Name: "a_b-9", Command: "true"},
+		{Name: strings.Repeat("x", 32), Command: "true"},
+	}
+	if err := Validate(ok); err != nil {
+		t.Errorf("valid checks: %v", err)
+	}
+	max := validConfig()
+	max.Checks = nChecks(16)
+	if err := Validate(max); err != nil {
+		t.Errorf("16 checks: %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{"duplicate name", func(c *Config) { c.Checks = []CheckConfig{{"vet", "a"}, {"vet", "b"}} }, `checks[1].name "vet" is used by an earlier check`},
+		{"uppercase", func(c *Config) { c.Checks = []CheckConfig{{"Build", "a"}} }, `checks[0].name "Build" must match`},
+		{"leading dash", func(c *Config) { c.Checks = []CheckConfig{{"-x", "a"}} }, `checks[0].name "-x" must match`},
+		{"33 characters", func(c *Config) { c.Checks = []CheckConfig{{strings.Repeat("a", 33), "a"}} }, "must match"},
+		{"slash", func(c *Config) { c.Checks = []CheckConfig{{"a/b", "a"}} }, `checks[0].name "a/b" must match`},
+		{"empty name", func(c *Config) { c.Checks = []CheckConfig{{"", "a"}} }, `checks[0].name "" must match`},
+		{"17 checks", func(c *Config) { c.Checks = nChecks(17) }, "17 checks, at most 16"},
+		{"empty command", func(c *Config) { c.Checks = []CheckConfig{{"vet", ""}} }, "checks[0].command is required"},
+		{"blank command", func(c *Config) { c.Checks = []CheckConfig{{"vet", "  \t"}} }, "checks[0].command is required"},
+		{"no test command", func(c *Config) {
+			c.Checks = []CheckConfig{{"vet", "go vet ./..."}}
+			c.Test.Command = ""
+		}, "checks need test.command"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(&cfg)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("want %q in %v", tc.want, err)
+			}
+		})
 	}
 }
 

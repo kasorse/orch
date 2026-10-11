@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"orchestrator/internal/apperr"
@@ -42,7 +43,8 @@ const heartbeatInterval = 30 * time.Second
 // nil ArtifactWriter (artifacts are then only carried in memory/RawStdout, not written to
 // disk) - this is the documented no-op-persistence state during early build-out.
 type ArtifactWriter interface {
-	SaveArtifact(runID string, stepIndex int, action domain.ActionType, artifact any) (string, error)
+	// prompt is what the step sent to its model, empty for a step without a model call.
+	SaveArtifact(runID string, stepIndex int, action domain.ActionType, artifact any, prompt string) (string, error)
 }
 
 // LogPathBuilder returns the path a step's raw provider output will be written to, without
@@ -81,41 +83,80 @@ type Dispatcher struct {
 	// OnSecret, if set, is told of each new likely secret a step added when
 	// security.secret_scan.mode is warn (file, line and rule - never the value).
 	OnSecret func(step domain.ActionType, file string, line int, rule string)
+	// OnWarning, if set, is told of a problem a step went on despite (nothing a run stops
+	// for), such as context it could not add to a prompt.
+	OnWarning func(step domain.ActionType, msg string)
+	// VerifyExecutable is the orchestrator binary the verify server is started from; empty
+	// means this process's own executable, with symlinks resolved. Tests set it.
+	VerifyExecutable string
 
 	lastResearch *domain.ResearchArtifact
 	lastAnalysis *domain.AnalysisArtifact
 	lastPlan     *domain.PlanArtifact
 	lastImpl     *domain.ImplementationArtifact
-	lastTest     *domain.TestResult
+	// commitImpl is the run's first implementation with a summary_short: the commit
+	// describes the whole change, not the last fix iteration (MVP.md §42.2).
+	commitImpl *domain.ImplementationArtifact
+	lastTest   *domain.TestResult
 
-	// pendingTestFailure/pendingReviewIssues carry retry context into the next
-	// executeImplement call; both are cleared once consumed, since the engine's
+	// pendingTestFailure/pendingReviewIssues/pendingUnmetCriteria carry retry context into
+	// the next executeImplement call; all are cleared once consumed, since the engine's
 	// transition table never has a test failure and a review failure pending at once.
-	pendingTestFailure  *domain.TestResult
-	pendingReviewIssues []domain.ReviewIssue
+	pendingTestFailure   *domain.TestResult
+	pendingReviewIssues  []domain.ReviewIssue
+	pendingUnmetCriteria []domain.CriterionVerdict
+	// pendingMediumIssues are the medium issues of a review that passed. An implement only
+	// follows a passing review when review.fix_medium sent the run back (specs/quality/SPEC.md
+	// §7.3), so what is pending here is what that retry is for; it is cleared like the rest.
+	pendingMediumIssues []domain.ReviewIssue
 
 	// stepUsage and stepCall are the usage and the report of the current step's provider
-	// call; stepTruncated is what its prompt had cut, set by the action before the call.
-	// Execute resets all three.
+	// call; stepTruncated is what its prompt had cut, set by the action before the call;
+	// stepPrompt is the prompt the call sent, saved with the step's artifact. Execute
+	// resets all four.
 	stepUsage     *domain.Usage
 	stepCall      *domain.CallReport
 	stepTruncated []domain.PromptPart
+	stepPrompt    string
 
 	// preRunFailure is a red pre-run test the run went on with (run --allow-red-tests). It
 	// is shown to implement until the first test step has run.
 	preRunFailure *domain.TestResult
 }
 
+// warn reports a non-fatal problem through OnWarning, if set.
+func (d *Dispatcher) warn(step domain.ActionType, msg string) {
+	if d.OnWarning != nil {
+		d.OnWarning(step, msg)
+	}
+}
+
 func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repository, runner *testexec.Runner) *Dispatcher {
 	return &Dispatcher{Config: cfg, Registry: registry, Repo: repo, Runner: runner}
 }
 
+// route is the provider, model and effort an action runs with under the run's decision, and
+// the source of the model (domain.ProviderRef.ModelSource): the action's own, or its
+// by_complexity entry for the decided complexity. Every executor resolves its model here.
+// The extra reviewers of review.models are not routed (specs/quality/SPEC.md §9.2).
+func (d *Dispatcher) route(run *domain.Run, actionName domain.ActionType) (config.ProviderModel, string) {
+	pm, source, ok := d.Config.Actions.Route(actionName, run.Decision)
+	if !ok {
+		return config.ProviderModel{}, domain.ModelSourceBase
+	}
+	return pm, source
+}
+
 // call resolves the configured provider for pm, executes the prompt, and - on a
 // *apperr.ProviderError - fills in the Action field the adapter deliberately leaves blank
-// and, if Logs is set, the LogPath the failing step's output will be written to.
-func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, actionName domain.ActionType, prompt string) (provider.Result, domain.ProviderRef, error) {
+// and, if Logs is set, the LogPath the failing step's output will be written to. source is
+// where pm came from (see route) and is recorded in the returned ProviderRef.
+//
+// builtin is what the orchestrator itself adds to the operator's extensions for this call
+// (the verify server of implement); the zero value adds nothing.
+func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.ProviderModel, source string, actionName domain.ActionType, prompt string, builtin provider.Extensions) (provider.Result, domain.ProviderRef, error) {
 	authority := domain.AuthorityFor(actionName)
-	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority}
+	ref := domain.ProviderRef{Provider: pm.Provider, Model: pm.Model, Effort: pm.Effort, Authority: authority, ModelSource: source}
 
 	client, err := d.Registry.Resolve(pm.Provider)
 	if err != nil {
@@ -125,14 +166,22 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		}
 	}
 
+	// The hint is about the operator's tools only: the verify tools have their own paragraph
+	// in the implement prompt.
+	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
+	prompt = withExtensionsHint(prompt, ext)
+	ext, err = mergeExtensions(ext, builtin)
+	if err != nil {
+		return provider.Result{}, ref, &apperr.WorkflowError{Msg: "failed to merge the MCP servers of the step", Err: err}
+	}
+
 	if d.Observer != nil {
 		d.Observer.ProviderCallStarted(pm.Provider, pm.Model)
 	}
 	start := time.Now()
 
 	stopHeartbeat := d.startHeartbeat()
-	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
-	prompt += extensionsHint(ext)
+	d.stepPrompt = prompt
 	result, err := client.Execute(ctx, provider.Request{
 		Prompt: prompt, Model: pm.Model, Effort: pm.Effort, WorkingDir: d.Repo.Dir, Stream: d.Stream,
 		Authority:  authority,
@@ -181,6 +230,53 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		return result, ref, err
 	}
 	return result, ref, nil
+}
+
+// stepCalls sums the calls of one step that makes several, a review with extra reviewers: the
+// usage is the sum of every call's, and the report is the first call's with a compact entry
+// per later call (domain.CallReport.ExtraCalls).
+type stepCalls struct {
+	usage *domain.Usage
+	first *domain.CallReport
+	extra []domain.ExtraCall
+}
+
+// newStepCalls starts from the first call's usage and report, either of which may be nil.
+func newStepCalls(usage *domain.Usage, report *domain.CallReport) *stepCalls {
+	s := &stepCalls{first: report}
+	if usage != nil {
+		u := *usage
+		s.usage = &u
+	}
+	return s
+}
+
+// add records a later call to model; its usage and report may be nil (the call failed before
+// they were known, or the provider reports none).
+func (s *stepCalls) add(model string, usage *domain.Usage, report *domain.CallReport) {
+	x := domain.ExtraCall{Model: model}
+	if report != nil {
+		x.APIMS = report.APIMS
+	}
+	if usage != nil {
+		x.InputTokens, x.OutputTokens = usage.PromptTokens(), usage.OutputTokens
+		if s.usage == nil {
+			s.usage = &domain.Usage{}
+		}
+		s.usage.Add(*usage)
+		s.usage.Partial = s.usage.Partial || usage.Partial
+	}
+	s.extra = append(s.extra, x)
+}
+
+// report is the first call's report with the extra calls so far; nil without a first report.
+func (s *stepCalls) report() *domain.CallReport {
+	if s.first == nil {
+		return nil
+	}
+	r := *s.first
+	r.ExtraCalls = slices.Clone(s.extra)
+	return &r
 }
 
 // denyRead is every call's file-tool deny list: the same secret deny list the Context
@@ -232,7 +328,7 @@ func (d *Dispatcher) saveArtifact(run *domain.Run, actionName domain.ActionType,
 	if d.Artifacts == nil {
 		return ""
 	}
-	path, err := d.Artifacts.SaveArtifact(run.ID, len(run.Executions), actionName, artifact)
+	path, err := d.Artifacts.SaveArtifact(run.ID, len(run.Executions), actionName, artifact, d.stepPrompt)
 	if err != nil {
 		return ""
 	}

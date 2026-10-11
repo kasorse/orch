@@ -1,0 +1,7 @@
+ PASS  src/store.test.js (5.3 s)
+  Store
+    ✓ puts (2 ms)
+    ✓ gets (1 ms)
+
+Test Suites: 1 passed, 1 total
+Tests:       2 passed, 2 total
