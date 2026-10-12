@@ -249,3 +249,41 @@ func indexOf(ss []string, s string) int {
 	}
 	return -1
 }
+
+func TestBuild_NamedFileCarriesItsContent(t *testing.T) {
+	dir := fixtureRepo(t)
+	m := newFixtureManager(t, dir, Options{MaxFiles: 20, MaxBytes: 1 << 20})
+	pc, raw := buildJSON(t, m, "implement the task in `internal/order/order.go`; see .env and config/secrets.yaml", "")
+
+	if got := pc.RelevantFiles[0]; got.Path != "internal/order/order.go" || got.Content != fixtureFiles["internal/order/order.go"] {
+		t.Errorf("first relevant file = %+v, want order.go with its content", got)
+	}
+	for _, f := range pc.RelevantFiles[1:] {
+		if f.Content != "" {
+			t.Errorf("%s is not named but carries content", f.Path)
+		}
+	}
+	for _, forbidden := range []string{envSecret, secretsYAML} {
+		if strings.Contains(raw, forbidden) {
+			t.Errorf("a named deny-listed file leaked %q", forbidden)
+		}
+	}
+}
+
+func TestNamedFiles(t *testing.T) {
+	files := []string{"a/b.md", "b.md", "a/b.md.bak"}
+	for request, want := range map[string]string{
+		"do a/b.md":      "a/b.md",
+		"do ./a/b.md.":   "a/b.md",
+		"do `a/b.md`":    "a/b.md",
+		"do x/a/b.md":    "",
+		"do a/b.md.bak":  "a/b.md.bak",
+		"do b.md please": "b.md",
+		"do a/b.mdx":     "",
+	} {
+		got := namedFiles(request, files)
+		if (want == "" && len(got) != 0) || (want != "" && (len(got) != 1 || !got[want])) {
+			t.Errorf("namedFiles(%q) = %v, want %q", request, got, want)
+		}
+	}
+}

@@ -589,7 +589,7 @@ exactly our options, values in [0, 1], distributions summing to 1. Anything else
 ## 8.3 Context Manager
 
 Runs only when the policy picks depth `project`. It builds a compact `ProjectContext` -
-never whole files:
+never whole files, except the ones the request names:
 
 * metadata from the manifest (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`,
   `pom.xml`): language, project type, module, direct dependencies;
@@ -597,7 +597,10 @@ never whole files:
 * rules: bullet lines of `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`;
 * excerpts of the `README.md` / `docs/*.md` sections that mention the request's terms;
 * relevant files - path-word matches plus verbatim identifiers in sources - with a
-  one-line summary each, followed by their tests;
+  one-line summary each, followed by their tests; a file the request names by its
+  repository path (`specs/x/TASK.md`, `./specs/x/TASK.md`) comes first and also carries
+  its `content`, clipped to 8 KiB, so a request that points at a task file is classified
+  on that file's text;
 * git branch, dirty flag, changed paths.
 
 Files come from `git ls-files --cached --others --exclude-standard`, so `.gitignore` is

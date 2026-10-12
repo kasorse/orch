@@ -42,6 +42,9 @@ type RelevantFile struct {
 	// "implementation", "test", "dependent".
 	Purpose string `json:"purpose,omitempty"`
 	Summary string `json:"summary,omitempty"`
+	// Content is the file's text, clipped, only for a file the request names by its
+	// path: the request then points at it instead of describing the task.
+	Content string `json:"content,omitempty"`
 }
 
 type TestInfo struct {

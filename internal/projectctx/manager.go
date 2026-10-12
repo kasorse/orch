@@ -1,8 +1,9 @@
 // Package projectctx is the Context Manager (specs/JEV integration/SPEC.md §5, TASKS.md
 // T08): it builds the compact ProjectContext sent to the decision provider when a task
-// needs repository context. It never sends whole files - only paths, one-line
-// summaries, rules, doc excerpts and metadata - and nothing it collects passes through
-// without the deny list, since the result leaves the machine.
+// needs repository context. It sends paths, one-line summaries, rules, doc excerpts and
+// metadata, and the clipped text of only the files the request names by path - never
+// whole files otherwise - and nothing it collects passes through without the deny list,
+// since the result leaves the machine.
 package projectctx
 
 import (
@@ -71,7 +72,7 @@ func (m *Manager) Build(ctx context.Context, request, requestEN string) (*domain
 	}
 
 	// One more than fits, so the budget can tell that something was left out.
-	pc.RelevantFiles, err = relevantFiles(ctx, m.root, files, q, m.opts.MaxFiles+1)
+	pc.RelevantFiles, err = relevantFiles(ctx, m.root, files, q, namedFiles(request, files), m.opts.MaxFiles+1)
 	if err != nil {
 		return nil, err
 	}
