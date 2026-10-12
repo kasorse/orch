@@ -263,6 +263,9 @@ type LimitsConfig struct {
 	// StopWithoutProgress is a pointer so an absent key (nil) can default to true while an
 	// explicit false still means false; read it through StopsWithoutProgress.
 	StopWithoutProgress *bool `yaml:"stop_without_progress"`
+	// MaxCostUSD is the budget of the workflow steps (specs/governance/SPEC.md §5): optional,
+	// nil means no budget. Only the steps' cost counts, not the decision phase's.
+	MaxCostUSD *float64 `yaml:"max_cost_usd"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
 	Prompt PromptLimitsConfig `yaml:"prompt"`

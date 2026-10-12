@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"path"
 	"regexp"
 	"slices"
@@ -51,6 +52,9 @@ func Validate(cfg Config) error {
 	}
 	if cfg.Limits.MaxFixIterations <= 0 {
 		problems = append(problems, fmt.Sprintf("limits.max_fix_iterations must be positive, got %d", cfg.Limits.MaxFixIterations))
+	}
+	if v := cfg.Limits.MaxCostUSD; v != nil && (*v <= 0 || math.IsNaN(*v) || math.IsInf(*v, 0)) {
+		problems = append(problems, fmt.Sprintf("limits.max_cost_usd must be positive and finite, got %v", *v))
 	}
 
 	problems = append(problems, checkProblems(cfg)...)

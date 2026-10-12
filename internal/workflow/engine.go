@@ -149,6 +149,17 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 			return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: maximum steps exceeded"}
 		}
 
+		// The budget is read before the gate, so the user is not asked to approve a step that
+		// will not run. The sum comes from the persisted executions, so a resume counts it all.
+		if reason := budgetReason(run, e.Limits); reason != "" {
+			run.Status = domain.RunStopped
+			run.FailureReason = reason
+			e.persist(run)
+			e.runFinished(run)
+			return &apperr.LimitExceededError{Reason: "Run status: stopped\nReason: " + reason +
+				"\n\nRaise limits.max_cost_usd to continue it."}
+		}
+
 		action := domain.ActionType(current)
 		index := len(run.Executions)
 
@@ -269,6 +280,39 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 		current = next
 	}
+}
+
+// spentUSD sums the cost the run's steps reported, and counts the calls that ended before the
+// CLI's final report: those record no cost, so the sum is then only a lower bound. An extra
+// reviewer's calls are already in its step's usage.
+func spentUSD(run *domain.Run) (spent float64, partial int) {
+	for _, exec := range run.Executions {
+		if exec.Usage == nil {
+			continue
+		}
+		spent += exec.Usage.CostUSD
+		if exec.Usage.Partial {
+			partial++
+		}
+	}
+	return spent, partial
+}
+
+// budgetReason is the failure reason of a run whose steps have cost limits.MaxCostUSD or more,
+// "" while it is under budget or has none (0).
+func budgetReason(run *domain.Run, limits domain.LimitsView) string {
+	if limits.MaxCostUSD <= 0 {
+		return ""
+	}
+	spent, partial := spentUSD(run)
+	if spent < limits.MaxCostUSD {
+		return ""
+	}
+	reason := fmt.Sprintf("budget exceeded: $%.2f of $%.2f", spent, limits.MaxCostUSD)
+	if partial > 0 {
+		reason += fmt.Sprintf(" (lower bound: %d calls without a final report)", partial)
+	}
+	return reason
 }
 
 // stopWithoutProgress ends the run as stopped with the reason NoProgress gave; a resume

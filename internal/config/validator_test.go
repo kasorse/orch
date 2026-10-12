@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,36 @@ func TestValidate_InvalidLimits(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "max_steps must be positive") || !strings.Contains(msg, "max_fix_iterations must be positive") {
 		t.Errorf("unexpected error message: %s", msg)
+	}
+}
+
+func TestValidate_MaxCostUSD(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value   *float64
+		wantErr bool
+	}{
+		"absent":            {nil, false},
+		"positive":          {float64Ptr(2.5), false},
+		"zero":              {float64Ptr(0), true},
+		"negative":          {float64Ptr(-1), true},
+		"not a number":      {float64Ptr(math.NaN()), true},
+		"positive infinity": {float64Ptr(math.Inf(1)), true},
+		"negative infinity": {float64Ptr(math.Inf(-1)), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Limits.MaxCostUSD = tc.value
+			err := Validate(cfg)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "limits.max_cost_usd must be positive and finite") {
+				t.Fatalf("expected a max_cost_usd error, got: %v", err)
+			}
+		})
 	}
 }
 

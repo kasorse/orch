@@ -223,7 +223,9 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
 	// What the test command may inherit beyond the default allowlist (test.env_pass).
 	execution.AllowTestEnv(cfg.Test.EnvPass...)
-	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
+	opts := depOpts(cfg)
+	opts.Cost = registry
+	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, opts); err != nil {
 		return config.Config{}, nil, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
@@ -897,11 +899,15 @@ func runOptions(cfg config.Config) domain.RunOptions {
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {
-	return domain.LimitsView{
+	view := domain.LimitsView{
 		MaxSteps:            cfg.Limits.MaxSteps,
 		MaxFixIterations:    cfg.Limits.MaxFixIterations,
 		StopWithoutProgress: cfg.Limits.StopsWithoutProgress(),
 	}
+	if cfg.Limits.MaxCostUSD != nil {
+		view.MaxCostUSD = *cfg.Limits.MaxCostUSD
+	}
+	return view
 }
 
 // recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a

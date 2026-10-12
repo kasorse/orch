@@ -71,6 +71,69 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 	}
 }
 
+// onlyClaudeReportsCost is a CostChecker like the registry with the real adapters.
+type onlyClaudeReportsCost struct{}
+
+func (onlyClaudeReportsCost) ReportsCost(providerID string) bool { return providerID == "claude" }
+
+func TestValidateDependencies_BudgetRefusedForAProviderWithoutCost(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+	cfg := validConfig() // research on gemini, review on codex
+	cfg.Limits.MaxCostUSD = float64Ptr(5)
+
+	err := ValidateDependencies(cfg, checker, DependencyOptions{Cost: onlyClaudeReportsCost{}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"limits.max_cost_usd cannot be enforced: codex (actions.review) reports no cost",
+		"limits.max_cost_usd cannot be enforced: gemini (actions.research) reports no cost",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected %q in: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "claude (actions") {
+		t.Errorf("claude reports cost and must not be named: %s", msg)
+	}
+}
+
+func TestValidateDependencies_BudgetAcceptedWhenEveryProviderReportsCost(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+	cfg := validConfig()
+	cfg.Actions.Research.Provider = "claude"
+	cfg.Actions.Review.Provider = "claude"
+	cfg.Limits.MaxCostUSD = float64Ptr(5)
+
+	if err := ValidateDependencies(cfg, checker, DependencyOptions{Cost: onlyClaudeReportsCost{}}); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateDependencies_NoBudgetNeedsNoCostReport(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	if err := ValidateDependencies(validConfig(), checker, DependencyOptions{Cost: onlyClaudeReportsCost{}}); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestValidateDependencies_BudgetWithoutACheckerIsRefused(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	checker := FakeDependencyChecker{Missing: map[string]bool{}}
+	cfg := validConfig()
+	cfg.Limits.MaxCostUSD = float64Ptr(5)
+
+	err := ValidateDependencies(cfg, checker, DependencyOptions{})
+	if err == nil || !strings.Contains(err.Error(), "limits.max_cost_usd cannot be enforced") {
+		t.Fatalf("expected a budget error, got: %v", err)
+	}
+}
+
 func TestValidateDependencies_DecisionValid(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "test-key")
 	checker := FakeDependencyChecker{Missing: map[string]bool{}}

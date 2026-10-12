@@ -143,6 +143,12 @@ limits:
   # blocking issues. The run stops with status stopped and exit code 4, and `resume` goes back
   # into implement. false turns the check off; max_fix_iterations still applies.
   # stop_without_progress: true
+  # A budget for the workflow steps: the run stops before its next step once they have cost this
+  # much (USD), with status stopped and exit code 4; one expensive step can still overshoot it.
+  # Every provider the actions route to must report a call's cost (only claude does), or
+  # validation refuses the budget. A call cut short reports no cost, so the sum is then a lower
+  # bound. The decision phase (translation, classification) is not counted.
+  # max_cost_usd: 5.00
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:
   #   max_test_output_bytes: 32768  # a failing test's output in the implement retry prompt
