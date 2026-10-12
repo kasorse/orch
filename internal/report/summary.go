@@ -112,6 +112,9 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		change = diffLine(*out.Diff)
 	}
 	row("Code change", change)
+	if out.ApprovalRequired {
+		row("Approval", "Commit needs manual approval (policy.paths)")
+	}
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
@@ -326,12 +329,7 @@ func writeChanges(b *strings.Builder, run domain.Run) {
 // writePathRules lists the policy.paths rules the last implement matched
 // (specs/governance/SPEC.md §4.3); nothing when it matched none.
 func writePathRules(b *strings.Builder, run domain.Run) {
-	var matches []domain.PathRuleMatch
-	for _, e := range run.Executions {
-		if e.Action == domain.ActionImplement {
-			matches = e.PathRules
-		}
-	}
+	matches := domain.LastImplementPathRules(run)
 	if len(matches) == 0 {
 		return
 	}

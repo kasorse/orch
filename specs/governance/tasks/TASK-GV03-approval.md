@@ -37,3 +37,32 @@ A change that matched an `approval: manual` rule is never committed without a pe
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. The code and its tests were written without being able to
+run anything: `scripts/check.sh` (root and `bench/`, outside the sandbox) has **not** been run
+for this task. It is the operator's to run, and GV03 is not ticked in `README.md` or TODO.md
+G1 until it passes.
+
+- **Helpers in `domain/pathrules.go`.** `LastImplementPathRules(run)` is the last `implement`
+  execution's matches (any status; an earlier implement's do not count) and
+  `ManualApprovalMatches` keeps the `approval: manual` ones. `ComputeOutcome`,
+  `report.writePathRules` and `app.commitOffer` all use them, so the three agree.
+- **`CommitOffer.PathRules`** carries only the manual matches (`[]domain.PathRuleMatch`);
+  `AskCommit` prints them after the warnings under `policy.paths requires your approval for:`,
+  one rule per line with its files below. The offer is derived from the executions, not from
+  `outcome`, so it works before the outcome is written.
+- **Where the check sits.** After `commitOffer` is built (so after the status and branch
+  checks: with no changes the run still says `No changes to commit.`) and before the `auto`
+  switch. The reason lists every manual match: `policy.paths requires manual approval:
+  migrations/** (1 file), **/*.sql (2 files); commit what you want yourself.`
+- **Summary line** is a row `Approval | Commit needs manual approval (policy.paths)`, shown
+  when `outcome.approval_required` is true.
+- **Tests:** `domain/outcome_test.go` (the last implement no longer matching after an earlier
+  one did), `interaction/commit_test.go` (the offer with two rules, as a full-output golden),
+  `app/commit_approval_test.go` (a real repository: `auto_commit` with approval leaves HEAD
+  and prints the reason; without approval it commits; the offer's rules; the reason text) and a
+  case in `report/summary_test.go`.
+- **Docs:** MVP.md §42.2, §42.6, §43.2 (the Approval row), §43.3 (`outcome.approval_required`),
+  CLAUDE.md and README.md. MVP.md §45 stays with GV08.

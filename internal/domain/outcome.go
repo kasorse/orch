@@ -31,6 +31,10 @@ type Outcome struct {
 	// VerifyCalls is the number of verify tool calls made over the run's implement steps,
 	// refused ones included. Absent when there were none.
 	VerifyCalls int `json:"verify_calls,omitempty"`
+	// ApprovalRequired is set when the last implement matched a policy.paths rule with
+	// approval: manual: the change is never committed without a person's yes
+	// (specs/governance/SPEC.md §4.5). Absent otherwise.
+	ApprovalRequired bool `json:"approval_required,omitempty"`
 }
 
 // OutcomeUsage is the usage summed over every provider call of a run, and how many calls
@@ -105,6 +109,7 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 		out.VerifyCalls += len(exec.VerifyCalls)
 	}
 	out.DurationMS = executionsDurationMS(run.Executions)
+	out.ApprovalRequired = len(ManualApprovalMatches(LastImplementPathRules(run))) > 0
 
 	if trace != nil && trace.Source != DecisionSourceManual {
 		if trace.Usage != nil {

@@ -247,7 +247,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
 - **Commit only on an explicit yes** (MVP.md §42). At the end of a completed run with
   `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
   never under `--mode auto` unless `auto_commit: true` gave the yes in advance (§42.6:
-  then no question, and no commit on a warning or without `summary_short`), never for a
+  then no question, and no commit on a warning, without `summary_short`, or when the last
+  implement matched a `policy.paths` rule with `approval: manual`), never for a
   run started on uncommitted changes, and only after
   `action.CheckBaseline` (fingerprint first) passes — `git commit` runs the repository's
   hooks. The message is the implementation's `summary_short` (without one, the operator
@@ -324,7 +325,7 @@ result's `checks`, `failed_check`, `failed_tests` and `report_format`; a review 
 summary, `criteria` and `reviewers`) and `outcome`
 (written when the run reaches a terminal status, recomputed over the whole history by a
 resume, derived and never read back for a decision: `status`, `failure_reason`,
-`fix_iterations`, `tests_passed_final`, `review_verdict`, `verify_calls`, `duration_ms`, `active_ms`,
+`fix_iterations`, `tests_passed_final`, `review_verdict`, `verify_calls`, `approval_required`, `duration_ms`, `active_ms`,
 `usage` summed over the steps and the decision calls with `calls` and `partial_calls`,
 `decision_overhead` {`cost_usd`, `ms`, `calls`}, the net `diff`), `summary.md` (rendered
 from run.json and decision.json when

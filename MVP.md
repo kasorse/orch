@@ -3488,6 +3488,10 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
   left) no message is proposed: the orchestrator says
   `The implementation proposed no commit message.` and asks for one line; an empty answer
   commits nothing, a written one is shown with the trailer and still needs the `y`.
+* When the last implement matched `policy.paths` rules with `approval: manual` (§43.3,
+  `executions[].path_rules`), the question lists them first, with their files, under
+  `policy.paths requires your approval for:`. The answer is the explicit yes; nothing else
+  changes.
 * The default (an empty answer) is no. `e` replaces the header and asks again. No answer
   (stdin closed) is no.
 
@@ -3518,7 +3522,11 @@ commit is then made without the question, in every mode (`--mode auto` included)
 without a terminal, after every check of §42.1 but the first. It is not made, and
 `Not committing automatically: <why>` is printed, when the question would have shown a
 warning (§42.2) or there is no proposed message (no `summary_short`): nobody is there to
-read the one or write the other. The message is the one §42.2 proposes; the commit is
+read the one or write the other. It is not made either when the last implement matched a
+`policy.paths` rule with `approval: manual`: the yes given in advance did not know which
+files would change. It prints `Not committing automatically: policy.paths requires manual
+approval: <match> (<n> files); commit what you want yourself.` and the changes stay in the
+working tree; `outcome.approval_required` (§43.3) is true. The message is the one §42.2 proposes; the commit is
 §42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed.
 
 ---
@@ -3579,6 +3587,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue, or any unmet acceptance criterion, fails). |
 | Reviewers | Only when the last review had extra reviewers (§44.4): the models whose answers were merged, base model first, e.g. `sonnet, opus`. |
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
+| Approval | Only when `outcome.approval_required`: `Commit needs manual approval (policy.paths)`. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
 
 ### Steps
@@ -3662,6 +3671,7 @@ implement step only).
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
 | `outcome.verify_calls` | The verify calls of the whole run (§44.3), 0 and absent when there were none. |
+| `outcome.approval_required` | `true` when the last implement matched a `policy.paths` rule with `approval: manual` (an earlier implement's matches do not count); absent otherwise. A CI job can read it: the change was not committed by the orchestrator. |
 | `options.path_rules` | A copy of `policy.paths` made when the run is created: `{match, require_stages, approval}` in file order. A resume applies these and never the current config's; if the config's rules differ, it prints `Warning: policy.paths changed since the run started; this run keeps the rules it started with`. Absent without rules. Each rule is validated as in the config. |
 | `executions[].path_rules` | On an implement that passed the guard and the secret scan: `{match, files, require_stages, missing, approval}` for each rule that matched a file of the run's net diff (`pre_run_ref` against the tree after the step; the step's own diff without a restore point; the runs directory excluded). `files` holds at most 50 clean repository-relative paths; `missing` is always present and a subset of `require_stages`. Recorded also when the step failed because of it. On an implement step only. |
 

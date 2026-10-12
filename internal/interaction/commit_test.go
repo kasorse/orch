@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"orchestrator/internal/domain"
 )
 
 func TestAskCommit(t *testing.T) {
@@ -51,6 +53,38 @@ func TestAskCommit_ShowsChangesWarningsAndMessage(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
+	}
+}
+
+// The offer lists the rules that need a person's yes, with their files, before the question.
+func TestAskCommit_PathRules(t *testing.T) {
+	p := &fakePrompter{answers: []string{"y"}}
+	var out bytes.Buffer
+	offer := CommitOffer{Branch: "main", Changes: " M migrations/a.sql", Header: "Fix a", Body: "Orchestrator-Run: x\n",
+		PathRules: []domain.PathRuleMatch{
+			{Match: "migrations/**", Files: []string{"migrations/a.sql", "migrations/b.sql"}, Approval: domain.PathApprovalManual},
+			{Match: "**/*.sql", Files: []string{"migrations/a.sql"}, Approval: domain.PathApprovalManual},
+		}}
+	if _, ok, err := AskCommit(p, &out, offer); err != nil || !ok {
+		t.Fatalf("got ok=%v err=%v", ok, err)
+	}
+	want := "\nChanges:\n   M migrations/a.sql\n" +
+		"\npolicy.paths requires your approval for:\n" +
+		"  migrations/**\n    migrations/a.sql\n    migrations/b.sql\n" +
+		"  **/*.sql\n    migrations/a.sql\n" +
+		"\nCommit message:\n  Fix a\n\n  Orchestrator-Run: x\n"
+	if out.String() != want {
+		t.Errorf("output:\n%q\nwant:\n%q", out.String(), want)
+	}
+
+	out.Reset()
+	offer.PathRules = nil
+	p = &fakePrompter{answers: []string{"n"}}
+	if _, _, err := AskCommit(p, &out, offer); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "policy.paths") {
+		t.Errorf("an offer without rules mentions them:\n%s", out.String())
 	}
 }
 

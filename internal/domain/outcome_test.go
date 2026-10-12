@@ -253,6 +253,37 @@ func TestOutcome_JSON(t *testing.T) {
 	}
 }
 
+// ApprovalRequired follows the last implement's matches only: an earlier implement's
+// approval: manual rule does not count once a later one no longer matches it.
+func TestComputeOutcome_ApprovalRequired(t *testing.T) {
+	manual := PathRuleMatch{Match: "migrations/**", Files: []string{"migrations/a.sql"}, Missing: []Stage{}, Approval: PathApprovalManual}
+	plain := PathRuleMatch{Match: "docs/**", Files: []string{"docs/a.md"}, Missing: []Stage{}}
+	impl := func(m ...PathRuleMatch) StepExecution {
+		return StepExecution{Action: ActionImplement, PathRules: m}
+	}
+	cases := []struct {
+		name  string
+		execs []StepExecution
+		want  bool
+	}{
+		{"no executions", nil, false},
+		{"no rule matched", []StepExecution{impl()}, false},
+		{"a rule without approval", []StepExecution{impl(plain)}, false},
+		{"a manual rule", []StepExecution{impl(plain, manual)}, true},
+		{"a manual rule after other steps", []StepExecution{impl(manual), {Action: ActionTest}, {Action: ActionReview}}, true},
+		{"the last implement no longer matches", []StepExecution{impl(manual), {Action: ActionTest}, impl()}, false},
+		{"the last implement matches again", []StepExecution{impl(), impl(manual)}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := ComputeOutcome(Run{Status: RunCompleted, Executions: c.execs}, nil)
+			if got.ApprovalRequired != c.want {
+				t.Errorf("ApprovalRequired = %v, want %v", got.ApprovalRequired, c.want)
+			}
+		})
+	}
+}
+
 func TestOutcomeUsage_Validate(t *testing.T) {
 	if err := (OutcomeUsage{Calls: -1}).Validate(); err == nil {
 		t.Error("negative calls must be rejected")

@@ -139,6 +139,30 @@ func MatchPathRules(rules []PathRule, files []string, wf Workflow) []PathRuleMat
 	return matches
 }
 
+// LastImplementPathRules are the rules the run's last implement execution matched; nil
+// without an implement or when it matched none. An earlier implement's matches do not count:
+// the last one's diff is the run's net change.
+func LastImplementPathRules(run Run) []PathRuleMatch {
+	var matches []PathRuleMatch
+	for _, e := range run.Executions {
+		if e.Action == ActionImplement {
+			matches = e.PathRules
+		}
+	}
+	return matches
+}
+
+// ManualApprovalMatches are the matches with approval: manual, in their order.
+func ManualApprovalMatches(matches []PathRuleMatch) []PathRuleMatch {
+	var manual []PathRuleMatch
+	for _, m := range matches {
+		if m.Approval == PathApprovalManual {
+			manual = append(manual, m)
+		}
+	}
+	return manual
+}
+
 // PathRuleFailure is the failure_reason of a step whose change matched a rule the workflow
 // cannot satisfy (specs/governance/SPEC.md §4.2).
 func PathRuleFailure(m PathRuleMatch) string {

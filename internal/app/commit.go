@@ -69,6 +69,12 @@ func offerCommit(ctx context.Context, s *session) {
 	offer := commitOffer(run, s.dispatcher.CommitImplementation())
 	offer.Branch, offer.Changes = branch, changes
 	header := offer.Header
+	// approval: manual is a person's yes at the question; auto_commit's yes was given in
+	// advance, before anyone knew which files would change (specs/governance/SPEC.md §4.5).
+	if auto && len(offer.PathRules) > 0 {
+		skip(approvalReason(offer.PathRules))
+		return
+	}
 	if auto {
 		switch {
 		case len(offer.Warnings) > 0:
@@ -133,7 +139,22 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 	for _, f := range run.SecretFindings {
 		warnings = append(warnings, fmt.Sprintf("a likely secret was added at %s:%d (%s)", f.File, f.Line, f.Rule))
 	}
-	return interaction.CommitOffer{Header: header, Body: body.String(), Warnings: warnings}
+	return interaction.CommitOffer{Header: header, Body: body.String(), Warnings: warnings,
+		PathRules: domain.ManualApprovalMatches(domain.LastImplementPathRules(*run))}
+}
+
+// approvalReason is why auto_commit does not commit a change that matched approval: manual
+// rules.
+func approvalReason(matches []domain.PathRuleMatch) string {
+	parts := make([]string, len(matches))
+	for i, m := range matches {
+		n := "files"
+		if len(m.Files) == 1 {
+			n = "file"
+		}
+		parts[i] = fmt.Sprintf("%s (%d %s)", m.Match, len(m.Files), n)
+	}
+	return "policy.paths requires manual approval: " + strings.Join(parts, ", ") + "; commit what you want yourself."
 }
 
 // lastReview is the result of the run's last completed review, or nil.

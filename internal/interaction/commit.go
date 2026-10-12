@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"orchestrator/internal/domain"
 )
 
 // CommitOffer is what the operator is shown before deciding whether a finished run's
@@ -20,6 +22,9 @@ type CommitOffer struct {
 	// the operator edits the header.
 	Header string
 	Body   string
+	// PathRules are the policy.paths matches with approval: manual, with their files
+	// (specs/governance/SPEC.md §4.5); listed before the question.
+	PathRules []domain.PathRuleMatch
 }
 
 // Message is the full commit message for header.
@@ -38,6 +43,15 @@ func AskCommit(p Prompter, out io.Writer, o CommitOffer) (header string, ok bool
 	fmt.Fprintf(out, "\nChanges:\n%s\n", indent(o.Changes))
 	for _, w := range o.Warnings {
 		fmt.Fprintf(out, "Warning: %s\n", w)
+	}
+	if len(o.PathRules) > 0 {
+		fmt.Fprintln(out, "\npolicy.paths requires your approval for:")
+		for _, m := range o.PathRules {
+			fmt.Fprintf(out, "  %s\n", m.Match)
+			for _, f := range m.Files {
+				fmt.Fprintf(out, "    %s\n", f)
+			}
+		}
 	}
 	where := o.Branch
 	if where == "" {

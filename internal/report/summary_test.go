@@ -202,6 +202,7 @@ func TestRunSummary_PathRules(t *testing.T) {
 		"\n## Path rules\n\n| Rule | Files | Requires | Missing | Approval |\n| --- | --- | --- | --- | --- |\n",
 		"| migrations/** | migrations/0042_users.sql, migrations/0043_x.sql | review, testing | testing | manual |\n",
 		"| docs/** | docs/a.md | — | — | — |\n",
+		"| Approval | Commit needs manual approval (policy.paths) |\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("summary lacks %q\n%s", want, got)
@@ -213,7 +214,7 @@ func TestRunSummary_PathRules(t *testing.T) {
 
 	// The last implement matched nothing: no section, even though an earlier one did.
 	run.Executions[1].PathRules = nil
-	if got := RunSummary(run, nil); strings.Contains(got, "## Path rules") {
+	if got := RunSummary(run, nil); strings.Contains(got, "## Path rules") || strings.Contains(got, "manual approval") {
 		t.Errorf("the last implement matched nothing\n%s", got)
 	}
 }
