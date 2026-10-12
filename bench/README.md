@@ -188,7 +188,7 @@ a config that cannot be rendered for a task, a manifest that names another build
 
 One cell: a fresh workspace without any commit after `base_commit` and without the oracle,
 `setup_command`, the config under the task's `timeout`, then the final check (the existing
-tests are reset, the oracle files are written, `oracle.command` and `test_command` run
+tests are reset, test files the model added are removed, the oracle files are written, `oracle.command` and `test_command` run
 sandboxed; SPEC.md §7.5). A task is solved only when both exit 0; the result comes from exit
 codes, never from model text. Question tasks are checked by their `answer_checks` and by the
 tree staying unchanged.
@@ -334,8 +334,7 @@ orchestrator runs report --dir <out>/runs
 | progress during a long run | `orchbench summarize <out> --stdout` in another terminal |
 | retry what failed for infra reasons | the same `run` command again: `infra_error` cells are run again, others are skipped |
 | the budget was reached | the same `run` command with a higher `--max-cost` |
-| a claude subscription's limit was reached (`You've hit your session limit` in `config.stdout`) | those cells are `fail` with $0 (B's are `infra_error`) and the same `run` skips them: after the reset, remove their lines from `results.jsonl` and `run --redo --ids <their tasks>`; until fixed, see [`TASK-BM16`](../specs/benchmark/tasks/TASK-BM16-pilot-and-full-run.md) "Progress" |
-| an oracle that does not compile (`redeclared in this block`) | the model added a test file whose test or helper name the oracle files also declare: the final check keeps new test files (a known defect, TASK-BM16 "Progress"); read `diff.patch`, it is not a wrong solution |
+| a claude subscription's limit was reached (`You've hit your session limit`) | the remaining cells end as `infra_error` within seconds; after the limit resets, the same `run` command retries them. Results written before 2026-10-12 by an older orchbench recorded A, C and D cells as `fail` with $0: remove those lines from `results.jsonl` and `run --redo --ids <their tasks>` |
 
 ## The container
 

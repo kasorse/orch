@@ -360,7 +360,13 @@ the tree the config left behind, in this order:
 1. **Reset the existing tests.** Every file matching `test_globs` that exists at
    `base_commit` is restored to its `base_commit` content, and one the model deleted is
    restored. Otherwise a model could make the suite green by weakening or deleting a test.
-   Test files the model *added* stay: they are part of its change and must pass too.
+   Test files the model *added* are removed: they are not the measure (§5.1), and one that
+   declares a name an oracle file also declares (Go: the same test or helper in the same
+   package) would fail the oracle with a correct solution, which the first round saw twice
+   (2026-10-12, TASK-BM16). "Added" is against `base_commit` and against the test files
+   present after `setup_command` (taken before the config runs), so a test file setup
+   generated in an ignored path stays. Changed 2026-10-12; until then added tests were kept
+   and had to pass.
 2. **Write the oracle.** `oracle.files` are written from `fix_commit` over the tree. This
    also covers an existing test the commit changed on purpose (the old expectation is
    replaced by the commit's, so the intended behaviour change is not taken for a regression).
@@ -858,7 +864,7 @@ All accepted as proposed.
 
 - **bench, unit:** task file parsing and validation errors; workspace creation (no object
   after `base_commit` — `git cat-file -e <fix>` fails); the final check (table over §7.5:
-  pass, oracle fail, regression; a modified, a deleted and an added test file; an oracle
+  pass, oracle fail, regression; a modified, a deleted and an added (removed) test file, one present before the config ran (kept); an oracle
   file that existed at `base_commit`); result line
   round-trip; summary statistics (paired comparison, bootstrap with a fixed seed) on fixed
   data; resume of an interrupted `results.jsonl`.

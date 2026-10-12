@@ -60,23 +60,24 @@ B's decision (claude/haiku) called every task `medium` and enabled analysis and 
 every run, planning in about half (0.10–0.85 on the same task across reps): the thresholds were
 raised (MVP.md §9.1).
 
-**Found, not fixed yet:**
+**Found, and fixed the same day:**
 
-- **The final check leaves the model's new test files in place.** `ResetTests` restores the
-  test files of `base_commit` and writes the oracle's, but a test file the model added stays.
+- **The final check left the model's new test files in place.** `ResetTests` restored the
+  test files of `base_commit` and wrote the oracle's, but a test file the model added stayed.
   Twice B wrote its own `TestCommitImplementation` / `TestScenario31_AutoCommit` in a new file,
-  the oracle file declares the same name, and the package no longer compiles: a fail with a
-  correct solution. Configs with review seem to write tests more often, so this biases against
-  them. Fix: also delete the test files that are not in `base_commit` (their content was never
-  the measure, §5.1), then `run --redo` the affected cells.
-- **A usage limit is recorded as `fail`, not `infra_error`.** When the subscription's limit is
-  reached, claude answers `You've hit your session limit`; A, C and D cells end as `fail` with
-  $0 and B as `infra_error` (the decision call fails first). The same `run` command then skips
-  the `fail` ones, so they need `--redo`, and their lines must be removed from `results.jsonl`
-  before `summarize` (the round's `summary.md` still counts five of them). A limit should be an
-  infra error, and the run should stop instead of burning through the remaining cells.
+  the oracle file declared the same name, and the package no longer compiled: a fail with a
+  correct solution. Configs with review touch tests more often (mean `tests_reset` B 2.1, C 1.8,
+  A 1.1, D 1.0), so this biased against them. Now a test file that is neither at `base_commit`
+  nor present after `setup_command` is removed before the oracle is written (SPEC.md §7.5,
+  `check.TestFiles`, `check.ResetTests`).
+- **A subscription's usage limit was recorded as `fail`, not `infra_error`.** claude answers
+  `You've hit your session limit · resets …`; the runner's rate-limit patterns knew "usage" and
+  "rate" limits only, so A, C and D cells ended as `fail` with $0 (B as `infra_error`, its
+  decision call failing first), and the same `run` command skipped them. The pattern now takes
+  any `hit your … limit`: such cells are `infra_error`, retried by the same command. The run
+  does not stop at a limit: each remaining cell fails in seconds at $0, which costs nothing.
 - **The subscription's limit is the real budget**, not `--max-cost`: 40–55 cells fit in one
   window here (B and C cells on the larger tasks take 3–5 minutes each).
 
-**Left:** the 30 tasks (BM15), the two fixes above, B′, `d7403e6` and the round again with the
+**Left:** the 30 tasks (BM15), B′, `d7403e6` and the round again with the
 new thresholds on a new `--out` (the B config's hash changed).

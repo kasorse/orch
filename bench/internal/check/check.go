@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -61,13 +62,15 @@ func Decide(oracleExit, suiteExit, testsReset int) Result {
 
 // Final runs the final check of a code task on the tree the config left in ws: ResetTests,
 // WriteOracle, then oracle.command and test_command under the sandbox without network, both
-// always. Their output goes to logDir/oracle.log and logDir/suite.log.
+// always. Their output goes to logDir/oracle.log and logDir/suite.log. beforeConfig is
+// TestFiles of the tree before the config ran, so that ResetTests knows which test files the
+// model added.
 //
 // t is the task as loaded; its language's defaults are filled here. ws must be a workspace at
 // t's base_commit; the fix commit is read from ws.Mirror. Only an infrastructure failure (git,
 // bwrap, the file system) is an error: a red or timed-out command is a Result.
-func Final(ctx context.Context, ws *workspace.Workspace, t task.Task, logDir string) (Result, error) {
-	reset, err := ResetTests(ctx, ws, t)
+func Final(ctx context.Context, ws *workspace.Workspace, t task.Task, logDir string, beforeConfig map[string]bool) (Result, error) {
+	reset, err := ResetTests(ctx, ws, t, beforeConfig)
 	if err != nil {
 		return Result{}, fmt.Errorf("resetting the tests: %w", err)
 	}
@@ -86,9 +89,13 @@ func Final(ctx context.Context, ws *workspace.Workspace, t task.Task, logDir str
 }
 
 // ResetTests restores every file that matches the task's test_globs and exists at
-// base_commit to its base_commit content and mode, and returns how many differed (changed,
-// deleted, or replaced by something else). Files the model added are left alone.
-func ResetTests(ctx context.Context, ws *workspace.Workspace, t task.Task) (int, error) {
+// base_commit to its base_commit content and mode, and removes the test files the model added:
+// those neither at base_commit nor in beforeConfig (TestFiles of the tree before the config
+// ran, which also holds what setup_command generated). A model's own test is not the measure,
+// and one that declares a name the oracle files also declare would fail the oracle with a
+// correct solution. It returns how many test files differed: changed, deleted, replaced by
+// something else, or added. A nil beforeConfig removes nothing (validate, where no model ran).
+func ResetTests(ctx context.Context, ws *workspace.Workspace, t task.Task, beforeConfig map[string]bool) (int, error) {
 	globs := resolved(t).TestGlobs
 	m := ws.Manager()
 
@@ -97,9 +104,28 @@ func ResetTests(ctx context.Context, ws *workspace.Workspace, t task.Task) (int,
 		return 0, err
 	}
 	var tests []workspace.Entry
+	atBase := make(map[string]bool)
 	for _, e := range tree {
 		if matchesAny(globs, e.Path) {
 			tests = append(tests, e)
+			atBase[e.Path] = true
+		}
+	}
+
+	removed := 0
+	if beforeConfig != nil {
+		now, err := TestFiles(ws.Dir, t)
+		if err != nil {
+			return 0, err
+		}
+		for p := range now {
+			if atBase[p] || beforeConfig[p] {
+				continue
+			}
+			if err := os.Remove(filepath.Join(ws.Dir, filepath.FromSlash(p))); err != nil {
+				return 0, err
+			}
+			removed++
 		}
 	}
 	blobs, err := m.ReadBlobs(ctx, ws.Mirror, oids(tests))
@@ -121,7 +147,35 @@ func ResetTests(ctx context.Context, ws *workspace.Workspace, t task.Task) (int,
 		}
 		reset++
 	}
-	return reset, nil
+	return reset + removed, nil
+}
+
+// TestFiles returns the files and symlinks under dir that match the task's test_globs, as
+// slash-separated paths. It skips .git and .orchestrator and never follows a symlink.
+func TestFiles(dir string, t task.Task) (map[string]bool, error) {
+	globs := resolved(t).TestGlobs
+	files := make(map[string]bool)
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if rel == ".git" || rel == ".orchestrator" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if matchesAny(globs, rel) {
+			files[rel] = true
+		}
+		return nil
+	})
+	return files, err
 }
 
 // MissingOracleFileError says that an oracle file does not exist at fix_commit: the task is
