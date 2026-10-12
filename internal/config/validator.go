@@ -60,6 +60,9 @@ func Validate(cfg Config) error {
 	problems = append(problems, checkProblems(cfg)...)
 	problems = append(problems, byComplexityProblems(cfg)...)
 	problems = append(problems, extraReviewerProblems(cfg)...)
+	if len(cfg.AllowedModels) > 0 {
+		problems = append(problems, allowedModelProblems(cfg)...)
+	}
 
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 	problems = append(problems, verifyProblems(cfg)...)
@@ -264,6 +267,57 @@ func extraReviewerProblems(cfg Config) []string {
 			problems = append(problems, fmt.Sprintf("actions.review.models[%d] %q repeats the base model, a by_complexity model or an earlier entry", i, m))
 		}
 		seen[name] = true
+	}
+	return problems
+}
+
+// allowedModelProblems checks every model the run can call against the org's allowed_models
+// (specs/governance/SPEC.md §6.2): each action's base model and by_complexity models, the
+// extra reviewers, the translator and the LLM decision provider. A route with no model is an
+// error, because the list cannot check the CLI's default. A by_complexity entry with no model
+// inherits the base, which is checked on its own; an empty extra reviewer is already refused
+// by extraReviewerProblems.
+func allowedModelProblems(cfg Config) []string {
+	var problems []string
+	check := func(key, model string) {
+		switch model = strings.TrimSpace(model); {
+		case model == "":
+			problems = append(problems, fmt.Sprintf("%s: no model is named; allowed_models (%s) cannot check the CLI default", key, cfg.AllowedModelsFrom))
+		case !slices.Contains(cfg.AllowedModels, model):
+			problems = append(problems, fmt.Sprintf("%s: model %s is not in allowed_models (%s)", key, model, cfg.AllowedModelsFrom))
+		}
+	}
+	for _, a := range []struct {
+		name   string
+		action ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"implement", cfg.Actions.Implement},
+		{"review", cfg.Actions.Review},
+	} {
+		key := "actions." + a.name
+		check(key, a.action.Model)
+		levels := make([]string, 0, len(a.action.ByComplexity))
+		for c := range a.action.ByComplexity {
+			levels = append(levels, string(c))
+		}
+		slices.Sort(levels)
+		for _, level := range levels {
+			if m := a.action.ByComplexity[domain.Complexity(level)].Model; strings.TrimSpace(m) != "" {
+				check(key+".by_complexity."+level, m)
+			}
+		}
+		for i, m := range a.action.Models {
+			if strings.TrimSpace(m) != "" {
+				check(fmt.Sprintf("%s.models[%d]", key, i), m)
+			}
+		}
+	}
+	check("translation", cfg.Translation.Model)
+	if !cfg.Decision.UsesJev() {
+		check("decision", cfg.Decision.Model)
 	}
 	return problems
 }

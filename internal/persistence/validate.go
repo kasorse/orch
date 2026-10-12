@@ -55,6 +55,11 @@ func validateRun(run *domain.Run, runID string) error {
 	if err := validateProviderCLI(run.ProviderCLI); err != nil {
 		return fmt.Errorf("provider_cli: %w", err)
 	}
+	if run.OrgConfig != nil {
+		if err := run.OrgConfig.Validate(); err != nil {
+			return fmt.Errorf("org_config: %w", err)
+		}
+	}
 	if err := validateSecretScan(run); err != nil {
 		return err
 	}
@@ -85,6 +90,11 @@ func validateRun(run *domain.Run, runID string) error {
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)
+		}
+		if r.OrgConfig != nil {
+			if err := r.OrgConfig.Validate(); err != nil {
+				return fmt.Errorf("resumes[%d].org_config: %w", i, err)
+			}
 		}
 		if !r.FromStatus.Valid() {
 			return fmt.Errorf("resumes[%d]: unknown status %q", i, r.FromStatus)

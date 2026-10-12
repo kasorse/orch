@@ -430,6 +430,12 @@ type Config struct {
 	// AutoCommit commits a completed run's changes without asking, in every mode
 	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
 	AutoCommit bool `yaml:"auto_commit"`
+
+	// AllowedModels and AllowedModelsFrom come from the org file (org.go) and never from the
+	// repository's: "-" makes strict decoding treat allowed_models there as an unknown key.
+	// Validate checks every model the run can call against the list; From is the org file.
+	AllowedModels     []string `yaml:"-"`
+	AllowedModelsFrom string   `yaml:"-"`
 }
 
 // ReviewConfig is the top-level review section.

@@ -208,15 +208,18 @@ const sandboxProbeTimeout = 10 * time.Second
 // ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, error) {
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, error) {
 	reporter.ValidatingConfig()
 
-	cfg, err := config.Load(configPath)
+	// The org layer is merged inside the Load step (specs/governance/SPEC.md §6.3), so every
+	// check below sees the merged config.
+	orgPath, _ := config.FindOrgConfig(orgConfigEtcPath, os.Getenv)
+	cfg, org, err := config.LoadLayered(configPath, orgPath)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
@@ -226,7 +229,7 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	opts := depOpts(cfg)
 	opts.Cost = registry
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, opts); err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
@@ -235,24 +238,55 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 		err := testexec.Probe(probeCtx, executor)
 		cancel()
 		if err != nil {
-			return config.Config{}, nil, err
+			return config.Config{}, nil, config.OrgSource{}, err
 		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
 	if err := config.ValidateAuthorities(cfg, registry); err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 
 	// The last check of the chain: it runs each routed CLI once (--version), which is
 	// not an AI call, and only after everything that needs no process at all.
 	clis, err := checkProviderCLIs(context.Background(), cfg, registry, reporter)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 
 	reporter.ConfigValid()
-	return cfg, clis, nil
+	return cfg, clis, org, nil
+}
+
+// orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);
+// a variable so tests can point it elsewhere.
+var orgConfigEtcPath = "/etc/orchestrator/org.yaml"
+
+// orgRef is the reference run.json records for org; nil when no org file applied.
+func orgRef(org config.OrgSource) *domain.OrgConfigRef {
+	if org.Path == "" {
+		return nil
+	}
+	return &domain.OrgConfigRef{Path: org.Path, SHA256: org.SHA256}
+}
+
+// orgConfigChangedWarning is the resume warning for an org file that is not the one the run
+// started under (specs/governance/SPEC.md §6.3).
+const orgConfigChangedWarning = "org config changed since the run started (%s → %s); this resume runs under the current one"
+
+// orgChangeWarning returns the warning for a resume whose org file differs from the run's
+// start record, and "" when they are the same. Absent on either side counts as a change.
+func orgChangeWarning(started, now *domain.OrgConfigRef) string {
+	describe := func(r *domain.OrgConfigRef) string {
+		if r == nil {
+			return "none"
+		}
+		return r.SHA256
+	}
+	if describe(started) == describe(now) {
+		return ""
+	}
+	return fmt.Sprintf(orgConfigChangedWarning, describe(started), describe(now))
 }
 
 // checkProviderCLIs asks every routed provider whose adapter can tell (provider.
@@ -320,13 +354,14 @@ func runValidate(ctx context.Context, configPath string, stdout, stderr io.Write
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
 	registry := newRegistry(executor)
-	cfg, clis, err := loadAndValidateConfig(configPath, registry, executor, reporter,
+	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
 	if err != nil {
 		return err
 	}
+	reporter.OrgConfig(org.Path)
 	for _, id := range config.ProvidersInUse(cfg) {
 		if cli, ok := clis[id]; ok {
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
@@ -444,7 +479,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -514,6 +549,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	run.ProviderCLI = clis
+	run.OrgConfig = orgRef(org)
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
