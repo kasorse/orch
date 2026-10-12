@@ -178,6 +178,7 @@ orchestrator validate
 orchestrator version
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
@@ -197,7 +198,13 @@ same level, the 3×3 matrix of their selections, each one's mean confidence, and
 where they disagree. It skips manual (`--stage`) runs, runs chosen by hand after a provider
 failure, mock answers and runs without the shadow question, and lists unreadable traces.
 It needs no configuration and calls nothing. It is the input for choosing one question
-(`specs/JEV integration/TASKS.md` T21).
+(`specs/JEV integration/TASKS.md` T21). Every `decision.json` of a provider or user decision
+records `policy_hash`, the sha256 of the `DecisionPolicy` it used (absent for `--stage`), and
+`decisions report` counts deciders per hash.
+
+`decisions calibrate [--runs <dir>] [--min-runs N]` reads the same runs, read-only, and
+proposes testing and review thresholds with the evidence behind them; the design record is
+`specs/governance/` §7.
 
 `run --jira` takes the task from one Jira issue: `--jira PMC-2789`, `--jira=pmc-2789` or
 the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator

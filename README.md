@@ -503,6 +503,7 @@ orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
 ```
 
 - `version` — prints the build version.
@@ -537,6 +538,21 @@ orchestrator decisions report
   mean confidence, and the runs where they disagree. Manual (`--stage`) runs, runs chosen by
   hand, mock answers and runs without the shadow question are skipped. It needs no config and
   calls nothing. Until there is Jev access, `decision.provider: claude` collects real data.
+  Deciders are told apart by the `policy_hash` every decision records (the first 12 digits are
+  printed; `—` for a run written before it existed), so runs before and after a threshold
+  change are not mixed.
+- `decisions calibrate [--runs <dir>] [--min-runs N]` — proposes `testing` and `review`
+  thresholds from your run history (`.orchestrator/runs/`, or every run under `<dir>`). Runs
+  are grouped by decision provider, model and `policy_hash`; for each group it prints the
+  runs where the stage ran in probability buckets of 0.1 with the share the stage paid off in
+  (testing: a test failed after an implement; review: a failing verdict followed by an
+  implement), then comparison tables for research, analysis and planning and a table per
+  complexity and model (runs, completed share, mean `fix_iterations`, mean cost), and ends
+  with a YAML diff of `policy.stages.thresholds` with the rows behind each line. A threshold
+  is raised to the lowest bucket edge above it such that the stage paid off in none of at
+  least `--min-runs` (default 10) runs below it; a bucket with fewer runs prints `not enough
+  data`. Nothing is written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen
+  by hand and mock answers are skipped. It needs no config and calls nothing.
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
   (and, if the decision provider fails, stops instead of asking you to choose).

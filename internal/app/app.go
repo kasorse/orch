@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, decisions report, runs report). This is the composition root - no other package
+// (version, validate, run, resume, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|runs report [--dir <path>]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -89,10 +90,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "decisions":
-		if len(rest) != 2 || rest[1] != "report" {
-			return &apperr.ConfigError{Msg: "usage: orchestrator decisions report"}
+		if len(rest) == 2 && rest[1] == "report" {
+			return decisionsReport(stdout)
 		}
-		return decisionsReport(stdout)
+		dir, minRuns, err := decisionsCalibrateArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return decisionsCalibrate(stdout, dir, minRuns)
 	case "runs":
 		dir, err := runsReportArgs(rest[1:])
 		if err != nil {
@@ -398,6 +403,76 @@ func decisionsReport(stdout io.Writer) error {
 		}
 	}
 	report.RenderDecisions(stdout, runsBaseDir, report.SummarizeDecisions(entries, unreadable))
+	return nil
+}
+
+const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]"
+
+// defaultMinRuns is how many runs a probability bucket needs before calibrate says anything
+// about it (specs/governance/SPEC.md §7.3).
+const defaultMinRuns = 10
+
+// decisionsCalibrateArgs parses what follows `decisions` for `calibrate`: --runs <dir> or
+// --runs=<dir> (default: the runs directory of the current repository) and --min-runs N or
+// --min-runs=N (default 10, at least 1), each at most once.
+func decisionsCalibrateArgs(args []string) (string, int, error) {
+	bad := &apperr.ConfigError{Msg: decisionsUsage}
+	if len(args) == 0 || args[0] != "calibrate" {
+		return "", 0, bad
+	}
+	dir, minRuns := runsBaseDir, defaultMinRuns
+	var gotDir, gotMin bool
+	for i := 1; i < len(args); i++ {
+		flag, v, hasValue := strings.Cut(args[i], "=")
+		if !hasValue {
+			if i+1 >= len(args) {
+				return "", 0, bad
+			}
+			i++
+			v = args[i]
+		}
+		switch {
+		case flag == "--runs" && !gotDir && v != "":
+			dir, gotDir = v, true
+		case flag == "--min-runs" && !gotMin:
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return "", 0, bad
+			}
+			minRuns, gotMin = n, true
+		default:
+			return "", 0, bad
+		}
+	}
+	return dir, minRuns, nil
+}
+
+// decisionsCalibrate proposes testing and review thresholds from the runs found under dir
+// (specs/governance/SPEC.md §7.3). It only reads: persistence.LoadRunDirs takes no lock and
+// creates nothing, and no Store is built. It needs no configuration and calls nothing.
+func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
+	found, bad, err := persistence.LoadRunDirs(dir)
+	if err != nil {
+		return err
+	}
+	// The loader walks the root with its symlinks resolved.
+	root := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		root = resolved
+	}
+	var entries []report.RunEntry
+	for _, f := range found {
+		entries = append(entries, report.RunEntry{RunID: f.RunID, At: f.At, Run: f.Run, Trace: f.Trace})
+	}
+	var unreadable []report.UnreadableRun
+	for _, b := range bad {
+		path := b.Dir
+		if r, err := filepath.Rel(root, b.Dir); err == nil {
+			path = r
+		}
+		unreadable = append(unreadable, report.UnreadableRun{Path: path, Err: b.Err.Error()})
+	}
+	report.RenderCalibration(stdout, dir, report.Calibrate(entries, unreadable, minRuns))
 	return nil
 }
 

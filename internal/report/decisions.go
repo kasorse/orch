@@ -46,11 +46,29 @@ var complexityLevels = []domain.Complexity{domain.ComplexitySimple, domain.Compl
 
 // Disagreement is a compared run whose two complexity questions selected different levels.
 type Disagreement struct {
-	RunID   string
-	At      time.Time
-	Choice  domain.Complexity
-	Score   domain.Complexity
-	Request string
+	RunID string
+	At    time.Time
+	// PolicyHash is the policy the run was decided under; empty in a trace written before
+	// the hash existed.
+	PolicyHash string
+	Choice     domain.Complexity
+	Score      domain.Complexity
+	Request    string
+}
+
+// hashDigits is how many digits of a policy hash the reports print.
+const hashDigits = 12
+
+// shortHash is the first hashDigits digits of a policy hash, or noValue for a decision
+// recorded without one.
+func shortHash(h string) string {
+	if h == "" {
+		return noValue
+	}
+	if len(h) > hashDigits {
+		return h[:hashDigits]
+	}
+	return h
 }
 
 // DecisionsSummary is the choice-versus-score comparison (TASKS.md T18, reduced): what
@@ -60,7 +78,8 @@ type DecisionsSummary struct {
 	Skipped    map[string]int
 	Unreadable []Unreadable
 	Compared   int
-	// Deciders counts the compared runs per "<source> <provider>/<model>".
+	// Deciders counts the compared runs per "<source> <provider>/<model> <policy_hash>", the
+	// hash in its short form (noValue when the trace has none).
 	Deciders map[string]int
 	Agree    int
 	// Matrix[i][j] counts runs where choice selected complexityLevels[i] and score
@@ -105,7 +124,7 @@ func SummarizeDecisions(entries []Entry, unreadable []Unreadable) DecisionsSumma
 		}
 
 		s.Compared++
-		s.Deciders[fmt.Sprintf("%s %s/%s", t.Source, t.Provider, t.Model)]++
+		s.Deciders[fmt.Sprintf("%s %s/%s %s", t.Source, t.Provider, t.Model, shortHash(t.PolicyHash))]++
 		s.Matrix[ci][cj]++
 		s.MeanConfidence[domain.ComplexitySourceChoice] += choice.Decision.Confidence
 		s.MeanConfidence[domain.ComplexitySourceScore] += score.Decision.Confidence
@@ -114,7 +133,7 @@ func SummarizeDecisions(entries []Entry, unreadable []Unreadable) DecisionsSumma
 			continue
 		}
 		s.Disagreements = append(s.Disagreements, Disagreement{
-			RunID: e.RunID, At: e.At, Choice: choice.Selected, Score: score.Selected, Request: t.Request,
+			RunID: e.RunID, At: e.At, PolicyHash: t.PolicyHash, Choice: choice.Selected, Score: score.Selected, Request: t.Request,
 		})
 	}
 	if s.Compared > 0 {
@@ -179,8 +198,8 @@ func RenderDecisions(w io.Writer, runsDir string, s DecisionsSummary) {
 	}
 	fmt.Fprintf(w, "\ndisagreements (%d):\n", len(s.Disagreements))
 	for _, d := range s.Disagreements {
-		fmt.Fprintf(w, "  %s  %s  choice=%-7s score=%-7s %q\n",
-			shortID(d.RunID), d.At.Local().Format("2006-01-02 15:04"), d.Choice, d.Score, excerpt(d.Request, 60))
+		fmt.Fprintf(w, "  %s  %s  %-*s  choice=%-7s score=%-7s %q\n",
+			shortID(d.RunID), d.At.Local().Format("2006-01-02 15:04"), hashDigits, shortHash(d.PolicyHash), d.Choice, d.Score, excerpt(d.Request, 60))
 	}
 }
 

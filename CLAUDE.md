@@ -330,7 +330,9 @@ resume, derived and never read back for a decision: `status`, `failure_reason`,
 `decision_overhead` {`cost_usd`, `ms`, `calls`}, the net `diff`), `summary.md` (rendered
 from run.json and decision.json when
 the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
-provider, model, effort and source each action gets; full trace:
+provider, model, effort and source each action gets; `policy_hash`: the sha256 of the
+`DecisionPolicy` the decision used, absent for `manual`, grouped on by `decisions report` and
+`decisions calibrate` (read-only, `internal/report/calibrate.go`); full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies, and `usage` of each decision call that
 reported one: `translation`, `context_depth`, `classification`),

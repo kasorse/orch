@@ -33,6 +33,10 @@ func TestSummarizeDecisions(t *testing.T) {
 		{"aaaaaaaa-0000-4000-8000-000000000006", at, domain.DecisionTrace{Source: domain.DecisionSourceManual}},
 		{"aaaaaaaa-0000-4000-8000-000000000007", at, domain.DecisionTrace{Source: domain.DecisionSourceUser}},
 	}
+	// Two runs decided under one policy, one from before policy_hash existed.
+	hash := strings.Repeat("a", 64)
+	entries[0].Trace.PolicyHash = hash
+	entries[1].Trace.PolicyHash = hash
 	unreadable := []Unreadable{{"bbbbbbbb-0000-4000-8000-000000000001", errors.New("decision.json is not a valid decision trace\nmore")}}
 
 	s := SummarizeDecisions(entries, unreadable)
@@ -61,13 +65,13 @@ func TestSummarizeDecisions(t *testing.T) {
 		"traces: 7, compared: 3",
 		"skipped: 1 manual (--stage), 1 chosen by user, 1 mock, 1 without the shadow question, 1 unreadable",
 		"  bbbbbbbb: decision.json is not a valid decision trace\n",
-		"decided by: jev jev/jev-1.13.0 (3)",
+		"decided by: jev jev/jev-1.13.0 aaaaaaaaaaaa (2), jev jev/jev-1.13.0 — (1)",
 		"choice vs score: 1 of 3 agree (33.3%)",
 		"medium            0        1        1",
 		"mean confidence: choice 0.80, score 0.60",
 		"disagreements (2):",
-		`choice=simple  score=medium  "first"`,
-		`choice=medium  score=complex "second"`,
+		"  —" + strings.Repeat(" ", 11+2) + `choice=simple  score=medium  "first"`,
+		`  aaaaaaaaaaaa  choice=medium  score=complex "second"`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q:\n%s", want, out)

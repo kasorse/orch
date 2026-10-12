@@ -1,12 +1,14 @@
 package persistence
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 )
 
@@ -48,6 +50,46 @@ func TestLoadDecision_Models(t *testing.T) {
 		}
 		if _, _, err := store.LoadDecision(run.ID); err == nil || !strings.Contains(err.Error(), "decision.json") {
 			t.Errorf("%s: a bad models entry must be refused, got %v", name, err)
+		}
+	}
+}
+
+func TestLoadDecision_PolicyHash(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := domain.PolicyHash(domain.DecisionPolicy{ProjectContextThreshold: 0.5})
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", PolicyHash: hash}
+	if err := store.SaveDecision(run.ID, trace); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := store.LoadDecision(run.ID); err != nil || got.PolicyHash != hash {
+		t.Errorf("LoadDecision policy_hash = %q, %v; want %q", got.PolicyHash, err, hash)
+	}
+
+	path := filepath.Join(store.runDir(run.ID), "decision.json")
+	if err := os.WriteFile(path, []byte(`{"request":"fix"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := store.LoadDecision(run.ID); err != nil || got.PolicyHash != "" {
+		t.Errorf("a decision.json without policy_hash = %q, %v; want it to load", got.PolicyHash, err)
+	}
+
+	for name, bad := range map[string]string{
+		"uppercase": strings.ToUpper(hash),
+		"short":     hash[:63],
+		"long":      hash + "0",
+		"not hex":   strings.Repeat("g", 64),
+	} {
+		if err := os.WriteFile(path, []byte(`{"request":"fix","policy_hash":"`+bad+`"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := store.LoadDecision(run.ID)
+		var rse *apperr.RunStateError
+		if !errors.As(err, &rse) || rse.Kind != apperr.RunCorrupt {
+			t.Errorf("%s: a bad policy_hash must be RunCorrupt, got %v", name, err)
 		}
 	}
 }

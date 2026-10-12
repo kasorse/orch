@@ -1,0 +1,25 @@
+Calibration report: runs
+runs: 5, used: 3, min runs: 10
+skipped: 1 manual (--stage), 1 mock, 1 unreadable
+  taskB/rep1: cannot read decision.json
+
+== jev/jev-1.13.0  policy aaaaaaaaaaaa  (3 runs)
+
+testing: threshold 0.50, ran in 3 runs
+  P          runs  paid off
+  0.5-0.6       1  not enough data
+  0.6-0.7       1  not enough data
+  0.7-0.8       1  not enough data
+
+review: threshold —, ran in 0 runs
+
+research, analysis, planning: with and without the stage (no proposal)
+  no run
+
+models per complexity (no proposal)
+  complexity action provider/model  runs    completed fix iter  mean cost
+  medium     —                         3   3 (100.0%)     0.33    $0.0000
+
+policy.stages.thresholds (a proposal; nothing is written)
+# jev/jev-1.13.0  policy aaaaaaaaaaaa
+  no change proposed

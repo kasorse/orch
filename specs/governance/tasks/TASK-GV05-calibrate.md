@@ -53,3 +53,43 @@ stages and the models it prints comparison tables only (`SPEC.md` §7.1–§7.3)
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. The code and its tests were written without being able to
+run anything: `scripts/check.sh` (root and `bench/`, outside the sandbox) has **not** been run
+for this task. It is the operator's to run, and GV05 is not ticked in `README.md` or TODO.md
+G5 until it passes. The four golden files under `internal/report/testdata/calibrate/` were
+written by hand, not by `-update`, so a mismatch in spacing is possible: if a golden test
+fails, read the diff, and rewrite them with `go test ./internal/report -update` once the
+output is what the spec asks for.
+
+- **Signature.** `report.Calibrate(entries, unreadable, minRuns)` returns a `Calibration` and
+  `RenderCalibration(w, runsDir, c)` prints it. The task's `Calibrate(entries, runs, minRuns)
+  Report` took `runs` for the unreadable directories, as `SummarizeRuns` does.
+- **The hash.** `domain.PolicyHash` returns an empty string instead of panicking if the
+  policy cannot be encoded (a NaN threshold, which config validation never lets through). It
+  is set in `classification.Service.Classify` on the `Result`, so it covers the provider path
+  and the user's choice after a provider failure, and both trace builds in `app`. The hash
+  covers the Go encoding of `DecisionPolicy` (it has no JSON tags): `TestPolicyHash_PinnedEncoding`
+  pins that encoding, because a renamed or added field changes every hash. It pins the
+  encoding and checks that the hash is its sha256, not a literal digest.
+- **When a stage "ran".** The trace has the stage enabled with a probability and a threshold,
+  and the run has an execution of its action (`test` or `review`). A stage that was on but
+  never reached because an earlier step failed is not counted. A stage forced on below its
+  threshold is in the bucket table and outside the raise window.
+- **Paid-off proxies.** `testingPaidOff`: any failed `test_result` after an `implement` (a
+  later pass or the failure left exposed). `reviewPaidOff`: a review whose `Decide()` is
+  `fail`, or with a medium issue when `options.review_fix_medium` is set, followed by an
+  `implement`. A failing review with nothing after it does not count.
+- **Raise rule.** The first window `[current, t)` with at least `--min-runs` runs decides: a
+  payoff in it means no proposal, since wider windows only add runs. The last window includes
+  `P = 1`. Runs decided under different thresholds (possible only in the group of traces
+  written before `policy_hash`) print `mixed thresholds` and get no proposal. `lowerProposal`
+  is the empty hook for GV06.
+- **Comparison and model tables** print the counts and means without a `not enough data`
+  mark; only the probability buckets use `--min-runs`. The model table has one row per action
+  and route (`implement claude/sonnet`) and counts a trace without `models` under `—`.
+- **`decisions report`.** The decider key is `<source> <provider>/<model> <hash12|—>`, and a
+  disagreement row gets the short hash after the time. Scenario 22 matches the hash with a
+  regular expression, since it depends on the config the fixture writes.

@@ -420,6 +420,15 @@ func validateDecisionModels(models map[string]domain.ModelRoute) error {
 	return nil
 }
 
+// validatePolicyHash checks decision.json's policy_hash: absent (a manual decision, a trace
+// written before the field), or the 64 lowercase hex digits domain.PolicyHash writes.
+func validatePolicyHash(h string) error {
+	if h != "" && !isSHA256Hex(h) {
+		return fmt.Errorf("policy_hash %q is not 64 lowercase hex digits", h)
+	}
+	return nil
+}
+
 func validateDecisionUsage(u *domain.DecisionUsage) error {
 	if u == nil {
 		return nil
