@@ -579,6 +579,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		run.Decision.Source != domain.DecisionSourceManual
 	reporter.ReviewForm = editable
 	out.announce(wf, stderr)
+	warnPathRules(stderr, run.Options.PathRules, wf)
 
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
 	s.stdin = stdin
@@ -599,6 +600,8 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 				return failRun(store, run, err)
 			}
 			run.Decision, run.Workflow = &d, &nwf
+			// The edit may have dropped a stage a rule needs, or added implement.
+			warnPathRules(stderr, run.Options.PathRules, nwf)
 			trace := out.trace(nwf)
 			trace.Complexity, trace.Stages, trace.Edit = d.Complexity, d.Stages.Stages, d.Edit
 			trace.Models = modelRoutes(cfg, d, nwf)
@@ -895,7 +898,7 @@ func preRunTest(ctx context.Context, s *session) error {
 // runOptions are the config rules a new run follows from here on; a resume reads them back from
 // run.json and never from the config (specs/quality/SPEC.md §7.3).
 func runOptions(cfg config.Config) domain.RunOptions {
-	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium}
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules()}
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

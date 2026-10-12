@@ -183,4 +183,37 @@ func TestRunSummary_OldRun(t *testing.T) {
 	if strings.Contains(got, "## Tool calls") || strings.Contains(got, "## Code changes") {
 		t.Errorf("empty sections must be left out\n%s", got)
 	}
+	if strings.Contains(got, "## Path rules") {
+		t.Errorf("a run without path rules has no such section\n%s", got)
+	}
+}
+
+// The path rules section is the last implement's matches; an earlier implement's are not shown.
+func TestRunSummary_PathRules(t *testing.T) {
+	run := summaryRun()
+	run.Executions[0].PathRules = []domain.PathRuleMatch{{Match: "old/**", Files: []string{"old/a.go"}, Missing: []domain.Stage{}}}
+	run.Executions[1].PathRules = []domain.PathRuleMatch{
+		{Match: "migrations/**", Files: []string{"migrations/0042_users.sql", "migrations/0043_x.sql"},
+			RequireStages: []domain.Stage{domain.StageReview, domain.StageTesting}, Missing: []domain.Stage{domain.StageTesting}, Approval: domain.PathApprovalManual},
+		{Match: "docs/**", Files: []string{"docs/a.md"}, Missing: []domain.Stage{}},
+	}
+	got := RunSummary(run, nil)
+	for _, want := range []string{
+		"\n## Path rules\n\n| Rule | Files | Requires | Missing | Approval |\n| --- | --- | --- | --- | --- |\n",
+		"| migrations/** | migrations/0042_users.sql, migrations/0043_x.sql | review, testing | testing | manual |\n",
+		"| docs/** | docs/a.md | — | — | — |\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "old/**") {
+		t.Errorf("an earlier implement's rules are shown\n%s", got)
+	}
+
+	// The last implement matched nothing: no section, even though an earlier one did.
+	run.Executions[1].PathRules = nil
+	if got := RunSummary(run, nil); strings.Contains(got, "## Path rules") {
+		t.Errorf("the last implement matched nothing\n%s", got)
+	}
 }

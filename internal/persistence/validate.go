@@ -40,6 +40,12 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	for i, r := range run.Options.PathRules {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("options.path_rules[%d]: %w", i, err)
+		}
+	}
+
 	for i, exec := range run.Executions {
 		if err := validateExecution(exec, i); err != nil {
 			return fmt.Errorf("executions[%d]: %w", i, err)
@@ -142,6 +148,14 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	}
 	if err := validateVerifyCalls(exec); err != nil {
 		return fmt.Errorf("verify_calls: %w", err)
+	}
+	if len(exec.PathRules) > 0 && exec.Action != domain.ActionImplement {
+		return fmt.Errorf("path_rules recorded on a %s step", exec.Action)
+	}
+	for i, m := range exec.PathRules {
+		if err := m.Validate(); err != nil {
+			return fmt.Errorf("path_rules[%d]: %w", i, err)
+		}
 	}
 	if exec.TestResult != nil {
 		if err := validateChecks(*exec.TestResult); err != nil {

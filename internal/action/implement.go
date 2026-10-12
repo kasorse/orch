@@ -147,8 +147,10 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		return outcome, err
 	}
 	// Only now, with the guard passed, may git look at what the call wrote.
+	var netFiles []string
+	netOK := false
 	if treeBefore != "" {
-		outcome.Diff, outcome.TreeAfter = d.stepDiff(ctx, run, treeBefore, artifact)
+		outcome.Diff, outcome.TreeAfter, netFiles, netOK = d.stepDiff(ctx, run, treeBefore, artifact)
 		if outcome.TreeAfter != "" {
 			outcome.TreeBefore = treeBefore
 		}
@@ -156,7 +158,33 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 	if err := d.scanSecrets(ctx, run, domain.ActionImplement); err != nil {
 		return outcome, err
 	}
-	return outcome, nil
+	err = checkPathRules(run, &outcome, netFiles, netOK)
+	return outcome, err
+}
+
+// checkPathRules matches the rules the run started with against the files of its net diff and
+// records the matches on outcome (specs/governance/SPEC.md §4.2). A match that needs a stage
+// the workflow lacks fails the step. Rules that cannot be checked because git gave no file
+// list fail it too: a rule that silently does not apply is the wrong answer.
+func checkPathRules(run *domain.Run, outcome *workflow.StepOutcome, files []string, filesOK bool) error {
+	rules := run.Options.PathRules
+	if len(rules) == 0 {
+		return nil
+	}
+	if !filesOK {
+		return &apperr.WorkflowError{Msg: "policy.paths cannot be checked: git could not list the changed files"}
+	}
+	var wf domain.Workflow
+	if run.Workflow != nil {
+		wf = *run.Workflow
+	}
+	outcome.PathRules = domain.MatchPathRules(rules, files, wf)
+	for _, m := range outcome.PathRules {
+		if len(m.Missing) > 0 {
+			return &apperr.WorkflowError{Msg: domain.PathRuleFailure(m)}
+		}
+	}
+	return nil
 }
 
 // protectedViolation explains why the run stopped. The changes stay on disk for

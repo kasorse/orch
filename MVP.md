@@ -3618,6 +3618,20 @@ One row per implement step with a diff.
 Both lists are empty when the artifact has no `changed_files` at all (the model did not
 answer in JSON), and hold at most 50 paths each.
 
+### Path rules
+
+Only when the run has `policy.paths` rules and the last implement matched at least one. One
+row per matched rule of the last implement (`executions[].path_rules`); an earlier
+implement's matches are not shown.
+
+| Column | Meaning |
+| --- | --- |
+| Rule | The rule's `match` pattern. |
+| Files | The files of the run's net diff the rule matched, in git's order, at most 50. |
+| Requires | The rule's `require_stages`; `—` when it has none. |
+| Missing | The required stages the workflow does not run; `—` when it runs them all. A step with a missing stage failed. |
+| Approval | `manual` when the rule asks for a person's yes before the commit; `—` otherwise. |
+
 ### Notes
 
 One line per partial call (what its numbers mean), per step that ran without an MCP server
@@ -3648,6 +3662,18 @@ implement step only).
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
 | `outcome.verify_calls` | The verify calls of the whole run (§44.3), 0 and absent when there were none. |
+| `options.path_rules` | A copy of `policy.paths` made when the run is created: `{match, require_stages, approval}` in file order. A resume applies these and never the current config's; if the config's rules differ, it prints `Warning: policy.paths changed since the run started; this run keeps the rules it started with`. Absent without rules. Each rule is validated as in the config. |
+| `executions[].path_rules` | On an implement that passed the guard and the secret scan: `{match, files, require_stages, missing, approval}` for each rule that matched a file of the run's net diff (`pre_run_ref` against the tree after the step; the step's own diff without a restore point; the runs directory excluded). `files` holds at most 50 clean repository-relative paths; `missing` is always present and a subset of `require_stages`. Recorded also when the step failed because of it. On an implement step only. |
+
+`policy.paths` rules (specs/governance/SPEC.md §4) are checked on that net diff after each
+implement, with git's own file list and never a model's `changed_files`. A matching rule whose
+`require_stages` the workflow does not contain fails the step with `policy.paths "<match>"
+requires <stages>, which this workflow does not run (changed: <files>)`; the workflow is never
+rebuilt. If rules exist and git could not list the changed files, the step fails with
+`policy.paths cannot be checked: git could not list the changed files`. At the start of a run
+whose workflow has implement, each rule the workflow cannot satisfy prints a warning on stderr
+(also after an edit on the review screen). `deny_change` is rejected in the config in favor of
+`security.protected_paths`.
 
 The fields of the quality loop (checks, verify, criteria, `by_complexity`, no progress) are
 listed in §44.9.

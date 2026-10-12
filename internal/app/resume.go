@@ -143,6 +143,9 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	reporter.WorkingTree(treeSummary, treeErr)
 	remaining := remainingSteps(*run.Workflow, opts.resume.Entry)
 	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remaining)
+	if pathRulesChanged(run.Options.PathRules, cfg.PathRules()) {
+		logging.GapWarning(stderr, pathRulesChangedWarning)
+	}
 	// Advisory only: a decision.json that is missing or unreadable costs the warning, not
 	// the resume.
 	if trace, _, err := store.LoadDecision(run.ID); err == nil {

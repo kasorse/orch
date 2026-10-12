@@ -69,6 +69,7 @@ func Validate(cfg Config) error {
 	}
 
 	problems = append(problems, decisionProblems(cfg)...)
+	problems = append(problems, pathRuleProblems(cfg)...)
 
 	problems = append(problems, sandboxProblems(cfg.Test)...)
 	problems = append(problems, envPassProblems(cfg)...)

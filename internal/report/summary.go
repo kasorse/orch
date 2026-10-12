@@ -25,6 +25,7 @@ func RunSummary(run domain.Run, trace *domain.DecisionTrace) string {
 	writeSteps(&b, run)
 	writeTools(&b, run)
 	writeChanges(&b, run)
+	writePathRules(&b, run)
 	writeNotes(&b, run)
 	b.WriteString("\nWhat each field means: MVP.md §43 (Run summary).\n")
 	return b.String()
@@ -320,6 +321,41 @@ func writeChanges(b *strings.Builder, run domain.Run) {
 	b.WriteString("| # | This step | Run so far | Changed, not in changed_files | In changed_files, unchanged |\n")
 	b.WriteString("| --- | --- | --- | --- | --- |\n")
 	b.WriteString(strings.Join(rows, "\n") + "\n")
+}
+
+// writePathRules lists the policy.paths rules the last implement matched
+// (specs/governance/SPEC.md §4.3); nothing when it matched none.
+func writePathRules(b *strings.Builder, run domain.Run) {
+	var matches []domain.PathRuleMatch
+	for _, e := range run.Executions {
+		if e.Action == domain.ActionImplement {
+			matches = e.PathRules
+		}
+	}
+	if len(matches) == 0 {
+		return
+	}
+	b.WriteString("\n## Path rules\n\n| Rule | Files | Requires | Missing | Approval |\n| --- | --- | --- | --- | --- |\n")
+	for _, m := range matches {
+		approval := m.Approval
+		if approval == "" {
+			approval = noValue
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", cell(m.Match), cell(pathList(m.Files)),
+			cell(stageNames(m.RequireStages)), cell(stageNames(m.Missing)), cell(approval))
+	}
+}
+
+// stageNames is a comma-separated stage list, or noValue for none.
+func stageNames(stages []domain.Stage) string {
+	if len(stages) == 0 {
+		return noValue
+	}
+	names := make([]string, len(stages))
+	for i, st := range stages {
+		names[i] = string(st)
+	}
+	return strings.Join(names, ", ")
 }
 
 func writeNotes(b *strings.Builder, run domain.Run) {

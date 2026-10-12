@@ -311,12 +311,15 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
-`options` (`review_fix_medium`, recorded at run start), `secret_scan_baseline`, `secret_findings` (never a
+`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
+read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `provider.model_source` (`base` or `by_complexity.<level>`), `attempt`,
 `usage` (with `partial` for a call cut off before its final report), `call` (prompt size and
 cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
-guard passed, `diff` from git, and for any implement `tree_after` and `verify_calls`; a test
+guard passed, `diff` from git and `path_rules` (the `policy.paths` rules the run's net diff matched,
+with the stages the workflow lacks in `missing`; recorded also when they failed the step), and for any
+implement `tree_after` and `verify_calls`; a test
 result's `checks`, `failed_check`, `failed_tests` and `report_format`; a review result's `diff`
 summary, `criteria` and `reviewers`) and `outcome`
 (written when the run reaches a terminal status, recomputed over the whole history by a

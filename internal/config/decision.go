@@ -199,6 +199,66 @@ type PolicyConfig struct {
 	ContextDepth ContextDepthPolicyConfig `yaml:"context_depth"`
 	Complexity   ComplexityPolicyConfig   `yaml:"complexity"`
 	Stages       StagePolicyConfig        `yaml:"stages"`
+	// Paths are the path rules, applied in file order (specs/governance/SPEC.md §4.1).
+	Paths []PathRuleConfig `yaml:"paths"`
+}
+
+// PathRuleConfig is one policy.paths entry: a change matching Match needs RequireStages in the
+// workflow and, with Approval, a person's yes before it is committed. DenyChange is declared
+// only so strict decoding accepts the key and the validator can reject it with its own message.
+type PathRuleConfig struct {
+	Match         string   `yaml:"match"`
+	RequireStages []string `yaml:"require_stages"`
+	Approval      string   `yaml:"approval"`
+	DenyChange    any      `yaml:"deny_change"`
+}
+
+// PathRules converts the validated policy.paths into the domain rules a run records, in file
+// order; nil when there are none. Call it only after Validate.
+func (c Config) PathRules() []domain.PathRule {
+	if len(c.Policy.Paths) == 0 {
+		return nil
+	}
+	rules := make([]domain.PathRule, len(c.Policy.Paths))
+	for i, p := range c.Policy.Paths {
+		rules[i] = domain.PathRule{Match: p.Match, Approval: p.Approval}
+		for _, s := range p.RequireStages {
+			rules[i].RequireStages = append(rules[i].RequireStages, domain.Stage(s))
+		}
+	}
+	return rules
+}
+
+// pathRuleProblems validates policy.paths: a usable pattern, known stages without duplicates,
+// approval manual or absent, a rule that is not empty, and no deny_change.
+func pathRuleProblems(cfg Config) []string {
+	var problems []string
+	for i, p := range cfg.Policy.Paths {
+		at := fmt.Sprintf("policy.paths[%d]", i)
+		if err := domain.ValidateProtectedPattern(p.Match); err != nil {
+			problems = append(problems, fmt.Sprintf("%s.match %q: %v", at, p.Match, err))
+		}
+		seen := map[string]bool{}
+		for j, s := range p.RequireStages {
+			if _, err := domain.ParseStage(s); err != nil {
+				problems = append(problems, fmt.Sprintf("%s.require_stages[%d]: %v", at, j, err))
+			} else if seen[s] {
+				problems = append(problems, fmt.Sprintf("%s.require_stages[%d]: duplicate stage %q", at, j, s))
+			}
+			seen[s] = true
+		}
+		if p.Approval != "" && p.Approval != domain.PathApprovalManual {
+			problems = append(problems, fmt.Sprintf("%s.approval must be %q or absent, got %q", at, domain.PathApprovalManual, p.Approval))
+		}
+		if len(p.RequireStages) == 0 && p.Approval == "" && p.DenyChange == nil {
+			problems = append(problems, fmt.Sprintf("%s is empty: it needs require_stages, approval, or both", at))
+		}
+		if p.DenyChange != nil {
+			problems = append(problems, at+".deny_change: use security.protected_paths: "+
+				"the guard already refuses any change there, git-ignored files included")
+		}
+	}
+	return problems
 }
 
 // ContextConfig bounds what the Context Manager (T08) collects and sends to the

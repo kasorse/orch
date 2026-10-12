@@ -1,6 +1,9 @@
 # Governance — control for teams (phase 4)
 
-Status: **specified** (2026-10-12). No task started.
+Status: **in progress** (specified 2026-10-12; 2026-10-13): GV02 is written and its tests with
+it, but `scripts/check.sh` has not been run over it yet, so it is not ticked below or in
+TODO.md G1 (G1.1, G1.2 and G1.4 are what it covers). This line does not record the state of the other
+tasks.
 
 The owner went through TODO.md G1–G5. G1, G2, G3 and G5 are in this spec. G4 (audit export) is
 dropped (`SPEC.md` §9): a local CLI on each developer's machine gives no central trail, and a

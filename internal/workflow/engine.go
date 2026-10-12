@@ -37,6 +37,9 @@ type StepOutcome struct {
 	Call *domain.CallReport
 	// Diff is what a completed implement changed, from git.
 	Diff *domain.StepDiff
+	// PathRules are the policy.paths rules the run's net diff matched after an implement,
+	// recorded also when the step failed because of them.
+	PathRules []domain.PathRuleMatch
 	// TreeBefore and TreeAfter are the git trees of the working tree around a completed
 	// implement, for showing its diff. TreeAfter is also recorded, as the execution's
 	// tree_after, for the no-progress check; TreeBefore is not.
@@ -201,6 +204,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 		stepExec.Call = outcome.Call
 		stepExec.Diff = outcome.Diff
 		stepExec.VerifyCalls = outcome.VerifyCalls
+		stepExec.PathRules = outcome.PathRules
 		if outcome.Provider != nil {
 			stepExec.Provider = outcome.Provider
 		}

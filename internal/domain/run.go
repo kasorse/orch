@@ -108,7 +108,11 @@ type StepExecution struct {
 	// VerifyCalls are the calls the implement session made to the verify tools, in order, also
 	// when the step failed (specs/quality/SPEC.md §12). Empty for every other step.
 	VerifyCalls []VerifyCall `json:"verify_calls,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	// PathRules are the policy.paths rules the run's net diff matched after this implement,
+	// also when the step failed because of them (specs/governance/SPEC.md §4.3). Empty for
+	// every other step.
+	PathRules []PathRuleMatch `json:"path_rules,omitempty"`
+	Error     string          `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`
@@ -200,6 +204,9 @@ type RunOptions struct {
 	// ReviewFixMedium is review.fix_medium: a passing review with a medium issue sends the run
 	// back to implement once.
 	ReviewFixMedium bool `json:"review_fix_medium,omitempty"`
+	// PathRules is a copy of policy.paths (specs/governance/SPEC.md §4.4). Nil, never empty,
+	// when there are none, so a run without rules writes no options.
+	PathRules []PathRule `json:"path_rules,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

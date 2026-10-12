@@ -63,3 +63,40 @@ run started with (`SPEC.md` §4.1–§4.4).
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. The code and its tests were written without being able to
+run anything: `scripts/check.sh` (root and `bench/`, outside the sandbox) has **not** been run
+for this task. It is the operator's to run, and GV02 is not ticked in `README.md` or TODO.md G1
+until it passes.
+
+- **Fail closed when git cannot list the files.** `stepDiff` is a best-effort record and never
+  fails a step. The path check needs its file list, so with rules in the run and no list (the
+  tree before the call could not be read, or `stepDiff` failed) the step fails with
+  `policy.paths cannot be checked: git could not list the changed files`. A run without rules
+  behaves as before. This is not in the spec.
+- **No second diff.** `stepDiff` now also returns the paths of the run's net diff (its
+  `DiffNumstat(pre_run_ref, after)` list, or the step's own list without a `pre_run_ref`), and
+  `executeImplement` hands them to `checkPathRules` after the secret scan. Paths are the top
+  level relative ones git gives, the same as the guard matches.
+- **Stages go through the action.** `domain.MissingStages` asks `Stage.Action()` and
+  `Workflow.Contains`, not `Step.Stage`, so a workflow whose steps name no stage, or one a
+  manual-mode gate edited, is judged by the actions it runs. An unknown stage counts as missing.
+- **An empty rule with `deny_change`** reports only the `deny_change` message, not "is empty"
+  as well. `deny_change: null` decodes to nil and is not seen by the validator; such a rule is
+  reported empty unless it has stages or an approval.
+- **Start warning** is printed by `warnPathRules` right after `out.announce` and again in
+  `onEdit` after the workflow is rebuilt, from `run.Options.PathRules`. The resume warning sits
+  after `reporter.NextStep`, next to the model change warnings.
+- **`approval: manual` is only recorded** here; the commit offer (GV03) and
+  `outcome.approval_required` are not touched.
+- **Tests** are `domain/pathrules_test.go`, `config/pathrules_test.go`,
+  `action/pathrules_test.go` (adds the net-diff revert case and the fail-closed case),
+  `app/pathrules_test.go`, `persistence/pathrules_test.go`, a case in `report/summary_test.go`,
+  and `test/integration/pathrules_test.go`, which runs the resume case end to end (rule X
+  fails the first implement, the config is changed to rule Y, the resume warns and still
+  applies X). The integration config writer got a `pathRules` option.
+- **Docs:** MVP.md §43 (a "Path rules" section for `summary.md` and the two `run.json` fields),
+  CLAUDE.md's run.json field list and `orchestrator.example.yaml` (a commented `policy.paths`
+  block). MVP.md §45 stays with GV08.
