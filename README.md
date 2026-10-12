@@ -73,10 +73,10 @@ policy:
   context_depth:
     project_threshold: 0.5
   complexity:
-    complex: 0.40
-    medium: 0.50
+    complex: 0.55
+    medium: 0.70
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
       complex: [analysis, planning, review]
 

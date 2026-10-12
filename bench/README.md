@@ -334,6 +334,8 @@ orchestrator runs report --dir <out>/runs
 | progress during a long run | `orchbench summarize <out> --stdout` in another terminal |
 | retry what failed for infra reasons | the same `run` command again: `infra_error` cells are run again, others are skipped |
 | the budget was reached | the same `run` command with a higher `--max-cost` |
+| a claude subscription's limit was reached (`You've hit your session limit` in `config.stdout`) | those cells are `fail` with $0 (B's are `infra_error`) and the same `run` skips them: after the reset, remove their lines from `results.jsonl` and `run --redo --ids <their tasks>`; until fixed, see [`TASK-BM16`](../specs/benchmark/tasks/TASK-BM16-pilot-and-full-run.md) "Progress" |
+| an oracle that does not compile (`redeclared in this block`) | the model added a test file whose test or helper name the oracle files also declare: the final check keeps new test files (a known defect, TASK-BM16 "Progress"); read `diff.patch`, it is not a wrong solution |
 
 ## The container
 
