@@ -348,7 +348,8 @@ ANTHROPIC_API_KEY=... bench/docker/run.sh <tasks-dir> <results-dir> orchbench ru
 
 `build` builds the image from the committed tree (`git archive HEAD`), so uncommitted edits
 never get in, and records the commit in it. The second form runs the command in a fresh
-container (default `orchbench --help`). The container gets only `ANTHROPIC_API_KEY` (by name),
+container (default `orchbench --help`). The container gets only `ANTHROPIC_API_KEY` or, for a
+claude subscription, `CLAUDE_CODE_OAUTH_TOKEN` (the token `claude setup-token` prints; by name),
 `<tasks-dir>` read-only at `/tasks`, `<results-dir>` at `/results` and a named volume
 (`ORCHBENCH_CACHE_VOLUME`, default `orchbench-cache`) at `/home/bench/.cache`, where the
 mirrors, workspaces and `validated.json` live. Not the host's home, SSH agent or Docker socket;

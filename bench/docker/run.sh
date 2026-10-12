@@ -3,6 +3,7 @@
 #
 #   bench/docker/run.sh build
 #   ANTHROPIC_API_KEY=... bench/docker/run.sh <tasks-dir> <results-dir> [command [args...]]
+#   CLAUDE_CODE_OAUTH_TOKEN=... bench/docker/run.sh ...   (a subscription: the token of `claude setup-token`)
 #
 # `build` builds the image from the committed tree (git archive HEAD, so uncommitted edits and
 # untracked files never get in) and records the commit in it. The second form runs `command` in
@@ -13,8 +14,8 @@
 #   run.sh ~/tasks ~/results env
 #
 # What the container gets, and nothing else:
-#   - ANTHROPIC_API_KEY, by name: the value is read from the environment of this script and
-#     never appears on a command line;
+#   - ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN, by name, whichever is set: the value is
+#     read from the environment of this script and never appears on a command line;
 #   - <tasks-dir> at /tasks, read-only;
 #   - <results-dir> at /results, read-write;
 #   - the named volume ORCHBENCH_CACHE_VOLUME (default orchbench-cache) at /home/bench/.cache:
@@ -44,7 +45,8 @@ if [ "${1:-}" = "build" ]; then
 fi
 
 [ $# -ge 2 ] || die "usage: run.sh build | run.sh <tasks-dir> <results-dir> [command [args...]]"
-[ -n "${ANTHROPIC_API_KEY:-}" ] || die "ANTHROPIC_API_KEY is not set: it is the only credential the container gets"
+[ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] ||
+	die "neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set: they are the only credentials the container gets"
 [ "$(id -u)" -ne 0 ] || die "refusing to run as root: the container runs as the caller's uid"
 
 tasks=$1
@@ -112,6 +114,7 @@ exec docker run --rm --init ${tty[@]+"${tty[@]}"} \
 	--user "$(id -u):$(id -g)" \
 	"${sandbox_opts[@]}" \
 	-e ANTHROPIC_API_KEY \
+	-e CLAUDE_CODE_OAUTH_TOKEN \
 	--mount "type=bind,src=$tasks,dst=/tasks,readonly" \
 	--mount "type=bind,src=$results,dst=/results" \
 	--mount "type=volume,src=$cache_volume,dst=/home/bench/.cache" \
