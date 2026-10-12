@@ -82,8 +82,12 @@ func TestFinal(t *testing.T) {
 		pass   bool
 		reason string
 		reset  int
-		// present: files that must exist with this content afterwards.
+		// present: files that must exist with this content afterwards; absent: files that
+		// must not.
 		present map[string]string
+		absent  []string
+		// before changes the tree before the config runs (what setup_command generated).
+		before func(t *testing.T, ws *workspace.Workspace)
 	}{
 		{
 			name:    "correct fix; the oracle file's old expectation at base is replaced",
@@ -131,22 +135,21 @@ func TestFinal(t *testing.T) {
 			reset: 1,
 		},
 		{
-			name: "an added passing test is kept and run",
-			change: files(map[string]string{
-				"calc.sh":           testutil.CalcFixed,
-				"tests/test_new.sh": newPassing,
-			}),
-			pass:    true,
-			present: map[string]string{"tests/test_new.sh": newPassing},
-		},
-		{
-			name: "an added failing test is a regression",
+			name: "an added test is removed: the model's own tests are not the measure",
 			change: files(map[string]string{
 				"calc.sh":           testutil.CalcFixed,
 				"tests/test_new.sh": failing,
 			}),
-			reason:  ReasonRegression,
-			present: map[string]string{"tests/test_new.sh": failing},
+			pass:   true,
+			reset:  1,
+			absent: []string{"tests/test_new.sh"},
+		},
+		{
+			name:    "a test file that was there before the config ran stays",
+			before:  files(map[string]string{"tests/test_generated.sh": newPassing}),
+			change:  files(map[string]string{"calc.sh": testutil.CalcFixed}),
+			pass:    true,
+			present: map[string]string{"tests/test_generated.sh": newPassing},
 		},
 		{
 			name: "a weakened test committed and a deleted one staged are reset",
@@ -180,10 +183,17 @@ func TestFinal(t *testing.T) {
 			p, m := setup(t)
 			tk := p.Task("fixture")
 			ws := create(t, m, tk, p.Base)
+			if tt.before != nil {
+				tt.before(t, ws)
+			}
+			beforeConfig, err := TestFiles(ws.Dir, tk)
+			if err != nil {
+				t.Fatal(err)
+			}
 			tt.change(t, ws)
 
 			logs := t.TempDir()
-			r, err := Final(context.Background(), ws, tk, logs)
+			r, err := Final(context.Background(), ws, tk, logs, beforeConfig)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,6 +207,11 @@ func TestFinal(t *testing.T) {
 				got, err := os.ReadFile(filepath.Join(ws.Dir, name))
 				if err != nil || string(got) != want {
 					t.Errorf("%s = %q (%v), want %q", name, got, err, want)
+				}
+			}
+			for _, name := range tt.absent {
+				if _, err := os.Lstat(filepath.Join(ws.Dir, name)); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("%s still exists (%v)", name, err)
 				}
 			}
 			for _, log := range []string{"oracle.log", "suite.log"} {
@@ -236,7 +251,7 @@ func TestResetDoesNotFollowSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, err := ResetTests(context.Background(), ws, tk)
+	n, err := ResetTests(context.Background(), ws, tk, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +276,7 @@ func TestResetOfAnUnchangedTreeCountsNothing(t *testing.T) {
 	tk := p.Task("fixture")
 	ws := create(t, m, tk, p.Base)
 
-	n, err := ResetTests(context.Background(), ws, tk)
+	n, err := ResetTests(context.Background(), ws, tk, nil)
 	if err != nil || n != 0 {
 		t.Fatalf("ResetTests = %d, %v", n, err)
 	}
@@ -311,7 +326,7 @@ func TestFinalTimeoutIsARedCommand(t *testing.T) {
 	testutil.Apply(t, ws.Dir, map[string]string{"calc.sh": testutil.CalcFixed})
 
 	logs := t.TempDir()
-	r, err := Final(context.Background(), ws, tk, logs)
+	r, err := Final(context.Background(), ws, tk, logs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

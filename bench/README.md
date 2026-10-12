@@ -188,7 +188,7 @@ a config that cannot be rendered for a task, a manifest that names another build
 
 One cell: a fresh workspace without any commit after `base_commit` and without the oracle,
 `setup_command`, the config under the task's `timeout`, then the final check (the existing
-tests are reset, the oracle files are written, `oracle.command` and `test_command` run
+tests are reset, test files the model added are removed, the oracle files are written, `oracle.command` and `test_command` run
 sandboxed; SPEC.md §7.5). A task is solved only when both exit 0; the result comes from exit
 codes, never from model text. Question tasks are checked by their `answer_checks` and by the
 tree staying unchanged.
@@ -334,6 +334,7 @@ orchestrator runs report --dir <out>/runs
 | progress during a long run | `orchbench summarize <out> --stdout` in another terminal |
 | retry what failed for infra reasons | the same `run` command again: `infra_error` cells are run again, others are skipped |
 | the budget was reached | the same `run` command with a higher `--max-cost` |
+| a claude subscription's limit was reached (`You've hit your session limit`) | the remaining cells end as `infra_error` within seconds; after the limit resets, the same `run` command retries them. Results written before 2026-10-12 by an older orchbench recorded A, C and D cells as `fail` with $0: remove those lines from `results.jsonl` and `run --redo --ids <their tasks>` |
 
 ## The container
 
@@ -348,7 +349,8 @@ ANTHROPIC_API_KEY=... bench/docker/run.sh <tasks-dir> <results-dir> orchbench ru
 
 `build` builds the image from the committed tree (`git archive HEAD`), so uncommitted edits
 never get in, and records the commit in it. The second form runs the command in a fresh
-container (default `orchbench --help`). The container gets only `ANTHROPIC_API_KEY` (by name),
+container (default `orchbench --help`). The container gets only `ANTHROPIC_API_KEY` or, for a
+claude subscription, `CLAUDE_CODE_OAUTH_TOKEN` (the token `claude setup-token` prints; by name),
 `<tasks-dir>` read-only at `/tasks`, `<results-dir>` at `/results` and a named volume
 (`ORCHBENCH_CACHE_VOLUME`, default `orchbench-cache`) at `/home/bench/.cache`, where the
 mirrors, workspaces and `validated.json` live. Not the host's home, SSH agent or Docker socket;

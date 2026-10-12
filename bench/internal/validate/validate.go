@@ -438,7 +438,7 @@ func (c *checker) green(ctx context.Context, ws *workspace.Workspace, command, l
 // oracleAtBase is §6 step 4: the final check's reset and oracle on the unchanged base tree,
 // then oracle.command must fail.
 func (c *checker) oracleAtBase(ctx context.Context, ws *workspace.Workspace) error {
-	if _, err := check.ResetTests(ctx, ws, c.t); err != nil {
+	if _, err := check.ResetTests(ctx, ws, c.t, nil); err != nil {
 		return err
 	}
 	err := check.WriteOracle(ctx, ws, c.t)

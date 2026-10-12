@@ -334,7 +334,7 @@ func (w *lineWriter) flush() {
 var rateLimitPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)rate[ _-]?limit`),
 	regexp.MustCompile(`(?i)usage limit`),
-	regexp.MustCompile(`(?i)hit your (usage |rate )?limit`),
+	regexp.MustCompile(`(?i)hit your (\w+ )?limit`), // usage, rate, session, weekly, ...
 	regexp.MustCompile(`(?i)(5-hour|five[ -]hour|weekly) limit`),
 	regexp.MustCompile(`(?i)too many requests`),
 	regexp.MustCompile(`(?i)overloaded_error|api error:? *(\d+ )?overloaded`),

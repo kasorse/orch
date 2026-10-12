@@ -269,10 +269,10 @@ policy:
   context_depth:
     project_threshold: 0.5
   complexity:
-    complex: 0.40            # P(complex) >= 0.40             -> complex
-    medium: 0.50             # P(medium) + P(complex) >= 0.50 -> medium, else simple
+    complex: 0.55            # P(complex) >= 0.55             -> complex
+    medium: 0.70             # P(medium) + P(complex) >= 0.70 -> medium, else simple
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
       complex: [analysis, planning, review]
 
@@ -684,6 +684,34 @@ stages and no probabilities; the builder treats it the same way.
 
 Do not ask an LLM to generate arbitrary workflow graphs, and do not let a decision
 provider choose stages or their order - it only estimates probabilities.
+
+## 9.1 The example thresholds
+
+`orchestrator.example.yaml` (and the benchmark configs, which follow it) ships every stage
+threshold at 0.81 except `testing: 0.60`, and the complexity thresholds `complex: 0.55`,
+`medium: 0.70`. They replace `research: 0.70, analysis: 0.60, planning: 0.65,
+development: 0.60, testing: 0.60, review: 0.70` and `complex: 0.40, medium: 0.50` after the
+first benchmark round (2026-10-12: 8 Go tasks from this repository, configs A–D, 3
+repetitions; `specs/benchmark/tasks/TASK-BM16-pilot-and-full-run.md`). With the earlier
+values, the claude/haiku decision provider enabled analysis and review in every run (their
+probabilities were 0.65–0.95 and 0.80–0.95) and planning by chance (0.10–0.85 on the same
+task across repetitions), and called every task `medium`; `auto` cost about 2.4×
+development + testing alone with no task solved that development + testing missed.
+
+Replayed on that round's 21 decisions, 0.81 keeps analysis and review in 15 runs and planning
+in 2, so planning is no longer a coin toss, but on haiku's answers most runs still get
+analysis and review. `testing` stays at 0.60 on purpose: at 0.81 three of the 21 runs enabled
+development without testing (P(testing) = 0.80), a workflow that implements and never runs the
+test command, the only judge of the result (§18). The complexity thresholds move the
+medium/simple line up (simple below P(medium) + P(complex) 0.70); on that round they change
+nothing, since every answer was P(medium) ≈ 0.85. A `complex` task still gets analysis,
+planning and review through `force`. The offline Jev mock answers 0.85 for a strong signal and
+0.15 for a weak one, so it is unaffected.
+
+They are a correction, not a calibration: eight tasks that development + testing solved
+anyway cannot show where the other stages pay off, and a stronger decision model answers on
+another scale. Recalibrate when the benchmark has tasks those stages decide (TODO.md G5),
+when the decision model changes, and whenever the questions' wording changes.
 
 ---
 

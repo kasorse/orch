@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-11): BM01–BM14 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench run`, `orchbench summarize`, the end-to-end test with fakes, the container image, the documentation: `bench/README.md`, MVP.md, CLAUDE.md, README.md). Left: the task set (BM15), the runs (BM16), the decision (BM17) and contributed results (BM18). The design questions are answered
+Status: **in progress** (2026-10-11): BM01–BM14 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench run`, `orchbench summarize`, the end-to-end test with fakes, the container image, the documentation: `bench/README.md`, MVP.md, CLAUDE.md, README.md). A first round ran on 2026-10-12 (8 private Go tasks, configs A–D, 3 reps; BM16 "Progress"): it raised the example's stage thresholds (MVP.md §9.1) and found two bench defects, fixed the same day (the final check removes the model's added test files; a subscription's limit is an infra error). Left: the task set (BM15), the runs (BM16), the decision (BM17) and contributed results (BM18). The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 

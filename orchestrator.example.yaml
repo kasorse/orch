@@ -26,10 +26,12 @@ policy:
   context_depth:
     project_threshold: 0.5   # P(project) >= threshold -> collect project context
   complexity:
-    complex: 0.40            # P(complex) >= 0.40             -> complex
-    medium: 0.50             # P(medium) + P(complex) >= 0.50 -> medium, else simple
+    complex: 0.55            # P(complex) >= 0.55             -> complex
+    medium: 0.70             # P(medium) + P(complex) >= 0.70 -> medium, else simple
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, planning: 0.65, development: 0.60, testing: 0.60, review: 0.70}
+    # 0.81 except testing (MVP.md §9.1): testing stays lower, so a run that implements also
+    # tests. The earlier 0.60-0.70 left analysis and review always on, planning by chance.
+    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
       complex: [analysis, planning, review]
 

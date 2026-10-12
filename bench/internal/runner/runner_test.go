@@ -737,6 +737,7 @@ func TestRateLimited(t *testing.T) {
 		"API Error: Overloaded",
 		"You've hit your limit · resets 5pm",
 		"You've hit your usage limit",
+		"You've hit your session limit · resets 2:40pm (UTC)",
 		`{"type":"error","error":{"type":"overloaded_error"}}`,
 		"HTTP 429",
 		"quota exceeded for this project",

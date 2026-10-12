@@ -128,6 +128,11 @@ func (e Env) attempt(ctx context.Context, c Cell) (fin Finished, cost float64, e
 	if exit != 0 {
 		return fin, 0, fmt.Errorf("setup: %s", exited(exit))
 	}
+	// The test files before the config ran: the final check removes the ones the model added.
+	beforeConfig, err := check.TestFiles(ws.Dir, t)
+	if err != nil {
+		return fin, 0, fmt.Errorf("listing the test files: %w", err)
+	}
 
 	out, started, wall, err := e.runConfig(ctx, c, ws, logDir)
 	if err != nil {
@@ -151,7 +156,7 @@ func (e Env) attempt(ctx context.Context, c Cell) (fin Finished, cost float64, e
 		}
 		res, err = check.Answer(ctx, t, out.Answer, ws)
 	} else {
-		res, err = check.Final(ctx, ws, t, logDir)
+		res, err = check.Final(ctx, ws, t, logDir, beforeConfig)
 	}
 	if err != nil {
 		return fin, cost, fmt.Errorf("final check: %w", err)
