@@ -56,4 +56,7 @@ type LimitsView struct {
 	// previous failure (specs/quality/SPEC.md §8.1). The zero value is off, so a view built
 	// by hand keeps the plain max_fix_iterations behavior.
 	StopWithoutProgress bool
+	// MaxCostUSD stops the run before the next step once its steps have cost this much
+	// (specs/governance/SPEC.md §5). 0 means no budget.
+	MaxCostUSD float64
 }

@@ -238,6 +238,21 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
+// OrgConfig reports the org file the configuration was merged with, or "none" for an empty
+// path (validate only).
+func (r *ConsoleReporter) OrgConfig(path string) {
+	text := "org config: " + path
+	if path == "" {
+		text = "org config: none"
+	}
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(text))
+		return
+	}
+	fmt.Fprintf(r.Out, "✓ %s\n", text)
+}
+
 // ProviderCLIUnverified warns, in every run's header, that a provider CLI outside its
 // verified version range runs because security.allow_unverified_cli is set.
 func (r *ConsoleReporter) ProviderCLIUnverified(id, version, verifiedRange string) {

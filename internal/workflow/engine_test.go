@@ -213,6 +213,133 @@ func TestEngine_MaxStepsExceeded(t *testing.T) {
 	}
 }
 
+// budgetExecutor scripts three steps (analyze, plan, implement) that each report usage.
+func budgetExecutor(usage domain.Usage) *scriptedExecutor {
+	exec := newScriptedExecutor()
+	for _, a := range []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement} {
+		u := usage
+		exec.script(a, StepOutcome{Outcome: OutcomeSuccess, Usage: &u}, nil)
+	}
+	return exec
+}
+
+func budgetWorkflow() domain.Workflow {
+	return domain.Workflow{Steps: []domain.Step{
+		{Action: domain.ActionAnalyze}, {Action: domain.ActionPlan}, {Action: domain.ActionImplement},
+	}}
+}
+
+func TestEngine_BudgetStopsBeforeTheNextStep(t *testing.T) {
+	exec := budgetExecutor(domain.Usage{CostUSD: 3})
+	run := newRun(budgetWorkflow())
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 5}}
+
+	err := engine.Run(context.Background(), run)
+
+	var limitErr *apperr.LimitExceededError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	if run.Status != domain.RunStopped {
+		t.Errorf("expected stopped, got %s", run.Status)
+	}
+	if want := "budget exceeded: $6.00 of $5.00"; run.FailureReason != want {
+		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
+	}
+	// The check runs before a step, so the second step overshoots and the third never starts.
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan})
+}
+
+func TestEngine_BudgetReachedStopsTheThirdStep(t *testing.T) {
+	exec := budgetExecutor(domain.Usage{CostUSD: 2})
+	run := newRun(budgetWorkflow())
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 4}}
+
+	err := engine.Run(context.Background(), run)
+
+	var limitErr *apperr.LimitExceededError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	if run.Status != domain.RunStopped {
+		t.Errorf("expected stopped, got %s", run.Status)
+	}
+	if want := "budget exceeded: $4.00 of $4.00"; run.FailureReason != want {
+		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan})
+}
+
+func TestEngine_BudgetNotReachedRunsAllSteps(t *testing.T) {
+	exec := budgetExecutor(domain.Usage{CostUSD: 3})
+	run := newRun(budgetWorkflow())
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 7}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+	if len(exec.calls) != 3 {
+		t.Errorf("expected 3 calls, got %v", exec.calls)
+	}
+}
+
+func TestEngine_NoBudgetNeverStops(t *testing.T) {
+	exec := budgetExecutor(domain.Usage{CostUSD: 1000})
+	run := newRun(budgetWorkflow())
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
+
+	if err := engine.Run(context.Background(), run); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if run.Status != domain.RunCompleted {
+		t.Errorf("expected completed, got %s", run.Status)
+	}
+}
+
+func TestEngine_BudgetSaysLowerBoundForPartialUsage(t *testing.T) {
+	exec := newScriptedExecutor()
+	exec.script(domain.ActionAnalyze, StepOutcome{Outcome: OutcomeSuccess, Usage: &domain.Usage{Partial: true}}, nil)
+	exec.script(domain.ActionPlan, StepOutcome{Outcome: OutcomeSuccess, Usage: &domain.Usage{CostUSD: 3}}, nil)
+	run := newRun(budgetWorkflow())
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 3}}
+
+	err := engine.Run(context.Background(), run)
+
+	var limitErr *apperr.LimitExceededError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	want := "budget exceeded: $3.00 of $3.00 (lower bound: 1 calls without a final report)"
+	if run.FailureReason != want {
+		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
+	}
+}
+
+func TestEngine_BudgetCountsAResumedRunsHistory(t *testing.T) {
+	exec := newScriptedExecutor()
+	run := newRun(budgetWorkflow())
+	run.Executions = []domain.StepExecution{
+		{Index: 0, Action: domain.ActionAnalyze, Status: domain.StepCompleted, Usage: &domain.Usage{CostUSD: 5}},
+	}
+	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 5}}
+
+	err := engine.Run(context.Background(), run)
+
+	var limitErr *apperr.LimitExceededError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	if len(exec.calls) != 0 {
+		t.Errorf("expected no step to run, got %v", exec.calls)
+	}
+	if run.Status != domain.RunStopped {
+		t.Errorf("expected stopped, got %s", run.Status)
+	}
+}
+
 func TestEngine_HardErrorEndsRunImmediately(t *testing.T) {
 	wf := domain.Workflow{Steps: []domain.Step{
 		{Action: domain.ActionImplement}, {Action: domain.ActionReview},

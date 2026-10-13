@@ -228,6 +228,38 @@ limits:
 - Nothing here changes what decides success: the `test` step's exit code and, for review,
   `ReviewResult.Decide`. Details: `MVP.md` §44 and `specs/quality/`.
 
+## Governance
+
+Controls for teams (`MVP.md` §45, design record in `specs/governance/`). All of it is
+optional and commented out in `orchestrator.example.yaml`; the org file has its own example,
+`org.example.yaml`.
+
+- **Path rules.** `policy.paths` asks for more care where a change lands, for example
+  `match: "migrations/**"`, `require_stages: [review, testing]`, `approval: manual`. They are
+  checked after each implement on the files git says the run changed, never on a model's list.
+  If the workflow lacks a required stage, the step fails (a new run with `--stage` adds it);
+  the workflow is never rebuilt mid-run. `approval: manual` keeps `auto_commit` from
+  committing and adds the rule to the commit question; `outcome.approval_required` in
+  `run.json` tells a CI job. To forbid a path outright use `security.protected_paths`.
+- **Budget.** `limits.max_cost_usd` stops a run before the next step once its steps have cost
+  that much (status `stopped`, exit code 4); a resume counts what was spent and continues once
+  you raise it. A step can overshoot by its own cost, and the decision phase is not counted.
+  Only providers that report a call's cost (claude) can be routed with a budget, or validation
+  refuses it.
+- **Org layer.** `/etc/orchestrator/org.yaml` (or the file `ORCHESTRATOR_ORG_CONFIG` names,
+  only when the `/etc` one does not exist) sets floors, ceilings and additions that a
+  repository's `orchestrator.yaml` can only tighten, plus an `allowed_models` list. A weaker
+  repository setting or an unreadable org file is a config error before any call; `run.json`
+  records the file's path and sha256.
+- **Calibration.** `orchestrator decisions calibrate` proposes `testing` and `review`
+  thresholds from your history (see [Usage](#usage)). It never writes config. The opt-in
+  `policy.explore` (`band`, `rate`) turns a stage on in a share of runs just below its
+  threshold, so lowering a threshold has data behind it; it never turns a stage off.
+
+On a developer's own machine these rules hold only while the developer cooperates: they own
+the machine and the files, and root can delete the org file. They are a real boundary where
+the operator controls the machine, such as CI or a managed host.
+
 ## Security model
 
 Every provider call gets the least tools its job needs, chosen by a fixed table in Go code —
@@ -503,6 +535,7 @@ orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
 ```
 
 - `version` — prints the build version.
@@ -537,6 +570,21 @@ orchestrator decisions report
   mean confidence, and the runs where they disagree. Manual (`--stage`) runs, runs chosen by
   hand, mock answers and runs without the shadow question are skipped. It needs no config and
   calls nothing. Until there is Jev access, `decision.provider: claude` collects real data.
+  Deciders are told apart by the `policy_hash` every decision records (the first 12 digits are
+  printed; `—` for a run written before it existed), so runs before and after a threshold
+  change are not mixed.
+- `decisions calibrate [--runs <dir>] [--min-runs N]` — proposes `testing` and `review`
+  thresholds from your run history (`.orchestrator/runs/`, or every run under `<dir>`). Runs
+  are grouped by decision provider, model and `policy_hash`; for each group it prints the
+  runs where the stage ran in probability buckets of 0.1 with the share the stage paid off in
+  (testing: a test failed after an implement; review: a failing verdict followed by an
+  implement), then comparison tables for research, analysis and planning and a table per
+  complexity and model (runs, completed share, mean `fix_iterations`, mean cost), and ends
+  with a YAML diff of `policy.stages.thresholds` with the rows behind each line. A threshold
+  is raised to the lowest bucket edge above it such that the stage paid off in none of at
+  least `--min-runs` (default 10) runs below it; a bucket with fewer runs prints `not enough
+  data`. Nothing is written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen
+  by hand and mock answers are skipped. It needs no config and calls nothing.
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
   (and, if the decision provider fails, stops instead of asking you to choose).
@@ -631,8 +679,9 @@ changed since the run started (`git commit` runs those hooks). See `MVP.md` §42
 
 `auto_commit: true` in the config commits without the question, in every mode including
 `--mode auto`, after the same checks. It does not commit when there is a warning (a failing
-review, a likely secret) or no `summary_short` to use as the message; it says why and the
-changes stay in the working tree.
+review, a likely secret) or no `summary_short` to use as the message, nor when the change
+matched a `policy.paths` rule with `approval: manual`; it says why and the changes stay in
+the working tree. Interactively, the question lists those rules and their files first.
 
 ### Resuming a run
 

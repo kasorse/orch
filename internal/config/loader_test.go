@@ -380,6 +380,26 @@ func TestLoad_StopWithoutProgress(t *testing.T) {
 	}
 }
 
+func TestLoad_MaxCostUSD(t *testing.T) {
+	const limits = "limits: {max_steps: 12, max_fix_iterations: 2}"
+	cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), limits,
+		"limits: {max_steps: 12, max_fix_iterations: 2, max_cost_usd: 1.5}", 1)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Limits.MaxCostUSD == nil || *cfg.Limits.MaxCostUSD != 1.5 {
+		t.Errorf("MaxCostUSD = %v, want 1.5", cfg.Limits.MaxCostUSD)
+	}
+
+	cfg, err = Load(writeTempConfig(t, validV2("")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Limits.MaxCostUSD != nil {
+		t.Errorf("an absent max_cost_usd must stay nil, got %v", *cfg.Limits.MaxCostUSD)
+	}
+}
+
 func TestLoad_StrictKeepsTheDedicatedMessages(t *testing.T) {
 	// A literal secret is declared by the schema so Validate can explain the rejection.
 	cfg, err := Load(writeTempConfig(t, validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: bearer\n  token_env: T\n  token: abc\n")))

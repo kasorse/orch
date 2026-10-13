@@ -165,6 +165,31 @@ func TestReview_RenderFitsAndShowsPreview(t *testing.T) {
 	}
 }
 
+// An explored stage is marked on the review screen like a forced one, and deselecting it says
+// so; the edit then records it as no longer explored.
+func TestReview_ExploredStageIsMarked(t *testing.T) {
+	d := domain.Decision{Complexity: domain.ComplexityOutcome{Selected: "simple"}, Stages: domain.StageSelection{Stages: []domain.StageOutcome{
+		{Stage: "development", Probability: ptr(0.98), Threshold: ptr(0.6), Enabled: true},
+		{Stage: "review", Probability: ptr(0.67), Threshold: ptr(0.7), Enabled: true, Explored: true, Reason: "explored (P 0.67, threshold 0.70)"},
+	}}}
+	st := (&ConsoleReporter{}).newReviewState(ReviewInput{Decision: d, DefaultMode: domain.ModeAcceptEdits, Editable: true})
+	show := func() string { return ansiRE.ReplaceAllString(strings.Join(st.render(style{on: true}), "\n"), "") }
+
+	if got := show(); !strings.Contains(got, "explored") || strings.Contains(got, "explored · off") || strings.Contains(got, "changed") {
+		t.Errorf("an explored stage that is on should read explored:\n%s", got)
+	}
+	press(t, st, digit('2'))
+	if got := show(); !strings.Contains(got, "explored · off") {
+		t.Errorf("a deselected explored stage should read explored · off:\n%s", got)
+	}
+	_, res := press(t, st, kEnter)
+	for _, so := range res.Decision.Stages.Stages {
+		if so.Stage == "review" && (so.Enabled || so.Explored) {
+			t.Errorf("review = %+v, want off and no longer explored", so)
+		}
+	}
+}
+
 func stageNames(s []domain.Stage) []string {
 	out := make([]string, len(s))
 	for i, x := range s {

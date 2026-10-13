@@ -2,6 +2,8 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -108,7 +110,11 @@ type StepExecution struct {
 	// VerifyCalls are the calls the implement session made to the verify tools, in order, also
 	// when the step failed (specs/quality/SPEC.md §12). Empty for every other step.
 	VerifyCalls []VerifyCall `json:"verify_calls,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	// PathRules are the policy.paths rules the run's net diff matched after this implement,
+	// also when the step failed because of them (specs/governance/SPEC.md §4.3). Empty for
+	// every other step.
+	PathRules []PathRuleMatch `json:"path_rules,omitempty"`
+	Error     string          `json:"error,omitempty"`
 	// Attempt is 0 for a step the original process ran and n for one run by the n-th
 	// resume (specs/resume/SPEC.md §12).
 	Attempt int `json:"attempt,omitempty"`
@@ -128,6 +134,33 @@ type Resume struct {
 	// ProviderCLI is what the fail-fast version check saw in this process: the CLI may
 	// have been updated since the run started (specs/hardening/SPEC.md §7.3).
 	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
+	// OrgConfig is the org file this resume ran under; nil when there was none
+	// (specs/governance/SPEC.md §6.3).
+	OrgConfig *OrgConfigRef `json:"org_config,omitempty"`
+}
+
+// OrgConfigRef names the org config file a run or a resume ran under and the sha256 of its
+// bytes, which is the evidence of which policy applied (specs/governance/SPEC.md §6.3).
+type OrgConfigRef struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+// Validate checks a recorded reference: an absolute, clean path and a 64-digit lowercase hex
+// sha256.
+func (o OrgConfigRef) Validate() error {
+	if !filepath.IsAbs(o.Path) || filepath.Clean(o.Path) != o.Path {
+		return fmt.Errorf("path %q is not an absolute, clean path", o.Path)
+	}
+	if len(o.SHA256) != 64 {
+		return fmt.Errorf("sha256 %q is not 64 hex digits", o.SHA256)
+	}
+	for _, c := range o.SHA256 {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return fmt.Errorf("sha256 %q is not lowercase hex", o.SHA256)
+		}
+	}
+	return nil
 }
 
 // ProviderCLI is one provider CLI as the version check found it: the version string the
@@ -160,6 +193,9 @@ type Run struct {
 	ResumeBaseline json.RawMessage `json:"resume_baseline,omitempty"`
 	// ProviderCLI is the CLI version of each routed provider at run start.
 	ProviderCLI map[string]ProviderCLI `json:"provider_cli,omitempty"`
+	// OrgConfig is the org file the run started under; nil when there was none
+	// (specs/governance/SPEC.md §6.3).
+	OrgConfig *OrgConfigRef `json:"org_config,omitempty"`
 	// Resumes is append-only: one entry per `orchestrator resume` of this run.
 	Resumes []Resume `json:"resumes,omitempty"`
 	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its
@@ -200,6 +236,9 @@ type RunOptions struct {
 	// ReviewFixMedium is review.fix_medium: a passing review with a medium issue sends the run
 	// back to implement once.
 	ReviewFixMedium bool `json:"review_fix_medium,omitempty"`
+	// PathRules is a copy of policy.paths (specs/governance/SPEC.md §4.4). Nil, never empty,
+	// when there are none, so a run without rules writes no options.
+	PathRules []PathRule `json:"path_rules,omitempty"`
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

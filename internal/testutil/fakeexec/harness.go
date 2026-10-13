@@ -75,6 +75,12 @@ func PrependPath(t *testing.T, dir string) {
 //     applies) appends one line "// implement call <N>" to this file. The tree then differs
 //     from one attempt to the next while the code stays as buggy or as fixed as it was,
 //     which the no-progress scenarios need.
+//   - FAKE_IMPLEMENT_TOUCH_FILE / FAKE_IMPLEMENT_REVERT_ON_CALL: if FAKE_IMPLEMENT_TOUCH_FILE
+//     is set, every implement call writes the line "-- implement call <N>" to this path
+//     (creating its directory), so the run's net diff holds a file the fixture does not
+//     (migrations/x.sql, for a path rule). From the implement call number in
+//     FAKE_IMPLEMENT_REVERT_ON_CALL on, the call removes the file instead, as a later attempt
+//     reverting an earlier one.
 //   - FAKE_PLANT_HOOK_BEFORE_CALL: 1-based implement call number before which the script
 //     writes an executable .git/hooks/pre-commit that touches FAKE_HOOK_MARKER (default
 //     $FAKE_STATE_DIR/hook-ran), as a model planting a hook would. A test asserts the
@@ -198,6 +204,15 @@ if [ "$action" = "implement" ] && [ -n "$call_count" ]; then
 
   if [ -n "${FAKE_IMPLEMENT_APPEND_FILE:-}" ]; then
     printf '// implement call %s\n' "$call_count" >> "$FAKE_IMPLEMENT_APPEND_FILE"
+  fi
+
+  if [ -n "${FAKE_IMPLEMENT_TOUCH_FILE:-}" ]; then
+    if [ -n "${FAKE_IMPLEMENT_REVERT_ON_CALL:-}" ] && [ "$call_count" -ge "$FAKE_IMPLEMENT_REVERT_ON_CALL" ]; then
+      rm -f "$FAKE_IMPLEMENT_TOUCH_FILE"
+    else
+      mkdir -p "$(dirname "$FAKE_IMPLEMENT_TOUCH_FILE")"
+      printf '%s\n' "-- implement call $call_count" > "$FAKE_IMPLEMENT_TOUCH_FILE"
+    fi
   fi
 
   # MCP client mode: act as the model calling the orch server's tools, after its edits.

@@ -16,6 +16,7 @@ const (
 	maxContentScans  = 2000
 	maxContentBytes  = 16 << 20
 	identifierWeight = 4 // a verbatim identifier hit outweighs any number of path-word hits
+	maxNamedContent  = 8 << 10
 )
 
 // vendoredDirs hold third-party code, build output or test fixtures: matching them
@@ -31,19 +32,26 @@ type candidate struct {
 // limit of them, each followed by its related tests. Matching is by path words (T08)
 // plus verbatim identifiers in source contents, so "добавь кэш в ProductRepository"
 // finds the files that declare or use ProductRepository even with no translation;
-// symbol-level roles come in T17.
-func relevantFiles(ctx context.Context, root string, files []string, q queryTokens, limit int) ([]domain.RelevantFile, error) {
-	if q.empty() || limit <= 0 {
+// symbol-level roles come in T17. Files the request names by path (named) come first and
+// carry their clipped content.
+func relevantFiles(ctx context.Context, root string, files []string, q queryTokens, named map[string]bool, limit int) ([]domain.RelevantFile, error) {
+	if (q.empty() && len(named) == 0) || limit <= 0 {
 		return nil, nil
 	}
 
 	var cands []candidate
+	for _, f := range files {
+		if named[f] {
+			cands = append(cands, candidate{f, 0})
+		}
+	}
+	pinned := len(cands)
 	scannedFiles, scannedBytes := 0, 0
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if isVendored(f) {
+		if named[f] || isVendored(f) {
 			continue
 		}
 		score := 2*countMatches(q.words, pathTokens(f)) + countMatches(q.words, pathTokens(path.Base(f)))
@@ -62,11 +70,12 @@ func relevantFiles(ctx context.Context, root string, files []string, q queryToke
 			cands = append(cands, candidate{f, score})
 		}
 	}
-	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].score != cands[j].score {
-			return cands[i].score > cands[j].score
+	rest := cands[pinned:]
+	sort.SliceStable(rest, func(i, j int) bool {
+		if rest[i].score != rest[j].score {
+			return rest[i].score > rest[j].score
 		}
-		return cands[i].path < cands[j].path
+		return rest[i].path < rest[j].path
 	})
 
 	testsByKey := map[string][]string{}
@@ -91,6 +100,9 @@ func relevantFiles(ctx context.Context, root string, files []string, q queryToke
 		rf := domain.RelevantFile{Path: f, Summary: summarize(f, content)}
 		if isTestFile(f) {
 			rf.Purpose = domain.PurposeTest
+		}
+		if named[f] {
+			rf.Content = clip(content, maxNamedContent)
 		}
 		out = append(out, rf)
 	}
@@ -194,4 +206,31 @@ func summarize(f, content string) string {
 		return clip(strings.Join(comment, " "), maxSummaryLen)
 	}
 	return clip(strings.Join(code, " "), maxSummaryLen)
+}
+
+// namedFiles returns the listed files whose repository path appears in request as a whole
+// token (`specs/a.md`, ./specs/a.md, "specs/a.md."), not as part of a longer path.
+func namedFiles(request string, files []string) map[string]bool {
+	named := map[string]bool{}
+	for _, f := range files {
+		for from := 0; ; {
+			i := strings.Index(request[from:], f)
+			if i < 0 {
+				break
+			}
+			i += from
+			end := i + len(f)
+			if (i == 0 || !isPathByte(request[i-1]) || strings.HasSuffix(request[:i], "./") && (i == 2 || !isPathByte(request[i-3]))) &&
+				(end == len(request) || !isPathByte(request[end]) || request[end] == '.' && (end+1 == len(request) || !isPathByte(request[end+1]))) {
+				named[f] = true
+				break
+			}
+			from = i + 1
+		}
+	}
+	return named
+}
+
+func isPathByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("_-./", c) >= 0
 }

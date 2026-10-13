@@ -34,6 +34,24 @@ policy:
     thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
       complex: [analysis, planning, review]
+  # Path rules (specs/governance/SPEC.md §4): checked on the run's net diff after each implement.
+  # Rules apply in file order and every matching rule applies, so requirements add up. A change
+  # that matches a rule whose stage the workflow lacks stops the run. To forbid a path outright
+  # use security.protected_paths; deny_change is rejected.
+  # paths:
+  #   - match: "migrations/**"
+  #     require_stages: [review, testing]
+  #     approval: manual
+  #   - match: "**/*.sql"
+  #     approval: manual
+  # Exploration (specs/governance/SPEC.md §7.4), off by default: a stage the policy left off, not
+  # forced, with P within `band` below its threshold is turned on in `rate` of the runs, chosen
+  # by the run id. It only turns stages on (so a run costs more, never less checked), records them
+  # as `explored`, and gives `decisions calibrate` the data to propose a lower threshold.
+  # band is in (0, 0.2], rate in (0, 0.5]. Never used with --stage.
+  # explore:
+  #   band: 0.05
+  #   rate: 0.1
 
 context:
   max_files: 20
@@ -143,6 +161,12 @@ limits:
   # blocking issues. The run stops with status stopped and exit code 4, and `resume` goes back
   # into implement. false turns the check off; max_fix_iterations still applies.
   # stop_without_progress: true
+  # A budget for the workflow steps: the run stops before its next step once they have cost this
+  # much (USD), with status stopped and exit code 4; one expensive step can still overshoot it.
+  # Every provider the actions route to must report a call's cost (only claude does), or
+  # validation refuses the budget. A call cut short reports no cost, so the sum is then a lower
+  # bound. The decision phase (translation, classification) is not counted.
+  # max_cost_usd: 5.00
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:
   #   max_test_output_bytes: 32768  # a failing test's output in the implement retry prompt

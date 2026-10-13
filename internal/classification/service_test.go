@@ -365,6 +365,36 @@ func TestResultTrace_ManualChoice(t *testing.T) {
 	if trace.Source != domain.DecisionSourceUser || trace.DecisionError == "" || trace.ContextDepth != nil || trace.Model != "" {
 		t.Errorf("trace = %+v", trace)
 	}
+	if want := domain.PolicyHash(f.svc.Policy); trace.PolicyHash != want {
+		t.Errorf("policy hash = %q, want %q (a choice after a provider failure is made under the policy too)", trace.PolicyHash, want)
+	}
+}
+
+func TestResultTrace_RecordsThePolicyHash(t *testing.T) {
+	f := newFixture(0.9)
+	res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := domain.PolicyHash(f.svc.Policy)
+	if got := res.Trace(domain.Workflow{}).PolicyHash; got != want || len(want) != 64 {
+		t.Errorf("policy hash = %q, want %q", got, want)
+	}
+
+	// Another threshold is another hash.
+	f.svc.Policy.StageThreshold[domain.StageTesting] += 0.01
+	res, err = f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).PolicyHash; got == want {
+		t.Errorf("policy hash did not change with a threshold: %q", got)
+	}
+
+	// A Result built by hand has no policy, and its trace omits the field.
+	if got := (Result{}).Trace(domain.Workflow{}).PolicyHash; got != "" {
+		t.Errorf("policy hash of a bare Result = %q", got)
+	}
 }
 
 func ptrf(v float64) *float64 { return &v }

@@ -40,6 +40,18 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if run.Decision != nil {
+		if err := validateDecisionStages(run.Decision.Stages.Stages); err != nil {
+			return fmt.Errorf("decision: %w", err)
+		}
+	}
+
+	for i, r := range run.Options.PathRules {
+		if err := r.Validate(); err != nil {
+			return fmt.Errorf("options.path_rules[%d]: %w", i, err)
+		}
+	}
+
 	for i, exec := range run.Executions {
 		if err := validateExecution(exec, i); err != nil {
 			return fmt.Errorf("executions[%d]: %w", i, err)
@@ -48,6 +60,11 @@ func validateRun(run *domain.Run, runID string) error {
 
 	if err := validateProviderCLI(run.ProviderCLI); err != nil {
 		return fmt.Errorf("provider_cli: %w", err)
+	}
+	if run.OrgConfig != nil {
+		if err := run.OrgConfig.Validate(); err != nil {
+			return fmt.Errorf("org_config: %w", err)
+		}
 	}
 	if err := validateSecretScan(run); err != nil {
 		return err
@@ -79,6 +96,11 @@ func validateRun(run *domain.Run, runID string) error {
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)
+		}
+		if r.OrgConfig != nil {
+			if err := r.OrgConfig.Validate(); err != nil {
+				return fmt.Errorf("resumes[%d].org_config: %w", i, err)
+			}
 		}
 		if !r.FromStatus.Valid() {
 			return fmt.Errorf("resumes[%d]: unknown status %q", i, r.FromStatus)
@@ -142,6 +164,14 @@ func validateExecution(exec domain.StepExecution, i int) error {
 	}
 	if err := validateVerifyCalls(exec); err != nil {
 		return fmt.Errorf("verify_calls: %w", err)
+	}
+	if len(exec.PathRules) > 0 && exec.Action != domain.ActionImplement {
+		return fmt.Errorf("path_rules recorded on a %s step", exec.Action)
+	}
+	for i, m := range exec.PathRules {
+		if err := m.Validate(); err != nil {
+			return fmt.Errorf("path_rules[%d]: %w", i, err)
+		}
 	}
 	if exec.TestResult != nil {
 		if err := validateChecks(*exec.TestResult); err != nil {
@@ -391,6 +421,26 @@ func validateDecisionModels(models map[string]domain.ModelRoute) error {
 		}
 		if !domain.ValidModelSource(r.Source) {
 			return fmt.Errorf("models.%s: unknown source %q", action, r.Source)
+		}
+	}
+	return nil
+}
+
+// validatePolicyHash checks decision.json's policy_hash: absent (a manual decision, a trace
+// written before the field), or the 64 lowercase hex digits domain.PolicyHash writes.
+func validatePolicyHash(h string) error {
+	if h != "" && !isSHA256Hex(h) {
+		return fmt.Errorf("policy_hash %q is not 64 lowercase hex digits", h)
+	}
+	return nil
+}
+
+// validateDecisionStages checks decision.json's stages[].explored: a stage exploration turned
+// on is enabled and not forced. The review screen clears the mark when it turns one off.
+func validateDecisionStages(stages []domain.StageOutcome) error {
+	for i, so := range stages {
+		if so.Explored && (!so.Enabled || so.Forced) {
+			return fmt.Errorf("stages[%d] (%s): explored needs the stage enabled and not forced", i, so.Stage)
 		}
 	}
 	return nil

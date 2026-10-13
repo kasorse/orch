@@ -54,6 +54,16 @@ func TestResumeEntry_UsesTheRunsFixMediumNotTheConfigs(t *testing.T) {
 	}
 }
 
+func TestLimitsView_MaxCostUSD(t *testing.T) {
+	budget := 2.5
+	if got := limitsView(config.Config{Limits: config.LimitsConfig{MaxCostUSD: &budget}}).MaxCostUSD; got != 2.5 {
+		t.Errorf("MaxCostUSD = %v, want 2.5", got)
+	}
+	if got := limitsView(config.Config{}).MaxCostUSD; got != 0 {
+		t.Errorf("an absent budget must be 0 (off), got %v", got)
+	}
+}
+
 func TestLimitsView_StopWithoutProgress(t *testing.T) {
 	yes, no := true, false
 	for name, tc := range map[string]struct {

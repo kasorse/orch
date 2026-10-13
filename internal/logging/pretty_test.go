@@ -148,6 +148,18 @@ func TestPrettyFor_NonTerminalIsPlain(t *testing.T) {
 	}
 }
 
+// The decided-stage table marks an explored stage like a forced one.
+func TestPretty_StageRowMarksExplored(t *testing.T) {
+	var buf bytes.Buffer
+	r := &ConsoleReporter{Out: &buf, Pretty: true}
+	r.stageRow(domain.StageOutcome{Stage: "review", Probability: ptr(0.67), Threshold: ptr(0.7), Enabled: true, Explored: true,
+		Reason: "explored (P 0.67, threshold 0.70)"})
+	got := ansiRE.ReplaceAllString(buf.String(), "")
+	if !strings.Contains(got, "0.67") || !strings.Contains(got, "on (explored)") {
+		t.Errorf("explored stage row = %q, want the probability and \"on (explored)\"", got)
+	}
+}
+
 func TestStylePrompt(t *testing.T) {
 	r := &ConsoleReporter{Pretty: true}
 	got := ansiRE.ReplaceAllString(r.stylePrompt("\nApprove this workflow? [a]pprove / [c]ancel: "), "")

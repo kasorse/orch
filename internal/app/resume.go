@@ -34,7 +34,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
+	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	opts := tailOptions{
 		mode:        mode,
 		defaultMode: resumeDefaultMode(run.Mode),
-		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis},
+		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis, OrgConfig: orgRef(org)},
 		// execution.timeout is a fresh budget for this process's steps (SPEC §8); there
 		// is no decision phase to discount.
 		engineContext: func() (context.Context, context.CancelFunc) {
@@ -143,6 +143,12 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	reporter.WorkingTree(treeSummary, treeErr)
 	remaining := remainingSteps(*run.Workflow, opts.resume.Entry)
 	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remaining)
+	if w := orgChangeWarning(run.OrgConfig, orgRef(org)); w != "" {
+		logging.GapWarning(stderr, w)
+	}
+	if pathRulesChanged(run.Options.PathRules, cfg.PathRules()) {
+		logging.GapWarning(stderr, pathRulesChangedWarning)
+	}
 	// Advisory only: a decision.json that is missing or unreadable costs the warning, not
 	// the resume.
 	if trace, _, err := store.LoadDecision(run.ID); err == nil {

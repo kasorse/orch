@@ -122,12 +122,7 @@ func SummarizeRuns(entries []RunEntry, unreadable []UnreadableRun) RunsSummary {
 	}
 
 	for _, e := range entries {
-		var out domain.Outcome
-		if e.Run.Outcome != nil {
-			out = *e.Run.Outcome
-		} else {
-			out = domain.ComputeOutcome(e.Run, e.Trace)
-		}
+		out := runOutcome(e)
 		status := out.Status
 		statuses[status]++
 		s.Total.add(status, out)

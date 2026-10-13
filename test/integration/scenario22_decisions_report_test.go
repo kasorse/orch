@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -39,7 +40,6 @@ func TestScenario22_DecisionsReport(t *testing.T) {
 	for _, want := range []string{
 		"traces: 3, compared: 2",
 		"skipped: 1 manual (--stage)",
-		"decided by: jev jev/jev-1.13.0 (2)",
 		"choice vs score: 1 of 2 agree (50.0%)",
 		"disagreements (1):",
 		`choice=simple  score=complex "explain Add in fixture.go"`,
@@ -47,6 +47,10 @@ func TestScenario22_DecisionsReport(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("report lacks %q:\n%s", want, stdout)
 		}
+	}
+	// Both runs were decided under one policy: one decider, keyed by the short policy hash.
+	if re := regexp.MustCompile(`decided by: jev jev/jev-1\.13\.0 [0-9a-f]{12} \(2\)\n`); !re.MatchString(stdout) {
+		t.Errorf("report lacks the decider with its policy hash:\n%s", stdout)
 	}
 	if got := invocations(t, invocationsLog); len(got) != len(before) {
 		t.Errorf("the report called a CLI: %v", got[len(before):])

@@ -263,6 +263,9 @@ type LimitsConfig struct {
 	// StopWithoutProgress is a pointer so an absent key (nil) can default to true while an
 	// explicit false still means false; read it through StopsWithoutProgress.
 	StopWithoutProgress *bool `yaml:"stop_without_progress"`
+	// MaxCostUSD is the budget of the workflow steps (specs/governance/SPEC.md §5): optional,
+	// nil means no budget. Only the steps' cost counts, not the decision phase's.
+	MaxCostUSD *float64 `yaml:"max_cost_usd"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
 	Prompt PromptLimitsConfig `yaml:"prompt"`
@@ -427,6 +430,12 @@ type Config struct {
 	// AutoCommit commits a completed run's changes without asking, in every mode
 	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
 	AutoCommit bool `yaml:"auto_commit"`
+
+	// AllowedModels and AllowedModelsFrom come from the org file (org.go) and never from the
+	// repository's: "-" makes strict decoding treat allowed_models there as an unknown key.
+	// Validate checks every model the run can call against the list; From is the org file.
+	AllowedModels     []string `yaml:"-"`
+	AllowedModelsFrom string   `yaml:"-"`
 }
 
 // ReviewConfig is the top-level review section.

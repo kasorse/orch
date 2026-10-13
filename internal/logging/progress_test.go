@@ -307,6 +307,19 @@ func TestAnnouncementHelpers(t *testing.T) {
 	}
 }
 
+func TestOrgConfig_PrintsTheSourceOrNone(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.OrgConfig("/etc/orchestrator/org.yaml")
+	r.OrgConfig("")
+
+	want := "✓ org config: /etc/orchestrator/org.yaml\n✓ org config: none\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
 func TestDirtyRepoWarning_PrintsExactText(t *testing.T) {
 	var buf bytes.Buffer
 	DirtyRepoWarning(&buf)

@@ -14,6 +14,7 @@ import (
 	"orchestrator/internal/interaction"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
+	"orchestrator/internal/policy"
 	"orchestrator/internal/projectctx"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/repository"
@@ -110,6 +111,11 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 	if err != nil {
 		return decisionOutcome{}, err
 	}
+	// policy.explore may turn on a stage just below its threshold. It is applied to the result
+	// itself, so res.Trace (decision.json), the announced table and run.json all record the
+	// same decision. Only here: a --stage run never reaches this function and a resume reads
+	// the persisted workflow.
+	res.Decision = policy.Explore(res.Decision, svc.Policy, run.ID)
 	return decisionOutcome{
 		decision:     res.Decision,
 		trace:        res.Trace,

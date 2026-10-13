@@ -1,5 +1,27 @@
 package domain
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+)
+
+// PolicyHash is the lowercase hex sha256 of the JSON of p. encoding/json writes map keys in
+// sorted order, so the order a policy's maps were filled in does not change the hash; a
+// renamed or added DecisionPolicy field does, and starts a new group of runs in the reports
+// (Explore is the exception: it has no JSON name, because it changes no threshold).
+// It is empty only for a policy that cannot be encoded (a NaN or infinite threshold, which
+// config validation never lets through), so such a decision is recorded without a hash
+// rather than stopping the run.
+func PolicyHash(p DecisionPolicy) string {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 // DecisionTrace is decision.json (TASKS.md T11): everything needed to reconstruct why a
 // run got its workflow - what was sent, what the provider answered, what the policy made
 // of it, and how long each step took. It is written once, after classification.
@@ -16,6 +38,10 @@ type DecisionTrace struct {
 	// (empty when the final classification never returned).
 	Provider string `json:"provider"`
 	Model    string `json:"model,omitempty"`
+	// PolicyHash is PolicyHash of the DecisionPolicy the decision used, so runs before and
+	// after a threshold change are told apart (specs/governance/SPEC.md §7.2). Absent for a
+	// manual decision and in a trace written before the field existed.
+	PolicyHash string `json:"policy_hash,omitempty"`
 
 	// ContextDepth is nil when the pre-check itself failed.
 	ContextDepth   *ContextDepthTrace `json:"context_depth,omitempty"`

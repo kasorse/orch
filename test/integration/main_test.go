@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"orchestrator/internal/app"
@@ -23,5 +24,20 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	os.Exit(runWithoutHostOrgConfig(m))
+}
+
+// runWithoutHostOrgConfig runs the tests with the machine-wide org file pointed at a path that
+// does not exist, so a /etc/orchestrator/org.yaml on the host cannot change any outcome. The
+// org scenarios that need an /etc file name their own (useEtcOrgConfig).
+func runWithoutHostOrgConfig(m *testing.M) int {
+	dir, err := os.MkdirTemp("", "orche-no-etc-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer os.RemoveAll(dir)
+	absentEtcOrgConfig = filepath.Join(dir, "org.yaml")
+	app.SetOrgConfigEtcPath(absentEtcOrgConfig)
+	return m.Run()
 }

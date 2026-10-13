@@ -88,6 +88,24 @@ type configOptions struct {
 	fixMedium bool
 	// reviewModels is actions.review.models: the extra reviewers.
 	reviewModels []string
+	// pathRules is policy.paths, the list items verbatim (four spaces of indent), e.g.
+	// "    - match: fixture.go\n      require_stages: [testing]\n". Empty renders none.
+	pathRules string
+	// explore is policy.explore, the lines verbatim (two spaces of indent), e.g.
+	// "  explore:\n    band: 0.05\n    rate: 0.5\n". Empty renders none.
+	explore string
+	// maxCostUSD is limits.max_cost_usd; 0 renders none.
+	maxCostUSD float64
+}
+
+// pathRulesYAML is the policy.paths and policy.explore keys that follow policy.stages, or
+// nothing.
+func (o configOptions) pathRulesYAML() string {
+	s := o.explore
+	if o.pathRules != "" {
+		s = "  paths:\n" + o.pathRules + s
+	}
+	return s
 }
 
 // checkOption is one entry of the checks: list.
@@ -130,6 +148,9 @@ func (o configOptions) actionsYAML() string {
 // limitsYAML is what goes under limits: after stop_without_progress.
 func (o configOptions) limitsYAML() string {
 	s := o.promptLimits
+	if o.maxCostUSD > 0 {
+		s += fmt.Sprintf("  max_cost_usd: %v\n", o.maxCostUSD)
+	}
 	if o.verifyMaxCalls > 0 {
 		s += fmt.Sprintf("  verify:\n    max_calls_per_step: %d\n", o.verifyMaxCalls)
 	}
@@ -240,7 +261,7 @@ policy:
     thresholds: {research: 0.60, analysis: 0.60, planning: 0.60, development: 0.60, testing: 0.60, review: 0.60}
     force:
       complex: [analysis, planning, review]
-
+%s
 context:
   max_files: 20
   max_bytes: 24576
@@ -260,7 +281,7 @@ limits:
 execution:
   timeout: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
-		opts.actionsYAML(),
+		opts.pathRulesYAML(), opts.actionsYAML(),
 		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, opts.extraYAML)
 	content += opts.tailYAML()
 	content += opts.jira.yaml()

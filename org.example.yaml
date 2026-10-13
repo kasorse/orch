@@ -1,0 +1,38 @@
+# The organization config (MVP.md §45.3, specs/governance/SPEC.md §6). Copy it to
+# /etc/orchestrator/org.yaml; ORCHESTRATOR_ORG_CONFIG names another file only when that one
+# does not exist. A repository's orchestrator.yaml can tighten what is set here, never loosen it.
+#
+# The file has its own strict schema: a key that is not listed here (thresholds, auto_commit,
+# the decision or Jira sections, anything) is an error. A file that exists but cannot be read
+# or parsed stops every run; there is no fallback to "no policy".
+#
+# On a developer's machine this holds only while the developer cooperates: root can delete
+# the file. It is a real boundary where the operator controls the machine (CI, a managed host).
+version: 1
+
+security:
+  require_clean_worktree: true   # a floor: a repository may not write false
+  allow_unverified_cli: false    # a floor: a repository may not write true
+  protected_paths: [".github/**", "go.mod"]   # added to the repository's own list
+  secret_scan:                   # the org owns allow_paths once this section is written
+    mode: stop                   # a floor in the order off < warn < stop
+    allow_paths: []
+
+test:
+  sandbox: bwrap                 # a floor: a repository may not write none
+
+policy:
+  paths:                         # org rules come first, then the repository's; both apply
+    - match: "migrations/**"
+      require_stages: [review, testing]
+      approval: manual
+  stages:
+    force:                       # added to the repository's, per complexity
+      complex: [review]
+
+limits:
+  max_cost_usd: 5.00             # a ceiling: a repository may set it lower, never higher or absent
+
+# The models a route may name: every action (and its by_complexity models), every extra
+# reviewer, the translator and an LLM decision provider. A route with no model is refused.
+allowed_models: [sonnet, opus, haiku]

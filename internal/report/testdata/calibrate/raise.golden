@@ -1,0 +1,27 @@
+Calibration report: runs
+runs: 9, used: 9, min runs: 4
+
+== jev/jev-1.13.0  policy aaaaaaaaaaaa  (9 runs)
+
+testing: threshold 0.50, ran in 9 runs
+  P          runs  paid off
+  0.4-0.5       1  not enough data
+  0.5-0.6       2  not enough data
+  0.6-0.7       2  not enough data
+  0.7-0.8       4  2 (50.0%)
+
+review: threshold —, ran in 0 runs
+
+research, analysis, planning: with and without the stage (no proposal)
+  no run
+
+models per complexity (no proposal)
+  complexity action provider/model  runs    completed fix iter  mean cost
+  medium     —                         9   9 (100.0%)     0.22    $0.0000
+
+policy.stages.thresholds (a proposal; nothing is written)
+# jev/jev-1.13.0  policy aaaaaaaaaaaa
+-   testing: 0.50
++   testing: 0.70
+      # 0.5-0.6: 2 runs, 0 paid off
+      # 0.6-0.7: 2 runs, 0 paid off

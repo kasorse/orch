@@ -178,6 +178,7 @@ orchestrator validate
 orchestrator version
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
@@ -197,7 +198,13 @@ same level, the 3×3 matrix of their selections, each one's mean confidence, and
 where they disagree. It skips manual (`--stage`) runs, runs chosen by hand after a provider
 failure, mock answers and runs without the shadow question, and lists unreadable traces.
 It needs no configuration and calls nothing. It is the input for choosing one question
-(`specs/JEV integration/TASKS.md` T21).
+(`specs/JEV integration/TASKS.md` T21). Every `decision.json` of a provider or user decision
+records `policy_hash`, the sha256 of the `DecisionPolicy` it used (absent for `--stage`), and
+`decisions report` counts deciders per hash.
+
+`decisions calibrate [--runs <dir>] [--min-runs N]` reads the same runs, read-only, and
+proposes testing and review thresholds with the evidence behind them; the design record is
+`specs/governance/` §7.
 
 `run --jira` takes the task from one Jira issue: `--jira PMC-2789`, `--jira=pmc-2789` or
 the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator
@@ -275,6 +282,9 @@ policy:
     thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
       complex: [analysis, planning, review]
+  # paths:                   # optional path rules, checked on the diff (§45.1)
+  #   - {match: "migrations/**", require_stages: [review, testing], approval: manual}
+  # explore: {band: 0.05, rate: 0.1}   # optional, opt-in exploration (§45.4)
 
 context:
   max_files: 20
@@ -310,6 +320,7 @@ test:
 limits:
   max_steps: 12
   max_fix_iterations: 2
+  # max_cost_usd: 5.00       # optional budget for the steps (§12, §45.2)
   prompt:                    # optional bounds on repository data in prompts (§41.2)
     max_test_output_bytes: 32768
     max_diff_bytes: 262144
@@ -512,6 +523,16 @@ codex and gemini currently support no authority (their flags are unverified, §3
 route to them fails here even when their executable is installed. `orchestrator validate`
 runs the same chain.
 
+### The org file and the budget
+
+The org layer is merged inside the `Load` step (`config.LoadLayered`, §45.3), so `Validate`
+and every later check see the merged config. An org file that exists but cannot be read, a
+repository setting weaker than the org's and a route outside the org's `allowed_models` are
+config errors before any call; none is a warning. With `limits.max_cost_usd`,
+`ValidateDependencies` refuses any routed provider that does not report a call's cost
+(`provider.CostReporter`; only claude does), because a budget that cannot be enforced is the
+one wrong answer (§45.2).
+
 ### Provider CLI version and the test sandbox
 
 Right after `ValidateAuthorities`, every routed provider CLI's version is checked against
@@ -589,7 +610,7 @@ exactly our options, values in [0, 1], distributions summing to 1. Anything else
 ## 8.3 Context Manager
 
 Runs only when the policy picks depth `project`. It builds a compact `ProjectContext` -
-never whole files:
+never whole files, except the ones the request names:
 
 * metadata from the manifest (`go.mod`, `package.json`, `pyproject.toml`, `Cargo.toml`,
   `pom.xml`): language, project type, module, direct dependencies;
@@ -597,7 +618,10 @@ never whole files:
 * rules: bullet lines of `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`;
 * excerpts of the `README.md` / `docs/*.md` sections that mention the request's terms;
 * relevant files - path-word matches plus verbatim identifiers in sources - with a
-  one-line summary each, followed by their tests;
+  one-line summary each, followed by their tests; a file the request names by its
+  repository path (`specs/x/TASK.md`, `./specs/x/TASK.md`) comes first and also carries
+  its `content`, clipped to 8 KiB, so a request that points at a task file is classified
+  on that file's text;
 * git branch, dirty flag, changed paths.
 
 Files come from `git ls-files --cached --others --exclude-standard`, so `.gitignore` is
@@ -684,6 +708,17 @@ stages and no probabilities; the builder treats it the same way.
 
 Do not ask an LLM to generate arbitrary workflow graphs, and do not let a decision
 provider choose stages or their order - it only estimates probabilities.
+
+Two additions keep this determinism (§45):
+
+* `policy.explore` (opt-in) turns a stage on that the policy left just below its threshold,
+  in a share of runs chosen by a hash of the run id and the stage (`policy.Explore`, a pure
+  function). The input to "the same decision always produces the same workflow" is then the
+  decision plus the run id, and `decision.json` records the stage as `explored`. It never
+  turns a stage off and never applies to `--stage` or a resume.
+* `decision.json` records `policy_hash`, the sha256 of the `DecisionPolicy` the decision used,
+  so runs before and after a threshold change are compared and never mixed (§45.4).
+  `policy.paths` is not part of the decision: it is checked on the diff after implement (§45.1).
 
 ## 9.1 The example thresholds
 
@@ -840,6 +875,13 @@ tests fail the same way, or review repeats its blocking issues. The run stops wi
 `stopped`, a reason that starts with `no progress:` and exit code 4. The check is Go's, over the
 persisted executions only (§44.6); `max_fix_iterations` still applies when it is off.
 `limits.verify` bounds the in-session verify tools (§44.3).
+
+`limits.max_cost_usd` (optional, positive, finite) is a budget for the workflow steps: before
+each step the engine sums the cost the executions reported, and at or over the budget the run
+stops with status `stopped`, `budget exceeded: $5.12 of $5.00` and exit code 4. A step can
+overshoot by its own cost; the decision phase is not counted; a call cut off before its final
+report has no cost, so the sum is then a lower bound. A provider that reports no cost cannot
+be routed with a budget (§7). Details in §45.2.
 
 ---
 
@@ -1636,6 +1678,10 @@ Support:
 execution:
   timeout: 15m
 ```
+
+`limits.max_cost_usd` (§12) is the cost bound next to this time bound: it is checked before
+each step and cannot interrupt a call, so `execution.timeout` still bounds a single hanging
+call.
 
 `execution.timeout` bounds the entire run, not just workflow step execution: it wraps
 opening the repository, the decision phase (translation, both decision rounds, context
@@ -2752,6 +2798,9 @@ inconsistent is `corrupt`. A resume never continues with a thinner prompt.
   `workflow.Counters` derives `total_steps` (`len(executions)`) and `fix_iterations`
   (completed tests/reviews that failed, in a workflow with implement, and a `fixable` review
   that went back to implement) from the history. The persisted counters are not trusted.
+* `limits.max_cost_usd` (§12, §45.2) is checked against the cost of every persisted execution,
+  so a resume counts what was already spent; a run stopped by the budget continues once the
+  budget is raised.
 * `workflow.CheckLimits` refuses before the approval prompt when the entry would exceed a
   limit (`LimitExceededError`, exit 4). Its message states the used and configured
   values, and the config key to raise. The engine applies the same check when it starts
@@ -2807,7 +2856,15 @@ resume_baseline   the guard's state then: {patterns, git_fingerprint, protected}
 resumes[]         append-only: at, from_status ("running" = interrupted), from_reason,
                   entry, why, mode
 executions[].attempt   0 for the original process, n for the n-th resume
+options.path_rules     policy.paths as the run started (§45.1); a resume applies these
+org_config        {path, sha256} of the org file the run started under; each resumes[]
+                  entry has its own (§45.3)
 ```
+
+A resume reads `options.path_rules` and never the current `policy.paths`. It loads the config
+through the org layer like a run does; if the org file differs from the one the run started
+under, it warns (`org config changed since the run started`) and continues under the current
+one.
 
 `executions` and `resumes` are append-only. A resume clears `failure_reason` when it
 starts; the previous reason is kept in its `resumes` record.
@@ -3485,6 +3542,10 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
   left) no message is proposed: the orchestrator says
   `The implementation proposed no commit message.` and asks for one line; an empty answer
   commits nothing, a written one is shown with the trailer and still needs the `y`.
+* When the last implement matched `policy.paths` rules with `approval: manual` (§43.3,
+  `executions[].path_rules`), the question lists them first, with their files, under
+  `policy.paths requires your approval for:`. The answer is the explicit yes; nothing else
+  changes.
 * The default (an empty answer) is no. `e` replaces the header and asks again. No answer
   (stdin closed) is no.
 
@@ -3515,7 +3576,11 @@ commit is then made without the question, in every mode (`--mode auto` included)
 without a terminal, after every check of §42.1 but the first. It is not made, and
 `Not committing automatically: <why>` is printed, when the question would have shown a
 warning (§42.2) or there is no proposed message (no `summary_short`): nobody is there to
-read the one or write the other. The message is the one §42.2 proposes; the commit is
+read the one or write the other. It is not made either when the last implement matched a
+`policy.paths` rule with `approval: manual`: the yes given in advance did not know which
+files would change. It prints `Not committing automatically: policy.paths requires manual
+approval: <match> (<n> files); commit what you want yourself.` and the changes stay in the
+working tree; `outcome.approval_required` (§43.3) is true. The message is the one §42.2 proposes; the commit is
 §42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed.
 
 ---
@@ -3576,6 +3641,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue, or any unmet acceptance criterion, fails). |
 | Reviewers | Only when the last review had extra reviewers (§44.4): the models whose answers were merged, base model first, e.g. `sonnet, opus`. |
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
+| Approval | Only when `outcome.approval_required`: `Commit needs manual approval (policy.paths)`. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
 
 ### Steps
@@ -3615,6 +3681,20 @@ One row per implement step with a diff.
 Both lists are empty when the artifact has no `changed_files` at all (the model did not
 answer in JSON), and hold at most 50 paths each.
 
+### Path rules
+
+Only when the run has `policy.paths` rules and the last implement matched at least one. One
+row per matched rule of the last implement (`executions[].path_rules`); an earlier
+implement's matches are not shown.
+
+| Column | Meaning |
+| --- | --- |
+| Rule | The rule's `match` pattern. |
+| Files | The files of the run's net diff the rule matched, in git's order, at most 50. |
+| Requires | The rule's `require_stages`; `—` when it has none. |
+| Missing | The required stages the workflow does not run; `—` when it runs them all. A step with a missing stage failed. |
+| Approval | `manual` when the rule asks for a person's yes before the commit; `—` otherwise. |
+
 ### Notes
 
 One line per partial call (what its numbers mean), per step that ran without an MCP server
@@ -3645,6 +3725,25 @@ implement step only).
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
 | `outcome.verify_calls` | The verify calls of the whole run (§44.3), 0 and absent when there were none. |
+| `outcome.approval_required` | `true` when the last implement matched a `policy.paths` rule with `approval: manual` (an earlier implement's matches do not count); absent otherwise. A CI job can read it: the change was not committed by the orchestrator. |
+| `options.path_rules` | A copy of `policy.paths` made when the run is created: `{match, require_stages, approval}` in file order. A resume applies these and never the current config's; if the config's rules differ, it prints `Warning: policy.paths changed since the run started; this run keeps the rules it started with`. Absent without rules. Each rule is validated as in the config. |
+| `executions[].path_rules` | On an implement that passed the guard and the secret scan: `{match, files, require_stages, missing, approval}` for each rule that matched a file of the run's net diff (`pre_run_ref` against the tree after the step; the step's own diff without a restore point; the runs directory excluded). `files` holds at most 50 clean repository-relative paths; `missing` is always present and a subset of `require_stages`. Recorded also when the step failed because of it. On an implement step only. |
+| `org_config`, `resumes[].org_config` | `{path, sha256}` of the org file the run (or that resume) ran under (§45.3): `path` absolute, `sha256` 64 hex. Absent without an org file. |
+
+`policy.paths` rules (specs/governance/SPEC.md §4) are checked on that net diff after each
+implement, with git's own file list and never a model's `changed_files`. A matching rule whose
+`require_stages` the workflow does not contain fails the step with `policy.paths "<match>"
+requires <stages>, which this workflow does not run (changed: <files>)`; the workflow is never
+rebuilt. If rules exist and git could not list the changed files, the step fails with
+`policy.paths cannot be checked: git could not list the changed files`. At the start of a run
+whose workflow has implement, each rule the workflow cannot satisfy prints a warning on stderr
+(also after an edit on the review screen). `deny_change` is rejected in the config in favor of
+`security.protected_paths`.
+
+`decision.json` gains two fields (§45.4). `policy_hash` is the sha256 (64 hex) of the
+`DecisionPolicy` the decision used; it is written with every provider or user decision and
+absent for `source: manual`. `stages[].explored` is `true` for a stage `policy.explore` turned
+on; it is valid only on a stage that is `enabled` and not `forced`. Both are optional on load.
 
 The fields of the quality loop (checks, verify, criteria, `by_complexity`, no progress) are
 listed in §44.9.
@@ -3961,3 +4060,159 @@ review artifact `reviewers`. Logs gain `<NNN>-test.<check>.*`, `pre-run-test.<ch
 * **A shell, parallel verify calls or any tool beyond `run_tests` and `run_check`**, and verify
   for codex or gemini (no adapter is verified, §38.2).
 * **Model choice by anything but the decided complexity** (cost so far, failures).
+
+---
+
+# 45. Governance
+
+Control for teams (phase 4: path rules, the org layer, the budget, calibration and
+exploration). This section is normative; the design record is `specs/governance/`. The
+sections it touches say the same in their own place: §7 (fail fast), §9 (exploration,
+`policy_hash`), §12 (the budget), §37 (resume), §42 (approval), §43 (summary and fields).
+
+## 45.1 Path rules
+
+```yaml
+policy:
+  paths:
+    - match: "migrations/**"
+      require_stages: [review, testing]
+      approval: manual
+    - match: "**/*.sql"
+      approval: manual
+```
+
+* `match` is one pattern in `security.protected_paths` syntax. `require_stages` names stages
+  (`research`, `analysis`, `planning`, `development`, `testing`, `review`) without duplicates.
+  `approval` is `manual` or absent. A rule needs `require_stages`, `approval`, or both.
+* Rules apply in file order and every matching rule applies; requirements add up.
+* `deny_change` is rejected with a message pointing at `security.protected_paths`: the guard
+  already refuses any change there, git-ignored files included.
+* **The diff is the truth.** After each implement that passed the guard and the secret scan,
+  the rules match the run's net diff (`pre_run_ref` against the tree; the step's own diff
+  without a restore point; the runs directory excluded), never a model's `changed_files`. A
+  file one attempt changed and a later attempt reverted does not match. Git-ignored files are
+  not in the diff.
+* **No workflow rebuilt mid-run.** A matching rule whose `require_stages` the workflow lacks
+  fails the step (`policy.paths "<match>" requires <stages>, which this workflow does not
+  run (changed: <files>)`); a resume would stop again, so start a new run with `--stage`. At
+  the start of a run whose workflow has implement, each rule the workflow cannot satisfy
+  prints a warning, because stopping is still cheap then.
+* **Approval** changes only the commit offer (§42): the question lists the matched rules and
+  files; `auto_commit: true` does not commit. The run's status and exit code are unchanged;
+  `outcome.approval_required` is true, which a CI job can read.
+* **Resume** applies `options.path_rules`, the rules recorded at run start, and warns when
+  the current config's differ.
+
+## 45.2 The budget
+
+```yaml
+limits:
+  max_cost_usd: 5.00
+```
+
+A positive, finite number; absent means no budget.
+
+* **Fail fast (§7).** The budget is enforceable only when every provider call it covers
+  reports a cost: the actions' routes, every extra reviewer and every `by_complexity` model.
+  `provider.CostReporter` (`ReportsCost() bool`) is implemented by the claude adapter only;
+  any other routed provider is a config error, `limits.max_cost_usd cannot be enforced:
+  codex (actions.review) reports no cost`. A silently unenforced budget is refused.
+* **Check.** Before each step the engine sums `usage.cost_usd` over the persisted
+  executions. At or over the budget, the run is `stopped` with `budget exceeded: $5.12 of
+  $5.00`, exit code 4. A resume counts what was already spent and continues once the budget is
+  raised.
+* **Limits, not hidden.** A step that starts under budget can end over it by one step's cost.
+  Decision calls are not counted (`decision_overhead` reports them). A call cut off before
+  its final report has no cost, so the sum is a lower bound and the reason says so
+  (`(lower bound: 1 calls without a final report)`). Verify calls run the test command, not a
+  provider, and cost nothing here.
+* There is no `pricing:` and no `max_tokens`: the CLI reports the cost.
+
+## 45.3 The org config layer
+
+The org file is `/etc/orchestrator/org.yaml`. `ORCHESTRATOR_ORG_CONFIG` names another path
+only when that file does not exist, so an environment variable cannot point a machine-wide
+policy away. With neither, there is no org layer. A file that exists but cannot be read or
+parsed is a config error, never "no policy". `orchestrator.example.yaml` has a sibling,
+`org.example.yaml`.
+
+The org file has its own strict schema (`config.OrgConfig`, `version: 1`); any other key is
+an error. What the repository config may then do:
+
+| org key | meaning | the repository config |
+|---|---|---|
+| `security.require_clean_worktree: true` | floor | may not set `false` |
+| `security.protected_paths` | added to the repository's list | only adds |
+| `security.allow_unverified_cli: false` | floor | may not set `true` |
+| `security.secret_scan.mode` | floor, `off` < `warn` < `stop` | equal or stricter |
+| `security.secret_scan.allow_paths` | owned by the org once it sets `secret_scan` | may not set its own |
+| `test.sandbox: bwrap` | floor | may not set `none` |
+| `policy.paths` | org rules first, then the repository's | only adds |
+| `policy.stages.force` | added to the repository's, per complexity | only adds |
+| `limits.max_cost_usd` | ceiling | lower only, never higher or absent |
+| `allowed_models` (org only) | the models a route may name | routes only to these |
+
+`allowed_models` covers every model the run can call: each action's base model and
+`by_complexity` models, extra reviewers, the translator and the LLM decision provider. A
+route with no model is an error under it. Thresholds, `auto_commit` and the decision, Jev and
+Jira settings are not in the org schema on purpose.
+
+`config.LoadLayered(repoPath, orgPath)` replaces `config.Load` in the fail-fast chain (§7), so
+`Validate` and everything after see the merged config. Every conflict is reported at once,
+naming both files. `validate` and `run` print the org source. `run.json` records
+`org_config: {path, sha256}`, and each `resumes[]` entry its own; a resume under a changed
+org file warns and continues under the current one, while the rules a run recorded at its
+start still win (§45.1).
+
+## 45.4 Calibration and exploration
+
+* **`policy_hash`.** `decision.json` records the sha256 of the canonical JSON of the
+  `DecisionPolicy` the decision used (absent for `source: manual`). It changes exactly when a
+  threshold does. `decisions report` and `decisions calibrate` group by it. `policy.explore`
+  is not part of it.
+* **`decisions calibrate [--runs <dir>] [--min-runs N]`** (read-only, `internal/report`)
+  prints, per decision provider, model and `policy_hash`, the runs where testing or review
+  ran in probability buckets of 0.1 and how often the stage paid off (testing: a test failed
+  after an implement; review: a failing verdict followed by an implement). A threshold is
+  raised to the lowest bucket edge above it such that the stage paid off in none of at least
+  `--min-runs` (default 10) runs below it; it is lowered only with exploration data, to the
+  lowest edge below which explored runs paid off at least as often as the runs above. A
+  bucket with fewer runs prints `not enough data`. Research, analysis and planning get a
+  comparison table and no proposal; a table per complexity and model (runs, completed share,
+  mean `fix_iterations`, mean cost) has none either. Manual, chosen-by-hand and mock
+  decisions are skipped. The output ends with a YAML diff of `policy.stages.thresholds` and
+  the rows behind each line. **Calibration only proposes**: nothing is written and it never
+  runs as part of `run`.
+* **`policy.explore`** (opt-in, absent by default):
+
+  ```yaml
+  policy:
+    explore:
+      band: 0.05   # (0, 0.2]
+      rate: 0.1    # (0, 0.5]
+  ```
+
+  For a stage the policy left off, not forced, with P within `band` below its threshold,
+  `fnv64a(run_id + "/" + stage) mod 1000 < rate × 1000` turns it on. It only turns stages
+  on, so a run costs more and is never less checked. The stage is recorded as
+  `stages[].explored: true` with the reason `explored (P 0.47, threshold 0.50)`. The same
+  decision plus the same run id gives the same workflow; a resume reads the persisted
+  workflow and never explores; `--stage` never explores. `policy.Explore` is a pure function
+  in `internal/policy`.
+
+## 45.5 Honesty note
+
+On a developer's machine every rule here holds only while the developer cooperates: they own
+the machine, the files and the CLI, and root can delete the org file. The rules are a real
+boundary where the operator does not control the machine (CI, a managed host). The org layer
+protects against a repository's config, not against the machine's owner.
+
+## 45.6 Not covered
+
+* **Audit export** (TODO G4): dropped. A local CLI gives no central trail, a hosted runner
+  already keeps the run directory, and a hash chain in a local file protects nothing.
+* A config written back by calibration; automatic thresholds for research, analysis or
+  planning; exploring models; a `--stage` run that still records probabilities.
+* Per-user or per-team policy beyond one org file, fetching the org config over the
+  network, and enforcing anything against the machine's owner.

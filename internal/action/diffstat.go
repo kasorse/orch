@@ -16,35 +16,48 @@ import (
 // files the step changed with the ones its artifact says it changed. It returns the tree
 // it diffed against, or nil and "" when git could not tell; a diff is a record, never a
 // reason to fail the step. Call it only after the guard has passed the step.
-func (d *Dispatcher) stepDiff(ctx context.Context, run *domain.Run, before string, artifact domain.ImplementationArtifact) (*domain.StepDiff, string) {
+//
+// It also returns the paths of the run's net diff - against the restore point, or against
+// before when the run has none - slash-separated and relative to the repository top level,
+// for the policy.paths check (specs/governance/SPEC.md §4.2). netOK is false when git could
+// not list them.
+func (d *Dispatcher) stepDiff(ctx context.Context, run *domain.Run, before string, artifact domain.ImplementationArtifact) (diff *domain.StepDiff, after string, net []string, netOK bool) {
 	after, err := d.Repo.WorktreeTree(ctx)
 	if err != nil {
-		return nil, ""
+		return nil, "", nil, false
 	}
 	exclude := d.runsExclude()
 	files, err := d.Repo.DiffNumstat(ctx, before, after, exclude)
 	if err != nil {
-		return nil, ""
+		return nil, "", nil, false
 	}
-	diff := &domain.StepDiff{Step: diffStat(files)}
+	diff = &domain.StepDiff{Step: diffStat(files)}
+	net, netOK = changedPaths(files), run.PreRunRef == ""
 	if run.PreRunRef != "" {
 		if total, err := d.Repo.DiffNumstat(ctx, run.PreRunRef, after, exclude); err == nil {
 			stat := diffStat(total)
 			diff.Run = &stat
+			net, netOK = changedPaths(total), true
 		}
 	}
 	if artifact.ChangedFiles != nil {
 		top, err := d.Repo.TopLevel(ctx)
 		if err == nil {
-			changed := make([]string, len(files))
-			for i, f := range files {
-				changed[i] = filepath.ToSlash(f.Path)
-			}
+			changed := changedPaths(files)
 			claimed := reportedPaths(append(slices.Clone(artifact.ChangedFiles), artifact.TestsAdded...), top, d.Repo.Dir)
 			diff.NotReported, diff.ReportedUnchanged = compareReported(changed, claimed)
 		}
 	}
-	return diff, after
+	return diff, after, net, netOK
+}
+
+// changedPaths are the paths of files, slash-separated, in git's order.
+func changedPaths(files []repository.FileChange) []string {
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = filepath.ToSlash(f.Path)
+	}
+	return paths
 }
 
 // runsExclude is the pathspec list that keeps the runs directory, the orchestrator's own

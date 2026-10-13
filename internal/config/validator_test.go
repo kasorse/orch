@@ -2,9 +2,12 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
+
+	"orchestrator/internal/domain"
 )
 
 // validConfig returns a fully valid version 2 config, matching the example in
@@ -101,6 +104,36 @@ func TestValidate_InvalidLimits(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "max_steps must be positive") || !strings.Contains(msg, "max_fix_iterations must be positive") {
 		t.Errorf("unexpected error message: %s", msg)
+	}
+}
+
+func TestValidate_MaxCostUSD(t *testing.T) {
+	for name, tc := range map[string]struct {
+		value   *float64
+		wantErr bool
+	}{
+		"absent":            {nil, false},
+		"positive":          {float64Ptr(2.5), false},
+		"zero":              {float64Ptr(0), true},
+		"negative":          {float64Ptr(-1), true},
+		"not a number":      {float64Ptr(math.NaN()), true},
+		"positive infinity": {float64Ptr(math.Inf(1)), true},
+		"negative infinity": {float64Ptr(math.Inf(-1)), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Limits.MaxCostUSD = tc.value
+			err := Validate(cfg)
+			if !tc.wantErr {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "limits.max_cost_usd must be positive and finite") {
+				t.Fatalf("expected a max_cost_usd error, got: %v", err)
+			}
+		})
 	}
 }
 
@@ -477,6 +510,75 @@ func TestValidate_Checks(t *testing.T) {
 				t.Errorf("want %q in %v", tc.want, err)
 			}
 		})
+	}
+}
+
+// allowedConfig is validConfig under an allowlist that names every model it uses.
+func allowedConfig() Config {
+	cfg := validConfig()
+	cfg.AllowedModels = []string{"pro", "sonnet", "opus", "gpt", "haiku"}
+	cfg.AllowedModelsFrom = "/etc/orchestrator/org.yaml"
+	return cfg
+}
+
+func TestValidate_AllowedModels(t *testing.T) {
+	if err := Validate(allowedConfig()); err != nil {
+		t.Fatalf("every model is listed: %v", err)
+	}
+	const org = "/etc/orchestrator/org.yaml"
+	for name, tc := range map[string]struct {
+		edit func(*Config)
+		want string
+	}{
+		"base model": {func(c *Config) { c.Actions.Review.Model = "o3" },
+			"actions.review: model o3 is not in allowed_models (" + org + ")"},
+		"base model, the spec's example": {func(c *Config) { c.AllowedModels = []string{"pro", "sonnet", "gpt", "haiku"} },
+			"actions.implement: model opus is not in allowed_models (" + org + ")"},
+		"by_complexity": {func(c *Config) {
+			c.Actions.Plan.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "mythos"}}
+		}, "actions.plan.by_complexity.complex: model mythos is not in allowed_models (" + org + ")"},
+		"extra reviewer": {func(c *Config) { c.Actions.Review.Models = []string{"o3"} },
+			"actions.review.models[0]: model o3 is not in allowed_models (" + org + ")"},
+		"translator": {func(c *Config) { c.Translation.Model = "tiny" },
+			"translation: model tiny is not in allowed_models (" + org + ")"},
+		"LLM decision provider": {func(c *Config) {
+			c.Decision.Provider, c.Decision.Model = "claude", "tiny"
+		}, "decision: model tiny is not in allowed_models (" + org + ")"},
+		"route without a model": {func(c *Config) { c.Actions.Analyze.Model = "" },
+			"actions.analyze: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+		"translator without a model": {func(c *Config) { c.Translation.Model = "" },
+			"translation: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := allowedConfig()
+			tc.edit(&cfg)
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidate_AllowedModels_JevDecisionModelIsNotChecked(t *testing.T) {
+	cfg := allowedConfig() // decision.provider is jev with the model jev-1.13.0, not on the list
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a Jev model is not a CLI model: %v", err)
+	}
+}
+
+func TestValidate_AllowedModels_ByComplexityWithoutModelInheritsTheBase(t *testing.T) {
+	cfg := allowedConfig()
+	cfg.Actions.Implement.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Effort: "high"}}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("an effort-only entry inherits the listed base model: %v", err)
+	}
+}
+
+func TestValidate_NoAllowlistChecksNothing(t *testing.T) {
+	cfg := validConfig()
+	cfg.Actions.Review.Model = "anything"
+	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 

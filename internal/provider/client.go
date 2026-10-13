@@ -101,6 +101,12 @@ type Client interface {
 	Supports(a domain.Authority) bool
 }
 
+// CostReporter is implemented by adapters whose CLI reports a call's cost in USD. A budget
+// (limits.max_cost_usd) is refused for a route whose adapter does not implement it.
+type CostReporter interface {
+	ReportsCost() bool
+}
+
 // ID identifies one of the fixed, supported provider CLIs.
 type ID string
 

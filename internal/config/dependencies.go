@@ -44,9 +44,18 @@ type DependencyOptions struct {
 	// run --jira, and orchestrator validate whenever the section is present.
 	Jira bool
 
+	// Cost says which providers report a call's cost, for limits.max_cost_usd. *provider.Registry
+	// implements it. Nil means none does, so a budget is then refused.
+	Cost CostChecker
+
 	// getenv reads the environment; nil means os.Getenv. Tests inject it so they don't
 	// have to mutate the process environment.
 	getenv func(string) string
+}
+
+// CostChecker reports whether a provider reports the cost of its calls.
+type CostChecker interface {
+	ReportsCost(providerID string) bool
 }
 
 // ValidateDependencies verifies, for every provider referenced by cfg - every action,
@@ -61,6 +70,7 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 	pms := append(cfg.actionProviderModels(), decisionProviderModels(cfg)...)
 	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
+	problems = append(problems, budgetProblems(cfg, opts.Cost)...)
 	if opts.Jira {
 		problems = append(problems, jiraCredentialProblems(cfg.Jira, opts.getenv)...)
 	}
@@ -72,6 +82,24 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n\n")),
 		nil,
 	)
+}
+
+// budgetProblems refuses limits.max_cost_usd when an action's provider reports no cost: the
+// budget could then never be reached. by_complexity and review.models change the model, never
+// the provider, so the actions' own routes cover them.
+func budgetProblems(cfg Config, checker CostChecker) []string {
+	if cfg.Limits.MaxCostUSD == nil {
+		return nil
+	}
+	var problems []string
+	for _, pm := range cfg.actionProviderModels() {
+		if pm.Provider == "" || (checker != nil && checker.ReportsCost(pm.Provider)) {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (actions.%s) reports no cost",
+			pm.Provider, pm.Action))
+	}
+	return problems
 }
 
 // checkExecutablesPresent groups pms by provider and reports, for each provider whose

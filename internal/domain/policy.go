@@ -29,6 +29,18 @@ type DecisionPolicy struct {
 	// ForceStages[c] lists stages that are enabled whenever c is the selected
 	// complexity, regardless of their own probability (SPEC.md §12).
 	ForceStages map[Complexity][]Stage
+
+	// Explore, when set, turns a stage just below its threshold on for a share of runs
+	// (specs/governance/SPEC.md §7.4). It changes no threshold, so it is left out of
+	// PolicyHash: explored runs stay in the calibration group of the thresholds they probe.
+	Explore *ExploreSettings `json:"-"`
+}
+
+// ExploreSettings is policy.explore: Band is how far below its threshold a stage's probability
+// may be to be explored, Rate the share of runs, in (0, 0.5], that explore it.
+type ExploreSettings struct {
+	Band float64
+	Rate float64
 }
 
 // DecisionSource records who decided: the Jev API, an LLM configured as the decision
@@ -78,13 +90,15 @@ type ComplexityOutcome struct {
 // short human-readable summary of the first three fields, e.g. "p=0.74 >= 0.70" or
 // "forced: complexity=complex" - exactly the trace line MVP.md §36 asks for.
 // Probability and Threshold are nil when there was no provider probability to report,
-// i.e. a stage selected by hand (ApplyForced, T16).
+// i.e. a stage selected by hand (ApplyForced, T16). Explored marks a stage that policy.explore
+// turned on below its threshold; it implies Enabled and not Forced.
 type StageOutcome struct {
 	Stage       Stage    `json:"stage"`
 	Probability *float64 `json:"probability,omitempty"`
 	Threshold   *float64 `json:"threshold,omitempty"`
 	Forced      bool     `json:"forced"`
 	Enabled     bool     `json:"enabled"`
+	Explored    bool     `json:"explored,omitempty"`
 	Reason      string   `json:"reason"`
 }
 
@@ -162,6 +176,9 @@ func (d Decision) WithEdit(complexity Complexity, enabled, forced []Stage) Decis
 		was := so.Enabled
 		so.Enabled = on[so.Stage]
 		so.Forced = isForced[so.Stage]
+		// An explored stage the operator kept stays explored; one left off or now forced is
+		// no longer a stage exploration turned on.
+		so.Explored = so.Explored && so.Enabled && was && !so.Forced
 		switch {
 		case so.Forced && !so.Enabled:
 			so.Reason = fmt.Sprintf("forced: complexity=%s, excluded by user", complexity)

@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, decisions report, runs report). This is the composition root - no other package
+// (version, validate, run, resume, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,7 +48,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|runs report [--dir <path>]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -89,10 +90,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.verbose, stdin, stdout, stderr)
 	case "decisions":
-		if len(rest) != 2 || rest[1] != "report" {
-			return &apperr.ConfigError{Msg: "usage: orchestrator decisions report"}
+		if len(rest) == 2 && rest[1] == "report" {
+			return decisionsReport(stdout)
 		}
-		return decisionsReport(stdout)
+		dir, minRuns, err := decisionsCalibrateArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return decisionsCalibrate(stdout, dir, minRuns)
 	case "runs":
 		dir, err := runsReportArgs(rest[1:])
 		if err != nil {
@@ -208,23 +213,28 @@ const sandboxProbeTimeout = 10 * time.Second
 // ValidateAuthorities. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, error) {
+func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, error) {
 	reporter.ValidatingConfig()
 
-	cfg, err := config.Load(configPath)
+	// The org layer is merged inside the Load step (specs/governance/SPEC.md §6.3), so every
+	// check below sees the merged config.
+	orgPath, _ := config.FindOrgConfig(orgConfigEtcPath, os.Getenv)
+	cfg, org, err := config.LoadLayered(configPath, orgPath)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
 	// What the test command may inherit beyond the default allowlist (test.env_pass).
 	execution.AllowTestEnv(cfg.Test.EnvPass...)
-	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, depOpts(cfg)); err != nil {
-		return config.Config{}, nil, err
+	opts := depOpts(cfg)
+	opts.Cost = registry
+	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, opts); err != nil {
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
@@ -233,24 +243,64 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 		err := testexec.Probe(probeCtx, executor)
 		cancel()
 		if err != nil {
-			return config.Config{}, nil, err
+			return config.Config{}, nil, config.OrgSource{}, err
 		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
 	if err := config.ValidateAuthorities(cfg, registry); err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 
 	// The last check of the chain: it runs each routed CLI once (--version), which is
 	// not an AI call, and only after everything that needs no process at all.
 	clis, err := checkProviderCLIs(context.Background(), cfg, registry, reporter)
 	if err != nil {
-		return config.Config{}, nil, err
+		return config.Config{}, nil, config.OrgSource{}, err
 	}
 
 	reporter.ConfigValid()
-	return cfg, clis, nil
+	return cfg, clis, org, nil
+}
+
+// orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);
+// a variable so tests can point it elsewhere.
+var orgConfigEtcPath = "/etc/orchestrator/org.yaml"
+
+// SetOrgConfigEtcPath makes path the machine-wide org file location and returns a function that
+// puts the previous one back. It exists for the integration tests, which run in another package
+// and must never read the real /etc.
+func SetOrgConfigEtcPath(path string) (restore func()) {
+	previous := orgConfigEtcPath
+	orgConfigEtcPath = path
+	return func() { orgConfigEtcPath = previous }
+}
+
+// orgRef is the reference run.json records for org; nil when no org file applied.
+func orgRef(org config.OrgSource) *domain.OrgConfigRef {
+	if org.Path == "" {
+		return nil
+	}
+	return &domain.OrgConfigRef{Path: org.Path, SHA256: org.SHA256}
+}
+
+// orgConfigChangedWarning is the resume warning for an org file that is not the one the run
+// started under (specs/governance/SPEC.md §6.3).
+const orgConfigChangedWarning = "org config changed since the run started (%s → %s); this resume runs under the current one"
+
+// orgChangeWarning returns the warning for a resume whose org file differs from the run's
+// start record, and "" when they are the same. Absent on either side counts as a change.
+func orgChangeWarning(started, now *domain.OrgConfigRef) string {
+	describe := func(r *domain.OrgConfigRef) string {
+		if r == nil {
+			return "none"
+		}
+		return r.SHA256
+	}
+	if describe(started) == describe(now) {
+		return ""
+	}
+	return fmt.Sprintf(orgConfigChangedWarning, describe(started), describe(now))
 }
 
 // checkProviderCLIs asks every routed provider whose adapter can tell (provider.
@@ -318,13 +368,14 @@ func runValidate(ctx context.Context, configPath string, stdout, stderr io.Write
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
 	registry := newRegistry(executor)
-	cfg, clis, err := loadAndValidateConfig(configPath, registry, executor, reporter,
+	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
 	if err != nil {
 		return err
 	}
+	reporter.OrgConfig(org.Path)
 	for _, id := range config.ProvidersInUse(cfg) {
 		if cli, ok := clis[id]; ok {
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
@@ -361,6 +412,76 @@ func decisionsReport(stdout io.Writer) error {
 		}
 	}
 	report.RenderDecisions(stdout, runsBaseDir, report.SummarizeDecisions(entries, unreadable))
+	return nil
+}
+
+const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]"
+
+// defaultMinRuns is how many runs a probability bucket needs before calibrate says anything
+// about it (specs/governance/SPEC.md §7.3).
+const defaultMinRuns = 10
+
+// decisionsCalibrateArgs parses what follows `decisions` for `calibrate`: --runs <dir> or
+// --runs=<dir> (default: the runs directory of the current repository) and --min-runs N or
+// --min-runs=N (default 10, at least 1), each at most once.
+func decisionsCalibrateArgs(args []string) (string, int, error) {
+	bad := &apperr.ConfigError{Msg: decisionsUsage}
+	if len(args) == 0 || args[0] != "calibrate" {
+		return "", 0, bad
+	}
+	dir, minRuns := runsBaseDir, defaultMinRuns
+	var gotDir, gotMin bool
+	for i := 1; i < len(args); i++ {
+		flag, v, hasValue := strings.Cut(args[i], "=")
+		if !hasValue {
+			if i+1 >= len(args) {
+				return "", 0, bad
+			}
+			i++
+			v = args[i]
+		}
+		switch {
+		case flag == "--runs" && !gotDir && v != "":
+			dir, gotDir = v, true
+		case flag == "--min-runs" && !gotMin:
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return "", 0, bad
+			}
+			minRuns, gotMin = n, true
+		default:
+			return "", 0, bad
+		}
+	}
+	return dir, minRuns, nil
+}
+
+// decisionsCalibrate proposes testing and review thresholds from the runs found under dir
+// (specs/governance/SPEC.md §7.3). It only reads: persistence.LoadRunDirs takes no lock and
+// creates nothing, and no Store is built. It needs no configuration and calls nothing.
+func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
+	found, bad, err := persistence.LoadRunDirs(dir)
+	if err != nil {
+		return err
+	}
+	// The loader walks the root with its symlinks resolved.
+	root := dir
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		root = resolved
+	}
+	var entries []report.RunEntry
+	for _, f := range found {
+		entries = append(entries, report.RunEntry{RunID: f.RunID, At: f.At, Run: f.Run, Trace: f.Trace})
+	}
+	var unreadable []report.UnreadableRun
+	for _, b := range bad {
+		path := b.Dir
+		if r, err := filepath.Rel(root, b.Dir); err == nil {
+			path = r
+		}
+		unreadable = append(unreadable, report.UnreadableRun{Path: path, Err: b.Err.Error()})
+	}
+	report.RenderCalibration(stdout, dir, report.Calibrate(entries, unreadable, minRuns))
 	return nil
 }
 
@@ -442,7 +563,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, clis, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -512,6 +633,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	run.ProviderCLI = clis
+	run.OrgConfig = orgRef(org)
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
@@ -577,6 +699,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		run.Decision.Source != domain.DecisionSourceManual
 	reporter.ReviewForm = editable
 	out.announce(wf, stderr)
+	warnPathRules(stderr, run.Options.PathRules, wf)
 
 	s := newSession(ctx, &cfg, configPath, registry, osExec, repo, store, run, reporter, prompter, stream, stdout)
 	s.stdin = stdin
@@ -597,6 +720,8 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 				return failRun(store, run, err)
 			}
 			run.Decision, run.Workflow = &d, &nwf
+			// The edit may have dropped a stage a rule needs, or added implement.
+			warnPathRules(stderr, run.Options.PathRules, nwf)
 			trace := out.trace(nwf)
 			trace.Complexity, trace.Stages, trace.Edit = d.Complexity, d.Stages.Stages, d.Edit
 			trace.Models = modelRoutes(cfg, d, nwf)
@@ -893,15 +1018,19 @@ func preRunTest(ctx context.Context, s *session) error {
 // runOptions are the config rules a new run follows from here on; a resume reads them back from
 // run.json and never from the config (specs/quality/SPEC.md §7.3).
 func runOptions(cfg config.Config) domain.RunOptions {
-	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium}
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules()}
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {
-	return domain.LimitsView{
+	view := domain.LimitsView{
 		MaxSteps:            cfg.Limits.MaxSteps,
 		MaxFixIterations:    cfg.Limits.MaxFixIterations,
 		StopWithoutProgress: cfg.Limits.StopsWithoutProgress(),
 	}
+	if cfg.Limits.MaxCostUSD != nil {
+		view.MaxCostUSD = *cfg.Limits.MaxCostUSD
+	}
+	return view
 }
 
 // recordRestorePoint sets run.PreRunRef before the first step: HEAD on a clean tree, or a
