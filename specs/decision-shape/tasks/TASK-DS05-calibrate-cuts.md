@@ -32,3 +32,34 @@ refuses when size does not spread (`SPEC.md` §7.3).
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-14)
+
+Built as planned, except as listed. `scripts/check.sh` (root and `bench/`) passed, run outside
+the bwrap sandbox. One earlier run failed an integration scenario on `failed to run test
+command: context deadline exceeded`; the rerun passed. That flake is older than this spec:
+master (`b9e9dce`) hit it in 2 of 6 runs of `test/integration` on 2026-10-14 (scenarios 56 and
+2), the branch in about 4 of 10. The fixture's `go test ./...` sometimes outlasts the 30 s
+`execution.timeout` the integration config gives a whole run.
+
+- **The outcome rule, made exact.** `SPEC.md` §7.3's wording was ambiguous. As built: the medium
+  cut by outcome is the highest edge `e` (steps of 0.1) such that the runs with size below `e`
+  number at least `--min-runs` and at most `--simple-max-hard` of them were hard. It is refused
+  with `size does not predict outcome` when the runs below the median size are hard at least as
+  often as the rest, and with `no size keeps N or more simple runs at most X% hard` when no edge
+  qualifies.
+- **What the diff proposes.** One value per key: the target's cuts, with medium lowered to the
+  outcome cut when that is lower. The diff says when it lowered it. It starts from the cuts the
+  group's decisions recorded (`mixed` when they differ, `—` before DS02), and compares at two
+  decimals, as it prints.
+- **Hard.** `fix_iterations > 0` or `stopped`. A `failed` run with no fix iteration is left out of
+  the outcome table altogether, not counted as easy: on the measured data it is the environment.
+- **Refusal** (interquartile range under 0.2) suppresses both rules.
+- **Flags** became one `calibrateArgs` struct (`--runs`, `--min-runs`, `--size-target`,
+  `--simple-max-hard`), each at most once.
+- **On the measured data** (43 claude/opus runs): about 45% of the runs with an outcome needed a
+  fix at every size. With the default `--min-runs 10` the outcome rule finds no simple level
+  that easy and the proposal is the target's `{medium: 1.23, complex: 1.48}`; with
+  `--min-runs 3` it lowers medium to 0.90, which leaves 5 of 43 runs simple. Size spreads tasks
+  for routing, but on this data it does not pick the tasks that will need a fix (SPEC.md §1.1),
+  and escalation (DS06) is the lever for those. The example config keeps 1.24 / 1.48.

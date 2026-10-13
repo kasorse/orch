@@ -48,27 +48,30 @@ func TestDecisionsCalibrateArgs(t *testing.T) {
 		{"size-target not three", []string{"calibrate", "--size-target", "50/50"}, "", 0, true},
 		{"size-target not 100", []string{"calibrate", "--size-target=50/35/10"}, "", 0, true},
 		{"size-target with a zero", []string{"calibrate", "--size-target", "60/40/0"}, "", 0, true},
+		{"simple-max-hard one", []string{"calibrate", "--simple-max-hard", "1"}, "", 0, true},
+		{"simple-max-hard not a number", []string{"calibrate", "--simple-max-hard=few"}, "", 0, true},
 		{"size-target twice", []string{"calibrate", "--size-target", "40/40/20", "--size-target", "40/40/20"}, "", 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, minRuns, target, err := decisionsCalibrateArgs(tc.args)
+			got, err := decisionsCalibrateArgs(tc.args)
 			if tc.wantErr {
 				var ce *apperr.ConfigError
-				if !errors.As(err, &ce) || !strings.Contains(ce.Msg, "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]") {
+				if !errors.As(err, &ce) || !strings.Contains(ce.Msg, "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]") {
 					t.Fatalf("decisionsCalibrateArgs(%q) error = %v, want a ConfigError with the usage", tc.args, err)
 				}
 				return
 			}
-			if err != nil || dir != tc.dir || minRuns != tc.minRuns || target != report.DefaultSizeTarget {
-				t.Fatalf("decisionsCalibrateArgs(%q) = %q, %d, %v, %v; want %q, %d", tc.args, dir, minRuns, target, err, tc.dir, tc.minRuns)
+			want := calibrateArgs{dir: tc.dir, minRuns: tc.minRuns, target: report.DefaultSizeTarget, simpleMaxHard: report.DefaultSimpleMaxHard}
+			if err != nil || got != want {
+				t.Fatalf("decisionsCalibrateArgs(%q) = %+v, %v; want %+v", tc.args, got, err, want)
 			}
 		})
 	}
 
-	_, _, target, err := decisionsCalibrateArgs([]string{"calibrate", "--size-target", "40/40/20"})
-	if err != nil || target != (report.SizeTarget{40, 40, 20}) {
-		t.Errorf("--size-target 40/40/20 = %v, %v", target, err)
+	got, err := decisionsCalibrateArgs([]string{"calibrate", "--size-target", "40/40/20", "--simple-max-hard=0.3"})
+	if err != nil || got.target != (report.SizeTarget{40, 40, 20}) || got.simpleMaxHard != 0.3 {
+		t.Errorf("--size-target 40/40/20 --simple-max-hard=0.3 = %+v, %v", got, err)
 	}
 }
 

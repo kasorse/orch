@@ -1,6 +1,6 @@
 # Spec: Decision shape — size, templates, escalation
 
-Status: **in progress** (2026-10-13): DS01–DS04 and DS06 are built (their task files say how). The owner decided O1–O3 (§11); the gate
+Status: **in progress** (2026-10-14): DS01–DS06 are built (their task files say how); DS07 is left. The owner decided O1–O3 (§11); the gate
 O3 passed on the data of §1.1. The author's defaults are in §12. Once DS07 is done, MVP.md (§9, §9.1, §31.1, §44.8) becomes the
 normative home and this file stays the design record.
 
@@ -263,11 +263,13 @@ Two rules, both printed with their evidence. Neither writes anything.
    when they are equal (DS01 "As built"). At least `--min-runs` (default 10) per proposed
    level.
 2. **By outcome.** A run is *hard* when `fix_iterations > 0` or its status is `stopped` by a
-   limit. `failed` is not counted: in the data of §1.1 it is mostly the environment. Per size
-   bin, the report prints runs and the hard share. The medium cut is proposed down to the highest bin edge `e` for which runs below
-   `e` have a hard share above `--simple-max-hard` (default 0.2), with `--min-runs` runs. If the
-   hard share does not grow with size at all, the report says `size does not predict outcome`
-   and proposes nothing by this rule.
+   limit. A `failed` run without a fix iteration is left out: in the data of §1.1 it is mostly
+   the environment. Per size bin, the report prints runs and the hard share. As built (DS05):
+   the medium cut by outcome is the highest edge `e` such that the runs below `e` number at
+   least `--min-runs` and at most `--simple-max-hard` (default 0.2) of them were hard; the diff
+   lowers the target's medium cut to it. If the runs below the median size are hard at least as
+   often as the rest, the report says `size does not predict outcome` and proposes nothing by
+   this rule.
 
 **Refusal.** If the interquartile range of `size` is below 0.2, the report prints
 `size does not separate tasks` and proposes no cut. Quantiles of noise would only split noise

@@ -1,6 +1,6 @@
 # Decision shape — size, templates, escalation
 
-Status: **in progress** (2026-10-13): DS01–DS04 and DS06 done. The owner decided O1–O3 (`SPEC.md` §11):
+Status: **in progress** (2026-10-14): DS01–DS06 done; DS07 left. The owner decided O1–O3 (`SPEC.md` §11):
 escalation yes, target shares 50/35/15, and the gate passed on the measured data (`SPEC.md`
 §1.1). Not yet in TODO.md.
 
@@ -29,7 +29,7 @@ high, `force[complex]` overrides the rest, and the first benchmark round called 
 | [DS02](tasks/TASK-DS02-size.md) | `size`, `policy.complexity.cuts`, `questions_hash` ✓ | M | — |
 | [DS03](tasks/TASK-DS03-questions.md) | three stage questions: domain, Jev, LLM, mock, goldens ✓ | M | — |
 | [DS04](tasks/TASK-DS04-template.md) | the stage rule: `force` as template, testing with development ✓ | M | DS03 |
-| [DS05](tasks/TASK-DS05-calibrate-cuts.md) | cut proposals by share and by outcome, refusal on no spread | M | DS01, DS02 |
+| [DS05](tasks/TASK-DS05-calibrate-cuts.md) | cut proposals by share and by outcome, refusal on no spread ✓ | M | DS01, DS02 |
 | [DS06](tasks/TASK-DS06-escalate.md) | `actions.implement.escalate` ✓ | S | DS02 |
 | [DS07](tasks/TASK-DS07-integration-docs.md) | scenarios, MVP.md, CLAUDE.md, README, example, bench configs, TODO.md | M | DS02–DS06 |
 

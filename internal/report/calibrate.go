@@ -170,8 +170,9 @@ type Calibration struct {
 	Groups     []CalibGroup
 	// Shape is the size section (specs/decision-shape/SPEC.md §7.2) for SizeTarget; the caller
 	// fills it with Shape, and the report leaves it out when it is empty.
-	Shape      []ShapeGroup
-	SizeTarget SizeTarget
+	Shape         []ShapeGroup
+	SizeTarget    SizeTarget
+	SimpleMaxHard float64
 }
 
 // sample is one run where a stage ran: its probability, whether the stage paid off, and
@@ -568,7 +569,7 @@ func RenderCalibration(w io.Writer, runsDir string, c Calibration) {
 		renderComparison(w, g.Comparison)
 		renderModels(w, g.Models)
 	}
-	renderShape(w, c.Shape, c.SizeTarget)
+	renderShape(w, c.Shape, c.SizeTarget, c.SimpleMaxHard)
 
 	fmt.Fprintln(w, "\npolicy.stages.thresholds (a proposal; nothing is written)")
 	for _, g := range c.Groups {
@@ -588,6 +589,7 @@ func RenderCalibration(w io.Writer, runsDir string, c Calibration) {
 			}
 		}
 	}
+	renderCutsDiff(w, c.Shape)
 }
 
 func renderStage(w io.Writer, s StageCalibration, minRuns int) {
