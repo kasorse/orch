@@ -228,6 +228,38 @@ limits:
 - Nothing here changes what decides success: the `test` step's exit code and, for review,
   `ReviewResult.Decide`. Details: `MVP.md` §44 and `specs/quality/`.
 
+## Governance
+
+Controls for teams (`MVP.md` §45, design record in `specs/governance/`). All of it is
+optional and commented out in `orchestrator.example.yaml`; the org file has its own example,
+`org.example.yaml`.
+
+- **Path rules.** `policy.paths` asks for more care where a change lands, for example
+  `match: "migrations/**"`, `require_stages: [review, testing]`, `approval: manual`. They are
+  checked after each implement on the files git says the run changed, never on a model's list.
+  If the workflow lacks a required stage, the step fails (a new run with `--stage` adds it);
+  the workflow is never rebuilt mid-run. `approval: manual` keeps `auto_commit` from
+  committing and adds the rule to the commit question; `outcome.approval_required` in
+  `run.json` tells a CI job. To forbid a path outright use `security.protected_paths`.
+- **Budget.** `limits.max_cost_usd` stops a run before the next step once its steps have cost
+  that much (status `stopped`, exit code 4); a resume counts what was spent and continues once
+  you raise it. A step can overshoot by its own cost, and the decision phase is not counted.
+  Only providers that report a call's cost (claude) can be routed with a budget, or validation
+  refuses it.
+- **Org layer.** `/etc/orchestrator/org.yaml` (or the file `ORCHESTRATOR_ORG_CONFIG` names,
+  only when the `/etc` one does not exist) sets floors, ceilings and additions that a
+  repository's `orchestrator.yaml` can only tighten, plus an `allowed_models` list. A weaker
+  repository setting or an unreadable org file is a config error before any call; `run.json`
+  records the file's path and sha256.
+- **Calibration.** `orchestrator decisions calibrate` proposes `testing` and `review`
+  thresholds from your history (see [Usage](#usage)). It never writes config. The opt-in
+  `policy.explore` (`band`, `rate`) turns a stage on in a share of runs just below its
+  threshold, so lowering a threshold has data behind it; it never turns a stage off.
+
+On a developer's own machine these rules hold only while the developer cooperates: they own
+the machine and the files, and root can delete the org file. They are a real boundary where
+the operator controls the machine, such as CI or a managed host.
+
 ## Security model
 
 Every provider call gets the least tools its job needs, chosen by a fixed table in Go code —

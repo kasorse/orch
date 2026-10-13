@@ -1,11 +1,13 @@
 # Governance — control for teams (phase 4)
 
 Status: **in progress** (specified 2026-10-12; 2026-10-13): GV02, GV03, GV04, GV05, GV06 and
-GV07 are written and their tests with them, but `scripts/check.sh` has not been run over them
-yet, so they are not ticked below or in TODO.md G1, G2 and G5 (G1.1, G1.2 and G1.4 are what
-GV02 covers, G1.3 what GV03 covers, G2 what GV04 covers, G5.1 and G5.2 what GV05 covers, G5.3
-what GV06 covers; GV07 has no TODO.md item). This line does not record the state of the other
-tasks.
+GV07 are written and their tests with them, and GV08 has written the documentation (MVP.md §45
+and the sections it touches, CLAUDE.md, README, `orchestrator.example.yaml`, `org.example.yaml`),
+but `scripts/check.sh` has not been run over any of it yet, so nothing is ticked below or in
+TODO.md G1, G2, G3 and G5 (G1.1, G1.2 and G1.4 are what GV02 covers, G1.3 what GV03 covers, G2
+what GV04 covers, G3 what GV01 covers, G5.1 and G5.2 what GV05 covers, G5.3 what GV06 covers;
+GV07 and GV08 have no TODO.md item). Once the script passes, tick the tasks and G1, G2, G3 and
+G5 (G4 is already `[-]`), and change this line to done.
 
 The owner went through TODO.md G1–G5. G1, G2, G3 and G5 are in this spec. G4 (audit export) is
 dropped (`SPEC.md` §9): a local CLI on each developer's machine gives no central trail, and a

@@ -34,3 +34,25 @@ Every config key of this spec appears in the example files and in MVP.md, and ev
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. Only documentation and `org.example.yaml` changed.
+`scripts/check.sh` (root and `bench/`, outside the sandbox) has **not** been run, and nothing
+else was run either. It is the operator's to run, and GV08 is not ticked in `README.md`, and
+TODO.md G1, G2, G3 and G5 stay `[ ]`, until it passes (the earlier tasks wait on the same run).
+The `Status:` line of `README.md` says so and says what to tick.
+
+- **Already there.** GV02, GV03, GV05 and GV06 had put their parts in `orchestrator.example.yaml`
+  (`policy.paths`, `policy.explore`, `limits.max_cost_usd`), MVP.md §42 and §43 (the Approval row,
+  the Path rules section, `outcome.approval_required`, `options.path_rules`,
+  `executions[].path_rules`), the `decisions calibrate` entry in §4 and the README usage, and the
+  artifact list and the commit invariant in CLAUDE.md. GV08 added what was still missing: MVP.md
+  §45, the notes in §5, §7, §9, §12, §25 and §37 and the `org_config`, `policy_hash` and
+  `stages[].explored` fields in §43.3; CLAUDE.md's pointer, invariant and artifact entries;
+  the README section; `org.example.yaml`.
+- **MVP.md §45** is one section with six subsections (path rules, the budget, the org layer,
+  calibration and exploration, the honesty note, not covered); the other sections point to it
+  rather than repeat it.
+- **`org.example.yaml`** sets every key of the org schema, with values chosen as an example
+  (`.github/**`, `go.mod`, `sonnet`, `opus`, `haiku`); nothing loads it, so no test covers it.

@@ -22,6 +22,8 @@ time): MVP.md §43, which is also the field reference for `summary.md`;
 the quality loop (stage context, `checks:`, the in-session verify tools, review criteria,
 `fix_medium` and extra reviewers, the no-progress stop, `by_complexity`): MVP.md §44, with its
 design record in `specs/quality/`;
+governance - path rules, the org config layer, the cost budget, threshold calibration and
+exploration: MVP.md §45, with its design record in `specs/governance/`;
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`.
 This file is a summary to keep future work aligned with them, not a replacement.
@@ -195,6 +197,17 @@ history, otherwise the state the history and the transition table give (MVP.md �
   no-progress stop, `review.fix_medium` (read from `options.review_fix_medium` on the run, never
   from the current config), the extra reviewers' merge and the `by_complexity` route are Go code
   over config and `run.json`; every transition they add is derivable on resume.
+- **Governance is Go over config and the persisted run** (MVP.md §45, `specs/governance/`).
+  `policy.paths` rules match the files git says the run's net diff changed, never a model's
+  list, and a rule that needs a stage the workflow lacks fails the step: the workflow is never
+  rebuilt. The org layer (`config.LoadLayered`, `/etc/orchestrator/org.yaml`, the environment
+  variable only when that file is absent) only tightens: floors, ceilings and additions, in
+  its own strict schema; a weaker repository setting, an unreadable org file and a route
+  outside `allowed_models` are config errors before any call. `limits.max_cost_usd` fails
+  closed: a routed provider that cannot report cost (`provider.CostReporter`) is a config
+  error, and the engine stops before a step once the persisted executions have cost the
+  budget. `decisions calibrate` only proposes (read-only, writes no config, never part of
+  `run`); `policy.explore` only turns stages on. None of this binds the machine's owner.
 - **Decision providers return probabilities; Go decides** (MVP.md §31.2). Never let a
   provider's own pick (e.g. Jev's `choice` field), an LLM, or a caller choose stages or their
   order. Every provider answer is strictly validated; anything unexpected is an
@@ -311,7 +324,8 @@ tests assemble such values at run time (`internal/secretscan`, scenario 27).
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
-`allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
+`org_config` (`{path, sha256}` of the org file the run started under; each `resumes[]` entry
+has its own), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
 `options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
 read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
@@ -331,7 +345,8 @@ resume, derived and never read back for a decision: `status`, `failure_reason`,
 from run.json and decision.json when
 the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
 provider, model, effort and source each action gets; `policy_hash`: the sha256 of the
-`DecisionPolicy` the decision used, absent for `manual`, grouped on by `decisions report` and
+`DecisionPolicy` the decision used, absent for `manual`; `stages[].explored`: a stage
+`policy.explore` turned on; grouped on by `decisions report` and
 `decisions calibrate` (read-only, `internal/report/calibrate.go`); full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
 probability/threshold/forced/reason, latencies, and `usage` of each decision call that
