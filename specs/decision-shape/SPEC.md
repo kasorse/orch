@@ -1,6 +1,6 @@
 # Spec: Decision shape — size, templates, escalation
 
-Status: **in progress** (2026-10-13): DS02, DS03, DS04 and DS06 are built (their task files say how). The owner decided O1–O3 (§11); the gate
+Status: **in progress** (2026-10-13): DS01–DS04 and DS06 are built (their task files say how). The owner decided O1–O3 (§11); the gate
 O3 passed on the data of §1.1. The author's defaults are in §12. Once DS07 is done, MVP.md (§9, §9.1, §31.1, §44.8) becomes the
 normative home and this file stays the design record.
 
@@ -259,7 +259,8 @@ This tells the owner whether §1 holds on their data, and gives DS02 its example
 Two rules, both printed with their evidence. Neither writes anything.
 
 1. **By target share.** The cuts are the `target` quantiles of the group's sizes; each cut is the
-   midpoint between the two neighbouring sizes. At least `--min-runs` (default 10) per proposed
+   midpoint between the two neighbouring sizes, moved to the nearest gap between different sizes
+   when they are equal (DS01 "As built"). At least `--min-runs` (default 10) per proposed
    level.
 2. **By outcome.** A run is *hard* when `fix_iterations > 0` or its status is `stopped` by a
    limit. `failed` is not counted: in the data of §1.1 it is mostly the environment. Per size

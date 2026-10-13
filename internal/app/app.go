@@ -93,11 +93,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if len(rest) == 2 && rest[1] == "report" {
 			return decisionsReport(stdout)
 		}
-		dir, minRuns, err := decisionsCalibrateArgs(rest[1:])
+		dir, minRuns, target, err := decisionsCalibrateArgs(rest[1:])
 		if err != nil {
 			return err
 		}
-		return decisionsCalibrate(stdout, dir, minRuns)
+		return decisionsCalibrate(stdout, dir, minRuns, target)
 	case "runs":
 		dir, err := runsReportArgs(rest[1:])
 		if err != nil {
@@ -415,27 +415,28 @@ func decisionsReport(stdout io.Writer) error {
 	return nil
 }
 
-const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]"
+const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C]"
 
 // defaultMinRuns is how many runs a probability bucket needs before calibrate says anything
 // about it (specs/governance/SPEC.md §7.3).
 const defaultMinRuns = 10
 
 // decisionsCalibrateArgs parses what follows `decisions` for `calibrate`: --runs <dir> or
-// --runs=<dir> (default: the runs directory of the current repository) and --min-runs N or
-// --min-runs=N (default 10, at least 1), each at most once.
-func decisionsCalibrateArgs(args []string) (string, int, error) {
+// --runs=<dir> (default: the runs directory of the current repository), --min-runs N or
+// --min-runs=N (default 10, at least 1) and --size-target S/M/C (default 50/35/15: three
+// positive percentages summing to 100), each at most once.
+func decisionsCalibrateArgs(args []string) (string, int, report.SizeTarget, error) {
 	bad := &apperr.ConfigError{Msg: decisionsUsage}
 	if len(args) == 0 || args[0] != "calibrate" {
-		return "", 0, bad
+		return "", 0, report.SizeTarget{}, bad
 	}
-	dir, minRuns := runsBaseDir, defaultMinRuns
-	var gotDir, gotMin bool
+	dir, minRuns, target := runsBaseDir, defaultMinRuns, report.DefaultSizeTarget
+	var gotDir, gotMin, gotTarget bool
 	for i := 1; i < len(args); i++ {
 		flag, v, hasValue := strings.Cut(args[i], "=")
 		if !hasValue {
 			if i+1 >= len(args) {
-				return "", 0, bad
+				return "", 0, report.SizeTarget{}, bad
 			}
 			i++
 			v = args[i]
@@ -446,20 +447,44 @@ func decisionsCalibrateArgs(args []string) (string, int, error) {
 		case flag == "--min-runs" && !gotMin:
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 1 {
-				return "", 0, bad
+				return "", 0, report.SizeTarget{}, bad
 			}
 			minRuns, gotMin = n, true
+		case flag == "--size-target" && !gotTarget:
+			t, ok := parseSizeTarget(v)
+			if !ok {
+				return "", 0, report.SizeTarget{}, bad
+			}
+			target, gotTarget = t, true
 		default:
-			return "", 0, bad
+			return "", 0, report.SizeTarget{}, bad
 		}
 	}
-	return dir, minRuns, nil
+	return dir, minRuns, target, nil
+}
+
+// parseSizeTarget reads S/M/C: three positive integers summing to 100.
+func parseSizeTarget(v string) (report.SizeTarget, bool) {
+	parts := strings.Split(v, "/")
+	if len(parts) != 3 {
+		return report.SizeTarget{}, false
+	}
+	var t report.SizeTarget
+	sum := 0
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 {
+			return report.SizeTarget{}, false
+		}
+		t[i], sum = n, sum+n
+	}
+	return t, sum == 100
 }
 
 // decisionsCalibrate proposes testing and review thresholds from the runs found under dir
 // (specs/governance/SPEC.md §7.3). It only reads: persistence.LoadRunDirs takes no lock and
 // creates nothing, and no Store is built. It needs no configuration and calls nothing.
-func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
+func decisionsCalibrate(stdout io.Writer, dir string, minRuns int, target report.SizeTarget) error {
 	found, bad, err := persistence.LoadRunDirs(dir)
 	if err != nil {
 		return err
@@ -481,7 +506,9 @@ func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
 		}
 		unreadable = append(unreadable, report.UnreadableRun{Path: path, Err: b.Err.Error()})
 	}
-	report.RenderCalibration(stdout, dir, report.Calibrate(entries, unreadable, minRuns))
+	c := report.Calibrate(entries, unreadable, minRuns)
+	c.Shape, c.SizeTarget = report.Shape(entries, target, minRuns), target
+	report.RenderCalibration(stdout, dir, c)
 	return nil
 }
 

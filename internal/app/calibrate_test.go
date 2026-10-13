@@ -14,6 +14,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/persistence"
+	"orchestrator/internal/report"
 )
 
 func TestDecisionsCalibrateArgs(t *testing.T) {
@@ -44,10 +45,14 @@ func TestDecisionsCalibrateArgs(t *testing.T) {
 		{"min-runs negative", []string{"calibrate", "--min-runs=-2"}, "", 0, true},
 		{"min-runs not a number", []string{"calibrate", "--min-runs", "many"}, "", 0, true},
 		{"extra argument", []string{"calibrate", "bench/runs"}, "", 0, true},
+		{"size-target not three", []string{"calibrate", "--size-target", "50/50"}, "", 0, true},
+		{"size-target not 100", []string{"calibrate", "--size-target=50/35/10"}, "", 0, true},
+		{"size-target with a zero", []string{"calibrate", "--size-target", "60/40/0"}, "", 0, true},
+		{"size-target twice", []string{"calibrate", "--size-target", "40/40/20", "--size-target", "40/40/20"}, "", 0, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			dir, minRuns, err := decisionsCalibrateArgs(tc.args)
+			dir, minRuns, target, err := decisionsCalibrateArgs(tc.args)
 			if tc.wantErr {
 				var ce *apperr.ConfigError
 				if !errors.As(err, &ce) || !strings.Contains(ce.Msg, "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]") {
@@ -55,10 +60,15 @@ func TestDecisionsCalibrateArgs(t *testing.T) {
 				}
 				return
 			}
-			if err != nil || dir != tc.dir || minRuns != tc.minRuns {
-				t.Fatalf("decisionsCalibrateArgs(%q) = %q, %d, %v; want %q, %d", tc.args, dir, minRuns, err, tc.dir, tc.minRuns)
+			if err != nil || dir != tc.dir || minRuns != tc.minRuns || target != report.DefaultSizeTarget {
+				t.Fatalf("decisionsCalibrateArgs(%q) = %q, %d, %v, %v; want %q, %d", tc.args, dir, minRuns, target, err, tc.dir, tc.minRuns)
 			}
 		})
+	}
+
+	_, _, target, err := decisionsCalibrateArgs([]string{"calibrate", "--size-target", "40/40/20"})
+	if err != nil || target != (report.SizeTarget{40, 40, 20}) {
+		t.Errorf("--size-target 40/40/20 = %v, %v", target, err)
 	}
 }
 

@@ -37,3 +37,31 @@ source of DS02's example cuts.
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. `scripts/check.sh` (root and `bench/`) passed on
+2026-10-13, run outside the bwrap sandbox.
+
+- **Where.** `report.Shape(entries, target, minRuns)` in `internal/report/shape.go`, rendered
+  by `RenderCalibration` after the per-group threshold sections and before the threshold diff.
+  `Calibrate` keeps its signature: `app.decisionsCalibrate` fills `Calibration.Shape` and
+  `SizeTarget`, so a report built without them prints no shape section.
+- **Grouping** is by provider, model and `questions_hash` already (DS05's grouping): traces
+  before DS02 have no hash and form one legacy group per model. The skip reasons are
+  calibrate's, now in one function (`calibrationSkip`) both use.
+- **Size** is computed from the primary distribution with `ComplexityDecision.Size()`, so
+  legacy traces, which recorded no size, get one too.
+- **Cuts on ties.** The plan put each cut midway between the two sizes at the share. On the
+  measured data four runs sit at 1.45 exactly where the complex share falls, and that midpoint
+  (1.45) would put all four in complex, 23% instead of 15%. The cut now moves to the nearest
+  gap between different sizes (`gapCut`): equal sizes always land in one level.
+- **Correlation** is computed for every stage that has a probability in the group, over the
+  runs that have one; under 3 runs, or with a constant side, it prints `—`.
+- **`--size-target S/M/C`**: three positive integers summing to 100, at most once.
+- **Reproduces `SPEC.md` §1.1.** On `.orchestrator/runs` (43 claude/opus runs): sizes 0.47 /
+  1.08 / 1.25 / 1.42 / 1.78, interquartile range 0.35, levels 4 / 29 / 10, r(planning) +0.94 and
+  r(review) +0.83 marked redundant, cuts medium 1.23, complex 1.48. On `bench/results/go/out`
+  (22 claude/haiku runs): interquartile range 0.14, every run medium, cuts refused. The medium
+  cut prints 1.23 where the example has 1.24: the midpoint of 1.22 and 1.25 is 1.235, and
+  either value separates the same runs.
