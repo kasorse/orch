@@ -136,15 +136,40 @@ func New(cfg *config.Config, registry *provider.Registry, repo *repository.Repos
 }
 
 // route is the provider, model and effort an action runs with under the run's decision, and
-// the source of the model (domain.ProviderRef.ModelSource): the action's own, or its
-// by_complexity entry for the decided complexity. Every executor resolves its model here.
-// The extra reviewers of review.models are not routed (specs/quality/SPEC.md §9.2).
+// the source of the model (domain.ProviderRef.ModelSource): the action's own, its
+// by_complexity entry for the decided complexity, or - for an implement that fixes a failed
+// test or review, under actions.implement.escalate - the entry one level up. Every executor
+// resolves its model here. The extra reviewers of review.models are not routed
+// (specs/quality/SPEC.md §9.2).
 func (d *Dispatcher) route(run *domain.Run, actionName domain.ActionType) (config.ProviderModel, string) {
+	if actionName == domain.ActionImplement && fixesACheck(run.Executions) {
+		if pm, source, ok := d.Config.Actions.EscalatedRoute(actionName, run.Decision); ok {
+			return pm, source
+		}
+	}
 	pm, source, ok := d.Config.Actions.Route(actionName, run.Decision)
 	if !ok {
 		return config.ProviderModel{}, domain.ModelSourceBase
 	}
 	return pm, source
+}
+
+// fixesACheck reports whether an implement about to run fixes a failed test or review: the
+// last execution that is not an implement is a test or a review. Stage order puts both after
+// implement, so only a fix transition leads from them back to it; skipping implements keeps
+// the answer when a resume repeats a fix that failed (specs/decision-shape/SPEC.md §8).
+func fixesACheck(execs []domain.StepExecution) bool {
+	for i := len(execs) - 1; i >= 0; i-- {
+		switch execs[i].Action {
+		case domain.ActionImplement:
+			continue
+		case domain.ActionTest, domain.ActionReview:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // call resolves the configured provider for pm, executes the prompt, and - on a

@@ -66,6 +66,7 @@ func Validate(cfg Config) error {
 
 	problems = append(problems, promptLimitProblems(cfg.Limits.Prompt)...)
 	problems = append(problems, verifyProblems(cfg)...)
+	problems = append(problems, escalateProblems(cfg)...)
 
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
@@ -155,6 +156,29 @@ func verifyProblems(cfg Config) []string {
 	}
 	if v.Timeout() <= 0 {
 		problems = append(problems, fmt.Sprintf("limits.verify.call_timeout must be a positive duration, got %s", v.Timeout()))
+	}
+	return problems
+}
+
+// escalateProblems validates actions.implement.escalate (specs/decision-shape/SPEC.md §8): the
+// key belongs to implement alone, and it needs by_complexity, the table it climbs.
+func escalateProblems(cfg Config) []string {
+	var problems []string
+	for _, o := range []struct {
+		name string
+		a    ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"analyze", cfg.Actions.Analyze},
+		{"plan", cfg.Actions.Plan},
+		{"review", cfg.Actions.Review},
+	} {
+		if o.a.escalateSet {
+			problems = append(problems, fmt.Sprintf("actions.%s.escalate: unknown key (escalate is accepted only on actions.implement)", o.name))
+		}
+	}
+	if cfg.Actions.Implement.Escalate && len(cfg.Actions.Implement.ByComplexity) == 0 {
+		problems = append(problems, "actions.implement.escalate needs actions.implement.by_complexity: a fix runs on the route of the level above")
 	}
 	return problems
 }

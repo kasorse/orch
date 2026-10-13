@@ -39,6 +39,10 @@ type ActionConfig struct {
 	// §9). The provider is fixed per action. A key that is not a complexity is kept as
 	// written, so Validate can name it; read the table through Route.
 	ByComplexity map[domain.Complexity]ModelEffort
+	// Escalate routes an implement that fixes a failed test or review as the next complexity
+	// up (specs/decision-shape/SPEC.md §8). Only actions.implement accepts it, and only with
+	// ByComplexity; read it through ActionsConfig.EscalatedRoute.
+	Escalate bool
 	// Models are the extra reviewers of actions.review: model names on the action's provider,
 	// called one after another after the base model with the same prompt (specs/quality/SPEC.md
 	// §7.5). Only actions.review accepts it; Validate rejects the key anywhere else.
@@ -46,8 +50,9 @@ type ActionConfig struct {
 
 	// verifySet and modelsSet record that the key was written, so Validate can name it on an
 	// action that does not accept it.
-	verifySet bool
-	modelsSet bool
+	verifySet   bool
+	modelsSet   bool
+	escalateSet bool
 }
 
 // MaxExtraReviewers bounds actions.review.models.
@@ -82,6 +87,26 @@ func (a ActionConfig) Route(c domain.Complexity, manual bool) (ProviderModel, st
 	return pm, domain.ModelSourceByComplexity + string(c)
 }
 
+// escalatedRoute is the route one complexity above c, with the source escalated.<level>; ok is
+// false without Escalate, for complex (nothing above it), and when the level above has no
+// by_complexity entry, so a fix never runs on something other than a configured route.
+func (a ActionConfig) escalatedRoute(c domain.Complexity) (ProviderModel, string, bool) {
+	if !a.Escalate {
+		return ProviderModel{}, "", false
+	}
+	order := domain.ComplexityOrder()
+	i := slices.Index(order, c)
+	if i < 0 || i+1 >= len(order) {
+		return ProviderModel{}, "", false
+	}
+	up := order[i+1]
+	if _, ok := a.ByComplexity[up]; !ok {
+		return ProviderModel{}, "", false
+	}
+	pm, _ := a.Route(up, false)
+	return pm, domain.ModelSourceEscalated + string(up), true
+}
+
 // UnmarshalYAML parses ActionConfig's own provider/model/timeout keys directly (rather
 // than relying on yaml.v3's inline-embedding tag) so Timeout can go through the same
 // duration-string parsing as ExecutionConfig.Timeout.
@@ -92,6 +117,7 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Effort   string `yaml:"effort"`
 		Timeout  string `yaml:"timeout"`
 		Verify   *bool  `yaml:"verify"`
+		Escalate *bool  `yaml:"escalate"`
 
 		// Models are pointers because yaml.v3 drops a null entry of a []string without a
 		// word; a pointer keeps it visible, so it can be refused.
@@ -109,6 +135,8 @@ func (a *ActionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	a.Effort = raw.Effort
 	a.Verify = raw.Verify != nil && *raw.Verify
 	a.verifySet = raw.Verify != nil
+	a.Escalate = raw.Escalate != nil && *raw.Escalate
+	a.escalateSet = raw.Escalate != nil
 	a.Models = nil
 	if raw.Models != nil {
 		a.Models = make([]string, len(raw.Models))
@@ -190,6 +218,17 @@ func (a ActionsConfig) Route(t domain.ActionType, d *domain.Decision) (pm Provid
 		pm, source = ac.Route(d.Complexity.Selected, d.Source == domain.DecisionSourceManual)
 	}
 	return pm, source, true
+}
+
+// EscalatedRoute is the route of an implement that fixes a failed test or review, when
+// actions.implement.escalate gives one: the by_complexity entry one level above the decided
+// complexity. ok is false for every other action, a manual decision (run --stage) and when
+// there is no level above with an entry; the caller then keeps Route.
+func (a ActionsConfig) EscalatedRoute(t domain.ActionType, d *domain.Decision) (pm ProviderModel, source string, ok bool) {
+	if t != domain.ActionImplement || d == nil || d.Source == domain.DecisionSourceManual {
+		return ProviderModel{}, "", false
+	}
+	return a.Implement.escalatedRoute(d.Complexity.Selected)
 }
 
 type TestConfig struct {

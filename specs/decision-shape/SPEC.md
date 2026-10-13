@@ -1,6 +1,6 @@
 # Spec: Decision shape — size, templates, escalation
 
-Status: **in progress** (2026-10-13): DS02 is built (its task file says how). The owner decided O1–O3 (§11); the gate
+Status: **in progress** (2026-10-13): DS02 and DS06 are built (their task files say how). The owner decided O1–O3 (§11); the gate
 O3 passed on the data of §1.1. The author's defaults are in §12. Once DS07 is done, MVP.md (§9, §9.1, §31.1, §44.8) becomes the
 normative home and this file stays the design record.
 
@@ -284,15 +284,15 @@ actions:
 ```
 
 - With `escalate: true`, an `implement` that follows a failed `test` or a failing `review`
-  (the execution right before it, read from `run.json`) routes as the **next** level up:
+  (the last execution before it that is not an implement, read from `run.json`) routes as the **next** level up:
   simple → `by_complexity.medium`, medium → `by_complexity.complex`, complex stays. One step,
   however many fix iterations follow, so the cost stays predictable.
-- `provider.model_source` records `escalated.<level>`. `decision.json: models` lists the
-  escalated route next to the base one.
+- `provider.model_source` records `escalated.<level>`.
 - Never under `run --stage` (no level: the base route, as today).
 - The provider never changes, as with `by_complexity`. `allowed_models`, `max_cost_usd` and the
   CLI version check already cover every `by_complexity` model.
 - A resume derives the route from the persisted history, so it routes the same way.
+- `decision.json: models` does not list it (DS06 "As built"): `run.json` records it per step.
 
 This needs the owner's reading of MVP.md §31.1 (§11, O1): it is a config table keyed by the
 attempt, as `by_complexity` is keyed by the level. It is not "best model" selection.

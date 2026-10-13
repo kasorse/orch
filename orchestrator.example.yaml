@@ -100,6 +100,11 @@ actions:
     # by_complexity:
     #   simple:  {model: haiku, effort: low}
     #   complex: {model: opus, effort: high}
+    # Optional, default false, implement only, needs by_complexity: an implement that fixes a
+    # failed test or review runs on the entry one level above the decided complexity (simple ->
+    # medium -> complex; complex, a level above without an entry and --stage keep their route).
+    # run.json records model_source escalated.<level> (specs/decision-shape/SPEC.md §8).
+    # escalate: true
 
   review:
     provider: claude

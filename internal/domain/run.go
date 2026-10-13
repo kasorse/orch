@@ -35,9 +35,10 @@ type ProviderRef struct {
 	Model     string    `json:"model"`
 	Effort    string    `json:"effort,omitempty"`
 	Authority Authority `json:"authority,omitempty"`
-	// ModelSource says where the model and effort came from: ModelSourceBase, or
-	// ModelSourceByComplexity + the decided complexity (specs/quality/SPEC.md §9.3). Empty in
-	// a run written before the field.
+	// ModelSource says where the model and effort came from: ModelSourceBase,
+	// ModelSourceByComplexity + the decided complexity (specs/quality/SPEC.md §9.3), or
+	// ModelSourceEscalated + the level above it for an implement that fixes a failed test or
+	// review (specs/decision-shape/SPEC.md §8). Empty in a run written before the field.
 	ModelSource string `json:"model_source,omitempty"`
 }
 
@@ -45,20 +46,24 @@ type ProviderRef struct {
 const (
 	ModelSourceBase         = "base"
 	ModelSourceByComplexity = "by_complexity."
+	ModelSourceEscalated    = "escalated."
 )
 
-// ValidModelSource reports whether s is a model source a run records: base, or by_complexity
-// with one of the complexities.
+// ValidModelSource reports whether s is a model source a run records: base, by_complexity
+// with one of the complexities, or escalated to one above simple.
 func ValidModelSource(s string) bool {
 	if s == ModelSourceBase {
 		return true
 	}
-	level, ok := strings.CutPrefix(s, ModelSourceByComplexity)
-	if !ok {
-		return false
+	if level, ok := strings.CutPrefix(s, ModelSourceByComplexity); ok {
+		_, err := ParseComplexity(level)
+		return err == nil
 	}
-	_, err := ParseComplexity(level)
-	return err == nil
+	if level, ok := strings.CutPrefix(s, ModelSourceEscalated); ok {
+		c, err := ParseComplexity(level)
+		return err == nil && c != ComplexitySimple
+	}
+	return false
 }
 
 type StepExecStatus string

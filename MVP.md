@@ -2383,8 +2383,17 @@ A static table in config, keyed by the decided complexity, is still static routi
 `actions.<name>.by_complexity` maps `simple | medium | complex` to a model and/or effort of the
 same provider, Go picks the entry once per step from `decision.complexity`, and the same
 decision always gives the same models (§44.8). A run started with `--stage` has no complexity
-and uses the action's own model. Nothing picks a model from cost so far, failures or a
-model's own answer, and there is no fallback.
+and uses the action's own model. Nothing picks a model from cost so far or a model's own
+answer, and there is no fallback.
+
+The one model a failure changes is `actions.implement.escalate: true` (opt-in,
+`specs/decision-shape/SPEC.md` §8): an `implement` that fixes a failed test or review - the
+last step before it that is not an implement is a test or a review, read from `run.json` -
+runs on the `by_complexity` entry one level above the decided complexity, recorded as
+`model_source: escalated.<level>`. It is the same static table, keyed by the attempt as well
+as the level: the failure is the test command's exit code or the review verdict, never a
+model's opinion, the provider never changes, and a resume derives the same route from the
+same history. Complex, a level above without an entry and `--stage` keep their route.
 
 ### 31.2 Deterministic workflows
 

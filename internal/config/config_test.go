@@ -220,3 +220,69 @@ func TestByComplexity_ProviderSetUnchanged(t *testing.T) {
 		t.Errorf("dependency checks changed: %v → %v", errPlain, errRouted)
 	}
 }
+
+func TestActionsConfig_EscalatedRoute(t *testing.T) {
+	base := ProviderModel{Provider: "claude", Model: "sonnet"}
+	table := map[domain.Complexity]ModelEffort{
+		domain.ComplexityMedium:  {Effort: "high"},
+		domain.ComplexityComplex: {Model: "opus"},
+	}
+	decided := func(c domain.Complexity) *domain.Decision {
+		return &domain.Decision{Source: domain.DecisionSourceLLM, Complexity: domain.ComplexityOutcome{Selected: c}}
+	}
+	on := ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: table, Escalate: true}}
+	off := ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: table}}
+	for _, tc := range []struct {
+		name    string
+		actions ActionsConfig
+		action  domain.ActionType
+		d       *domain.Decision
+		want    ProviderModel
+		source  string
+		ok      bool
+	}{
+		{"simple climbs to medium", on, domain.ActionImplement, decided(domain.ComplexitySimple), ProviderModel{Provider: "claude", Model: "sonnet", Effort: "high"}, "escalated.medium", true},
+		{"medium climbs to complex", on, domain.ActionImplement, decided(domain.ComplexityMedium), ProviderModel{Provider: "claude", Model: "opus"}, "escalated.complex", true},
+		{"complex has nothing above", on, domain.ActionImplement, decided(domain.ComplexityComplex), ProviderModel{}, "", false},
+		{"off", off, domain.ActionImplement, decided(domain.ComplexitySimple), ProviderModel{}, "", false},
+		{"manual", on, domain.ActionImplement, &domain.Decision{Source: domain.DecisionSourceManual}, ProviderModel{}, "", false},
+		{"no decision", on, domain.ActionImplement, nil, ProviderModel{}, "", false},
+		{"another action", on, domain.ActionReview, decided(domain.ComplexitySimple), ProviderModel{}, "", false},
+		{"level above without an entry", ActionsConfig{Implement: ActionConfig{ProviderModel: base, Escalate: true,
+			ByComplexity: map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "opus"}}}},
+			domain.ActionImplement, decided(domain.ComplexitySimple), ProviderModel{}, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, source, ok := tc.actions.EscalatedRoute(tc.action, tc.d)
+			if got != tc.want || source != tc.source || ok != tc.ok {
+				t.Errorf("EscalatedRoute = %+v, %q, %v; want %+v, %q, %v", got, source, ok, tc.want, tc.source, tc.ok)
+			}
+		})
+	}
+}
+
+func TestLoad_Escalate(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, strings.Replace(byComplexityYAML("{complex: {model: big}}"), "by_complexity:", "escalate: true, by_complexity:", 1)))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(cfg); err != nil || !cfg.Actions.Implement.Escalate {
+		t.Fatalf("escalate with by_complexity: Validate = %v, Escalate = %v", err, cfg.Actions.Implement.Escalate)
+	}
+	for name, tc := range map[string]struct{ yaml, want string }{
+		"without by_complexity": {strings.Replace(validV2(""), "implement: {provider: claude, model: opus}",
+			"implement: {provider: claude, model: opus, escalate: true}", 1), "actions.implement.escalate needs actions.implement.by_complexity"},
+		"on review": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
+			"review: {provider: claude, model: sonnet, escalate: false}", 1), "actions.review.escalate: unknown key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, tc.yaml))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

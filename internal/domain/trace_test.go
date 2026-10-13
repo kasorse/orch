@@ -135,3 +135,15 @@ func TestComplexityDecisionSize(t *testing.T) {
 		}
 	}
 }
+
+func TestValidModelSource(t *testing.T) {
+	for s, want := range map[string]bool{
+		"base": true, "by_complexity.simple": true, "by_complexity.complex": true,
+		"escalated.medium": true, "escalated.complex": true,
+		"escalated.simple": false, "escalated.huge": false, "by_complexity.": false, "": false, "other": false,
+	} {
+		if got := ValidModelSource(s); got != want {
+			t.Errorf("ValidModelSource(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
