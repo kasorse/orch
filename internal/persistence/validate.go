@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"net/url"
 	"path"
@@ -42,6 +43,9 @@ func validateRun(run *domain.Run, runID string) error {
 
 	if run.Decision != nil {
 		if err := validateDecisionStages(run.Decision.Stages.Stages); err != nil {
+			return fmt.Errorf("decision: %w", err)
+		}
+		if err := validateComplexityOutcome(run.Decision.Complexity); err != nil {
 			return fmt.Errorf("decision: %w", err)
 		}
 	}
@@ -431,6 +435,29 @@ func validateDecisionModels(models map[string]domain.ModelRoute) error {
 func validatePolicyHash(h string) error {
 	if h != "" && !isSHA256Hex(h) {
 		return fmt.Errorf("policy_hash %q is not 64 lowercase hex digits", h)
+	}
+	return nil
+}
+
+// validateQuestionsHash checks decision.json's questions_hash like validatePolicyHash.
+func validateQuestionsHash(h string) error {
+	if h != "" && !isSHA256Hex(h) {
+		return fmt.Errorf("questions_hash %q is not 64 lowercase hex digits", h)
+	}
+	return nil
+}
+
+// validateComplexityOutcome checks the size cuts (specs/decision-shape/SPEC.md §10): each
+// source's size, when present, in [0, 2] and, when present, 0 < cuts.medium <
+// cuts.complex <= 2. Both are absent in a trace written before them.
+func validateComplexityOutcome(c domain.ComplexityOutcome) error {
+	for _, src := range slices.Sorted(maps.Keys(c.Sources)) {
+		if s := c.Sources[src].Size; s != nil && !(*s >= 0 && *s <= 2) {
+			return fmt.Errorf("complexity.sources.%s.size %v outside [0, 2]", src, *s)
+		}
+	}
+	if k := c.Cuts; k != nil && !(0 < k.Medium && k.Medium < k.Complex && k.Complex <= 2) {
+		return fmt.Errorf("complexity.cuts must satisfy 0 < medium < complex <= 2, got medium %v, complex %v", k.Medium, k.Complex)
 	}
 	return nil
 }

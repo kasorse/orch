@@ -73,8 +73,7 @@ policy:
   context_depth:
     project_threshold: 0.5
   complexity:
-    complex: 0.55
-    medium: 0.70
+    cuts: {medium: 1.24, complex: 1.48}
   stages:
     thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
     force:
@@ -139,7 +138,9 @@ security:
   decision provider (the stages still get your original text). If translation fails, the
   original is sent and a warning is printed.
 - **`policy`** turns probabilities into decisions: `project_threshold` for collecting
-  project context; the cumulative complexity thresholds (complex is checked first); a
+  project context; the complexity cuts on size = P(medium) + 2·P(complex), from 0 to 2
+  (`specs/decision-shape/`: the example's are quantiles of past decisions, recalibrate for
+  yours); a
   per-stage threshold (inclusive); and stages forced on for a complexity. If no stage
   qualifies, the workflow is `analysis`. The same thresholds apply to every decision
   provider.

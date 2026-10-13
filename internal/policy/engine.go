@@ -24,26 +24,23 @@ func SelectContextDepth(d domain.ContextDepthDecision, p domain.DecisionPolicy) 
 	return domain.ContextDepthNone
 }
 
-// SelectComplexity picks a complexity from d by walking the most complex option down
-// (TASKS.md В2): Complex is selected when its own probability is at least
-// p.ComplexityThreshold[Complex]; otherwise Medium is selected when the combined
-// probability of Medium and Complex is at least p.ComplexityThreshold[Medium];
-// otherwise Simple. Both comparisons are inclusive.
+// SelectComplexity cuts d's Size by p.ComplexityCuts (specs/decision-shape/SPEC.md §5):
+// complex at or above the complex cut, otherwise medium at or above the medium cut,
+// otherwise simple. Both comparisons are inclusive.
 //
-// This is deliberately not argmax: on a distribution spread thin across all three
-// options, argmax could pick Simple even though Medium+Complex together carry most of
-// the probability mass. Walking from the top down, and summing as it goes, means a
-// near-tie is resolved toward the more complex (and so more cautious) option - an
-// extra analysis pass costs less than a missed one.
+// This is deliberately not argmax: a model answers most tasks "medium", and the size keeps
+// what argmax throws away (0.2/0.6/0.2 and 0.05/0.6/0.35 are different tasks). The cuts
+// are quantiles of past sizes, proposed by `decisions calibrate`.
 func SelectComplexity(d domain.ComplexityDecision, p domain.DecisionPolicy) domain.Complexity {
-	if d.Probabilities[domain.ComplexityComplex] >= p.ComplexityThreshold[domain.ComplexityComplex] {
+	size := d.Size()
+	switch {
+	case size >= p.ComplexityCuts.Complex:
 		return domain.ComplexityComplex
-	}
-	mass := d.Probabilities[domain.ComplexityMedium] + d.Probabilities[domain.ComplexityComplex]
-	if mass >= p.ComplexityThreshold[domain.ComplexityMedium] {
+	case size >= p.ComplexityCuts.Medium:
 		return domain.ComplexityMedium
+	default:
+		return domain.ComplexitySimple
 	}
-	return domain.ComplexitySimple
 }
 
 // SelectStages decides which stages run (SPEC.md §12): a stage is enabled when its
@@ -185,7 +182,8 @@ func evaluateComplexity(
 ) domain.ComplexityOutcome {
 	sources := make(map[domain.ComplexitySource]domain.ComplexitySourceOutcome, len(dists))
 	for src, d := range dists {
-		sources[src] = domain.ComplexitySourceOutcome{Decision: d, Selected: SelectComplexity(d, p)}
+		size := d.Size()
+		sources[src] = domain.ComplexitySourceOutcome{Decision: d, Size: &size, Selected: SelectComplexity(d, p)}
 	}
 
 	selected := sources[primary].Selected
@@ -198,11 +196,13 @@ func evaluateComplexity(
 		}
 	}
 
+	cuts := p.ComplexityCuts
 	return domain.ComplexityOutcome{
 		Primary:  primary,
 		Sources:  sources,
 		Selected: selected,
 		Agree:    agree,
+		Cuts:     &cuts,
 	}
 }
 

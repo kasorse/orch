@@ -109,6 +109,18 @@ type ComplexityDecision struct {
 	Score         *float64               `json:"score,omitempty"`
 }
 
+// Size is the distribution's expected level, Σ i·P(level i) over ComplexityOrder:
+// P(medium) + 2·P(complex), in [0, 2] (specs/decision-shape/SPEC.md §5.1). It is computed
+// from the probabilities for every provider alike; Score, when a provider sends one, is
+// recorded and never used.
+func (d ComplexityDecision) Size() float64 {
+	size := 0.0
+	for i, c := range complexityOrder {
+		size += float64(i) * d.Probabilities[c]
+	}
+	return size
+}
+
 func (d ComplexityDecision) Validate() error {
 	if err := validateDistribution(d.Probabilities, complexityOrder); err != nil {
 		return fmt.Errorf("complexity: %w", err)

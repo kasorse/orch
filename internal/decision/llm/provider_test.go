@@ -277,7 +277,7 @@ func testPolicy() domain.DecisionPolicy {
 	}
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: 0.5,
-		ComplexityThreshold:     map[domain.Complexity]float64{domain.ComplexityComplex: 0.4, domain.ComplexityMedium: 0.5},
+		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold:          th,
 	}
 }

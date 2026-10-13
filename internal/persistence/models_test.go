@@ -148,3 +148,43 @@ func TestLoadDecision_PolicyHash(t *testing.T) {
 		}
 	}
 }
+
+// specs/decision-shape §10: size in [0, 2], 0 < cuts.medium < cuts.complex <= 2,
+// questions_hash 64 hex; a trace without any of them still loads.
+func TestLoadDecision_SizeCutsQuestionsHash(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.runDir(run.ID), "decision.json")
+	hash := strings.Repeat("a", 64)
+	ok := `{"request":"fix","questions_hash":"` + hash + `","complexity":{"primary":"choice","sources":{"choice":` +
+		`{"decision":{"probabilities":{"simple":0.1,"medium":0.6,"complex":0.3},"confidence":0.6},"size":1.2,"selected":"medium"}},` +
+		`"selected":"medium","agree":true,"cuts":{"medium":0.5,"complex":1.4}}}`
+	if err := os.WriteFile(path, []byte(ok), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := store.LoadDecision(run.ID)
+	if err != nil || got.QuestionsHash != hash || got.Complexity.Cuts == nil || *got.Complexity.Sources["choice"].Size != 1.2 {
+		t.Fatalf("LoadDecision = %+v, %v; want it to load with size, cuts and questions_hash", got, err)
+	}
+
+	for name, bad := range map[string]string{
+		"size above 2":    strings.Replace(ok, `"size":1.2`, `"size":2.1`, 1),
+		"negative size":   strings.Replace(ok, `"size":1.2`, `"size":-0.1`, 1),
+		"cuts reversed":   strings.Replace(ok, `"cuts":{"medium":0.5,"complex":1.4}`, `"cuts":{"medium":1.4,"complex":0.5}`, 1),
+		"cut above 2":     strings.Replace(ok, `"complex":1.4}`, `"complex":2.5}`, 1),
+		"medium cut zero": strings.Replace(ok, `"cuts":{"medium":0.5`, `"cuts":{"medium":0`, 1),
+		"short hash":      strings.Replace(ok, hash, hash[:63], 1),
+	} {
+		if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := store.LoadDecision(run.ID)
+		var rse *apperr.RunStateError
+		if !errors.As(err, &rse) || rse.Kind != apperr.RunCorrupt {
+			t.Errorf("%s: must be RunCorrupt, got %v", name, err)
+		}
+	}
+}

@@ -9,14 +9,11 @@ import (
 
 // testPolicy mirrors the example thresholds in specs/JEV integration/TASKS.md T02:
 // research 0.70, analysis 0.60, planning 0.65, development 0.60, testing 0.60,
-// review 0.70; complex forces analysis, planning, review.
+// review 0.70; complex forces analysis, planning, review; size cuts 0.5 and 1.4.
 func testPolicy() domain.DecisionPolicy {
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: 0.5,
-		ComplexityThreshold: map[domain.Complexity]float64{
-			domain.ComplexityComplex: 0.40,
-			domain.ComplexityMedium:  0.50,
-		},
+		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold: map[domain.Stage]float64{
 			domain.StageResearch:    0.70,
 			domain.StageAnalysis:    0.60,
@@ -75,13 +72,13 @@ func TestSelectComplexity(t *testing.T) {
 		simple, medium, complex float64
 		want                    domain.Complexity
 	}{
-		{"clear simple", 0.94, 0.04, 0.02, domain.ComplexitySimple},
-		{"clear medium (example 2)", 0.05, 0.63, 0.32, domain.ComplexityMedium},
-		{"complex clears its own threshold directly", 0.10, 0.10, 0.80, domain.ComplexityComplex},
-		{"complex threshold boundary is inclusive", 0.60, 0.00, 0.40, domain.ComplexityComplex},
-		{"just below complex threshold, medium+complex clears medium threshold", 0.11, 0.50, 0.39, domain.ComplexityMedium},
-		{"medium threshold boundary is inclusive", 0.50, 0.50, 0.00, domain.ComplexityMedium},
-		{"neither threshold met", 0.60, 0.30, 0.10, domain.ComplexitySimple},
+		{"clear simple (size 0.08)", 0.94, 0.04, 0.02, domain.ComplexitySimple},
+		{"clear medium (size 1.27)", 0.05, 0.63, 0.32, domain.ComplexityMedium},
+		{"clear complex (size 1.70)", 0.10, 0.10, 0.80, domain.ComplexityComplex},
+		{"complex cut is inclusive (size 1.40)", 0.20, 0.20, 0.60, domain.ComplexityComplex},
+		{"just below the complex cut (size 1.39)", 0.11, 0.39, 0.50, domain.ComplexityMedium},
+		{"medium cut is inclusive (size 0.50)", 0.50, 0.50, 0.00, domain.ComplexityMedium},
+		{"below the medium cut (size 0.49)", 0.61, 0.29, 0.10, domain.ComplexitySimple},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -93,21 +90,18 @@ func TestSelectComplexity(t *testing.T) {
 	}
 }
 
-// TestSelectComplexity_ConservativeOnNearTie is TASKS.md T03's acceptance example:
-// a distribution spread across all three options should not fall through to Simple
-// just because no single option has a probability majority. With a complex threshold
-// set low enough to treat "a meaningful complex probability" as sufficient on its
-// own - a deliberate operator choice, not the default 0.40 from testPolicy - complex
-// wins even though simple and complex are tied and neither is a majority.
-func TestSelectComplexity_ConservativeOnNearTie(t *testing.T) {
+// TestSelectComplexity_SizeSeparatesWhatArgmaxMerges is the reason for the size
+// (specs/decision-shape/SPEC.md §5.1): two distributions with the same "medium" argmax
+// land on different levels once the cut sits between their sizes.
+func TestSelectComplexity_SizeSeparatesWhatArgmaxMerges(t *testing.T) {
 	p := testPolicy()
-	p.ComplexityThreshold = map[domain.Complexity]float64{
-		domain.ComplexityComplex: 0.35,
-		domain.ComplexityMedium:  0.50,
+	p.ComplexityCuts = domain.ComplexityCuts{Medium: 0.5, Complex: 1.2}
+	low, high := complexityDist(0.20, 0.60, 0.20), complexityDist(0.05, 0.60, 0.35)
+	if got := SelectComplexity(low, p); got != domain.ComplexityMedium {
+		t.Errorf("SelectComplexity(.20/.60/.20, size 1.00) = %s, want medium", got)
 	}
-	d := complexityDist(0.35, 0.30, 0.35)
-	if got := SelectComplexity(d, p); got != domain.ComplexityComplex {
-		t.Errorf("SelectComplexity(.35/.30/.35) with complex threshold 0.35 = %s, want complex", got)
+	if got := SelectComplexity(high, p); got != domain.ComplexityComplex {
+		t.Errorf("SelectComplexity(.05/.60/.35, size 1.30) = %s, want complex", got)
 	}
 }
 
@@ -334,6 +328,12 @@ func TestEvaluate(t *testing.T) {
 	}
 	if len(dec.Complexity.Sources) != 2 {
 		t.Errorf("expected both complexity sources in trace, got %d", len(dec.Complexity.Sources))
+	}
+	if s := dec.Complexity.Sources[domain.ComplexitySourceChoice].Size; s == nil || *s < 1.269 || *s > 1.271 {
+		t.Errorf("choice size = %v, want 1.27", s)
+	}
+	if c := dec.Complexity.Cuts; c == nil || *c != p.ComplexityCuts {
+		t.Errorf("Cuts = %v, want the policy's %v", c, p.ComplexityCuts)
 	}
 	wantStages(t, dec.Stages.EnabledStages(), domain.StageAnalysis, domain.StagePlanning, domain.StageDevelopment, domain.StageTesting, domain.StageReview)
 }

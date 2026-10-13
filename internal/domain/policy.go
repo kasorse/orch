@@ -16,12 +16,9 @@ type DecisionPolicy struct {
 	// P(project) is at least this.
 	ProjectContextThreshold float64
 
-	// ComplexityThreshold[c] is the minimum cumulative probability of c and every more
-	// complex option that selects c or higher (TASKS.md В2: walked from the top down,
-	// so ComplexityComplex is checked before ComplexityMedium). ComplexitySimple has
-	// no entry - it is the default when neither Medium's nor Complex's threshold is
-	// met.
-	ComplexityThreshold map[Complexity]float64
+	// ComplexityCuts split a complexity distribution's Size into levels
+	// (specs/decision-shape/SPEC.md §5.2).
+	ComplexityCuts ComplexityCuts
 
 	// StageThreshold[s] is the minimum probability that enables s on its own.
 	StageThreshold map[Stage]float64
@@ -34,6 +31,14 @@ type DecisionPolicy struct {
 	// (specs/governance/SPEC.md §7.4). It changes no threshold, so it is left out of
 	// PolicyHash: explored runs stay in the calibration group of the thresholds they probe.
 	Explore *ExploreSettings `json:"-"`
+}
+
+// ComplexityCuts is policy.complexity.cuts: a Size at or above Complex selects complex,
+// otherwise at or above Medium selects medium, otherwise simple. Config validation keeps
+// 0 < Medium < Complex <= 2.
+type ComplexityCuts struct {
+	Medium  float64 `json:"medium"`
+	Complex float64 `json:"complex"`
 }
 
 // ExploreSettings is policy.explore: Band is how far below its threshold a stage's probability
@@ -70,7 +75,10 @@ type ContextDepthOutcome struct {
 // itself.
 type ComplexitySourceOutcome struct {
 	Decision ComplexityDecision `json:"decision"`
-	Selected Complexity         `json:"selected"`
+	// Size is Decision.Size(), the number the cuts compare; nil in a trace written before
+	// specs/decision-shape.
+	Size     *float64   `json:"size,omitempty"`
+	Selected Complexity `json:"selected"`
 }
 
 // ComplexityOutcome is the Policy Engine's full complexity trace. Sources holds one
@@ -82,6 +90,10 @@ type ComplexityOutcome struct {
 	Sources  map[ComplexitySource]ComplexitySourceOutcome `json:"sources"`
 	Selected Complexity                                   `json:"selected"`
 	Agree    bool                                         `json:"agree"`
+	// Cuts are the policy's cuts the sources' sizes were compared with; nil when no provider
+	// answered (a manual or a user decision) and in a trace written before
+	// specs/decision-shape.
+	Cuts *ComplexityCuts `json:"cuts,omitempty"`
 }
 
 // StageOutcome is one stage's result from the Policy Engine: whether its probability

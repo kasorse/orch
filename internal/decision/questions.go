@@ -1,6 +1,9 @@
 package decision
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	"orchestrator/internal/domain"
@@ -140,6 +143,23 @@ func StageQuestions() []YesNoQuestion {
 		out = append(out, q)
 	}
 	return out
+}
+
+// QuestionsHash is the lowercase hex sha256 of every shared question as asked, in a fixed
+// order. decision.json records it, and calibration groups by it: an answer to a reworded
+// question is on another scale (specs/decision-shape/SPEC.md §5.3).
+func QuestionsHash() string {
+	data, err := json.Marshal(struct {
+		ContextDepth     ChoiceQuestion
+		ComplexityChoice ChoiceQuestion
+		ComplexityScore  ScoreQuestion
+		Stages           []YesNoQuestion
+	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions()})
+	if err != nil {
+		panic(err) // plain strings and slices always encode
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func capitalize(s string) string {

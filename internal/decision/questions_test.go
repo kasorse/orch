@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -65,5 +66,23 @@ func TestStageQuestions_OnePerStageInOrder(t *testing.T) {
 		if !strings.Contains(q.Instructions, "`request`") {
 			t.Errorf("stage %s instructions must refer to the `request` state field", st)
 		}
+	}
+}
+
+func TestQuestionsHash(t *testing.T) {
+	h := QuestionsHash()
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(h) {
+		t.Fatalf("QuestionsHash = %q, want 64 lowercase hex characters", h)
+	}
+	if again := QuestionsHash(); again != h {
+		t.Errorf("QuestionsHash is not stable: %q then %q", h, again)
+	}
+	saved := stageQuestions[domain.StageReview]
+	t.Cleanup(func() { stageQuestions[domain.StageReview] = saved })
+	reworded := saved
+	reworded.Instructions += " "
+	stageQuestions[domain.StageReview] = reworded
+	if QuestionsHash() == h {
+		t.Error("rewording a stage question did not change the hash")
 	}
 }

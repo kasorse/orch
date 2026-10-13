@@ -42,6 +42,10 @@ type DecisionTrace struct {
 	// after a threshold change are told apart (specs/governance/SPEC.md §7.2). Absent for a
 	// manual decision and in a trace written before the field existed.
 	PolicyHash string `json:"policy_hash,omitempty"`
+	// QuestionsHash is decision.QuestionsHash() of the questions the provider was asked:
+	// sizes from different wordings are not comparable (specs/decision-shape/SPEC.md §5.3).
+	// Absent for a manual decision and in a trace written before the field existed.
+	QuestionsHash string `json:"questions_hash,omitempty"`
 
 	// ContextDepth is nil when the pre-check itself failed.
 	ContextDepth   *ContextDepthTrace `json:"context_depth,omitempty"`

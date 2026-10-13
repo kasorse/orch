@@ -173,12 +173,20 @@ type ContextDepthPolicyConfig struct {
 	ProjectThreshold *float64 `yaml:"project_threshold"`
 }
 
-// ComplexityPolicyConfig configures the cumulative complexity thresholds (TASKS.md
-// В2): Complex is selected when P(complex) is at least Complex; otherwise Medium is
-// selected when P(medium)+P(complex) is at least Medium; otherwise Simple.
+// ComplexityPolicyConfig configures the cuts on a complexity distribution's size
+// (specs/decision-shape/SPEC.md §5.2). Complex and Medium, the probability thresholds
+// before it, are declared only so strict decoding accepts them and the validator can name
+// their replacement: the same key with another meaning would change a policy silently.
 type ComplexityPolicyConfig struct {
-	Complex *float64 `yaml:"complex"`
+	Cuts    *ComplexityCutsConfig `yaml:"cuts"`
+	Complex any                   `yaml:"complex"`
+	Medium  any                   `yaml:"medium"`
+}
+
+// ComplexityCutsConfig is policy.complexity.cuts.
+type ComplexityCutsConfig struct {
 	Medium  *float64 `yaml:"medium"`
+	Complex *float64 `yaml:"complex"`
 }
 
 // StagePolicyConfig configures per-stage enablement thresholds and the stages that
@@ -307,12 +315,14 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 		forceStages[cx] = parsed
 	}
 
-	complexityThreshold := make(map[domain.Complexity]float64, 2)
-	if c.Policy.Complexity.Complex != nil {
-		complexityThreshold[domain.ComplexityComplex] = *c.Policy.Complexity.Complex
-	}
-	if c.Policy.Complexity.Medium != nil {
-		complexityThreshold[domain.ComplexityMedium] = *c.Policy.Complexity.Medium
+	var cuts domain.ComplexityCuts
+	if cc := c.Policy.Complexity.Cuts; cc != nil {
+		if cc.Medium != nil {
+			cuts.Medium = *cc.Medium
+		}
+		if cc.Complex != nil {
+			cuts.Complex = *cc.Complex
+		}
 	}
 
 	projectThreshold := 0.0
@@ -327,7 +337,7 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: projectThreshold,
-		ComplexityThreshold:     complexityThreshold,
+		ComplexityCuts:          cuts,
 		StageThreshold:          stageThreshold,
 		ForceStages:             forceStages,
 		Explore:                 explore,
@@ -424,6 +434,37 @@ func validateJevConfig(j JevConfig) []string {
 	return problems
 }
 
+// replacedByCuts is the message for a probability threshold the size cuts replaced.
+const replacedByCuts = "policy.complexity.%s was replaced by policy.complexity.cuts: the level is now cut " +
+	"from size = P(medium) + 2·P(complex), in [0, 2] (specs/decision-shape/SPEC.md §5.2)"
+
+// validateComplexityPolicy checks policy.complexity: no old threshold key, and
+// 0 < cuts.medium < cuts.complex <= 2.
+func validateComplexityPolicy(c ComplexityPolicyConfig) []string {
+	var problems []string
+	if c.Medium != nil {
+		problems = append(problems, fmt.Sprintf(replacedByCuts, "medium"))
+	}
+	if c.Complex != nil {
+		problems = append(problems, fmt.Sprintf(replacedByCuts, "complex"))
+	}
+	if c.Cuts == nil {
+		return append(problems, "policy.complexity.cuts is required")
+	}
+	medium, complex := c.Cuts.Medium, c.Cuts.Complex
+	if medium == nil {
+		problems = append(problems, "policy.complexity.cuts.medium is required")
+	}
+	if complex == nil {
+		problems = append(problems, "policy.complexity.cuts.complex is required")
+	}
+	if medium != nil && complex != nil && !(0 < *medium && *medium < *complex && *complex <= 2) {
+		problems = append(problems, fmt.Sprintf(
+			"policy.complexity.cuts must satisfy 0 < medium < complex <= 2, got medium %v, complex %v", *medium, *complex))
+	}
+	return problems
+}
+
 func validatePolicyConfig(p PolicyConfig) []string {
 	var problems []string
 
@@ -433,16 +474,7 @@ func validatePolicyConfig(p PolicyConfig) []string {
 		problems = append(problems, fmt.Sprintf("policy.context_depth.project_threshold must be in [0, 1], got %v", v))
 	}
 
-	if p.Complexity.Complex == nil {
-		problems = append(problems, "policy.complexity.complex is required")
-	} else if v := *p.Complexity.Complex; v < 0 || v > 1 {
-		problems = append(problems, fmt.Sprintf("policy.complexity.complex must be in [0, 1], got %v", v))
-	}
-	if p.Complexity.Medium == nil {
-		problems = append(problems, "policy.complexity.medium is required")
-	} else if v := *p.Complexity.Medium; v < 0 || v > 1 {
-		problems = append(problems, fmt.Sprintf("policy.complexity.medium must be in [0, 1], got %v", v))
-	}
+	problems = append(problems, validateComplexityPolicy(p.Complexity)...)
 
 	for _, st := range domain.StageOrder() {
 		v, ok := p.Stages.Thresholds[string(st)]
