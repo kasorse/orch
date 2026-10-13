@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -254,6 +255,47 @@ func TestValidateDecision_Policy(t *testing.T) {
 	cfg.Policy.Stages.Thresholds["review"] = 0
 	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
+	}
+}
+
+func TestValidateDecision_Explore(t *testing.T) {
+	bad := []struct {
+		name    string
+		explore ExploreConfig
+		wantErr string
+	}{
+		{"zero band", ExploreConfig{Band: 0, Rate: 0.1}, "policy.explore.band must be in (0, 0.2]"},
+		{"negative band", ExploreConfig{Band: -0.05, Rate: 0.1}, "policy.explore.band must be in (0, 0.2]"},
+		{"band above 0.2", ExploreConfig{Band: 0.25, Rate: 0.1}, "policy.explore.band must be in (0, 0.2]"},
+		{"NaN band", ExploreConfig{Band: math.NaN(), Rate: 0.1}, "policy.explore.band must be in (0, 0.2]"},
+		{"zero rate", ExploreConfig{Band: 0.05, Rate: 0}, "policy.explore.rate must be in (0, 0.5]"},
+		{"rate above 0.5", ExploreConfig{Band: 0.05, Rate: 0.6}, "policy.explore.rate must be in (0, 0.5]"},
+		{"NaN rate", ExploreConfig{Band: 0.05, Rate: math.NaN()}, "policy.explore.rate must be in (0, 0.5]"},
+	}
+	for _, tt := range bad {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			explore := tt.explore
+			cfg.Policy.Explore = &explore
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("Validate() = %v, want error containing %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	cfg := validConfig()
+	if got := cfg.DecisionPolicy().Explore; got != nil {
+		t.Errorf("DecisionPolicy().Explore = %+v without policy.explore, want nil", got)
+	}
+	for _, e := range []ExploreConfig{{Band: 0.2, Rate: 0.5}, {Band: 0.05, Rate: 0.1}} {
+		cfg.Policy.Explore = &ExploreConfig{Band: e.Band, Rate: e.Rate}
+		if err := Validate(cfg); err != nil {
+			t.Errorf("explore %+v rejected: %v", e, err)
+		}
+		got := cfg.DecisionPolicy().Explore
+		if got == nil || got.Band != e.Band || got.Rate != e.Rate {
+			t.Errorf("DecisionPolicy().Explore = %+v, want %+v", got, e)
+		}
 	}
 }
 

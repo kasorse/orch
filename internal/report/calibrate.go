@@ -15,8 +15,8 @@ import (
 // This file is `orchestrator decisions calibrate` (specs/governance/SPEC.md §7.1–§7.3). It
 // reads what runs wrote and proposes; nothing here writes a file or a config.
 //
-// The explored traces and the lowering rule of §7.4 (GV06) are not here. lowerProposal is
-// where that rule goes once a trace can say a stage was turned on below its threshold.
+// The lowering rule reads the runs where policy.explore turned a stage on below its threshold
+// (§7.4, stages[].explored); the raise rule never does, since its windows start at the threshold.
 
 // bucketCount is the number of probability buckets of 0.1 between 0 and 1.
 const bucketCount = 10
@@ -98,7 +98,8 @@ type Bucket struct {
 }
 
 // Proposal is a new threshold for a stage and the runs it rests on: the buckets of the runs
-// with P in [From, To).
+// with P in [From, To) for a raise, and of the explored runs with P in [To, From) for a
+// lowering (To < From).
 type Proposal struct {
 	From, To float64
 	Runs     int
@@ -169,10 +170,12 @@ type Calibration struct {
 	Groups     []CalibGroup
 }
 
-// sample is one run where a stage ran: its probability and whether the stage paid off.
+// sample is one run where a stage ran: its probability, whether the stage paid off, and
+// whether policy.explore turned it on below its threshold.
 type sample struct {
-	p       float64
-	paidOff bool
+	p        float64
+	paidOff  bool
+	explored bool
 }
 
 type stageAcc struct {
@@ -320,7 +323,7 @@ func (a *stageAcc) add(t *domain.DecisionTrace, run domain.Run, st domain.Stage,
 		a.thresholds = map[float64]bool{}
 	}
 	a.thresholds[*so.Threshold] = true
-	a.samples = append(a.samples, sample{p: p, paidOff: paidOff(run)})
+	a.samples = append(a.samples, sample{p: p, paidOff: paidOff(run), explored: so.Explored})
 }
 
 func (a *stageAcc) finish(st domain.Stage, minRuns int) StageCalibration {
@@ -424,11 +427,55 @@ func raiseProposal(samples []sample, current float64, minRuns int) *Proposal {
 	return nil
 }
 
-// lowerProposal is the lowering rule of §7.3: the lowest edge below which explored runs paid
-// off at least as often as the runs above the threshold. It needs runs where the stage was
-// turned on below its threshold, which no trace records until GV06 (stages[].explored), so
-// it proposes nothing.
+// lowerProposal is the lowering rule of §7.3: the lowest bucket edge t below the current
+// threshold such that the explored runs (stages[].explored, turned on below the threshold by
+// policy.explore) with P in [t, current) paid off at least as often as the runs at or above
+// the threshold. It needs at least minRuns runs on both sides and a baseline that paid off at
+// least once; it is nil otherwise. A stage forced on below its threshold is not explored and
+// says nothing here. Edges below the lowest explored run are not considered, since they would
+// add no run to the window and propose a threshold nobody tried. The proposal's evidence is
+// the window [To, From).
 func lowerProposal(samples []sample, current float64, minRuns int) *Proposal {
+	baseRuns, basePaid := 0, 0
+	lowest := bucketCount
+	for _, s := range samples {
+		switch {
+		case s.p >= current-probEps:
+			baseRuns++
+			if s.paidOff {
+				basePaid++
+			}
+		case s.explored:
+			lowest = min(lowest, bucketOf(s.p))
+		}
+	}
+	if baseRuns < minRuns || basePaid == 0 {
+		return nil
+	}
+	for k := lowest; k < bucketCount; k++ {
+		edge := float64(k) / bucketCount
+		if edge >= current-probEps {
+			break
+		}
+		p := Proposal{From: current, To: edge}
+		paidOff := 0
+		for _, s := range samples {
+			if !s.explored || s.p < edge-probEps || s.p >= current-probEps {
+				continue
+			}
+			p.Runs++
+			b := &p.Evidence[bucketOf(s.p)]
+			b.Runs++
+			if s.paidOff {
+				b.PaidOff++
+				paidOff++
+			}
+		}
+		// paidOff/p.Runs >= basePaid/baseRuns, without dividing.
+		if p.Runs >= minRuns && paidOff*baseRuns >= basePaid*p.Runs {
+			return &p
+		}
+	}
 	return nil
 }
 

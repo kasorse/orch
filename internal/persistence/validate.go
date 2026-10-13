@@ -40,6 +40,12 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if run.Decision != nil {
+		if err := validateDecisionStages(run.Decision.Stages.Stages); err != nil {
+			return fmt.Errorf("decision: %w", err)
+		}
+	}
+
 	for i, r := range run.Options.PathRules {
 		if err := r.Validate(); err != nil {
 			return fmt.Errorf("options.path_rules[%d]: %w", i, err)
@@ -425,6 +431,17 @@ func validateDecisionModels(models map[string]domain.ModelRoute) error {
 func validatePolicyHash(h string) error {
 	if h != "" && !isSHA256Hex(h) {
 		return fmt.Errorf("policy_hash %q is not 64 lowercase hex digits", h)
+	}
+	return nil
+}
+
+// validateDecisionStages checks decision.json's stages[].explored: a stage exploration turned
+// on is enabled and not forced. The review screen clears the mark when it turns one off.
+func validateDecisionStages(stages []domain.StageOutcome) error {
+	for i, so := range stages {
+		if so.Explored && (!so.Enabled || so.Forced) {
+			return fmt.Errorf("stages[%d] (%s): explored needs the stage enabled and not forced", i, so.Stage)
+		}
 	}
 	return nil
 }

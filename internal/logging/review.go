@@ -359,6 +359,10 @@ func (st *reviewState) render(s style) []string {
 				note = s.gray("forced")
 			case forced[so.Stage]:
 				note = s.yellow("forced · overridden")
+			case so.Explored && st.on[so.Stage]:
+				note = s.gray("explored")
+			case so.Explored:
+				note = s.yellow("explored · off")
 			case so.Enabled != st.on[so.Stage]:
 				note = s.yellow("changed")
 			}

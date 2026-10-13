@@ -200,6 +200,9 @@ func decodeDecision(data []byte, runID string) (domain.DecisionTrace, error) {
 	if err := validatePolicyHash(trace.PolicyHash); err != nil {
 		return domain.DecisionTrace{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json is not a valid decision trace", Err: err}
 	}
+	if err := validateDecisionStages(trace.Stages); err != nil {
+		return domain.DecisionTrace{}, &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: runID, Msg: "decision.json is not a valid decision trace", Err: err}
+	}
 	return trace, nil
 }
 

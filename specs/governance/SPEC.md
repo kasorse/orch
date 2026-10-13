@@ -346,7 +346,8 @@ Probabilities from different decision models are not comparable, so traces are g
 needs no operator discipline, and it changes exactly when a threshold does.
 
 `decisions calibrate` and `decisions report` group by it, so runs before and after a change are
-compared and never mixed.
+compared and never mixed. `policy.explore` (§7.4) is not part of the hash: it changes no
+threshold, and explored runs belong to the group of the thresholds they probe.
 
 ### 7.3 `orchestrator decisions calibrate [--runs <dir>] [--min-runs N]` (GV05)
 

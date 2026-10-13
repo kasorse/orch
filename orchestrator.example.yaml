@@ -44,6 +44,14 @@ policy:
   #     approval: manual
   #   - match: "**/*.sql"
   #     approval: manual
+  # Exploration (specs/governance/SPEC.md §7.4), off by default: a stage the policy left off, not
+  # forced, with P within `band` below its threshold is turned on in `rate` of the runs, chosen
+  # by the run id. It only turns stages on (so a run costs more, never less checked), records them
+  # as `explored`, and gives `decisions calibrate` the data to propose a lower threshold.
+  # band is in (0, 0.2], rate in (0, 0.5]. Never used with --stage.
+  # explore:
+  #   band: 0.05
+  #   rate: 0.1
 
 context:
   max_files: 20

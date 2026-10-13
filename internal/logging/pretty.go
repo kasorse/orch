@@ -422,6 +422,9 @@ func (r *ConsoleReporter) stageRow(s domain.StageOutcome) {
 		if s.Forced {
 			state = st.green("on") + st.gray(" (forced)")
 		}
+		if s.Explored {
+			state = st.green("on") + st.gray(" (explored)")
+		}
 		name = st.bold(name)
 	} else {
 		name = st.gray(name)

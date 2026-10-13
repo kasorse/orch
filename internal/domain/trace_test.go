@@ -84,6 +84,17 @@ func TestPolicyHash_PinnedEncoding(t *testing.T) {
 	}
 }
 
+// Exploration changes no threshold, so explored runs stay in the group of the thresholds they
+// probe.
+func TestPolicyHash_IgnoresExplore(t *testing.T) {
+	p := hashPolicy()
+	want := PolicyHash(p)
+	p.Explore = &ExploreSettings{Band: 0.05, Rate: 0.1}
+	if got := PolicyHash(p); got != want {
+		t.Errorf("setting Explore changed the hash: %s vs %s", got, want)
+	}
+}
+
 func TestManualTraceHasNoPolicyHash(t *testing.T) {
 	d, err := ManualDecision([]Stage{StageAnalysis})
 	if err != nil {

@@ -201,6 +201,16 @@ type PolicyConfig struct {
 	Stages       StagePolicyConfig        `yaml:"stages"`
 	// Paths are the path rules, applied in file order (specs/governance/SPEC.md §4.1).
 	Paths []PathRuleConfig `yaml:"paths"`
+	// Explore, when set, turns a stage just below its threshold on for a share of runs
+	// (specs/governance/SPEC.md §7.4). It is absent by default, and the org file cannot set it.
+	Explore *ExploreConfig `yaml:"explore"`
+}
+
+// ExploreConfig is policy.explore: a stage whose probability is within Band below its threshold
+// is turned on in Rate of the runs, chosen by the run id.
+type ExploreConfig struct {
+	Band float64 `yaml:"band"`
+	Rate float64 `yaml:"rate"`
 }
 
 // PathRuleConfig is one policy.paths entry: a change matching Match needs RequireStages in the
@@ -310,11 +320,17 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 		projectThreshold = *c.Policy.ContextDepth.ProjectThreshold
 	}
 
+	var explore *domain.ExploreSettings
+	if c.Policy.Explore != nil {
+		explore = &domain.ExploreSettings{Band: c.Policy.Explore.Band, Rate: c.Policy.Explore.Rate}
+	}
+
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: projectThreshold,
 		ComplexityThreshold:     complexityThreshold,
 		StageThreshold:          stageThreshold,
 		ForceStages:             forceStages,
+		Explore:                 explore,
 	}
 }
 
@@ -453,6 +469,16 @@ func validatePolicyConfig(p PolicyConfig) []string {
 			if _, err := domain.ParseStage(s); err != nil {
 				problems = append(problems, fmt.Sprintf("policy.stages.force.%s has unknown stage %q", key, s))
 			}
+		}
+	}
+
+	if e := p.Explore; e != nil {
+		// Written as a negated range so a NaN is rejected too.
+		if !(e.Band > 0 && e.Band <= 0.2) {
+			problems = append(problems, fmt.Sprintf("policy.explore.band must be in (0, 0.2], got %v", e.Band))
+		}
+		if !(e.Rate > 0 && e.Rate <= 0.5) {
+			problems = append(problems, fmt.Sprintf("policy.explore.rate must be in (0, 0.5], got %v", e.Rate))
 		}
 	}
 

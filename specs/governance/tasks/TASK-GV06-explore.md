@@ -39,3 +39,41 @@ counterfactual it otherwise lacks (`SPEC.md` §7.4).
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned, except as listed. The code and its tests were written without being able to
+run anything: `scripts/check.sh` (root and `bench/`, outside the sandbox) has **not** been run
+for this task. It is the operator's to run, and GV06 is not ticked in `README.md` or TODO.md
+G5.3 until it passes.
+
+- **Where it is called.** In `app.decideWithProvider`, on `res.Decision` right after
+  `Classify`, not in `Run`: `res.Trace` (decision.json), the announced table and `run.json`'s
+  decision then all carry the explored stage, with no second copy of the decision to keep in
+  step. `decideManual` and `resumeTask` never reach it.
+- **The hash.** `DecisionPolicy.Explore` is `json:"-"`, so it is not in `policy_hash`: it
+  changes no threshold, and explored runs stay in the calibration group of the thresholds they
+  probe. `TestPolicyHash_PinnedEncoding` is unchanged.
+- **The draw.** `fnv.New64a` over `seed + "/" + stage`, `% 1000`, compared as a float with
+  `rate × 1000`. The tests find a run id below and one above the limit by searching, using the
+  same hash, instead of pinning two literal ids: no literal was computed here. Pin two ids
+  from a run of the tests if the draw should be frozen against a later change.
+- **Review screen.** An explored stage reads `explored` (on) or `explored · off` (deselected);
+  the decided-stage table reads `on (explored)`; the plain decision block already prints the
+  reason. `Decision.WithEdit` clears `explored` on a stage the operator turns off or forces, so
+  an edited decision never trips the persistence rule.
+- **Persistence.** `explored` needs `enabled` and not `forced`, in `decision.json` and in
+  `run.json`'s embedded decision (which had no decision checks before).
+- **Lowering.** `lowerProposal` needs `--min-runs` baseline runs (P at or above the threshold)
+  of which at least one paid off, then takes the lowest edge `t` for which the explored runs
+  with P in `[t, threshold)` number at least `--min-runs` and paid off at least as often as the
+  baseline. Edges below the lowest explored run are not tried, so the proposal is never lower
+  than something that ran. Stages forced on below the threshold are not explored and are
+  ignored. `Proposal` rendering already prints `From` then `To`, so a lowering reads
+  `- testing: 0.50` / `+ testing: 0.40`.
+- **Not done: the app-level test.** No test runs `decideWithProvider` with a decision
+  provider that answers a chosen probability (the Jev client and the CLI provider cannot be
+  injected there), so "run.json and decision.json both record `explored`" and "a `--stage` run
+  never does" are covered by construction and by scenario 56 of GV07, not by a test here.
+- **Older binaries** reject a `decision.json` with `explored: true` (strict decoding). The
+  field is `omitempty`, so only runs that explored are affected.

@@ -100,6 +100,7 @@ type calibCase struct {
 	threshold float64
 	p         float64
 	paid      bool
+	explored  bool
 	cost      float64
 	models    map[string]domain.ModelRoute
 }
@@ -120,7 +121,7 @@ func (c calibCase) entry() RunEntry {
 			Source: domain.DecisionSourceJev, Provider: c.key.Provider, Model: c.key.Model, PolicyHash: c.key.PolicyHash,
 			Complexity: domain.ComplexityOutcome{Selected: domain.ComplexityMedium},
 			Stages: []domain.StageOutcome{
-				{Stage: domain.StageTesting, Probability: fp(c.p), Threshold: fp(c.threshold), Enabled: true},
+				{Stage: domain.StageTesting, Probability: fp(c.p), Threshold: fp(c.threshold), Enabled: true, Explored: c.explored},
 				{Stage: domain.StageReview, Probability: fp(0.2), Threshold: fp(0.4)},
 			},
 			Models: c.models,
@@ -371,9 +372,90 @@ func TestBucketOf(t *testing.T) {
 	}
 }
 
-// Lowering needs explored traces (GV06); until they exist nothing is proposed.
-func TestLowerProposalWaitsForExploredTraces(t *testing.T) {
-	if p := lowerProposal([]sample{{p: 0.45, paidOff: true}, {p: 0.8}}, 0.5, 1); p != nil {
-		t.Errorf("lowerProposal = %+v, want none", p)
+func TestLowerProposal(t *testing.T) {
+	runs := func(n, paid int, p float64, explored bool) []sample {
+		out := make([]sample, n)
+		for i := range out {
+			out[i] = sample{p: p, paidOff: i < paid, explored: explored}
+		}
+		return out
+	}
+	join := func(parts ...[]sample) []sample { return slices.Concat(parts...) }
+	cases := []struct {
+		name    string
+		samples []sample
+		min     int
+		want    float64 // 0: no proposal
+		runs    int
+	}{
+		{"explored runs pay off as often as the baseline",
+			join(runs(4, 1, 0.6, false), runs(3, 1, 0.45, true)), 3, 0.4, 3},
+		{"the lowest edge that still qualifies",
+			join(runs(4, 1, 0.6, false), runs(3, 1, 0.45, true), runs(3, 1, 0.35, true)), 3, 0.3, 6},
+		{"a lower edge that pays off less is skipped",
+			join(runs(4, 1, 0.6, false), runs(3, 1, 0.45, true), runs(3, 0, 0.35, true)), 3, 0.4, 3},
+		{"explored runs pay off more often than the baseline",
+			join(runs(4, 1, 0.6, false), runs(3, 3, 0.45, true)), 3, 0.4, 3},
+		{"too few explored runs",
+			join(runs(4, 1, 0.6, false), runs(2, 2, 0.45, true)), 3, 0, 0},
+		{"explored runs pay off less often than the baseline",
+			join(runs(4, 2, 0.6, false), runs(3, 1, 0.45, true)), 3, 0, 0},
+		{"too few baseline runs",
+			join(runs(2, 2, 0.6, false), runs(3, 3, 0.45, true)), 3, 0, 0},
+		{"no baseline",
+			runs(3, 3, 0.45, true), 3, 0, 0},
+		{"a baseline that never paid off",
+			join(runs(4, 0, 0.6, false), runs(3, 3, 0.45, true)), 3, 0, 0},
+		{"a stage forced on below the threshold is not explored",
+			join(runs(4, 1, 0.6, false), runs(5, 5, 0.45, false)), 3, 0, 0},
+		{"the threshold itself belongs to the baseline",
+			join(runs(4, 1, 0.5, false), runs(3, 1, 0.45, true)), 3, 0.4, 3},
+		{"no samples", nil, 1, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := lowerProposal(tc.samples, 0.5, tc.min)
+			switch {
+			case tc.want == 0 && p != nil:
+				t.Errorf("proposal %+v, want none", *p)
+			case tc.want != 0 && (p == nil || p.To != tc.want || p.From != 0.5 || p.Runs != tc.runs):
+				t.Errorf("proposal %+v, want 0.5 -> %.1f on %d runs", p, tc.want, tc.runs)
+			}
+		})
+	}
+}
+
+// Explored runs sit below the threshold, so the raise rule never counts them.
+func TestRaiseProposal_IgnoresExploredRuns(t *testing.T) {
+	samples := []sample{{p: 0.45, paidOff: true, explored: true}, {p: 0.47, paidOff: true, explored: true},
+		{p: 0.55}, {p: 0.56}}
+	p := raiseProposal(samples, 0.5, 2)
+	if p == nil || p.To != 0.6 || p.Runs != 2 {
+		t.Errorf("proposal %+v, want 0.5 -> 0.6 on the two runs above the threshold", p)
+	}
+}
+
+func TestRenderCalibration_LowerProposal(t *testing.T) {
+	// Testing at 0.50: one of four runs above it paid off, and so did one of three explored
+	// runs at 0.45. Raising is out (a run above paid off), lowering to 0.40 is proposed.
+	es := calibEntries(
+		calibCase{id: "r1", key: jev113, threshold: 0.5, p: 0.60},
+		calibCase{id: "r2", key: jev113, threshold: 0.5, p: 0.62},
+		calibCase{id: "r3", key: jev113, threshold: 0.5, p: 0.64},
+		calibCase{id: "r4", key: jev113, threshold: 0.5, p: 0.66, paid: true},
+		calibCase{id: "e1", key: jev113, threshold: 0.5, p: 0.45, explored: true},
+		calibCase{id: "e2", key: jev113, threshold: 0.5, p: 0.46, explored: true, paid: true},
+		calibCase{id: "e3", key: jev113, threshold: 0.5, p: 0.47, explored: true},
+	)
+	c := Calibrate(es, nil, 3)
+	prop := c.Groups[0].Testing.Proposal
+	if prop == nil || prop.From != 0.5 || prop.To != 0.4 || prop.Runs != 3 {
+		t.Fatalf("proposal = %+v, want 0.5 -> 0.4 on 3 runs", prop)
+	}
+	out := renderCalibration(es, nil, 3)
+	for _, want := range []string{"-   testing: 0.50\n", "+   testing: 0.40\n", "      # 0.4-0.5: 3 runs, 1 paid off\n"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
 	}
 }

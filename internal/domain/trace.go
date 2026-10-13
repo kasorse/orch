@@ -8,7 +8,8 @@ import (
 
 // PolicyHash is the lowercase hex sha256 of the JSON of p. encoding/json writes map keys in
 // sorted order, so the order a policy's maps were filled in does not change the hash; a
-// renamed or added DecisionPolicy field does, and starts a new group of runs in the reports.
+// renamed or added DecisionPolicy field does, and starts a new group of runs in the reports
+// (Explore is the exception: it has no JSON name, because it changes no threshold).
 // It is empty only for a policy that cannot be encoded (a NaN or infinite threshold, which
 // config validation never lets through), so such a decision is recorded without a hash
 // rather than stopping the run.
