@@ -24,51 +24,66 @@ func SelectContextDepth(d domain.ContextDepthDecision, p domain.DecisionPolicy) 
 	return domain.ContextDepthNone
 }
 
-// SelectComplexity picks a complexity from d by walking the most complex option down
-// (TASKS.md В2): Complex is selected when its own probability is at least
-// p.ComplexityThreshold[Complex]; otherwise Medium is selected when the combined
-// probability of Medium and Complex is at least p.ComplexityThreshold[Medium];
-// otherwise Simple. Both comparisons are inclusive.
+// SelectComplexity cuts d's Size by p.ComplexityCuts (specs/decision-shape/SPEC.md §5):
+// complex at or above the complex cut, otherwise medium at or above the medium cut,
+// otherwise simple. Both comparisons are inclusive.
 //
-// This is deliberately not argmax: on a distribution spread thin across all three
-// options, argmax could pick Simple even though Medium+Complex together carry most of
-// the probability mass. Walking from the top down, and summing as it goes, means a
-// near-tie is resolved toward the more complex (and so more cautious) option - an
-// extra analysis pass costs less than a missed one.
+// This is deliberately not argmax: a model answers most tasks "medium", and the size keeps
+// what argmax throws away (0.2/0.6/0.2 and 0.05/0.6/0.35 are different tasks). The cuts
+// are quantiles of past sizes, proposed by `decisions calibrate`.
 func SelectComplexity(d domain.ComplexityDecision, p domain.DecisionPolicy) domain.Complexity {
-	if d.Probabilities[domain.ComplexityComplex] >= p.ComplexityThreshold[domain.ComplexityComplex] {
+	size := d.Size()
+	switch {
+	case size >= p.ComplexityCuts.Complex:
 		return domain.ComplexityComplex
-	}
-	mass := d.Probabilities[domain.ComplexityMedium] + d.Probabilities[domain.ComplexityComplex]
-	if mass >= p.ComplexityThreshold[domain.ComplexityMedium] {
+	case size >= p.ComplexityCuts.Medium:
 		return domain.ComplexityMedium
+	default:
+		return domain.ComplexitySimple
 	}
-	return domain.ComplexitySimple
 }
 
-// SelectStages decides which stages run (SPEC.md §12): a stage is enabled when its
-// probability is at least its configured threshold (inclusive), or when it is listed
-// in p.ForceStages[complexity] regardless of probability. If nothing clears its
-// threshold and nothing is forced, analysis alone is enabled (TASKS.md В6) rather than
-// returning an empty workflow.
+// SelectStages decides which stages run (specs/decision-shape/SPEC.md §6.2):
+//
+//	enabled = ForceStages[complexity]
+//	        ∪ { asked stage s : P(s) >= threshold(s) }   (inclusive)
+//	        ∪ { testing, if development is enabled }
+//
+// and without development, testing and review are off: there is no diff to test or review.
+// A stage the provider was not asked about (planning, testing, review) has no probability;
+// the template (ForceStages) is what turns it on. If nothing is enabled, analysis alone is
+// (TASKS.md В6) rather than an empty workflow.
 func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p domain.DecisionPolicy) domain.StageSelection {
 	forced := forcedSet(p, complexity)
 
 	var sel domain.StageSelection
-	for _, sp := range stages.All() {
-		prob := sp.Decision.Probability
-		threshold := p.StageThreshold[sp.Stage]
-		isForced := forced[sp.Stage]
-		enabled := prob >= threshold || isForced
+	for _, st := range domain.StageOrder() {
+		isForced := forced[st]
+		out := domain.StageOutcome{Stage: st, Forced: isForced, Enabled: isForced}
+		if d, asked := stages.Get(st); asked {
+			prob, threshold := d.Probability, p.StageThreshold[st]
+			out.Probability, out.Threshold = &prob, &threshold
+			out.Enabled = prob >= threshold || isForced
+			out.Reason = stageReason(prob, threshold, isForced, complexity)
+		} else if isForced {
+			out.Reason = fmt.Sprintf("forced: complexity=%s", complexity)
+		} else {
+			out.Reason = "not asked, not in the template"
+		}
+		sel.Stages = append(sel.Stages, out)
+	}
 
-		sel.Stages = append(sel.Stages, domain.StageOutcome{
-			Stage:       sp.Stage,
-			Probability: &prob,
-			Threshold:   &threshold,
-			Forced:      isForced,
-			Enabled:     enabled,
-			Reason:      stageReason(prob, threshold, isForced, complexity),
-		})
+	development := outcome(&sel, domain.StageDevelopment).Enabled
+	for _, st := range []domain.Stage{domain.StageTesting, domain.StageReview} {
+		o := outcome(&sel, st)
+		switch {
+		case !development && o.Enabled:
+			o.Enabled = false
+			o.Reason = "dropped: no code change"
+		case development && st == domain.StageTesting && !o.Enabled:
+			o.Enabled = true
+			o.Reason = "with development"
+		}
 	}
 
 	if !anyEnabled(sel) {
@@ -185,7 +200,8 @@ func evaluateComplexity(
 ) domain.ComplexityOutcome {
 	sources := make(map[domain.ComplexitySource]domain.ComplexitySourceOutcome, len(dists))
 	for src, d := range dists {
-		sources[src] = domain.ComplexitySourceOutcome{Decision: d, Selected: SelectComplexity(d, p)}
+		size := d.Size()
+		sources[src] = domain.ComplexitySourceOutcome{Decision: d, Size: &size, Selected: SelectComplexity(d, p)}
 	}
 
 	selected := sources[primary].Selected
@@ -198,12 +214,24 @@ func evaluateComplexity(
 		}
 	}
 
+	cuts := p.ComplexityCuts
 	return domain.ComplexityOutcome{
 		Primary:  primary,
 		Sources:  sources,
 		Selected: selected,
 		Agree:    agree,
+		Cuts:     &cuts,
 	}
+}
+
+// outcome is sel's entry for stage; SelectStages fills one per stage in StageOrder.
+func outcome(sel *domain.StageSelection, stage domain.Stage) *domain.StageOutcome {
+	for i := range sel.Stages {
+		if sel.Stages[i].Stage == stage {
+			return &sel.Stages[i]
+		}
+	}
+	panic("policy: no outcome for stage " + string(stage))
 }
 
 func forcedSet(p domain.DecisionPolicy, complexity domain.Complexity) map[domain.Stage]bool {

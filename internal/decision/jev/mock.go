@@ -192,7 +192,6 @@ type requestSignals struct {
 	bug        bool // describes a defect
 	feature    bool // asks for new behaviour
 	research   bool // asks about external knowledge
-	testRef    bool // mentions tests
 	docsOnly   bool // touches only text: typos, comments, docs
 	complexity int  // 0 simple, 1 medium, 2 complex
 }
@@ -206,7 +205,6 @@ var (
 	bugWords      = []string{"bug", "fix", "error", "fail", "crash", "panic", "broken", "wrong", "incorrect", "regression", "leak", "баг", "ошибк", "паник", "падает", "сломал"}
 	featureWords  = []string{"add", "implement", "support", "introduce", "new ", "feature", "добав", "реализ", "поддерж", "нов"}
 	researchWords = []string{"compare", "comparison", "library", "libraries", "alternative", "approach", "best practice", "research", "which tool", "vs ", "сравни", "библиотек", "альтернатив", "подход"}
-	testWords     = []string{"test", "coverage", "тест"}
 	docsWords     = []string{"typo", "comment", "readme", "docs", "documentation", "spelling", "опечат", "коммент", "документац"}
 	simpleWords   = []string{"typo", "rename", "comment", "log message", "spelling", "readme", "bump", "small", "minor", "one-line", "constant", "опечат", "переимен", "коммент", "мелк"}
 	complexWords  = []string{"architecture", "redesign", "migrate", "migration", "rewrite", "distributed", "concurrency", "across", "entire", "whole", "system-wide", "framework", "архитектур", "перепиш", "миграц", "весь ", "всю "}
@@ -230,7 +228,6 @@ func analyzeRequest(text string) requestSignals {
 		bug:      has(bugWords),
 		feature:  has(featureWords),
 		research: has(researchWords),
-		testRef:  has(testWords),
 		docsOnly: has(docsWords),
 	}
 	s.bug = s.bug && !s.docsOnly // "fix a typo" is an edit, not a defect to analyse
@@ -305,14 +302,8 @@ func (s requestSignals) noul(id string) float64 {
 		yes = s.research || (s.question && !s.codeRef)
 	case "analysis":
 		yes = s.bug || (s.codeRef && s.question) || (s.change && s.complexity > 0)
-	case "planning":
-		yes = s.complexity == 2 || (s.feature && s.complexity > 0)
 	case "development":
 		yes = s.change && !(s.question && !s.feature && !s.bug)
-	case "testing":
-		yes = s.testRef || (s.change && !s.docsOnly)
-	case "review":
-		yes = s.change && s.complexity > 0
 	default:
 		return 0.5
 	}

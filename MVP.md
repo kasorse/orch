@@ -178,7 +178,7 @@ orchestrator validate
 orchestrator version
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
-orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
 
 `resume` continues a persisted run where it stopped, without deciding again (§37).
@@ -202,9 +202,9 @@ It needs no configuration and calls nothing. It is the input for choosing one qu
 records `policy_hash`, the sha256 of the `DecisionPolicy` it used (absent for `--stage`), and
 `decisions report` counts deciders per hash.
 
-`decisions calibrate [--runs <dir>] [--min-runs N]` reads the same runs, read-only, and
-proposes testing and review thresholds with the evidence behind them; the design record is
-`specs/governance/` §7.
+`decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]` reads the same runs, read-only, and
+proposes testing and review thresholds and `policy.complexity.cuts` with the evidence behind
+them; the design records are `specs/governance/` §7 and `specs/decision-shape/` §7.
 
 `run --jira` takes the task from one Jira issue: `--jira PMC-2789`, `--jira=pmc-2789` or
 the issue's `/browse/<KEY>` URL, in any position. Any positional text becomes operator
@@ -276,11 +276,11 @@ policy:
   context_depth:
     project_threshold: 0.5
   complexity:
-    complex: 0.55            # P(complex) >= 0.55             -> complex
-    medium: 0.70             # P(medium) + P(complex) >= 0.70 -> medium, else simple
+    cuts: {medium: 1.24, complex: 1.48}  # on size = P(medium) + 2·P(complex), §9
   stages:
-    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
-    force:
+    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}  # the three asked stages
+    force:                   # the template: stages on at each complexity
+      medium: [analysis, review]
       complex: [analysis, planning, review]
   # paths:                   # optional path rules, checked on the diff (§45.1)
   #   - {match: "migrations/**", require_stages: [review, testing], approval: manual}
@@ -601,7 +601,11 @@ same state:
   `decision.complexity.shadow` is on, `complexity_score` (score over the same three
   levels). The policy decides on `primary`; the other is recorded for comparison only.
   Both are built from one criteria list, so their texts cannot drift apart.
-* `stage_<stage>` (yes/no) for each of the six stages (§9), each judged independently.
+* `stage_<stage>` (yes/no) for the three asked stages, each judged independently:
+  `development` (must repository files change?), `research` (is outside knowledge needed?)
+  and `analysis` (is the cause or the place to change not yet known?). Planning, testing and
+  review are not asked: their answers repeated the task's size (§9.1); they come from the
+  level and from development (§9).
 
 Answers are strictly validated: the expected questions only, the right answer type,
 exactly our options, values in [0, 1], distributions summing to 1. Anything else is an
@@ -681,15 +685,26 @@ functions over the provider's probabilities and `policy` config:
 ```text
 context depth  project if P(project) >= policy.context_depth.project_threshold
 
-complexity     complex if P(complex) >= policy.complexity.complex
-               else medium if P(medium) + P(complex) >= policy.complexity.medium
+size           P(medium) + 2·P(complex), in [0, 2], from the probabilities (any provider;
+               Jev's own score is recorded, never used)
+
+complexity     complex if size >= policy.complexity.cuts.complex
+               else medium if size >= policy.complexity.cuts.medium
                else simple
                (applied to both questions; primary decides, agree = primary == shadow)
 
-stages         enabled if P(stage) >= policy.stages.thresholds[stage] (inclusive)
-               + policy.stages.force[complexity]
+stages         policy.stages.force[complexity]                       (the template)
+               ∪ asked stages with P >= policy.stages.thresholds    (inclusive)
+               ∪ testing, whenever development is enabled
+               without development: testing and review off ("dropped: no code change")
                nothing enabled → analysis
 ```
+
+The asked stages are research, analysis and development (§8.2); planning, testing and review
+have no probability and come from the template. A config that still sets
+`policy.complexity.medium`/`complex` or a threshold for planning, testing or review is
+refused with a message naming the replacement. The design record is
+`specs/decision-shape/`.
 
 Stages run in a fixed order, and each maps to one action:
 
@@ -715,38 +730,43 @@ Two additions keep this determinism (§45):
   in a share of runs chosen by a hash of the run id and the stage (`policy.Explore`, a pure
   function). The input to "the same decision always produces the same workflow" is then the
   decision plus the run id, and `decision.json` records the stage as `explored`. It never
-  turns a stage off and never applies to `--stage` or a resume.
+  turns a stage off, never explores development (it would skip "testing with development")
+  and never applies to `--stage` or a resume.
 * `decision.json` records `policy_hash`, the sha256 of the `DecisionPolicy` the decision used,
   so runs before and after a threshold change are compared and never mixed (§45.4).
   `policy.paths` is not part of the decision: it is checked on the diff after implement (§45.1).
 
 ## 9.1 The example thresholds
 
-`orchestrator.example.yaml` (and the benchmark configs, which follow it) ships every stage
-threshold at 0.81 except `testing: 0.60`, and the complexity thresholds `complex: 0.55`,
-`medium: 0.70`. They replace `research: 0.70, analysis: 0.60, planning: 0.65,
-development: 0.60, testing: 0.60, review: 0.70` and `complex: 0.40, medium: 0.50` after the
-first benchmark round (2026-10-12: 8 Go tasks from this repository, configs A–D, 3
-repetitions; `specs/benchmark/tasks/TASK-BM16-pilot-and-full-run.md`). With the earlier
-values, the claude/haiku decision provider enabled analysis and review in every run (their
-probabilities were 0.65–0.95 and 0.80–0.95) and planning by chance (0.10–0.85 on the same
-task across repetitions), and called every task `medium`; `auto` cost about 2.4×
-development + testing alone with no task solved that development + testing missed.
+`orchestrator.example.yaml` (and the benchmark configs, which follow it) ships the cuts
+`medium: 1.24, complex: 1.48`, the thresholds `research: 0.81, analysis: 0.81,
+development: 0.81` and the template `medium: [analysis, review]`, `complex: [analysis,
+planning, review]`.
 
-Replayed on that round's 21 decisions, 0.81 keeps analysis and review in 15 runs and planning
-in 2, so planning is no longer a coin toss, but on haiku's answers most runs still get
-analysis and review. `testing` stays at 0.60 on purpose: at 0.81 three of the 21 runs enabled
-development without testing (P(testing) = 0.80), a workflow that implements and never runs the
-test command, the only judge of the result (§18). The complexity thresholds move the
-medium/simple line up (simple below P(medium) + P(complex) 0.70); on that round they change
-nothing, since every answer was P(medium) ≈ 0.85. A `complex` task still gets analysis,
-planning and review through `force`. The offline Jev mock answers 0.85 for a strong signal and
-0.15 for a weak one, so it is unaffected.
+**Why the shape changed** (`specs/decision-shape/SPEC.md` §1). The first benchmark round
+(2026-10-12: 8 Go tasks from this repository, configs A–D, 3 repetitions;
+`specs/benchmark/tasks/TASK-BM16-pilot-and-full-run.md`) asked six stage probabilities and
+cut complexity with absolute thresholds. The claude/haiku decision provider enabled analysis
+and review in every run, planning by chance, and called every task `medium`; `auto` cost about
+2.4× development + testing alone with no task solved that development + testing missed.
+Raising the stage thresholds to 0.81 moved the coin, it did not add signal. Measured on 43
+claude/opus decisions of this repository's own tasks (2026-10-13), planning and review
+correlate with the size of the task at r = 0.94 and 0.83 (they only repeat it), while size
+spreads (interquartile range 0.35) and is stable across repeats of one task.
 
-They are a correction, not a calibration: eight tasks that development + testing solved
-anyway cannot show where the other stages pay off, and a stronger decision model answers on
-another scale. Recalibrate when the benchmark has tasks those stages decide (TODO.md G5),
-when the decision model changes, and whenever the questions' wording changes.
+**Where the values come from.** The cuts are the 50/35/15 quantiles of those 43 opus decisions
+(`orchestrator decisions calibrate` prints them, §45.4); they hold for that decision model and
+task stream only. "Complex" therefore means "the top share of this stream's tasks", not an
+absolute difficulty. On the benchmark's 22 haiku decisions size barely spreads (interquartile
+range 0.14) and calibrate refuses to propose cuts; whether that is the model or the
+benchmark's tasks is open, since the two sets of decisions were made on different tasks. The
+stage thresholds keep their earlier values: no data justifies moving them. The offline Jev mock
+answers 0.85 for a strong signal and 0.15 for a weak one.
+
+Size spreads tasks for routing (§44.8) but, on the same data, does not predict which task will
+need a fix (about 45% did, at every size). A failed check escalating the model
+(`actions.implement.escalate`, §31.1, §44.8) is the lever for those. Recalibrate when the
+decision model, the task stream or the questions' wording changes.
 
 ---
 
@@ -2383,8 +2403,17 @@ A static table in config, keyed by the decided complexity, is still static routi
 `actions.<name>.by_complexity` maps `simple | medium | complex` to a model and/or effort of the
 same provider, Go picks the entry once per step from `decision.complexity`, and the same
 decision always gives the same models (§44.8). A run started with `--stage` has no complexity
-and uses the action's own model. Nothing picks a model from cost so far, failures or a
-model's own answer, and there is no fallback.
+and uses the action's own model. Nothing picks a model from cost so far or a model's own
+answer, and there is no fallback.
+
+The one model a failure changes is `actions.implement.escalate: true` (opt-in,
+`specs/decision-shape/SPEC.md` §8): an `implement` that fixes a failed test or review - the
+last step before it that is not an implement is a test or a review, read from `run.json` -
+runs on the `by_complexity` entry one level above the decided complexity, recorded as
+`model_source: escalated.<level>`. It is the same static table, keyed by the attempt as well
+as the level: the failure is the test command's exit code or the review verdict, never a
+model's opinion, the provider never changes, and a resume derives the same route from the
+same history. Complex, a level above without an entry and `--stage` keep their route.
 
 ### 31.2 Deterministic workflows
 
@@ -3745,6 +3774,12 @@ whose workflow has implement, each rule the workflow cannot satisfy prints a war
 absent for `source: manual`. `stages[].explored` is `true` for a stage `policy.explore` turned
 on; it is valid only on a stage that is `enabled` and not `forced`. Both are optional on load.
 
+`specs/decision-shape` adds three (§9): `complexity.sources.<src>.size` (in [0, 2]),
+`complexity.cuts` (`0 < medium < complex <= 2`) and `questions_hash` (the sha256, 64 hex, of the
+shared questions as asked; calibration groups sizes by it). All are absent for
+`source: manual` and in traces written before them, and a stage that was not asked (planning,
+testing, review) has no `probability` or `threshold`.
+
 The fields of the quality loop (checks, verify, criteria, `by_complexity`, no progress) are
 listed in §44.9.
 
@@ -3827,7 +3862,7 @@ test:
   exception to argv-only execution.
 * Checks are **not a new action type** (§30). The `test` step runs every check in order, then
   `test.command`, and stops at the first non-zero exit code. A workflow without a `testing`
-  stage never runs them; to always have them, force `testing` in `policy.stages.force`.
+  stage never runs them; testing comes with every workflow that has development (§9).
 * Every command runs through the same `testexec.Runner`, under the same sandbox and with the
   same `execution.TestEnv()` allowlist plus `test.env_pass`, with `ORCH_BASE_REF=<pre_run_ref>`
   added (empty when no restore point was recorded; set for `test.command` too). The guard takes
@@ -4020,6 +4055,13 @@ actions:
 * Go picks once per step: if the run's decision has a complexity and the table has an entry
   for it, that entry; otherwise the base. A manual decision (`run --stage`) has none and gets
   the base. Extra reviewers (§44.4) are not routed.
+* **Escalation** (`actions.implement.escalate: true`, implement only, needs `by_complexity`,
+  default off): an implement that fixes a failed test or review - the last execution before
+  it that is not an implement is a test or a review - runs on the entry one level above the
+  decided complexity (simple → medium → complex; complex, a level above without an entry and
+  `--stage` keep their route), recorded as `model_source: escalated.<level>`. One level,
+  however many fix iterations follow. A resume derives the same route from the history.
+  `decision.json: models` does not list it.
 * **Record.** `executions[].provider.model_source` is `base` or `by_complexity.<level>`, and
   `decision.json: models` lists, for every action of the workflow that makes a call, the
   provider, model, effort and source the decision implies, written when the decision is made.
@@ -4040,7 +4082,7 @@ actions:
 | `failed_tests`, `report_format` | `test_result`, `pre_run_test` | §44.7; a failed result only, a known format, at most 200 names of 1 to 300 bytes without control characters |
 | `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused}`; `tool` is `run_tests` or `run_check`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 50 |
 | `tree_after` | implement executions | the git tree of the working tree after the step; 40 or 64 hex characters |
-| `provider.model_source` | executions | `base` or `by_complexity.{simple,medium,complex}` |
+| `provider.model_source` | executions | `base`, `by_complexity.{simple,medium,complex}` or `escalated.{medium,complex}` (§44.8) |
 | `review_result.criteria[]` | review executions | `{index, criterion, met, evidence}`; indexes `1…N` unique; evidence at most 500 bytes |
 | `review_result.reviewers[]` | review executions | `[{model, result}]`, the base model first, absent for a single reviewer; a reviewer has no reviewers of its own |
 | `call.extra_calls[]` | review executions | `{model, api_ms, input_tokens, …}` per extra reviewer; at most 4 |
@@ -4171,7 +4213,7 @@ start still win (§45.1).
   `DecisionPolicy` the decision used (absent for `source: manual`). It changes exactly when a
   threshold does. `decisions report` and `decisions calibrate` group by it. `policy.explore`
   is not part of it.
-* **`decisions calibrate [--runs <dir>] [--min-runs N]`** (read-only, `internal/report`)
+* **`decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]`** (read-only, `internal/report`)
   prints, per decision provider, model and `policy_hash`, the runs where testing or review
   ran in probability buckets of 0.1 and how often the stage paid off (testing: a test failed
   after an implement; review: a failing verdict followed by an implement). A threshold is
@@ -4182,7 +4224,19 @@ start still win (§45.1).
   comparison table and no proposal; a table per complexity and model (runs, completed share,
   mean `fix_iterations`, mean cost) has none either. Manual, chosen-by-hand and mock
   decisions are skipped. The output ends with a YAML diff of `policy.stages.thresholds` and
-  the rows behind each line. **Calibration only proposes**: nothing is written and it never
+  the rows behind each line. Testing and review have probabilities only in decisions made
+  before `specs/decision-shape`, so their proposals apply to those groups.
+* **Size and cuts** (`specs/decision-shape/SPEC.md` §7). Per decision model and
+  `questions_hash` (not `policy_hash`: size does not depend on the cuts), calibrate prints the
+  spread of size with a histogram, the levels decided, each stage's correlation with size
+  (r ≥ 0.8 marked `redundant with size`), the cuts for a target share (`--size-target`,
+  default 50/35/15; equal sizes stay in one level), and the hard runs (a fix iteration, or
+  stopped by a limit; a failed run with no fix is left out) per size bin. The medium cut by
+  outcome is the highest edge below which at least `--min-runs` runs were at most
+  `--simple-max-hard` (default 0.2) hard; it lowers the target's medium cut, unless the runs
+  below the median size were hard at least as often as the rest. An interquartile range of
+  size under 0.2 refuses both. A YAML diff of `policy.complexity.cuts` follows the thresholds'
+  diff. **Calibration only proposes**: nothing is written and it never
   runs as part of `run`.
 * **`policy.explore`** (opt-in, absent by default):
 

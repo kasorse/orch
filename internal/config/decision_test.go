@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"orchestrator/internal/domain"
 )
 
 func float64Ptr(v float64) *float64 { return &v }
@@ -219,15 +221,23 @@ func TestValidateDecision_Policy(t *testing.T) {
 		{"missing project_threshold", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = nil }, "policy.context_depth.project_threshold is required"},
 		{"project_threshold above 1", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(1.5) }, "project_threshold must be in [0, 1]"},
 		{"project_threshold negative", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(-0.1) }, "project_threshold must be in [0, 1]"},
-		{"missing complexity.complex", func(c *Config) { c.Policy.Complexity.Complex = nil }, "policy.complexity.complex is required"},
-		{"missing complexity.medium", func(c *Config) { c.Policy.Complexity.Medium = nil }, "policy.complexity.medium is required"},
-		{"complexity.complex out of range", func(c *Config) { c.Policy.Complexity.Complex = float64Ptr(1.1) }, "policy.complexity.complex must be in [0, 1]"},
+		{"missing complexity.cuts", func(c *Config) { c.Policy.Complexity.Cuts = nil }, "policy.complexity.cuts is required"},
+		{"missing cuts.complex", func(c *Config) { c.Policy.Complexity.Cuts.Complex = nil }, "policy.complexity.cuts.complex is required"},
+		{"missing cuts.medium", func(c *Config) { c.Policy.Complexity.Cuts.Medium = nil }, "policy.complexity.cuts.medium is required"},
+		{"cuts.complex above 2", func(c *Config) { c.Policy.Complexity.Cuts.Complex = float64Ptr(2.1) }, "0 < medium < complex <= 2"},
+		{"cuts.medium at 0", func(c *Config) { c.Policy.Complexity.Cuts.Medium = float64Ptr(0) }, "0 < medium < complex <= 2"},
+		{"cuts out of order", func(c *Config) { c.Policy.Complexity.Cuts.Medium = float64Ptr(1.5) }, "0 < medium < complex <= 2"},
+		{"old complexity.medium", func(c *Config) { c.Policy.Complexity.Medium = 0.7 }, "policy.complexity.medium was replaced by policy.complexity.cuts"},
+		{"old complexity.complex", func(c *Config) { c.Policy.Complexity.Complex = 0.55 }, "policy.complexity.complex was replaced by policy.complexity.cuts"},
 		{"missing stage threshold", func(c *Config) {
-			delete(c.Policy.Stages.Thresholds, "review")
-		}, "policy.stages.thresholds.review is required"},
+			delete(c.Policy.Stages.Thresholds, "analysis")
+		}, "policy.stages.thresholds.analysis is required"},
 		{"stage threshold out of range", func(c *Config) {
-			c.Policy.Stages.Thresholds["review"] = 1.5
-		}, "policy.stages.thresholds.review must be in [0, 1]"},
+			c.Policy.Stages.Thresholds["analysis"] = 1.5
+		}, "policy.stages.thresholds.analysis must be in [0, 1]"},
+		{"threshold of a stage no longer asked", func(c *Config) {
+			c.Policy.Stages.Thresholds["review"] = 0.7
+		}, "policy.stages.thresholds.review: review is not asked any more"},
 		{"unknown stage threshold key", func(c *Config) {
 			c.Policy.Stages.Thresholds["deploy"] = 0.5
 		}, `policy.stages.thresholds has unknown stage "deploy"`},
@@ -252,7 +262,7 @@ func TestValidateDecision_Policy(t *testing.T) {
 	// distinct from an omitted one.
 	cfg := validConfig()
 	cfg.Policy.ContextDepth.ProjectThreshold = float64Ptr(0)
-	cfg.Policy.Stages.Thresholds["review"] = 0
+	cfg.Policy.Stages.Thresholds["analysis"] = 0
 	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
 	}
@@ -355,14 +365,14 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 	if p.ProjectContextThreshold != 0.5 {
 		t.Errorf("ProjectContextThreshold = %v, want 0.5", p.ProjectContextThreshold)
 	}
-	if got := len(p.StageThreshold); got != 6 {
-		t.Fatalf("StageThreshold has %d entries, want 6", got)
+	if got := len(p.StageThreshold); got != 3 {
+		t.Fatalf("StageThreshold has %d entries, want 3", got)
 	}
-	if p.StageThreshold["review"] != 0.70 {
-		t.Errorf(`StageThreshold["review"] = %v, want 0.70`, p.StageThreshold["review"])
+	if p.StageThreshold["research"] != 0.70 {
+		t.Errorf(`StageThreshold["research"] = %v, want 0.70`, p.StageThreshold["research"])
 	}
-	if p.ComplexityThreshold["complex"] != 0.40 || p.ComplexityThreshold["medium"] != 0.50 {
-		t.Errorf("ComplexityThreshold = %+v", p.ComplexityThreshold)
+	if p.ComplexityCuts != (domain.ComplexityCuts{Medium: 0.50, Complex: 1.40}) {
+		t.Errorf("ComplexityCuts = %+v", p.ComplexityCuts)
 	}
 	force := p.ForceStages["complex"]
 	if len(force) != 3 {

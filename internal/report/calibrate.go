@@ -168,6 +168,11 @@ type Calibration struct {
 	Skipped    map[string]int
 	Unreadable []UnreadableRun
 	Groups     []CalibGroup
+	// Shape is the size section (specs/decision-shape/SPEC.md §7.2) for SizeTarget; the caller
+	// fills it with Shape, and the report leaves it out when it is empty.
+	Shape         []ShapeGroup
+	SizeTarget    SizeTarget
+	SimpleMaxHard float64
 }
 
 // sample is one run where a stage ran: its probability, whether the stage paid off, and
@@ -213,18 +218,12 @@ func Calibrate(entries []RunEntry, unreadable []UnreadableRun, minRuns int) Cali
 
 	for _, e := range entries {
 		t := e.Trace
-		switch {
-		case t == nil:
+		if t == nil {
 			c.Skipped[skipNoTrace]++
 			continue
-		case t.Source == domain.DecisionSourceManual:
-			c.Skipped[SkipManual]++
-			continue
-		case t.Source == domain.DecisionSourceUser:
-			c.Skipped[SkipUser]++
-			continue
-		case strings.HasPrefix(t.Model, mockModelPrefix):
-			c.Skipped[SkipMock]++
+		}
+		if reason := calibrationSkip(t); reason != "" {
+			c.Skipped[reason]++
 			continue
 		}
 		c.Used++
@@ -247,6 +246,20 @@ func Calibrate(entries []RunEntry, unreadable []UnreadableRun, minRuns int) Cali
 			strings.Compare(a.Key.PolicyHash, b.Key.PolicyHash))
 	})
 	return c
+}
+
+// calibrationSkip is why a trace is left out of calibration, "" when it is used: the reasons
+// `decisions report` uses - manual, chosen by the user, and mock.
+func calibrationSkip(t *domain.DecisionTrace) string {
+	switch {
+	case t.Source == domain.DecisionSourceManual:
+		return SkipManual
+	case t.Source == domain.DecisionSourceUser:
+		return SkipUser
+	case strings.HasPrefix(t.Model, mockModelPrefix):
+		return SkipMock
+	}
+	return ""
 }
 
 // runOutcome is the outcome run.json recorded or, for a run written before that, the one
@@ -556,6 +569,7 @@ func RenderCalibration(w io.Writer, runsDir string, c Calibration) {
 		renderComparison(w, g.Comparison)
 		renderModels(w, g.Models)
 	}
+	renderShape(w, c.Shape, c.SizeTarget, c.SimpleMaxHard)
 
 	fmt.Fprintln(w, "\npolicy.stages.thresholds (a proposal; nothing is written)")
 	for _, g := range c.Groups {
@@ -575,6 +589,7 @@ func RenderCalibration(w io.Writer, runsDir string, c Calibration) {
 			}
 		}
 	}
+	renderCutsDiff(w, c.Shape)
 }
 
 func renderStage(w io.Writer, s StageCalibration, minRuns int) {

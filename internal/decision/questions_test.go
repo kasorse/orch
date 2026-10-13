@@ -1,6 +1,7 @@
 package decision
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -48,9 +49,9 @@ func TestComplexityChoiceQuestion_ReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestStageQuestions_OnePerStageInOrder(t *testing.T) {
+func TestStageQuestions_OnePerAskedStageInOrder(t *testing.T) {
 	qs := StageQuestions()
-	order := domain.StageOrder()
+	order := domain.AskedStages()
 	if len(qs) != len(order) {
 		t.Fatalf("got %d stage questions, want %d", len(qs), len(order))
 	}
@@ -65,5 +66,23 @@ func TestStageQuestions_OnePerStageInOrder(t *testing.T) {
 		if !strings.Contains(q.Instructions, "`request`") {
 			t.Errorf("stage %s instructions must refer to the `request` state field", st)
 		}
+	}
+}
+
+func TestQuestionsHash(t *testing.T) {
+	h := QuestionsHash()
+	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(h) {
+		t.Fatalf("QuestionsHash = %q, want 64 lowercase hex characters", h)
+	}
+	if again := QuestionsHash(); again != h {
+		t.Errorf("QuestionsHash is not stable: %q then %q", h, again)
+	}
+	saved := stageQuestions[domain.StageAnalysis]
+	t.Cleanup(func() { stageQuestions[domain.StageAnalysis] = saved })
+	reworded := saved
+	reworded.Instructions += " "
+	stageQuestions[domain.StageAnalysis] = reworded
+	if QuestionsHash() == h {
+		t.Error("rewording a stage question did not change the hash")
 	}
 }

@@ -71,6 +71,15 @@ func TestStageDecisions_GetSetAll(t *testing.T) {
 		}
 	}
 
+	var partial StageDecisions
+	partial.Set(StageAnalysis, ProbabilityDecision{Probability: 0.4})
+	if _, ok := partial.Get(StageReview); ok {
+		t.Error("Get of a stage that was not set reported success")
+	}
+	if all := partial.All(); len(all) != 1 || all[0].Stage != StageAnalysis {
+		t.Errorf("All() of one set stage = %+v", all)
+	}
+
 	if s.Set("deploy", ProbabilityDecision{Probability: 1}) {
 		t.Error("Set of an unknown stage reported success")
 	}
@@ -95,12 +104,9 @@ func validClassification() TaskClassification {
 			},
 		},
 		Stages: StageDecisions{
-			Research:    ProbabilityDecision{Probability: 0.2},
-			Analysis:    ProbabilityDecision{Probability: 0.9},
-			Planning:    ProbabilityDecision{Probability: 0.8},
-			Development: ProbabilityDecision{Probability: 0.99},
-			Testing:     ProbabilityDecision{Probability: 0.95},
-			Review:      ProbabilityDecision{Probability: 0.7},
+			Research:    &ProbabilityDecision{Probability: 0.2},
+			Analysis:    &ProbabilityDecision{Probability: 0.9},
+			Development: &ProbabilityDecision{Probability: 0.99},
 		},
 		Provider: "jev",
 		Model:    "jev-1.13.0",
@@ -171,9 +177,13 @@ func TestTaskClassification_Validate(t *testing.T) {
 			d.Score = &s
 			c.Complexity[ComplexitySourceChoice] = d
 		}, "must not carry a score"},
-		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Review.Probability = 1.01 }, "stage review"},
+		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Analysis.Probability = 1.01 }, "stage analysis"},
 		{"negative stage probability", func(c *TaskClassification) { c.Stages.Research.Probability = -0.01 }, "stage research"},
-		{"NaN stage probability", func(c *TaskClassification) { c.Stages.Testing.Probability = math.NaN() }, "stage testing"},
+		{"NaN stage probability", func(c *TaskClassification) { c.Stages.Development.Probability = math.NaN() }, "stage development"},
+		{"asked stage missing", func(c *TaskClassification) { c.Stages.Analysis = nil }, "stage analysis has no probability"},
+		{"stage not asked answered", func(c *TaskClassification) {
+			c.Stages.Review = &ProbabilityDecision{Probability: 0.5}
+		}, "stage review is not asked"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

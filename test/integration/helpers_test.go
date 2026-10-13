@@ -84,6 +84,8 @@ type configOptions struct {
 	verifyMaxCalls int
 	// byComplexity is actions.<action>.by_complexity as action -> complexity -> model.
 	byComplexity map[string]map[string]string
+	// escalate is actions.implement.escalate (specs/decision-shape/SPEC.md §8).
+	escalate bool
 	// fixMedium is review.fix_medium.
 	fixMedium bool
 	// reviewModels is actions.review.models: the extra reviewers.
@@ -137,6 +139,9 @@ func (o configOptions) actionsYAML() string {
 		}
 		if a.name == "implement" && o.verify {
 			b.WriteString("    verify: true\n")
+		}
+		if a.name == "implement" && o.escalate {
+			b.WriteString("    escalate: true\n")
 		}
 		if a.name == "review" && len(o.reviewModels) > 0 {
 			fmt.Fprintf(&b, "    models: [%s]\n", strings.Join(o.reviewModels, ", "))
@@ -255,11 +260,11 @@ policy:
   context_depth:
     project_threshold: 0.5
   complexity:
-    complex: 0.40
-    medium: 0.50
+    cuts: {medium: 0.50, complex: 1.40}
   stages:
-    thresholds: {research: 0.60, analysis: 0.60, planning: 0.60, development: 0.60, testing: 0.60, review: 0.60}
+    thresholds: {research: 0.60, analysis: 0.60, development: 0.60}
     force:
+      medium: [analysis, review]
       complex: [analysis, planning, review]
 %s
 context:

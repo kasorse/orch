@@ -65,3 +65,51 @@ func TestExecute_FailedCallRecordsModelSource(t *testing.T) {
 		t.Errorf("provider ref = %+v", outcome.Provider)
 	}
 }
+
+// specs/decision-shape §8: a fix after a failed test or review runs one level up, and a resume
+// that repeats a failed fix still does; the first implement and --stage keep their route.
+func TestRoute_EscalatesAFix(t *testing.T) {
+	d := newDispatcher(&fakeClient{})
+	d.Config.Actions.Implement.Escalate = true
+	d.Config.Actions.Implement.ByComplexity = map[domain.Complexity]config.ModelEffort{
+		domain.ComplexitySimple: {Model: "haiku"},
+		domain.ComplexityMedium: {Model: "sonnet"},
+	}
+	history := func(actions ...domain.ActionType) []domain.StepExecution {
+		out := make([]domain.StepExecution, len(actions))
+		for i, a := range actions {
+			out[i] = domain.StepExecution{Index: i, Action: a}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name   string
+		run    *domain.Run
+		model  string
+		source string
+	}{
+		{"first implement", runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), "haiku", "by_complexity.simple"},
+		{"after analysis", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionAnalyze)), "haiku", "by_complexity.simple"},
+		{"after a failed test", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest)), "sonnet", "escalated.medium"},
+		{"after a review", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest, domain.ActionReview)), "sonnet", "escalated.medium"},
+		{"resume repeats a failed fix", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest, domain.ActionImplement)), "sonnet", "escalated.medium"},
+		{"no entry above medium", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexityMedium), history(domain.ActionImplement, domain.ActionTest)), "sonnet", "by_complexity.medium"},
+		{"manual", withHistory(runDecided(domain.DecisionSourceManual, ""), history(domain.ActionImplement, domain.ActionTest)), "m", "base"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pm, source := d.route(tc.run, domain.ActionImplement)
+			if pm.Model != tc.model || source != tc.source {
+				t.Errorf("route = %q, %q; want %q, %q", pm.Model, source, tc.model, tc.source)
+			}
+		})
+	}
+	// Only implement escalates: a review after a failed test keeps its own route.
+	if _, source := d.route(withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest)), domain.ActionReview); source != "base" {
+		t.Errorf("review route source = %q, want base", source)
+	}
+}
+
+func withHistory(run *domain.Run, execs []domain.StepExecution) *domain.Run {
+	run.Executions = execs
+	return run
+}

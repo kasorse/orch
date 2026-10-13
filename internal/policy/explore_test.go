@@ -155,3 +155,16 @@ func TestExplore_DoesNotMutateTheInput(t *testing.T) {
 		t.Errorf("Explore modified its input:\n%+v\nwas\n%+v", in, want)
 	}
 }
+
+// Development is the task, and turning it on would need testing with it
+// (specs/decision-shape/SPEC.md §6.5): it is never explored, even when the draw picks it.
+func TestExplore_NeverDevelopment(t *testing.T) {
+	seed := exploreSeed(t, domain.StageDevelopment, 500, true)
+	dec := domain.Decision{Source: domain.DecisionSourceLLM, Stages: domain.StageSelection{Stages: []domain.StageOutcome{
+		{Stage: domain.StageDevelopment, Probability: fp(0.58), Threshold: fp(0.6), Reason: "p=0.58 < 0.60"},
+	}}}
+	got := Explore(dec, explorePolicy(0.05, 0.5), seed)
+	if so := stageOf(t, got, domain.StageDevelopment); so.Enabled || so.Explored {
+		t.Errorf("development = %+v, want it left off", so)
+	}
+}

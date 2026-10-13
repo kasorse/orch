@@ -189,13 +189,15 @@ func TestProvider_ClassifyMapsFixture(t *testing.T) {
 		t.Errorf("score = %+v", score)
 	}
 
-	want := map[domain.Stage]float64{
-		domain.StageResearch: 0.05, domain.StageAnalysis: 0.92, domain.StagePlanning: 0.71,
-		domain.StageDevelopment: 0.99, domain.StageTesting: 0.95, domain.StageReview: 0.74,
-	}
+	want := map[domain.Stage]float64{domain.StageResearch: 0.05, domain.StageAnalysis: 0.92, domain.StageDevelopment: 0.99}
 	for st, p := range want {
 		if got, _ := tc.Stages.Get(st); got.Probability != p {
 			t.Errorf("stage %s = %v, want %v", st, got.Probability, p)
+		}
+	}
+	for _, st := range []domain.Stage{domain.StagePlanning, domain.StageTesting, domain.StageReview} {
+		if _, ok := tc.Stages.Get(st); ok {
+			t.Errorf("stage %s has a probability, but is not asked", st)
 		}
 	}
 }
@@ -218,9 +220,12 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	cases := map[string]func(r *systemOneResponse){
 		"no model":             func(r *systemOneResponse) { r.Model = "" },
-		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_review") },
-		"missing complexity":   func(r *systemOneResponse) { delete(r.Answers, "complexity") },
-		"unexpected answer":    func(r *systemOneResponse) { r.Answers["stage_deploy"] = answer{Type: questionNoul, Noul: f(0.5)} },
+		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_analysis") },
+		"answer to a stage no longer asked": func(r *systemOneResponse) {
+			r.Answers["stage_review"] = answer{Type: questionNoul, Noul: f(0.7)}
+		},
+		"missing complexity": func(r *systemOneResponse) { delete(r.Answers, "complexity") },
+		"unexpected answer":  func(r *systemOneResponse) { r.Answers["stage_deploy"] = answer{Type: questionNoul, Noul: f(0.5)} },
 		"choice wrong type": func(r *systemOneResponse) {
 			a := r.Answers["complexity"]
 			a.Type = questionScore
@@ -258,13 +263,15 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 			r.Answers["complexity_score"] = a
 		},
 		"noul wrong type": func(r *systemOneResponse) {
-			a := r.Answers["stage_testing"]
+			a := r.Answers["stage_development"]
 			a.Type = questionChoice
-			r.Answers["stage_testing"] = a
+			r.Answers["stage_development"] = a
 		},
-		"noul missing value": func(r *systemOneResponse) { r.Answers["stage_testing"] = answer{Type: questionNoul} },
-		"noul above one":     func(r *systemOneResponse) { r.Answers["stage_testing"] = answer{Type: questionNoul, Noul: f(1.01)} },
-		"noul below zero":    func(r *systemOneResponse) { r.Answers["stage_testing"] = answer{Type: questionNoul, Noul: f(-0.01)} },
+		"noul missing value": func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul} },
+		"noul above one":     func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul, Noul: f(1.01)} },
+		"noul below zero": func(r *systemOneResponse) {
+			r.Answers["stage_development"] = answer{Type: questionNoul, Noul: f(-0.01)}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

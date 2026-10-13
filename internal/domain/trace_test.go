@@ -12,7 +12,7 @@ import (
 func hashPolicy() DecisionPolicy {
 	return DecisionPolicy{
 		ProjectContextThreshold: 0.5,
-		ComplexityThreshold:     map[Complexity]float64{ComplexityMedium: 0.6, ComplexityComplex: 0.7},
+		ComplexityCuts:          ComplexityCuts{Medium: 0.6, Complex: 1.4},
 		StageThreshold:          map[Stage]float64{StageTesting: 0.5, StageReview: 0.4},
 		ForceStages:             map[Complexity][]Stage{ComplexityComplex: {StageReview}},
 	}
@@ -32,13 +32,18 @@ func TestPolicyHash(t *testing.T) {
 	if PolicyHash(p) == h {
 		t.Error("changing one stage threshold did not change the hash")
 	}
+
+	p = hashPolicy()
+	p.ComplexityCuts.Medium = 0.61
+	if PolicyHash(p) == h {
+		t.Error("changing a size cut did not change the hash")
+	}
 }
 
 func TestPolicyHash_MapOrderDoesNotMatter(t *testing.T) {
 	fill := func(stages []Stage, complexities []Complexity) DecisionPolicy {
 		p := DecisionPolicy{
 			ProjectContextThreshold: 0.5,
-			ComplexityThreshold:     map[Complexity]float64{},
 			StageThreshold:          map[Stage]float64{},
 			ForceStages:             map[Complexity][]Stage{},
 		}
@@ -46,7 +51,6 @@ func TestPolicyHash_MapOrderDoesNotMatter(t *testing.T) {
 			p.StageThreshold[st] = 0.1 * float64(len(string(st)))
 		}
 		for _, c := range complexities {
-			p.ComplexityThreshold[c] = 0.5
 			p.ForceStages[c] = []Stage{StageReview}
 		}
 		return p
@@ -64,10 +68,11 @@ func TestPolicyHash_MapOrderDoesNotMatter(t *testing.T) {
 
 // The hash covers DecisionPolicy's encoding, so a renamed, retyped or added field changes
 // every hash and splits the run history into a new group. This pins the encoding: when it
-// fails on purpose, say so in the commit that changes it.
+// fails on purpose, say so in the commit that changes it. specs/decision-shape DS02 changed it
+// on purpose: ComplexityThreshold became ComplexityCuts.
 func TestPolicyHash_PinnedEncoding(t *testing.T) {
 	const wantJSON = `{"ProjectContextThreshold":0.5,` +
-		`"ComplexityThreshold":{"complex":0.7,"medium":0.6},` +
+		`"ComplexityCuts":{"medium":0.6,"complex":1.4},` +
 		`"StageThreshold":{"review":0.4,"testing":0.5},` +
 		`"ForceStages":{"complex":["review"]}}`
 	p := hashPolicy()
@@ -110,5 +115,35 @@ func TestManualTraceHasNoPolicyHash(t *testing.T) {
 	}
 	if _, ok := raw["policy_hash"]; ok {
 		t.Errorf("a manual trace has a policy_hash: %s", data)
+	}
+}
+
+func TestComplexityDecisionSize(t *testing.T) {
+	for _, tt := range []struct {
+		simple, medium, complex, want float64
+	}{
+		{1, 0, 0, 0},
+		{0, 1, 0, 1},
+		{0, 0, 1, 2},
+		{0.08, 0.62, 0.30, 1.22},
+	} {
+		d := ComplexityDecision{Probabilities: map[Complexity]float64{
+			ComplexitySimple: tt.simple, ComplexityMedium: tt.medium, ComplexityComplex: tt.complex,
+		}}
+		if got := d.Size(); got < tt.want-1e-9 || got > tt.want+1e-9 {
+			t.Errorf("Size(%v/%v/%v) = %v, want %v", tt.simple, tt.medium, tt.complex, got, tt.want)
+		}
+	}
+}
+
+func TestValidModelSource(t *testing.T) {
+	for s, want := range map[string]bool{
+		"base": true, "by_complexity.simple": true, "by_complexity.complex": true,
+		"escalated.medium": true, "escalated.complex": true,
+		"escalated.simple": false, "escalated.huge": false, "by_complexity.": false, "": false, "other": false,
+	} {
+		if got := ValidModelSource(s); got != want {
+			t.Errorf("ValidModelSource(%q) = %v, want %v", s, got, want)
+		}
 	}
 }

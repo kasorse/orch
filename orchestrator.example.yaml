@@ -26,13 +26,20 @@ policy:
   context_depth:
     project_threshold: 0.5   # P(project) >= threshold -> collect project context
   complexity:
-    complex: 0.55            # P(complex) >= 0.55             -> complex
-    medium: 0.70             # P(medium) + P(complex) >= 0.70 -> medium, else simple
+    # size = P(medium) + 2·P(complex), in [0, 2]: size >= complex -> complex, >= medium -> medium,
+    # else simple (specs/decision-shape/SPEC.md §5). The cuts are the 50/35/15 quantiles of 43
+    # claude/opus decisions on this repository's tasks (2026-10-13); another decision model or
+    # task stream answers on another scale, so recalibrate for yours (SPEC.md §7).
+    cuts: {medium: 1.24, complex: 1.48}
   stages:
-    # 0.81 except testing (MVP.md §9.1): testing stays lower, so a run that implements also
-    # tests. The earlier 0.60-0.70 left analysis and review always on, planning by chance.
-    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
+    # Three stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
+    # if not, the run only answers), research (is outside knowledge needed) and analysis (is the
+    # cause or the place to change unknown). The rest comes from the template below: the stages
+    # on at each complexity. Testing always comes with development; without development,
+    # testing and review are off.
+    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
     force:
+      medium: [analysis, review]
       complex: [analysis, planning, review]
   # Path rules (specs/governance/SPEC.md §4): checked on the run's net diff after each implement.
   # Rules apply in file order and every matching rule applies, so requirements add up. A change
@@ -97,6 +104,11 @@ actions:
     # by_complexity:
     #   simple:  {model: haiku, effort: low}
     #   complex: {model: opus, effort: high}
+    # Optional, default false, implement only, needs by_complexity: an implement that fixes a
+    # failed test or review runs on the entry one level above the decided complexity (simple ->
+    # medium -> complex; complex, a level above without an entry and --stage keep their route).
+    # run.json records model_source escalated.<level> (specs/decision-shape/SPEC.md §8).
+    # escalate: true
 
   review:
     provider: claude

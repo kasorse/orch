@@ -30,36 +30,12 @@
         "true": "Files in the repository must be created, modified or deleted."
       }
     },
-    "stage_planning": {
-      "type": "noul",
-      "instructions": "Does fulfilling `request` require an explicit implementation plan before changing code?",
-      "criteria": {
-        "false": "The change is direct enough to implement without a separate plan, or no code is changed at all.",
-        "true": "The work spans several steps, files or components, or involves design choices that should be settled before writing code."
-      }
-    },
     "stage_research": {
       "type": "noul",
       "instructions": "Does fulfilling `request` require researching external knowledge (approaches, libraries, alternatives) before working?",
       "criteria": {
         "false": "Everything needed is in the request, the repository, or common engineering knowledge.",
         "true": "The request needs information that is not in the repository: comparing approaches, choosing or evaluating libraries or tools, or looking up external standards or APIs."
-      }
-    },
-    "stage_review": {
-      "type": "noul",
-      "instructions": "Does fulfilling `request` require reviewing the resulting code changes?",
-      "criteria": {
-        "false": "There is no diff, or it is trivial enough not to need a review.",
-        "true": "The change is non-trivial or risky enough that its diff should be checked for correctness, or the request itself asks for a review."
-      }
-    },
-    "stage_testing": {
-      "type": "noul",
-      "instructions": "Does fulfilling `request` require running the project's tests to verify the result?",
-      "criteria": {
-        "false": "No code behaviour changes: a question, a pure analysis, or a documentation-only edit.",
-        "true": "Code behaviour changes, or the request explicitly asks for tests to be run or written."
       }
     }
   }

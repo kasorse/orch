@@ -73,9 +73,11 @@ type Result struct {
 	Provider string
 	// PolicyHash is domain.PolicyHash of the Service's policy, which both the provider's
 	// decision and a manual choice after its failure are made under.
-	PolicyHash  string
-	Translation translate.Result
-	Decision    domain.Decision
+	PolicyHash string
+	// QuestionsHash is decision.QuestionsHash() of the questions the provider is asked.
+	QuestionsHash string
+	Translation   translate.Result
+	Decision      domain.Decision
 	// Depth and Classification are the provider's raw answers; nil when that round
 	// failed or never ran.
 	Depth          *domain.ContextDepthDecision
@@ -97,7 +99,7 @@ type Result struct {
 // Classify runs the decision flow for req. Errors are a cancelled run, a provider
 // failure with on_failure: fail (or no terminal to ask on), and wiring bugs.
 func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
-	res := Result{Provider: s.Decisions.Name(), PolicyHash: domain.PolicyHash(s.Policy)}
+	res := Result{Provider: s.Decisions.Name(), PolicyHash: domain.PolicyHash(s.Policy), QuestionsHash: decision.QuestionsHash()}
 
 	start := time.Now()
 	tr, err := s.Translator.Prepare(ctx, req.RunID, req.Text)
@@ -241,6 +243,7 @@ func (r Result) Trace(wf domain.Workflow) domain.DecisionTrace {
 		Source:         r.Decision.Source,
 		Provider:       r.Provider,
 		PolicyHash:     r.PolicyHash,
+		QuestionsHash:  r.QuestionsHash,
 		ContextLimited: r.ContextLimited,
 		ContextError:   r.ContextError,
 		Complexity:     r.Decision.Complexity,

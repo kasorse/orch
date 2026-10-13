@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/decision"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/interaction"
 	"orchestrator/internal/translate"
@@ -88,7 +89,7 @@ func testPolicy() domain.DecisionPolicy {
 	}
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: 0.5,
-		ComplexityThreshold:     map[domain.Complexity]float64{domain.ComplexityComplex: 0.4, domain.ComplexityMedium: 0.5},
+		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold:          th,
 		ForceStages:             map[domain.Complexity][]domain.Stage{domain.ComplexityComplex: {domain.StageAnalysis, domain.StagePlanning, domain.StageReview}},
 	}
@@ -379,6 +380,9 @@ func TestResultTrace_RecordsThePolicyHash(t *testing.T) {
 	want := domain.PolicyHash(f.svc.Policy)
 	if got := res.Trace(domain.Workflow{}).PolicyHash; got != want || len(want) != 64 {
 		t.Errorf("policy hash = %q, want %q", got, want)
+	}
+	if got := res.Trace(domain.Workflow{}).QuestionsHash; got != decision.QuestionsHash() {
+		t.Errorf("questions hash = %q, want %q", got, decision.QuestionsHash())
 	}
 
 	// Another threshold is another hash.

@@ -1,6 +1,9 @@
 package decision
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 
 	"orchestrator/internal/domain"
@@ -107,31 +110,18 @@ var stageQuestions = map[domain.Stage]YesNoQuestion{
 		True:         "The cause, the affected code, or the right place to change is not yet known and must be found by reading code, logs or behaviour.",
 		False:        "What to do and where is already clear from the request.",
 	},
-	domain.StagePlanning: {
-		Instructions: "Does fulfilling `request` require an explicit implementation plan before changing code?",
-		True:         "The work spans several steps, files or components, or involves design choices that should be settled before writing code.",
-		False:        "The change is direct enough to implement without a separate plan, or no code is changed at all.",
-	},
 	domain.StageDevelopment: {
 		Instructions: "Does fulfilling `request` require changing code in the repository?",
 		True:         "Files in the repository must be created, modified or deleted.",
 		False:        "The request is answered or fulfilled without modifying repository files.",
 	},
-	domain.StageTesting: {
-		Instructions: "Does fulfilling `request` require running the project's tests to verify the result?",
-		True:         "Code behaviour changes, or the request explicitly asks for tests to be run or written.",
-		False:        "No code behaviour changes: a question, a pure analysis, or a documentation-only edit.",
-	},
-	domain.StageReview: {
-		Instructions: "Does fulfilling `request` require reviewing the resulting code changes?",
-		True:         "The change is non-trivial or risky enough that its diff should be checked for correctness, or the request itself asks for a review.",
-		False:        "There is no diff, or it is trivial enough not to need a review.",
-	},
 }
 
-// StageQuestions returns one yes/no question per stage, in domain.StageOrder.
+// StageQuestions returns one yes/no question per asked stage (domain.AskedStages), in stage
+// order. Planning, testing and review are not asked: their answers repeated the task's size
+// (specs/decision-shape/SPEC.md §1.1).
 func StageQuestions() []YesNoQuestion {
-	order := domain.StageOrder()
+	order := domain.AskedStages()
 	out := make([]YesNoQuestion, 0, len(order))
 	for _, st := range order {
 		q := stageQuestions[st]
@@ -140,6 +130,23 @@ func StageQuestions() []YesNoQuestion {
 		out = append(out, q)
 	}
 	return out
+}
+
+// QuestionsHash is the lowercase hex sha256 of every shared question as asked, in a fixed
+// order. decision.json records it, and calibration groups by it: an answer to a reworded
+// question is on another scale (specs/decision-shape/SPEC.md §5.3).
+func QuestionsHash() string {
+	data, err := json.Marshal(struct {
+		ContextDepth     ChoiceQuestion
+		ComplexityChoice ChoiceQuestion
+		ComplexityScore  ScoreQuestion
+		Stages           []YesNoQuestion
+	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions()})
+	if err != nil {
+		panic(err) // plain strings and slices always encode
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func capitalize(s string) string {

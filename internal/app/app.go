@@ -93,11 +93,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if len(rest) == 2 && rest[1] == "report" {
 			return decisionsReport(stdout)
 		}
-		dir, minRuns, err := decisionsCalibrateArgs(rest[1:])
+		args, err := decisionsCalibrateArgs(rest[1:])
 		if err != nil {
 			return err
 		}
-		return decisionsCalibrate(stdout, dir, minRuns)
+		return decisionsCalibrate(stdout, args)
 	case "runs":
 		dir, err := runsReportArgs(rest[1:])
 		if err != nil {
@@ -415,51 +415,90 @@ func decisionsReport(stdout io.Writer) error {
 	return nil
 }
 
-const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N]"
+const decisionsUsage = "usage: orchestrator decisions report|calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]"
 
 // defaultMinRuns is how many runs a probability bucket needs before calibrate says anything
 // about it (specs/governance/SPEC.md §7.3).
 const defaultMinRuns = 10
 
-// decisionsCalibrateArgs parses what follows `decisions` for `calibrate`: --runs <dir> or
-// --runs=<dir> (default: the runs directory of the current repository) and --min-runs N or
-// --min-runs=N (default 10, at least 1), each at most once.
-func decisionsCalibrateArgs(args []string) (string, int, error) {
+// calibrateArgs are the flags of `decisions calibrate`.
+type calibrateArgs struct {
+	dir           string
+	minRuns       int
+	target        report.SizeTarget
+	simpleMaxHard float64
+}
+
+// decisionsCalibrateArgs parses what follows `decisions` for `calibrate`, each flag at most
+// once and as `--flag value` or `--flag=value`: --runs <dir> (default: the runs directory of the
+// current repository), --min-runs N (default 10, at least 1), --size-target S/M/C (default
+// 50/35/15: three positive percentages summing to 100) and --simple-max-hard F (default 0.2,
+// in (0, 1)).
+func decisionsCalibrateArgs(args []string) (calibrateArgs, error) {
 	bad := &apperr.ConfigError{Msg: decisionsUsage}
 	if len(args) == 0 || args[0] != "calibrate" {
-		return "", 0, bad
+		return calibrateArgs{}, bad
 	}
-	dir, minRuns := runsBaseDir, defaultMinRuns
-	var gotDir, gotMin bool
+	out := calibrateArgs{dir: runsBaseDir, minRuns: defaultMinRuns, target: report.DefaultSizeTarget, simpleMaxHard: report.DefaultSimpleMaxHard}
+	seen := map[string]bool{}
 	for i := 1; i < len(args); i++ {
 		flag, v, hasValue := strings.Cut(args[i], "=")
 		if !hasValue {
 			if i+1 >= len(args) {
-				return "", 0, bad
+				return calibrateArgs{}, bad
 			}
 			i++
 			v = args[i]
 		}
-		switch {
-		case flag == "--runs" && !gotDir && v != "":
-			dir, gotDir = v, true
-		case flag == "--min-runs" && !gotMin:
+		if seen[flag] {
+			return calibrateArgs{}, bad
+		}
+		seen[flag] = true
+		ok := true
+		switch flag {
+		case "--runs":
+			out.dir, ok = v, v != ""
+		case "--min-runs":
 			n, err := strconv.Atoi(v)
-			if err != nil || n < 1 {
-				return "", 0, bad
-			}
-			minRuns, gotMin = n, true
+			out.minRuns, ok = n, err == nil && n >= 1
+		case "--size-target":
+			out.target, ok = parseSizeTarget(v)
+		case "--simple-max-hard":
+			f, err := strconv.ParseFloat(v, 64)
+			out.simpleMaxHard, ok = f, err == nil && f > 0 && f < 1
 		default:
-			return "", 0, bad
+			ok = false
+		}
+		if !ok {
+			return calibrateArgs{}, bad
 		}
 	}
-	return dir, minRuns, nil
+	return out, nil
+}
+
+// parseSizeTarget reads S/M/C: three positive integers summing to 100.
+func parseSizeTarget(v string) (report.SizeTarget, bool) {
+	parts := strings.Split(v, "/")
+	if len(parts) != 3 {
+		return report.SizeTarget{}, false
+	}
+	var t report.SizeTarget
+	sum := 0
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 {
+			return report.SizeTarget{}, false
+		}
+		t[i], sum = n, sum+n
+	}
+	return t, sum == 100
 }
 
 // decisionsCalibrate proposes testing and review thresholds from the runs found under dir
 // (specs/governance/SPEC.md §7.3). It only reads: persistence.LoadRunDirs takes no lock and
 // creates nothing, and no Store is built. It needs no configuration and calls nothing.
-func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
+func decisionsCalibrate(stdout io.Writer, args calibrateArgs) error {
+	dir, minRuns := args.dir, args.minRuns
 	found, bad, err := persistence.LoadRunDirs(dir)
 	if err != nil {
 		return err
@@ -481,7 +520,10 @@ func decisionsCalibrate(stdout io.Writer, dir string, minRuns int) error {
 		}
 		unreadable = append(unreadable, report.UnreadableRun{Path: path, Err: b.Err.Error()})
 	}
-	report.RenderCalibration(stdout, dir, report.Calibrate(entries, unreadable, minRuns))
+	c := report.Calibrate(entries, unreadable, minRuns)
+	c.Shape = report.Shape(entries, args.target, minRuns, args.simpleMaxHard)
+	c.SizeTarget, c.SimpleMaxHard = args.target, args.simpleMaxHard
+	report.RenderCalibration(stdout, dir, c)
 	return nil
 }
 

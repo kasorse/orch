@@ -142,22 +142,19 @@ func TestBuild_FromPolicySelection(t *testing.T) {
 		StageThreshold: map[domain.Stage]float64{
 			domain.StageResearch:    0.70,
 			domain.StageAnalysis:    0.60,
-			domain.StagePlanning:    0.65,
 			domain.StageDevelopment: 0.60,
-			domain.StageTesting:     0.60,
-			domain.StageReview:      0.70,
+		},
+		ForceStages: map[domain.Complexity][]domain.Stage{
+			domain.ComplexityComplex: {domain.StageAnalysis, domain.StagePlanning, domain.StageReview},
 		},
 	}
 	stages := domain.StageDecisions{
-		Research:    domain.ProbabilityDecision{Probability: 0.31},
-		Analysis:    domain.ProbabilityDecision{Probability: 0.92},
-		Planning:    domain.ProbabilityDecision{Probability: 0.83},
-		Development: domain.ProbabilityDecision{Probability: 0.99},
-		Testing:     domain.ProbabilityDecision{Probability: 0.96},
-		Review:      domain.ProbabilityDecision{Probability: 0.82},
+		Research:    &domain.ProbabilityDecision{Probability: 0.31},
+		Analysis:    &domain.ProbabilityDecision{Probability: 0.92},
+		Development: &domain.ProbabilityDecision{Probability: 0.99},
 	}
 
-	sel := policy.SelectStages(stages, domain.ComplexityMedium, p)
+	sel := policy.SelectStages(stages, domain.ComplexityComplex, p)
 	w, err := Build(sel)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

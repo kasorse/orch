@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -109,6 +110,18 @@ type ComplexityDecision struct {
 	Score         *float64               `json:"score,omitempty"`
 }
 
+// Size is the distribution's expected level, Σ i·P(level i) over ComplexityOrder:
+// P(medium) + 2·P(complex), in [0, 2] (specs/decision-shape/SPEC.md §5.1). It is computed
+// from the probabilities for every provider alike; Score, when a provider sends one, is
+// recorded and never used.
+func (d ComplexityDecision) Size() float64 {
+	size := 0.0
+	for i, c := range complexityOrder {
+		size += float64(i) * d.Probabilities[c]
+	}
+	return size
+}
+
 func (d ComplexityDecision) Validate() error {
 	if err := validateDistribution(d.Probabilities, complexityOrder); err != nil {
 		return fmt.Errorf("complexity: %w", err)
@@ -131,18 +144,27 @@ type ProbabilityDecision struct {
 	Probability float64 `json:"probability"`
 }
 
-// StageDecisions holds an independent probability for every supported stage.
+// askedStages are the stages a decision provider is asked about (specs/decision-shape/SPEC.md
+// §6.1), in stage order: facts about the task that its size does not already carry. Planning,
+// testing and review come from the level and from development instead.
+var askedStages = []Stage{StageResearch, StageAnalysis, StageDevelopment}
+
+// AskedStages returns the stages a decision provider answers a probability for.
+func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
+
+// StageDecisions holds the probability of each stage a provider was asked about; a stage that
+// was not asked is nil.
 type StageDecisions struct {
-	Research    ProbabilityDecision `json:"research"`
-	Analysis    ProbabilityDecision `json:"analysis"`
-	Planning    ProbabilityDecision `json:"planning"`
-	Development ProbabilityDecision `json:"development"`
-	Testing     ProbabilityDecision `json:"testing"`
-	Review      ProbabilityDecision `json:"review"`
+	Research    *ProbabilityDecision `json:"research,omitempty"`
+	Analysis    *ProbabilityDecision `json:"analysis,omitempty"`
+	Planning    *ProbabilityDecision `json:"planning,omitempty"`
+	Development *ProbabilityDecision `json:"development,omitempty"`
+	Testing     *ProbabilityDecision `json:"testing,omitempty"`
+	Review      *ProbabilityDecision `json:"review,omitempty"`
 }
 
 // field returns a pointer to s's field for stage, or nil for an unknown stage.
-func (s *StageDecisions) field(stage Stage) *ProbabilityDecision {
+func (s *StageDecisions) field(stage Stage) **ProbabilityDecision {
 	switch stage {
 	case StageResearch:
 		return &s.Research
@@ -161,13 +183,13 @@ func (s *StageDecisions) field(stage Stage) *ProbabilityDecision {
 	}
 }
 
-// Get returns the decision for stage, or false for an unknown stage.
+// Get returns the decision for stage, or false for an unknown stage or one not asked.
 func (s StageDecisions) Get(stage Stage) (ProbabilityDecision, bool) {
 	f := s.field(stage)
-	if f == nil {
+	if f == nil || *f == nil {
 		return ProbabilityDecision{}, false
 	}
-	return *f, true
+	return **f, true
 }
 
 // Set stores the decision for stage and reports whether stage is known.
@@ -176,7 +198,7 @@ func (s *StageDecisions) Set(stage Stage, d ProbabilityDecision) bool {
 	if f == nil {
 		return false
 	}
-	*f = d
+	*f = &d
 	return true
 }
 
@@ -186,17 +208,29 @@ type StageProbability struct {
 	Decision ProbabilityDecision
 }
 
-// All returns every stage's decision in execution order.
+// All returns the decision of every stage that has one, in execution order.
 func (s StageDecisions) All() []StageProbability {
 	out := make([]StageProbability, 0, len(stageOrder))
 	for _, st := range stageOrder {
-		d, _ := s.Get(st)
-		out = append(out, StageProbability{Stage: st, Decision: d})
+		if d, ok := s.Get(st); ok {
+			out = append(out, StageProbability{Stage: st, Decision: d})
+		}
 	}
 	return out
 }
 
+// Validate requires a probability for every asked stage, none for the others, and each in
+// [0, 1].
 func (s StageDecisions) Validate() error {
+	for _, st := range stageOrder {
+		_, has := s.Get(st)
+		if asked := slices.Contains(askedStages, st); has != asked {
+			if asked {
+				return fmt.Errorf("stage %s has no probability", st)
+			}
+			return fmt.Errorf("stage %s is not asked, but has a probability", st)
+		}
+	}
 	for _, sp := range s.All() {
 		if err := validateUnit(fmt.Sprintf("stage %s probability", sp.Stage), sp.Decision.Probability); err != nil {
 			return err

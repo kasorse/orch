@@ -71,7 +71,7 @@ func usageEnv(t *testing.T, repoDir string) {
 		"decide-context": {`{"context_depth": {"none": 0.9, "project": 0.1}}`, 0.02},
 		"decide-classify": {`{"complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
  "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
- "stages": {"research": 0.05, "analysis": 0.9, "planning": 0.1, "development": 0.95, "testing": 0.9, "review": 0.8}}`, 0.03},
+ "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95}}`, 0.03},
 		"analyze":   {analyzeResponse, 0.11},
 		"implement": {implementResponse, 0.33},
 		"review":    {reviewPassResponse, 0.44},
