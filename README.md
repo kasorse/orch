@@ -75,7 +75,7 @@ policy:
   complexity:
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
+    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
     force:
       complex: [analysis, planning, review]
 

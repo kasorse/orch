@@ -43,29 +43,47 @@ func SelectComplexity(d domain.ComplexityDecision, p domain.DecisionPolicy) doma
 	}
 }
 
-// SelectStages decides which stages run (SPEC.md §12): a stage is enabled when its
-// probability is at least its configured threshold (inclusive), or when it is listed
-// in p.ForceStages[complexity] regardless of probability. If nothing clears its
-// threshold and nothing is forced, analysis alone is enabled (TASKS.md В6) rather than
-// returning an empty workflow.
+// SelectStages decides which stages run (specs/decision-shape/SPEC.md §6.2):
+//
+//	enabled = ForceStages[complexity]
+//	        ∪ { asked stage s : P(s) >= threshold(s) }   (inclusive)
+//	        ∪ { testing, if development is enabled }
+//
+// and without development, testing and review are off: there is no diff to test or review.
+// A stage the provider was not asked about (planning, testing, review) has no probability;
+// the template (ForceStages) is what turns it on. If nothing is enabled, analysis alone is
+// (TASKS.md В6) rather than an empty workflow.
 func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p domain.DecisionPolicy) domain.StageSelection {
 	forced := forcedSet(p, complexity)
 
 	var sel domain.StageSelection
-	for _, sp := range stages.All() {
-		prob := sp.Decision.Probability
-		threshold := p.StageThreshold[sp.Stage]
-		isForced := forced[sp.Stage]
-		enabled := prob >= threshold || isForced
+	for _, st := range domain.StageOrder() {
+		isForced := forced[st]
+		out := domain.StageOutcome{Stage: st, Forced: isForced, Enabled: isForced}
+		if d, asked := stages.Get(st); asked {
+			prob, threshold := d.Probability, p.StageThreshold[st]
+			out.Probability, out.Threshold = &prob, &threshold
+			out.Enabled = prob >= threshold || isForced
+			out.Reason = stageReason(prob, threshold, isForced, complexity)
+		} else if isForced {
+			out.Reason = fmt.Sprintf("forced: complexity=%s", complexity)
+		} else {
+			out.Reason = "not asked, not in the template"
+		}
+		sel.Stages = append(sel.Stages, out)
+	}
 
-		sel.Stages = append(sel.Stages, domain.StageOutcome{
-			Stage:       sp.Stage,
-			Probability: &prob,
-			Threshold:   &threshold,
-			Forced:      isForced,
-			Enabled:     enabled,
-			Reason:      stageReason(prob, threshold, isForced, complexity),
-		})
+	development := outcome(&sel, domain.StageDevelopment).Enabled
+	for _, st := range []domain.Stage{domain.StageTesting, domain.StageReview} {
+		o := outcome(&sel, st)
+		switch {
+		case !development && o.Enabled:
+			o.Enabled = false
+			o.Reason = "dropped: no code change"
+		case development && st == domain.StageTesting && !o.Enabled:
+			o.Enabled = true
+			o.Reason = "with development"
+		}
 	}
 
 	if !anyEnabled(sel) {
@@ -204,6 +222,16 @@ func evaluateComplexity(
 		Agree:    agree,
 		Cuts:     &cuts,
 	}
+}
+
+// outcome is sel's entry for stage; SelectStages fills one per stage in StageOrder.
+func outcome(sel *domain.StageSelection, stage domain.Stage) *domain.StageOutcome {
+	for i := range sel.Stages {
+		if sel.Stages[i].Stage == stage {
+			return &sel.Stages[i]
+		}
+	}
+	panic("policy: no outcome for stage " + string(stage))
 }
 
 func forcedSet(p domain.DecisionPolicy, complexity domain.Complexity) map[domain.Stage]bool {

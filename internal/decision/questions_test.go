@@ -49,9 +49,9 @@ func TestComplexityChoiceQuestion_ReturnsCopy(t *testing.T) {
 	}
 }
 
-func TestStageQuestions_OnePerStageInOrder(t *testing.T) {
+func TestStageQuestions_OnePerAskedStageInOrder(t *testing.T) {
 	qs := StageQuestions()
-	order := domain.StageOrder()
+	order := domain.AskedStages()
 	if len(qs) != len(order) {
 		t.Fatalf("got %d stage questions, want %d", len(qs), len(order))
 	}
@@ -77,11 +77,11 @@ func TestQuestionsHash(t *testing.T) {
 	if again := QuestionsHash(); again != h {
 		t.Errorf("QuestionsHash is not stable: %q then %q", h, again)
 	}
-	saved := stageQuestions[domain.StageReview]
-	t.Cleanup(func() { stageQuestions[domain.StageReview] = saved })
+	saved := stageQuestions[domain.StageAnalysis]
+	t.Cleanup(func() { stageQuestions[domain.StageAnalysis] = saved })
 	reworded := saved
 	reworded.Instructions += " "
-	stageQuestions[domain.StageReview] = reworded
+	stageQuestions[domain.StageAnalysis] = reworded
 	if QuestionsHash() == h {
 		t.Error("rewording a stage question did not change the hash")
 	}

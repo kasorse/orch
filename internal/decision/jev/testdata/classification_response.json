@@ -20,10 +20,7 @@
     },
     "stage_research": {"type": "noul", "noul": 0.05},
     "stage_analysis": {"type": "noul", "noul": 0.92},
-    "stage_planning": {"type": "noul", "noul": 0.71},
-    "stage_development": {"type": "noul", "noul": 0.99},
-    "stage_testing": {"type": "noul", "noul": 0.95},
-    "stage_review": {"type": "noul", "noul": 0.74}
+    "stage_development": {"type": "noul", "noul": 0.99}
   },
   "usage": {"input_tokens": 1450, "output_tokens": 8}
 }

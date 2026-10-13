@@ -73,7 +73,7 @@ const contextOut = "Here you go:\n```json\n{\"context_depth\": {\"none\": 0.2, \
 const classifyOut = `{
   "complexity": {"simple": 0.33, "medium": 0.33, "complex": 0.33},
   "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3},
-  "stages": {"research": 0.1, "analysis": 0.9, "planning": 0.4, "development": 0.95, "testing": 0.9, "review": 0.7}
+  "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}
 }`
 
 func projectInput() domain.ClassificationInput {
@@ -130,8 +130,11 @@ func TestClassify(t *testing.T) {
 	if score.Score == nil || *score.Score < 1.19 || *score.Score > 1.21 || score.Confidence != 0.6 {
 		t.Errorf("score = %+v", score)
 	}
-	if r, _ := tc.Stages.Get(domain.StageReview); r.Probability != 0.7 {
+	if r, _ := tc.Stages.Get(domain.StageAnalysis); r.Probability != 0.9 {
 		t.Errorf("stages = %+v", tc.Stages)
+	}
+	if _, asked := tc.Stages.Get(domain.StageReview); asked {
+		t.Errorf("review has a probability, but is not asked: %+v", tc.Stages)
 	}
 	if logs.logs["decide-classify.stdout"] == "" {
 		t.Error("classify call not logged")
@@ -153,7 +156,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestClassify_ChoiceOnly(t *testing.T) {
-	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "analysis": 1, "planning": 1, "development": 1, "testing": 1, "review": 1}}`
+	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "analysis": 1, "development": 1}}`
 	client := &fakeClient{outputs: []string{out}}
 	p, _ := newProvider(client, []domain.ComplexitySource{domain.ComplexitySourceChoice})
 	tc, err := p.Classify(context.Background(), domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone})
@@ -166,7 +169,7 @@ func TestClassify_ChoiceOnly(t *testing.T) {
 }
 
 func TestInvalidAnswers(t *testing.T) {
-	stages := `"stages": {"research": 0.1, "analysis": 0.9, "planning": 0.4, "development": 0.95, "testing": 0.9, "review": 0.7}`
+	stages := `"stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}`
 	cases := map[string]string{
 		"not json":                  "I think it is medium.",
 		"missing complexity":        `{"complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `}`,
@@ -176,8 +179,9 @@ func TestInvalidAnswers(t *testing.T) {
 		"probability above one":     `{"complexity": {"simple": -0.2, "medium": 1.2, "complex": 0}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `}`,
 		"score levels as names":     `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, ` + stages + `}`,
 		"missing stage":             `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1}}`,
-		"stage above one":           `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 1.5, "analysis": 0.9, "planning": 0.4, "development": 0.95, "testing": 0.9, "review": 0.7}}`,
+		"stage above one":           `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 1.5, "analysis": 0.9, "development": 0.95}}`,
 		"verdict instead of probas": `{"complexity": "medium", ` + stages + `}`,
+		"stage no longer asked":     `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95, "review": 0.7}}`,
 		"unknown field":             `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `, "workflow": ["analysis"]}`,
 	}
 	for name, out := range cases {

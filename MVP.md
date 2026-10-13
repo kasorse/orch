@@ -279,7 +279,7 @@ policy:
     complex: 0.55            # P(complex) >= 0.55             -> complex
     medium: 0.70             # P(medium) + P(complex) >= 0.70 -> medium, else simple
   stages:
-    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
+    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
     force:
       complex: [analysis, planning, review]
   # paths:                   # optional path rules, checked on the diff (§45.1)

@@ -180,7 +180,7 @@ func TestDecision_DepthNoneSkipsContext(t *testing.T) {
 	if len(bodies) != 2 || !strings.Contains(bodies[1], `"project_context_available":false`) || strings.Contains(bodies[1], `"project":`) {
 		t.Errorf("classification request = %v", bodies)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
 		t.Errorf("invocations = %v", got)
 	}
 }
@@ -240,7 +240,7 @@ func TestDecision_ContextFailureContinuesLimited(t *testing.T) {
 	if !strings.Contains(stdout, "limited: ") {
 		t.Errorf("console does not show the limited context:\n%s", stdout)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
 		t.Errorf("invocations = %v", got)
 	}
 }
@@ -432,7 +432,7 @@ func TestDecision_LLMProvider(t *testing.T) {
 	writeResponse(t, responsesDir, "decide-classify", `{
   "complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
   "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
-  "stages": {"research": 0.05, "analysis": 0.9, "planning": 0.1, "development": 0.95, "testing": 0.9, "review": 0.8}
+  "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95}
 }`)
 	t.Setenv("JEV_API_KEY", "")
 

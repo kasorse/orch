@@ -84,16 +84,16 @@ func TestScenario10_InteractiveManualRun(t *testing.T) {
 	opts.jevURL = startJev(t, scriptBugfixLow()).URL()
 	configPath := writeConfig(t, configDir, opts)
 
-	// approve the workflow, pick manual mode, then confirm implement/test/review in turn.
-	stdin := "a\n2\ny\ny\ny\n"
+	// approve the workflow, pick manual mode, then confirm implement and test in turn.
+	stdin := "a\n2\ny\ny\n"
 
 	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, configPath, stdin, "run", "fix Add() to add instead of subtract")
 	if err != nil {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement", "review"}) {
-		t.Errorf("invocations = %v, want [implement review]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
+		t.Errorf("invocations = %v, want [implement]", got)
 	}
 
 	if !strings.Contains(stdout, "Run completed successfully.") {

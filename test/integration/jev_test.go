@@ -31,21 +31,23 @@ type jevScript struct {
 	ModelsStatus int
 }
 
-// scriptBugfixMedium decides analysis -> development -> testing -> review.
+// scriptBugfixMedium decides analysis -> development -> testing -> review: size 1.1 is medium
+// under the test cuts, and medium's template is analysis and review.
 func scriptBugfixMedium() jevScript {
 	return jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.95, "testing": 0.9, "review": 0.8},
+		Stages:   map[string]float64{"analysis": 0.9, "development": 0.95},
 	}
 }
 
-// scriptBugfixLow decides development -> testing -> review.
+// scriptBugfixLow decides development -> testing: size 0.25 is simple, which has no template,
+// and testing comes with development (specs/decision-shape/SPEC.md §6.2).
 func scriptBugfixLow() jevScript {
 	return jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.8, 0.15, 0.05},
-		Stages:   map[string]float64{"development": 0.95, "testing": 0.9, "review": 0.8},
+		Stages:   map[string]float64{"development": 0.95},
 	}
 }
 

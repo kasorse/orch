@@ -45,11 +45,8 @@ func validConfig() Config {
 			ContextDepth: ContextDepthPolicyConfig{ProjectThreshold: float64Ptr(0.5)},
 			Complexity:   ComplexityPolicyConfig{Cuts: &ComplexityCutsConfig{Medium: float64Ptr(0.50), Complex: float64Ptr(1.40)}},
 			Stages: StagePolicyConfig{
-				Thresholds: map[string]float64{
-					"research": 0.70, "analysis": 0.60, "planning": 0.65,
-					"development": 0.60, "testing": 0.60, "review": 0.70,
-				},
-				Force: map[string][]string{"complex": {"analysis", "planning", "review"}},
+				Thresholds: map[string]float64{"research": 0.70, "analysis": 0.60, "development": 0.60},
+				Force:      map[string][]string{"complex": {"analysis", "planning", "review"}},
 			},
 		},
 		Context: ContextConfig{MaxFiles: 20, MaxBytes: 24576},

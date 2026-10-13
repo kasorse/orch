@@ -32,10 +32,14 @@ policy:
     # task stream answers on another scale, so recalibrate for yours (SPEC.md §7).
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    # 0.81 except testing (MVP.md §9.1): testing stays lower, so a run that implements also
-    # tests. The earlier 0.60-0.70 left analysis and review always on, planning by chance.
-    thresholds: {research: 0.81, analysis: 0.81, planning: 0.81, development: 0.81, testing: 0.60, review: 0.81}
+    # Three stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
+    # if not, the run only answers), research (is outside knowledge needed) and analysis (is the
+    # cause or the place to change unknown). The rest comes from the template below: the stages
+    # on at each complexity. Testing always comes with development; without development,
+    # testing and review are off.
+    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
     force:
+      medium: [analysis, review]
       complex: [analysis, planning, review]
   # Path rules (specs/governance/SPEC.md §4): checked on the run's net diff after each implement.
   # Rules apply in file order and every matching rule applies, so requirements add up. A change

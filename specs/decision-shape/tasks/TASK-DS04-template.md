@@ -35,3 +35,26 @@ without development, testing and review are dropped (`SPEC.md` §6.2).
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built with DS03 (see its "As built" for why). `scripts/check.sh` passed on 2026-10-13.
+
+- **`SelectStages`** walks `StageOrder`, takes the asked stages' probabilities against their
+  thresholds, adds `ForceStages[level]`, then turns testing on with development and testing and
+  review off without it. Reasons: `p=… >= …`, `forced: complexity=…`, `with development`,
+  `dropped: no code change`, and `not asked, not in the template` for a stage that is neither.
+  A dropped review keeps `forced: true` with `enabled: false`, as an excluded forced stage does.
+- **`policy.Explore` never explores development** (a new rule, not in the plan): turning
+  development on after the policy ran would skip "testing with development". Its threshold is
+  never calibrated anyway (governance SPEC §7.1).
+- **Config:** `stages.thresholds` needs research, analysis and development; planning, testing
+  and review are refused with a message naming `force`. The org layer's `force` additions are
+  unchanged and merge into the template as before.
+- **Templates:** `force.medium: [analysis, review]` in the example, the bench configs, their
+  goldens, `bench/docker/B.container.yaml`, `B2.yaml` and the integration config.
+- **Not changed:** `ApplyForced` and `WithEdit` (the manual choice and the review-screen edit).
+  A stage picked by hand stays as picked, so a manual choice of development without testing is
+  still possible there; the operator sees it.
+- **MVP.md** got only the three-stage `thresholds` line in its §9 example (the regex that
+  rewrote every config caught it); the rest of the text stays for DS07.

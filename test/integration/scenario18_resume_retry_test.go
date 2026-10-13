@@ -16,12 +16,13 @@ import (
 // its history left off - a failed step is retried with the context it had, limits count
 // the whole history, and a run whose process died is continued as "interrupted".
 
-// scriptWithPlan decides analysis -> planning -> development -> testing -> review.
+// scriptWithPlan decides analysis -> planning -> development -> testing -> review: size 1.65
+// is complex under the test cuts, and complex's template is analysis, planning and review.
 func scriptWithPlan() jevScript {
 	return jevScript{
 		PProject: 0.9,
-		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "planning": 0.9, "development": 0.95, "testing": 0.9, "review": 0.8},
+		Choice:   [3]float64{0.05, 0.25, 0.7},
+		Stages:   map[string]float64{"analysis": 0.9, "development": 0.95},
 	}
 }
 

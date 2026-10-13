@@ -25,7 +25,7 @@ func classificationRequest(request string) systemOneRequest {
 		}},
 		"complexity_score": {Type: questionScore, Instructions: "Rate how complex it is.", Criteria: complexityLevels},
 	}
-	for _, st := range []string{"research", "analysis", "planning", "development", "testing", "review"} {
+	for _, st := range []string{"research", "analysis", "development"} {
 		qs["stage_"+st] = question{Type: questionNoul, Instructions: "Does `request` need " + st + "?",
 			Criteria: map[string]string{"true": "yes", "false": "no"}}
 	}
@@ -62,8 +62,8 @@ func TestMock_AnswersEveryQuestionInValidShape(t *testing.T) {
 	if resp.Model != MockModelPrefix+"jev-1.13.0" {
 		t.Errorf("Model = %q", resp.Model)
 	}
-	if len(resp.Answers) != 8 {
-		t.Fatalf("got %d answers, want 8", len(resp.Answers))
+	if len(resp.Answers) != 5 {
+		t.Fatalf("got %d answers, want 5", len(resp.Answers))
 	}
 
 	c := resp.Answers["complexity"]
@@ -158,8 +158,12 @@ func TestMock_Complexity(t *testing.T) {
 func TestMock_Stages(t *testing.T) {
 	enabled := func(resp systemOneResponse) []string {
 		var out []string
-		for _, st := range []string{"research", "analysis", "planning", "development", "testing", "review"} {
-			if *resp.Answers["stage_"+st].Noul >= 0.5 {
+		for _, st := range []string{"research", "analysis", "development"} {
+			a, ok := resp.Answers["stage_"+st]
+			if !ok {
+				t.Fatalf("no answer for stage_%s", st)
+			}
+			if *a.Noul >= 0.5 {
 				out = append(out, st)
 			}
 		}
@@ -168,9 +172,9 @@ func TestMock_Stages(t *testing.T) {
 	cases := map[string][]string{
 		"Compare Redis and Memcached for caching":         {"research"},
 		"Fix a typo in the README":                        {"development"},
-		"Fix the race condition in the dispatcher":        {"analysis", "development", "testing", "review"},
-		"Add pagination support to the list endpoint":     {"analysis", "planning", "development", "testing", "review"},
-		"Rewrite the whole engine with a new concurrency": {"analysis", "planning", "development", "testing", "review"},
+		"Fix the race condition in the dispatcher":        {"analysis", "development"},
+		"Add pagination support to the list endpoint":     {"analysis", "development"},
+		"Rewrite the whole engine with a new concurrency": {"analysis", "development"},
 	}
 	for request, want := range cases {
 		if got := enabled(mustDecide(t, classificationRequest(request))); !reflect.DeepEqual(got, want) {

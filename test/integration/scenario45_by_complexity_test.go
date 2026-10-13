@@ -2,6 +2,7 @@ package integration
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"orchestrator/internal/testutil/fakeexec"
@@ -41,40 +42,45 @@ func TestScenario45_SimpleDecisionUsesTheTablesModel(t *testing.T) {
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	argsDir := t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
-	j := startJev(t, scriptBugfixLow())
+	// research has no by_complexity entry, so it shows the base model next to implement's table
+	// model: a simple decision has no template, and review is not part of it.
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", analyzeResponse)
+	script := scriptBugfixLow()
+	script.Stages["research"] = 0.9
+	j := startJev(t, script)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j, haikuForSimple), "run", "fix Add() to add instead of subtract")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"research", "implement"}) {
 		t.Fatalf("invocations = %v", got)
 	}
 	if d := readDecision(t, repoDir); d.Complexity.Selected != "simple" {
 		t.Fatalf("the decision's complexity = %q, want simple", d.Complexity.Selected)
 	}
 	implementArgs := readFile(t, argsDir+"/implement.args")
-	reviewArgs := readFile(t, argsDir+"/review.args")
+	researchArgs := readFile(t, argsDir+"/research.args")
 	assertContains(t, "implement's argv", implementArgs, "--model\nhaiku-fake\n")
-	assertContains(t, "review's argv", reviewArgs, "--model\nfake\n")
+	assertContains(t, "research's argv", researchArgs, "--model\nfake\n")
 
 	// decision.json routes every action of the workflow (not the test step).
 	models := readDecisionModels(t, repoDir).Models
 	if len(models) != 2 {
-		t.Fatalf("decision.json models = %+v, want implement and review", models)
+		t.Fatalf("decision.json models = %+v, want research and implement", models)
 	}
 	if m := models["implement"]; m.Provider != "claude" || m.Model != "haiku-fake" || m.Source != "by_complexity.simple" {
 		t.Errorf("models[implement] = %+v", m)
 	}
-	if m := models["review"]; m.Model != "fake" || m.Source != "base" {
-		t.Errorf("models[review] = %+v", m)
+	if m := models["research"]; m.Model != "fake" || m.Source != "base" {
+		t.Errorf("models[research] = %+v", m)
 	}
 
 	run := loadQL(t, repoDir)
 	if p := run.ofAction("implement")[0].Provider; p == nil || p.Model != "haiku-fake" || p.ModelSource != "by_complexity.simple" {
 		t.Errorf("implement's provider = %+v", p)
 	}
-	if p := run.ofAction("review")[0].Provider; p == nil || p.Model != "fake" || p.ModelSource != "base" {
-		t.Errorf("review's provider = %+v", p)
+	if p := run.ofAction("research")[0].Provider; p == nil || p.Model != "fake" || p.ModelSource != "base" {
+		t.Errorf("research's provider = %+v", p)
 	}
 }
 

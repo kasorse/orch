@@ -35,3 +35,30 @@ Ask only `stage_development`, `stage_research` and `stage_analysis`, with their 
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built together with DS04 and committed with it: on its own, DS03 would stop asking about
+testing, and without DS04's "testing with development" a run would implement and never test.
+`scripts/check.sh` (root and `bench/`) passed on 2026-10-13, run outside the bwrap sandbox,
+after rebuilding `bin/orchestrator`.
+
+- **The asked stages live in `domain`.** `domain.AskedStages()` (research, analysis,
+  development) is the one list: `decision.StageQuestions`, `StageDecisions.Validate` and the
+  config's thresholds all read it.
+- **`StageDecisions` holds pointers for all six stages**, not only for the three dropped ones:
+  one shape for every field, `Get` reports a stage that was not answered, `All` yields only the
+  answered ones. `Validate` requires the asked three and refuses the others.
+- **The mappers needed no change.** Jev's `checkEnvelope` and the LLM's `exactKeys` already take
+  their list from `StageQuestions()`, so an answer to `stage_review` is an `unexpected answer`
+  (tests added for both).
+- **The Jev mock** lost its planning, testing and review heuristics and the test-word signal
+  only they read.
+- **Golden files:** `go test ./internal/decision/jev -update` removed the three questions from
+  both request goldens and nothing else; `internal/logging` goldens did not change.
+- **Integration fixtures** answer three stages; `scriptBugfixLow` is now a simple task that
+  runs implement and test, so three scenarios expect `[implement]` instead of
+  `[implement review]`, `scriptWithPlan` is a complex task, and scenario 45 shows the base model
+  on research instead of review.
+- `questions_hash` changes with this task, as intended: the decisions after it are a new
+  calibration group.

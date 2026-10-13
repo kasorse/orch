@@ -5,8 +5,10 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -476,7 +478,7 @@ func validatePolicyConfig(p PolicyConfig) []string {
 
 	problems = append(problems, validateComplexityPolicy(p.Complexity)...)
 
-	for _, st := range domain.StageOrder() {
+	for _, st := range domain.AskedStages() {
 		v, ok := p.Stages.Thresholds[string(st)]
 		if !ok {
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds.%s is required", st))
@@ -486,9 +488,14 @@ func validatePolicyConfig(p PolicyConfig) []string {
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds.%s must be in [0, 1], got %v", st, v))
 		}
 	}
-	for key := range p.Stages.Thresholds {
-		if _, err := domain.ParseStage(key); err != nil {
+	for _, key := range slices.Sorted(maps.Keys(p.Stages.Thresholds)) {
+		st, err := domain.ParseStage(key)
+		switch {
+		case err != nil:
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds has unknown stage %q", key))
+		case !slices.Contains(domain.AskedStages(), st):
+			problems = append(problems, fmt.Sprintf("policy.stages.thresholds.%s: %s is not asked any more; it comes from "+
+				"policy.stages.force per complexity, and testing with development (specs/decision-shape/SPEC.md §6)", key, key))
 		}
 	}
 
