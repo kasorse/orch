@@ -88,3 +88,6 @@ G2 until it passes.
   the warning). The integration tests name the org file through `ORCHESTRATOR_ORG_CONFIG`, so
   they assume no `/etc/orchestrator/org.yaml` on the host; GV07 adds the `/etc` override.
 - **Docs:** MVP.md, CLAUDE.md, README.md and the example config stay with GV08.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

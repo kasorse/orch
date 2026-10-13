@@ -59,3 +59,6 @@ on that.
   run's own id, so it never pins an id.
 - **Not run.** Nothing here was executed, so the exact messages asserted (the warning, the
   skip line of scenario 51, the guard's path list) are taken from the code, not from a run.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

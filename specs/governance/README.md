@@ -1,13 +1,9 @@
 # Governance — control for teams (phase 4)
 
-Status: **in progress** (specified 2026-10-12; 2026-10-13): GV02, GV03, GV04, GV05, GV06 and
-GV07 are written and their tests with them, and GV08 has written the documentation (MVP.md §45
-and the sections it touches, CLAUDE.md, README, `orchestrator.example.yaml`, `org.example.yaml`),
-but `scripts/check.sh` has not been run over any of it yet, so nothing is ticked below or in
-TODO.md G1, G2, G3 and G5 (G1.1, G1.2 and G1.4 are what GV02 covers, G1.3 what GV03 covers, G2
-what GV04 covers, G3 what GV01 covers, G5.1 and G5.2 what GV05 covers, G5.3 what GV06 covers;
-GV07 and GV08 have no TODO.md item). Once the script passes, tick the tasks and G1, G2, G3 and
-G5 (G4 is already `[-]`), and change this line to done.
+Status: **done** (specified 2026-10-12; 2026-10-13): GV01–GV08 done. The four gates
+(`scripts/check.sh`, root and `bench/`, outside the sandbox) passed on 2026-10-13 over all of them,
+including the tasks written without running anything (GV02–GV08). TODO.md G1, G2, G3 and G5 are
+ticked; G4 stays `[-]`.
 
 The owner went through TODO.md G1–G5. G1, G2, G3 and G5 are in this spec. G4 (audit export) is
 dropped (`SPEC.md` §9): a local CLI on each developer's machine gives no central trail, and a
@@ -38,14 +34,14 @@ phase:
 
 | task | title | TODO | size | depends on |
 |---|---|---|---|---|
-| [GV01](tasks/TASK-GV01-budget.md) | `limits.max_cost_usd`: fail fast, engine stop, resume | G3 | S | — |
-| [GV02](tasks/TASK-GV02-path-rules.md) | `policy.paths`: config, start warning, check after implement, record | G1.1–2, G1.4 | M | — |
-| [GV03](tasks/TASK-GV03-approval.md) | `approval: manual` in the commit offer, `outcome.approval_required` | G1.3 | S | GV02 |
-| [GV04](tasks/TASK-GV04-org-config.md) | org config layer: find, strict schema, merge, record | G2 | M | GV01, GV02 |
-| [GV05](tasks/TASK-GV05-calibrate.md) | `policy_hash`, `orchestrator decisions calibrate` | G5 | M | — |
-| [GV06](tasks/TASK-GV06-explore.md) | `policy.explore`: opt-in stage exploration | G5.3 | S | GV05 |
-| [GV07](tasks/TASK-GV07-integration.md) | integration scenarios 47–56 | — | M | GV01–GV06 |
-| [GV08](tasks/TASK-GV08-documentation.md) | MVP.md §45 and others, CLAUDE.md, README, example config, TODO.md | — | S | GV07 |
+| [GV01](tasks/TASK-GV01-budget.md) | `limits.max_cost_usd`: fail fast, engine stop, resume ✓ | G3 | S | — |
+| [GV02](tasks/TASK-GV02-path-rules.md) | `policy.paths`: config, start warning, check after implement, record ✓ | G1.1–2, G1.4 | M | — |
+| [GV03](tasks/TASK-GV03-approval.md) | `approval: manual` in the commit offer, `outcome.approval_required` ✓ | G1.3 | S | GV02 |
+| [GV04](tasks/TASK-GV04-org-config.md) | org config layer: find, strict schema, merge, record ✓ | G2 | M | GV01, GV02 |
+| [GV05](tasks/TASK-GV05-calibrate.md) | `policy_hash`, `orchestrator decisions calibrate` ✓ | G5 | M | — |
+| [GV06](tasks/TASK-GV06-explore.md) | `policy.explore`: opt-in stage exploration ✓ | G5.3 | S | GV05 |
+| [GV07](tasks/TASK-GV07-integration.md) | integration scenarios 47–56 ✓ | — | M | GV01–GV06 |
+| [GV08](tasks/TASK-GV08-documentation.md) | MVP.md §45 and others, CLAUDE.md, README, example config, TODO.md ✓ | — | S | GV07 |
 
 ```
 budget   GV01 ──────────┐

@@ -56,3 +56,6 @@ The `Status:` line of `README.md` says so and says what to tick.
   rather than repeat it.
 - **`org.example.yaml`** sets every key of the org schema, with values chosen as an example
   (`.github/**`, `go.mod`, `sonnet`, `opus`, `haiku`); nothing loads it, so no test covers it.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

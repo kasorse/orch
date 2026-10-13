@@ -77,3 +77,6 @@ G5.3 until it passes.
   never does" are covered by construction and by scenario 56 of GV07, not by a test here.
 - **Older binaries** reject a `decision.json` with `explored: true` (strict decoding). The
   field is `omitempty`, so only runs that explored are affected.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

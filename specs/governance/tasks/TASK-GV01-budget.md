@@ -45,3 +45,13 @@ refused before any call when a routed provider cannot report cost (`SPEC.md` §5
 ## Gates
 
 `scripts/check.sh`
+
+## As built (2026-10-13)
+
+Built as planned (commit a7ef351, 2026-10-12). One addition: `config` cannot import
+`provider`, so `DependencyOptions.Cost` takes a `config.CostChecker` and `*provider.Registry`
+implements it (`ReportsCost`). The check walks the actions' own routes only: `by_complexity`
+and `review.models` change the model, never the provider.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

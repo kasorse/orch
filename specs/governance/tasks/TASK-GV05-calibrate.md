@@ -93,3 +93,6 @@ output is what the spec asks for.
 - **`decisions report`.** The decider key is `<source> <provider>/<model> <hash12|—>`, and a
   disagreement row gets the short hash after the time. Scenario 22 matches the hash with a
   regular expression, since it depends on the config the fixture writes.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

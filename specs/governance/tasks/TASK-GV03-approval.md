@@ -66,3 +66,6 @@ G1 until it passes.
   case in `report/summary_test.go`.
 - **Docs:** MVP.md §42.2, §42.6, §43.2 (the Approval row), §43.3 (`outcome.approval_required`),
   CLAUDE.md and README.md. MVP.md §45 stays with GV08.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.

@@ -100,3 +100,6 @@ until it passes.
 - **Docs:** MVP.md §43 (a "Path rules" section for `summary.md` and the two `run.json` fields),
   CLAUDE.md's run.json field list and `orchestrator.example.yaml` (a commented `policy.paths`
   block). MVP.md §45 stays with GV08.
+
+**Gates passed 2026-10-13:** `scripts/check.sh` (root and `bench/`, outside the sandbox) passed over the
+whole phase, GV01–GV08, before the merge into `master`.
