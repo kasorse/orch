@@ -1,6 +1,7 @@
 # Spec: Decision shape — size, templates, escalation
 
-Status: **in progress** (2026-10-14): DS01–DS06 are built (their task files say how); DS07 is left. The owner decided O1–O3 (§11); the gate
+Status: **done** (2026-10-14): DS01–DS07 are built (their task files say how). MVP.md (§8.2, §9,
+§9.1, §31.1, §44.8, §45.4) is now the normative home; this file stays the design record. The owner decided O1–O3 (§11); the gate
 O3 passed on the data of §1.1. The author's defaults are in §12. Once DS07 is done, MVP.md (§9, §9.1, §31.1, §44.8) becomes the
 normative home and this file stays the design record.
 

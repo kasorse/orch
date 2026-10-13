@@ -32,3 +32,31 @@ the normative home.
 ## Gates
 
 `scripts/check.sh`, root and `bench/`, outside the sandbox.
+
+## As built (2026-10-14)
+
+Built as planned, except as listed. `scripts/check.sh` (root and `bench/`) passed on
+2026-10-14, run outside the bwrap sandbox, after rebuilding `bin/orchestrator`.
+
+- **Scenarios 57-62** are one file, `test/integration/scenario57_decision_shape_test.go`; the
+  integration config gained an `escalate` option. 57: simple with P(analysis) high → analyze,
+  implement, test, testing `with development`. 58: medium with P(analysis) low → the template's
+  analysis and review, implement on the medium model. 59: P(development) low on a medium size →
+  analyze only, the answer printed, review `dropped: no code change`. 60: the old complexity
+  keys and a threshold for review fail with a config error naming the replacement, with no Jev
+  request and no provider call. 61: the first implement on the simple model leaves the test
+  red, the run stops at `max_steps: 2`, and the resume's fix runs on the medium model, recorded
+  as `escalated.medium` (the escalation and the resume are one scenario, not two). 62: three
+  answered runs of sizes 0.2, 0.6 and 1.2 give `cuts for 34/33/33: medium 0.40, complex 0.90`
+  and the diff from the cuts they were decided with.
+- **Docs.** MVP.md §8.2 (the three questions), §9 (the rule), §9.1 (rewritten: the example
+  values, why the shape changed, where the cuts come from), the example config in §5, §44.2
+  (checks run with every workflow that has development), §44.8 (escalation), §45.4 (the size
+  section of calibrate), the field references (§45 fields, §44.9 `model_source`), and the
+  `decisions calibrate` usage lines. §31.1 was done in DS06. README: the example, the policy
+  bullets, the decision steps, `escalate`, calibrate. CLAUDE.md: the spec list, the decision
+  flow, the policy rules, static routing, the run artifacts. `org.example.yaml`: the force
+  comment. TODO.md: G6, ticked, with the open question.
+- **Bench configs** were already updated in DS02 and DS04 (their test validates them against the
+  built binary). `specs/benchmark/SPEC.md` still describes the first round's six thresholds; it
+  is the benchmark's own record of what that round ran, and is left as written.

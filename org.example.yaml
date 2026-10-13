@@ -27,7 +27,7 @@ policy:
       require_stages: [review, testing]
       approval: manual
   stages:
-    force:                       # added to the repository's, per complexity
+    force:                       # added to the repository's template, per complexity
       complex: [review]
 
 limits:

@@ -77,6 +77,7 @@ policy:
   stages:
     thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
     force:
+      medium: [analysis, review]
       complex: [analysis, planning, review]
 
 context:
@@ -137,12 +138,19 @@ security:
 - **`translation`** — a request that is mostly Russian is translated to English for the
   decision provider (the stages still get your original text). If translation fails, the
   original is sent and a warning is printed.
-- **`policy`** turns probabilities into decisions: `project_threshold` for collecting
-  project context; the complexity cuts on size = P(medium) + 2·P(complex), from 0 to 2
-  (`specs/decision-shape/`: the example's are quantiles of past decisions, recalibrate for
-  yours); a
-  per-stage threshold (inclusive); and stages forced on for a complexity. If no stage
-  qualifies, the workflow is `analysis`. The same thresholds apply to every decision
+- **`policy`** turns probabilities into decisions (`specs/decision-shape/`):
+  - `project_threshold` for collecting project context;
+  - `complexity.cuts` on size = P(medium) + 2·P(complex), from 0 to 2: size at or above
+    `complex` is complex, at or above `medium` medium, else simple. The example's cuts are the
+    50/35/15 quantiles of past decisions of one decision model on one repository's tasks;
+    take yours from `decisions calibrate`;
+  - `stages.thresholds` for the three stages the decision provider is asked about:
+    development (are files changed; without it the run only answers), research (is outside
+    knowledge needed) and analysis (is the cause or the place to change unknown);
+  - `stages.force`, the template: the stages on at each complexity. Testing always comes
+    with development; without development, testing and review are off.
+
+  If nothing qualifies, the workflow is `analysis`. The same values apply to every decision
   provider.
 - **`context`** bounds the project context sent to the decision provider; `extra_deny`
   adds glob patterns that are never read.
@@ -218,12 +226,15 @@ limits:
 - **`checks`** are exit-code gates like the tests: build, vet, lint or a SAST scan, each run
   under the test sandbox, environment and guard, with `ORCH_BASE_REF` set to the commit the run
   started from. A failed check is named in the retry prompt, and the pre-run test runs them too.
-  Checks only run in a workflow with a `testing` stage.
+  Checks only run in a workflow with a `testing` stage, which every workflow with development
+  has.
 - **`verify`** is described under [Verify](#verify-let-implement-run-the-tests-opt-in); the
   `${ORCH_TEST_FILTER:+…}` in `test.command` lets the model run a subset of the tests, and a
   command that does not use it simply runs everything.
 - **`by_complexity`** is a static table: Go reads the complexity the decision already made and
-  picks the entry; nothing is chosen by a model, and the provider cannot be overridden.
+  picks the entry; nothing is chosen by a model, and the provider cannot be overridden. With
+  **`escalate: true`** (implement only) a fix after a failed test or review runs on the entry
+  one level up (simple → medium → complex), recorded as `model_source: escalated.<level>`.
 - **`review.fix_medium`** and **`actions.review.models`** make review stricter; the second
   costs one more call per extra model.
 - Nothing here changes what decides success: the `test` step's exit code and, for review,
@@ -491,8 +502,10 @@ summary: `MVP.md` §38.
    from the manifest, test layout, bullet rules from `AGENTS.md`/`CLAUDE.md`/
    `CONTRIBUTING.md`, matching README/docs sections, the files relevant to the request with
    one-line summaries, git branch and changed paths.
-4. **Classification.** Complexity distribution(s) and each stage's probability.
-5. **Policy.** Thresholds pick the complexity and the stages; forced stages are added.
+4. **Classification.** Complexity distribution(s) and the probabilities of the three asked
+   stages (development, research, analysis).
+5. **Policy.** The cuts on size pick the complexity; its template, the asked stages over
+   their thresholds and testing with development make the stages.
 6. **Workflow.** `research → analyze → plan → implement → test → review`, filtered to the
    enabled stages. A workflow without `implement` ends by printing the answer written by its
    last read-only step.
@@ -536,7 +549,7 @@ orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
-orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
+orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
 
 - `version` — prints the build version.
@@ -574,7 +587,7 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
   Deciders are told apart by the `policy_hash` every decision records (the first 12 digits are
   printed; `—` for a run written before it existed), so runs before and after a threshold
   change are not mixed.
-- `decisions calibrate [--runs <dir>] [--min-runs N]` — proposes `testing` and `review`
+- `decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]` — proposes `testing` and `review`
   thresholds from your run history (`.orchestrator/runs/`, or every run under `<dir>`). Runs
   are grouped by decision provider, model and `policy_hash`; for each group it prints the
   runs where the stage ran in probability buckets of 0.1 with the share the stage paid off in
@@ -584,8 +597,14 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N]
   with a YAML diff of `policy.stages.thresholds` with the rows behind each line. A threshold
   is raised to the lowest bucket edge above it such that the stage paid off in none of at
   least `--min-runs` (default 10) runs below it; a bucket with fewer runs prints `not enough
-  data`. Nothing is written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen
-  by hand and mock answers are skipped. It needs no config and calls nothing.
+  data`. Testing and review have probabilities only in decisions made before
+  `specs/decision-shape`. A second section, per decision model and questions hash, shows how
+  the decisions' sizes spread, which stage answers only repeat the size, the cuts for a target
+  share (`--size-target`, default 50/35/15) and the share of runs that needed a fix per size;
+  it ends with a YAML diff of `policy.complexity.cuts`, the medium cut lowered when the
+  simple level would hold more than `--simple-max-hard` (default 0.2) hard runs. Nothing is
+  written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen by hand and mock
+  answers are skipped. It needs no config and calls nothing.
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
   (and, if the decision provider fails, stops instead of asking you to choose).

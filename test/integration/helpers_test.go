@@ -84,6 +84,8 @@ type configOptions struct {
 	verifyMaxCalls int
 	// byComplexity is actions.<action>.by_complexity as action -> complexity -> model.
 	byComplexity map[string]map[string]string
+	// escalate is actions.implement.escalate (specs/decision-shape/SPEC.md §8).
+	escalate bool
 	// fixMedium is review.fix_medium.
 	fixMedium bool
 	// reviewModels is actions.review.models: the extra reviewers.
@@ -137,6 +139,9 @@ func (o configOptions) actionsYAML() string {
 		}
 		if a.name == "implement" && o.verify {
 			b.WriteString("    verify: true\n")
+		}
+		if a.name == "implement" && o.escalate {
+			b.WriteString("    escalate: true\n")
 		}
 		if a.name == "review" && len(o.reviewModels) > 0 {
 			fmt.Fprintf(&b, "    models: [%s]\n", strings.Join(o.reviewModels, ", "))

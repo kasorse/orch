@@ -24,6 +24,9 @@ the quality loop (stage context, `checks:`, the in-session verify tools, review 
 design record in `specs/quality/`;
 governance - path rules, the org config layer, the cost budget, threshold calibration and
 exploration: MVP.md §45, with its design record in `specs/governance/`;
+the decision shape - complexity cut from one size number, three asked stages and the level's
+template, cut proposals in `decisions calibrate`, `actions.implement.escalate`: MVP.md §9,
+§9.1, §31.1, §44.8, §45.4, with its design record in `specs/decision-shape/`;
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`.
 This file is a summary to keep future work aligned with them, not a replacement.
@@ -83,7 +86,7 @@ request → translate if ≥30% Cyrillic prose (internal/translate; failure → 
         → policy: project if P(project) ≥ project_threshold
         → Context Manager builds ProjectContext        (internal/projectctx)
           failure → continue with context_limited
-        → classification: complexity + 6 stage probs   (decision.Provider.Classify)
+        → classification: complexity + 3 stage probs   (decision.Provider.Classify)
         → policy → complexity, enabled stages          (internal/policy)
         → workflow.Build                                (internal/workflow)
   provider failure → manual choice (on_failure: ask, interactive only) or error
@@ -105,11 +108,15 @@ research → research, analysis → analyze, planning → plan,
 development → implement, testing → test, review → review
 ```
 
-Policy rules: complexity is `complex` if P(complex) ≥ `policy.complexity.complex`, else
-`medium` if P(medium)+P(complex) ≥ `policy.complexity.medium`, else `simple` — applied to
-both the primary and the shadow question, the primary decides. A stage is enabled if its
-probability ≥ its threshold (inclusive), plus `policy.stages.force[complexity]`; nothing
-enabled → `analysis`. The same decision always produces the same workflow.
+Policy rules (`specs/decision-shape/`): size = P(medium) + 2·P(complex), computed by Go from
+the probabilities for every provider; complexity is `complex` if size ≥
+`policy.complexity.cuts.complex`, else `medium` if size ≥ `cuts.medium`, else `simple` —
+applied to both the primary and the shadow question, the primary decides. Only research,
+analysis and development are asked (`domain.AskedStages`); stages = `policy.stages.force
+[complexity]` (the template) ∪ the asked stages with probability ≥ threshold (inclusive) ∪
+testing whenever development is on; without development, testing and review are off; nothing
+enabled → `analysis`. `policy.explore` never explores development. The same decision always
+produces the same workflow.
 
 Engine transitions (`internal/workflow/transitions.go`) are a state machine, not a for-loop
 over a fixed list: success → the next step of the workflow (done after the last); test
@@ -219,7 +226,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   decision provider leads to the user's manual choice, never to another provider.
   `actions.<name>.by_complexity` is static routing too: a config table keyed by the decided
   complexity, model and effort only (never the provider), so the same decision always gives the
-  same models; `run --stage` has no complexity and uses the base.
+  same models; `run --stage` has no complexity and uses the base. `actions.implement.escalate`
+  is the one model a failure changes: an implement that fixes a failed test or review (read
+  from `run.Executions`) runs on the `by_complexity` entry one level up, derivable on resume.
 - **Secrets never leave the machine**: the Context Manager applies its deny list (`.env*`,
   `*.pem`, `*.key`, `credentials*`, `secrets*`, `context.extra_deny`, to every path segment)
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads
@@ -329,7 +338,7 @@ has its own), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, 
 `options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
 read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
-`provider.authority`, `provider.model_source` (`base` or `by_complexity.<level>`), `attempt`,
+`provider.authority`, `provider.model_source` (`base`, `by_complexity.<level>` or `escalated.<level>`), `attempt`,
 `usage` (with `partial` for a call cut off before its final report), `call` (prompt size and
 cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
 guard passed, `diff` from git and `path_rules` (the `policy.paths` rules the run's net diff matched,
@@ -345,11 +354,13 @@ resume, derived and never read back for a decision: `status`, `failure_reason`,
 from run.json and decision.json when
 the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
 provider, model, effort and source each action gets; `policy_hash`: the sha256 of the
-`DecisionPolicy` the decision used, absent for `manual`; `stages[].explored`: a stage
+`DecisionPolicy` the decision used, absent for `manual`; `questions_hash`: the sha256 of the
+shared questions, which `decisions calibrate` groups sizes by; `complexity.sources.<src>.size`
+and `complexity.cuts`; `stages[].explored`: a stage
 `policy.explore` turned on; grouped on by `decisions report` and
 `decisions calibrate` (read-only, `internal/report/calibrate.go`); full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
-probability/threshold/forced/reason, latencies, and `usage` of each decision call that
+probability/threshold (absent for a stage not asked)/forced/reason, latencies, and `usage` of each decision call that
 reported one: `translation`, `context_depth`, `classification`),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
