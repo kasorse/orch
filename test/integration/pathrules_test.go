@@ -2,6 +2,8 @@ package integration
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -52,7 +54,20 @@ func loadPathRulesRun(t *testing.T, repoDir string) pathRulesRun {
 const (
 	fixtureNeedsResearch = "    - match: fixture.go\n      require_stages: [research]\n"
 	fixtureNeedsTesting  = "    - match: fixture.go\n      require_stages: [testing]\n"
+	// migrationsNeedTesting is the rule of scenarios 49, 50 and 52.
+	migrationsNeedTesting = "    - match: migrations/**\n      require_stages: [testing]\n"
 )
+
+// touchOnImplement makes each fake implement call write rel (relative to repoDir), the way an
+// implementation adds a migration. With revertOnCall above 0 the call of that number on removes
+// it again.
+func touchOnImplement(t *testing.T, repoDir, rel string, revertOnCall int) {
+	t.Helper()
+	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", filepath.Join(repoDir, rel))
+	if revertOnCall > 0 {
+		t.Setenv("FAKE_IMPLEMENT_REVERT_ON_CALL", strconv.Itoa(revertOnCall))
+	}
+}
 
 // A rule that needs a stage the workflow lacks: the run warns at its start, the first
 // implement fails with the rule's message and records the match.

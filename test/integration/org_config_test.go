@@ -9,13 +9,29 @@ import (
 	"strings"
 	"testing"
 
+	"orchestrator/internal/app"
 	"orchestrator/internal/config"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
 // The org config layer (specs/governance/SPEC.md §6, GV04). The tests name the org file
-// through ORCHESTRATOR_ORG_CONFIG, which applies only while /etc/orchestrator/org.yaml does not
-// exist.
+// through ORCHESTRATOR_ORG_CONFIG, which applies only while the /etc org file does not exist.
+// TestMain points that location at a path that never exists, so the host's own
+// /etc/orchestrator/org.yaml is never read; useEtcOrgConfig puts a file there for a test.
+
+// absentEtcOrgConfig is the /etc org file location of every test that does not set its own.
+var absentEtcOrgConfig string
+
+// useEtcOrgConfig writes an org file with body, makes it the /etc one for the test and returns
+// its path.
+func useEtcOrgConfig(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "etc-org.yaml")
+	writeOrgConfig(t, path, body)
+	restore := app.SetOrgConfigEtcPath(path)
+	t.Cleanup(restore)
+	return path
+}
 
 type orgRecord struct {
 	OrgConfig *orgRef `json:"org_config"`

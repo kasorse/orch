@@ -91,14 +91,21 @@ type configOptions struct {
 	// pathRules is policy.paths, the list items verbatim (four spaces of indent), e.g.
 	// "    - match: fixture.go\n      require_stages: [testing]\n". Empty renders none.
 	pathRules string
+	// explore is policy.explore, the lines verbatim (two spaces of indent), e.g.
+	// "  explore:\n    band: 0.05\n    rate: 0.5\n". Empty renders none.
+	explore string
+	// maxCostUSD is limits.max_cost_usd; 0 renders none.
+	maxCostUSD float64
 }
 
-// pathRulesYAML is the policy.paths key, or nothing.
+// pathRulesYAML is the policy.paths and policy.explore keys that follow policy.stages, or
+// nothing.
 func (o configOptions) pathRulesYAML() string {
-	if o.pathRules == "" {
-		return ""
+	s := o.explore
+	if o.pathRules != "" {
+		s = "  paths:\n" + o.pathRules + s
 	}
-	return "  paths:\n" + o.pathRules
+	return s
 }
 
 // checkOption is one entry of the checks: list.
@@ -141,6 +148,9 @@ func (o configOptions) actionsYAML() string {
 // limitsYAML is what goes under limits: after stop_without_progress.
 func (o configOptions) limitsYAML() string {
 	s := o.promptLimits
+	if o.maxCostUSD > 0 {
+		s += fmt.Sprintf("  max_cost_usd: %v\n", o.maxCostUSD)
+	}
 	if o.verifyMaxCalls > 0 {
 		s += fmt.Sprintf("  verify:\n    max_calls_per_step: %d\n", o.verifyMaxCalls)
 	}

@@ -267,6 +267,15 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 // a variable so tests can point it elsewhere.
 var orgConfigEtcPath = "/etc/orchestrator/org.yaml"
 
+// SetOrgConfigEtcPath makes path the machine-wide org file location and returns a function that
+// puts the previous one back. It exists for the integration tests, which run in another package
+// and must never read the real /etc.
+func SetOrgConfigEtcPath(path string) (restore func()) {
+	previous := orgConfigEtcPath
+	orgConfigEtcPath = path
+	return func() { orgConfigEtcPath = previous }
+}
+
 // orgRef is the reference run.json records for org; nil when no org file applied.
 func orgRef(org config.OrgSource) *domain.OrgConfigRef {
 	if org.Path == "" {
