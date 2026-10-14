@@ -33,3 +33,14 @@ of the orchestrator's credentials (`SPEC.md` §5).
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+- `internal/config/providers.go` holds `ProvidersConfig`, `ClaudeProviderConfig` (`EffectiveAuth`,
+  `KeyEnv`) and `providersProblems`; `Config.Providers` and `CredentialEnvNames()` are in
+  `config.go`, the call in `Validate`. Strictness needed no schema change: the new structs are
+  decoded by the existing strict loader.
+- `CredentialEnvNames()` now always contains the key variable, so `ANTHROPIC_API_KEY` is scrubbed
+  from every child, claude included, until CA03 gives it back to the claude adapter. Scenario 25
+  was changed to expect that; CA02/CA03 must restore the key for the claude calls.
+- Not marked done: `scripts/check.sh` was not run by the author of this change.

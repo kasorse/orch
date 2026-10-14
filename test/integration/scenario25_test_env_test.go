@@ -42,10 +42,13 @@ func TestScenario25_TestEnvAllowlist(t *testing.T) {
 	}
 
 	providerEnv := readEnvDump(t, filepath.Join(envDir, "analyze.env"))
-	for _, want := range []string{"ANTHROPIC_API_KEY", "ORCH_SCENARIO25_OTHER"} {
-		if _, ok := providerEnv[want]; !ok {
-			t.Errorf("the provider CLI lost %s; only the test command gets the allowlist", want)
-		}
+	// ANTHROPIC_API_KEY is a credential of the config now (specs/claude-auth/SPEC.md §5), so
+	// no child inherits it; CA03 has the claude adapter put it back for its own calls.
+	if _, ok := providerEnv["ORCH_SCENARIO25_OTHER"]; !ok {
+		t.Errorf("the provider CLI lost ORCH_SCENARIO25_OTHER; only the test command gets the allowlist")
+	}
+	if _, ok := providerEnv["ANTHROPIC_API_KEY"]; ok {
+		t.Errorf("the provider CLI inherited ANTHROPIC_API_KEY, a credential the config names")
 	}
 }
 

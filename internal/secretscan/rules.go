@@ -76,7 +76,7 @@ var rules = []rule{
 		// or a key are not an assignment of a quoted literal, and skip the pattern.
 		pre: assignmentShape,
 		accept: func(v, line string) bool {
-			return entropy(v) >= minEntropy && !placeholder(v) && !envLookup(line)
+			return entropy(v) >= minEntropy && !placeholder(v) && !envLookup(line) && !envVarName.MatchString(v)
 		},
 	},
 }
@@ -116,6 +116,11 @@ func placeholder(v string) bool {
 	}
 	return v == "" || strings.Count(v, v[:1]) == len(v)
 }
+
+// envVarName is a value that names an environment variable (api_key_env: "ANTHROPIC_API_KEY"):
+// upper-case segments joined by underscores. At least one underscore is required, so a base32
+// secret (upper-case letters and digits only) still counts.
+var envVarName = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$`)
 
 // envLookups on a line mean the value is read from the environment, not written down.
 var envLookups = []string{"os.Getenv(", "os.LookupEnv(", "process.env.", "os.environ", "os.getenv(", "System.getenv(", "ENV["}

@@ -466,6 +466,10 @@ type Config struct {
 	// settings (extensions.go). Absent means none, as before.
 	Extensions ExtensionsConfig `yaml:"extensions"`
 
+	// Providers holds how the claude CLI is authenticated (providers.go). Absent means auth:
+	// auto with api_key_env ANTHROPIC_API_KEY.
+	Providers ProvidersConfig `yaml:"providers"`
+
 	// AutoCommit commits a completed run's changes without asking, in every mode
 	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
 	AutoCommit bool `yaml:"auto_commit"`
@@ -532,10 +536,11 @@ func (s SecurityConfig) CleanWorktreeRequired() bool {
 // CredentialEnvNames lists the environment variables the configuration names as the
 // orchestrator's own credentials, sorted and without duplicates: decision.jev.api_key_env
 // whatever the decision provider (the variable may be set either way), and jira.token_env
-// and jira.email_env when the jira section is present. No child process may inherit them
-// (execution.ScrubCredentials, specs/jira/SPEC.md §12).
+// and jira.email_env when the jira section is present, and providers.claude.api_key_env (its
+// default when absent). No child process may inherit them (execution.ScrubCredentials,
+// specs/jira/SPEC.md §12); only the claude adapter puts the key back.
 func (c Config) CredentialEnvNames() []string {
-	names := []string{strings.TrimSpace(c.Decision.Jev.APIKeyEnv)}
+	names := []string{strings.TrimSpace(c.Decision.Jev.APIKeyEnv), c.Providers.Claude.KeyEnv()}
 	if c.Jira != nil {
 		names = append(names, c.Jira.TokenEnv, c.Jira.EmailEnv)
 	}
