@@ -748,6 +748,22 @@ authorities на его флаги, live-проверка `-tags security`, `Sup
 ### [ ] P8. Codex / Gemini — отложено
 По решению владельца от 2026-10-03: только по отдельной спеке. Не трогать до P7.
 
+### [ ] P11. Claude по API-ключу или по логину CLI — P1 · M
+Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из
+переменной `providers.claude.api_key_env`) или `login` (логин самого CLI). Выбирается флагом
+`--claude-auth`, затем `providers.claude.auth`, затем `auto` (ключ задан → `api`). Адаптер
+собирает окружение под режим и сверяет `apiKeySource` из init-события. Ошибка
+аутентификации останавливает run, а `resume` может сменить режим. Закрывает п. 2 из P6 для
+`ANTHROPIC_API_KEY`.
+
+### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
+Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна
+правка MVP.md §30. Инструменты Read/Grep/Glob/Edit/Write придётся реализовать на Go, а
+authority проверять в Go. Ещё нужны deny list, стоимость по `usage` и таблице цен, повторы
+на 429/529, prompt caching и `verify` как Go-инструмент. Контрол над authority будет
+сильнее, чем через флаги CLI, но взамен придётся поддерживать своего агента. Не начинать
+до P11 и B4. Отправная точка — `specs/claude-auth/SPEC.md` §14.
+
 ---
 
 ## Фаза 6 — Продукт и упаковка
