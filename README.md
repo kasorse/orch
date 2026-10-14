@@ -1001,3 +1001,9 @@ This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). 
 - No RAG, persistent conversational memory, or database — state is per-run JSON on disk.
 - No custom/dynamically-defined action types or user-defined workflow language — the stage
   set, their order and the policy rules are fixed in Go code; only thresholds are configured.
+
+## License
+
+Source-available under the [PolyForm Noncommercial License 1.0.0](LICENSE): free for
+personal use, research, education and noncommercial organizations. Any commercial use needs
+a separate commercial license — contact the author (orsaevkhasan@gmail.com).
