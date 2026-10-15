@@ -30,3 +30,16 @@ An authentication failure stops the run wherever it happens (`SPEC.md` §9).
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+- `translate.Translator.Prepare` returns a `FailureAuth` `ProviderError` (with `Action` and `LogPath`
+  filled as for any provider error) instead of the original text; every other failure still falls back.
+- `llm.Provider` needed no change: it already wraps the `ProviderError` in a `DecisionError` whose
+  `Unwrap` reaches it. `classification.Service.manual` returns the error without asking when
+  `errors.As` finds a `FailureAuth` `ProviderError`, whatever `on_failure` says.
+- `exitcode.FromError` checks `ProviderError` before `DecisionError`, so the wrapped error already
+  exits 2; the message is the adapter's (CA03), so `internal/app` needed nothing.
+- Workflow steps: a provider error already fails the run; only test/review outcomes retry implement.
+- Tests: `TestPrepare_AuthFailureIsAnError`, `TestClassify_AuthFailureNeverAsks`.
+- Status: implemented; `scripts/check.sh` is left to the operator.

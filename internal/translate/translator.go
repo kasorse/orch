@@ -77,7 +77,8 @@ type Translator struct {
 // Prepare returns the request as it should be sent to the decision provider. A failed
 // translation is not an error - the original goes out with Failed set and a Reason, and
 // the decision provider copes with Russian, only worse (TASKS.md В12). The only errors
-// are the run itself ending: Ctrl-C or execution.timeout.
+// are the run itself ending (Ctrl-C or execution.timeout) and an authentication failure
+// (FailureAuth), which stops the run wherever it happens.
 func (t *Translator) Prepare(ctx context.Context, runID, request string) (Result, error) {
 	res := Result{Original: request, Text: request, Detected: Detect(request)}
 	if !res.Detected.NeedsTranslate {
@@ -90,6 +91,10 @@ func (t *Translator) Prepare(ctx context.Context, runID, request string) (Result
 	res.Latency = time.Since(start)
 	if ctx.Err() != nil {
 		return res, ctx.Err()
+	}
+	var providerErr *apperr.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Kind == apperr.FailureAuth {
+		return res, err
 	}
 	if err == nil {
 		out, err = check(request, out)
@@ -143,6 +148,11 @@ func (t *Translator) call(ctx context.Context, runID, request string, res *Resul
 				case wroteStdout:
 					providerErr.LogPath = t.Logger.CallLogPath(runID, logName, "stdout")
 				}
+			}
+			// A credential problem ends the run; it is not a translation failure to
+			// fall back from (specs/claude-auth/SPEC.md §9).
+			if providerErr.Kind == apperr.FailureAuth {
+				return "", err
 			}
 			if providerErr.Kind == apperr.FailureTimeout || errors.Is(callCtx.Err(), context.DeadlineExceeded) {
 				return "", fmt.Errorf("translation timed out after %s", t.Timeout)
