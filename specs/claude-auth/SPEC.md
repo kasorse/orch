@@ -105,6 +105,8 @@ providers:              # new, optional; absent = auth: auto, api_key_env: ANTHR
   claude:
     auth: auto          # auto | api | login
     api_key_env: ANTHROPIC_API_KEY   # the variable that holds the key; never the key itself
+    api_env:            # optional (§17): set for the child in api mode only, never a secret
+      ANTHROPIC_BASE_URL: https://gateway.example
 ```
 
 - Parsed strictly (version 2). `providers.claude.api_key` (a literal) is declared in the
@@ -143,6 +145,7 @@ Built in the claude adapter only (`internal/provider/claude`), starting from
 | `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY` | removed (outrank the key) | inherited |
 | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_PROFILE`, `ANTHROPIC_FEDERATION_RULE_ID` | removed | inherited |
 | `ANTHROPIC_BASE_URL` | inherited, warned once (§13 #12) | inherited |
+| each name in `providers.claude.api_env` (§17) | **set** to the configured value | removed |
 | everything else | inherited, as today | inherited, as today |
 
 `login` means "the CLI's own credentials, never an API key from the orchestrator's
@@ -183,6 +186,10 @@ The message names the mode and how it was chosen, and what to try:
 --claude-auth login`. `resume` with another `--claude-auth` continues the run (§11).
 
 Rate limits (`rate_limit`, `overloaded`) are not `FailureAuth`: the CLI retries them as today.
+A call that fails with an error result `API Error: NNN …` (the API, or a gateway in front of
+it, refused the request) carries that status as `ProviderError.APIStatus`; the LLM decision
+provider classifies it like a Jev HTTP status (`apperr.DecisionKindForStatus`), so a 400 for
+a model the endpoint does not serve is `bad_request`, not `unavailable` (2026-10-15).
 What a non-retryable 401 looks like in stream-json is not documented; task CA07 records it
 from a live call and the classifier follows that record (§15 Q5).
 
@@ -249,6 +256,8 @@ finishes it on the key. A resume that changes the mode prints
 | 18 | A test double prints plain text (no stream-json) | no `apiKeySource`, not checked, recorded `""` (§8) |
 | 19 | A future CLI makes `--bare` the default for `-p` | `login` would break; the version range (`<2.2.0`) refuses that CLI until the live check (CA07) passes on it |
 | 20 | `bench/` (`orchbench`) runs `claude` for its baseline itself | not covered; the operator gives both the same environment (bench README note) |
+| 21 | The key's endpoint serves other model names than the login (a Bedrock gateway) | `api_env` maps the aliases (`ANTHROPIC_DEFAULT_OPUS_MODEL` …) in `api` only; routes keep `opus`/`sonnet` (§17) |
+| 22 | The gateway does not serve a model (`API Error: 400 … no healthy deployments`) | the step fails with the status in the message; a decision call is `bad_request`, not `unavailable` (§9) |
 
 ## 14. Out of scope and the next step
 
@@ -293,3 +302,108 @@ finishes it on the key. A resume that changes the mode prints
 - **D6** `resume` re-resolves; the persisted mode is a record, never an input.
 - **D7** The org layer gets no `providers.claude.auth` floor: whether an org may forbid
   subscription use is a policy question for TODO.md P6 (legal).
+
+## 17. The api mode's own environment (`providers.claude.api_env`)
+
+Added 2026-10-15, task CA09. Not built yet.
+
+### 17.1 Problem
+
+A key and a login can reach different endpoints that serve different model names. The
+owner's key goes to an internal gateway (LiteLLM in front of Bedrock): it needs
+`ANTHROPIC_BASE_URL`, `AWS_PROFILE`, `AWS_REGION` and the aliases
+`ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL` mapped to `bedrock/eu.anthropic.…` names.
+Without the aliases the CLI sends `claude-opus-5-5` and the gateway answers
+`API Error: 400 … no healthy deployments for this model` (run 7250e1ac). Exporting the
+variables in the shell does not work: `login` inherits them (§7), so the subscription call
+goes to the gateway with a gateway model name. The operator would have to `unset` them
+before every switch of mode, and a resume that changes mode (§11) would need another shell.
+
+### 17.2 Configuration
+
+```yaml
+providers:
+  claude:
+    auth: auto
+    api_key_env: ANTHROPIC_API_KEY
+    api_env:
+      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+      AWS_PROFILE: claude-bedrock
+      AWS_REGION: eu-west-1
+      ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
+      ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock/eu.anthropic.claude-sonnet-5-5
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0
+      ANTHROPIC_DEFAULT_FABLE_MODEL: bedrock/eu.anthropic.claude-fable-5
+```
+
+A map of names to values. Absent or empty means today's behavior byte for byte. Routes keep the
+aliases (`model: opus`), so `by_complexity`, `escalate` and `run --stage` need no change and
+the same config works in both modes. The CLI resolves the alias.
+
+### 17.3 Validation (config errors, in `Validate`, before any call)
+
+- A name must match `envNameRE` and must not be:
+  - `ANTHROPIC_API_KEY` or the effective `api_key_env`, because the key comes only from the
+    environment (§12);
+  - one of the variables `api` removes (§7: `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
+    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_PROFILE`, `ANTHROPIC_FEDERATION_RULE_ID`), since
+    setting one would undo the mode;
+  - a parent-session variable (`execution.IsParentSessionVar`);
+  - a name in `Config.CredentialEnvNames()`;
+  - a credential-like name (`credentialLike`, the `test.env_pass` rule). This rules out
+    `AWS_SECRET_ACCESS_KEY` or `AWS_SESSION_TOKEN` by name; a cloud credential belongs in
+    the profile `AWS_PROFILE` names, not in a committed config.
+- A value must be non-empty and free of control characters (a newline included). A value
+  that parses as a URL with userinfo (`https://user:pass@host`) is refused. The value is
+  also run through `internal/secretscan`, and a finding is refused with the variable's name,
+  never the value. The config file is committed, so it holds no secret.
+- With an org config that has `allowed_models` (MVP.md §45), any value of
+  `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `ANTHROPIC_DEFAULT_*_MODEL` or
+  `ANTHROPIC_CUSTOM_MODEL_OPTION` in `api_env` must also be in `allowed_models`. These
+  variables change the model a route reaches. A value outside the list is the same error as
+  a route outside it (D8).
+- The org layer gets no `api_env` of its own (D7 still applies).
+
+### 17.4 The child's environment
+
+Built in `buildEnv` (`internal/provider/claude/auth.go`), after the §7 table:
+
+- `api`: each `api_env` entry is set, replacing an inherited value of the same name.
+- `login`: each name in `api_env` is removed, so an export left in the shell cannot pull the
+  subscription onto the gateway. The removed names that were set join the one notice
+  (`ignored in login mode: ANTHROPIC_BASE_URL`), names only.
+- The version probe gets the same environment (one code path, §7).
+- No other process gets `api_env`: not the test command (`TestEnv`), not git, not the `orch`
+  verify server's test processes (they run with `verify.json`'s `TestEnv`), not codex or
+  gemini. The values are not secret, but they are claude's.
+- When `api_env` sets `ANTHROPIC_BASE_URL`, the §13 #12 warning names its host and says
+  `(providers.claude.api_env)`.
+
+### 17.5 Persistence and output
+
+- `run.json` gets `claude_auth.api_env`, the sorted names that were set (api) or removed
+  (login), never the values. Each `resumes[]` entry gets its own (§11: a resume re-resolves).
+- `validate` and the start of a run print one line in `api`:
+  `claude env (api): ANTHROPIC_BASE_URL (ai-gateway.example.internal), AWS_PROFILE, AWS_REGION, ANTHROPIC_DEFAULT_OPUS_MODEL, …`.
+  Only the host of `ANTHROPIC_BASE_URL` is shown; other values are not printed.
+- The real model of each call is already in `call.models` (the CLI reports
+  `bedrock/eu.anthropic.claude-opus-5-5`), so the audit shows what the alias became.
+- `summary.md`'s `Claude auth` line adds `, env: N variables` in `api`.
+- `decision.json`'s `models` keeps the routed alias. It records the route, not the endpoint.
+
+### 17.6 Out of scope
+
+- A `login_env` for the other direction. Nobody has asked for it; add it the same way if a
+  login setup ever needs variables the key's setup must not see.
+- Per-action or per-complexity environments: one mode and one environment per process (§15 Q3).
+- `bench/`: the operator gives `orchbench` the same environment (§13 #20).
+
+### 17.7 Defaults
+
+- **D8** The model variables in `api_env` are checked against the org's `allowed_models`. A
+  stricter alternative (forbid them whenever the org config exists) would block exactly the
+  gateway setup this section is for.
+- **D9** `login` removes the `api_env` names rather than leaving them alone. The section
+  exists because a shell export leaks across modes, and keeping them would bring that leak
+  back.
+
