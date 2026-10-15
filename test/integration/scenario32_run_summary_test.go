@@ -103,7 +103,7 @@ func TestScenario32_RunSummary(t *testing.T) {
 	}
 	for _, want := range []string{
 		"| Status | completed |",
-		"| Cost | $0.9400 |",
+		"| Cost | $0.9400",
 		"| Code change | 1 file, +",
 		"## Steps",
 		"| implement | completed |",

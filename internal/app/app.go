@@ -666,7 +666,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter,
+	cfg, clis, org, auth, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -737,6 +737,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	}
 	run.ProviderCLI = clis
 	run.OrgConfig = orgRef(org)
+	run.ClaudeAuth = &auth
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	// Held until the run returns, so a resume cannot take the run over while it is alive

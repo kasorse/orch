@@ -215,6 +215,9 @@ func parseStream(stdout string) streamReport {
 		rep.call = call
 	}
 	rep.apiKeySource = call.APIKeySource
+	if rep.usage != nil {
+		rep.usage.APIKeySource = call.APIKeySource
+	}
 	rep.authErr = authErr
 	return rep
 }

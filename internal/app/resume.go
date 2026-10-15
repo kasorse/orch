@@ -34,7 +34,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter, noJiraDependencies)
+	cfg, clis, org, auth, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	opts := tailOptions{
 		mode:        mode,
 		defaultMode: resumeDefaultMode(run.Mode),
-		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis, OrgConfig: orgRef(org)},
+		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis, OrgConfig: orgRef(org), ClaudeAuth: &auth},
 		// execution.timeout is a fresh budget for this process's steps (SPEC §8); there
 		// is no decision phase to discount.
 		engineContext: func() (context.Context, context.CancelFunc) {
@@ -146,6 +146,9 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if w := orgChangeWarning(run.OrgConfig, orgRef(org)); w != "" {
 		logging.GapWarning(stderr, w)
 	}
+	if w := claudeAuthChangeNotice(run, auth); w != "" {
+		logging.GapWarning(stderr, w)
+	}
 	if pathRulesChanged(run.Options.PathRules, cfg.PathRules()) {
 		logging.GapWarning(stderr, pathRulesChangedWarning)
 	}
@@ -163,6 +166,22 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		reporter.SetRun(run)
 	}
 	return executeWorkflow(ctx, s, opts)
+}
+
+// claudeAuthChangeNotice is the notice for a resume whose credential mode differs from the one
+// the run last ran under (specs/claude-auth/SPEC.md §11), and "" when it is the same or the run
+// recorded none. The record is only compared for the notice, never used to decide anything.
+func claudeAuthChangeNotice(run *domain.Run, now domain.ClaudeAuth) string {
+	last := run.ClaudeAuth
+	for _, r := range run.Resumes {
+		if r.ClaudeAuth != nil {
+			last = r.ClaudeAuth
+		}
+	}
+	if last == nil || last.Mode == now.Mode {
+		return ""
+	}
+	return fmt.Sprintf("claude auth changed since the run started: %s → %s", last.Mode, now.Mode)
 }
 
 // verifyWorkflow refuses a run without a workflow (nothing to continue; that is a new run)

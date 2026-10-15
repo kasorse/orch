@@ -30,6 +30,19 @@ CLI reported (`SPEC.md` §10, §11).
 - A `run.json` from before this change still resumes.
 - `grep` of the whole run directory for the test key value finds nothing.
 
+## As built
+
+- `Run.ClaudeAuth` / `Resume.ClaudeAuth` are `*domain.ClaudeAuth` (`claude_auth`, omitted when nil),
+  validated by `ClaudeAuth.Validate` in `persistence.validateRun`. The execution's
+  `api_key_source` was already on `CallReport` (CA03), so it sits in `call.api_key_source`, not
+  `provider.api_key_source`; `domain.Usage` gained `api_key_source`, set by `parseStream`, which
+  is what the decision usage blocks in `decision.json` carry (no golden files needed changing).
+- `summary.md` gets a `Claude auth` row only when the run recorded one, and the cost note when
+  any part ran in `login`.
+- `resume` records its own mode and prints the change notice against the last recorded mode.
+- Left to the operator: `scripts/check.sh` (root and `bench/`); the task is not marked done
+  until it passes. No test greps a run directory for the key value yet (CA06).
+
 ## Gates
 
 `scripts/check.sh`

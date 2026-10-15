@@ -33,6 +33,30 @@ type ClaudeAuth struct {
 	KeyBlank bool `json:"-"`
 }
 
+// Validate checks a recorded ClaudeAuth: requested in auto, api, login; mode api or login;
+// decided_by one of the three; key_env free of whitespace and control characters.
+func (a ClaudeAuth) Validate() error {
+	switch a.Requested {
+	case ClaudeAuthAuto, ClaudeAuthAPI, ClaudeAuthLogin:
+	default:
+		return fmt.Errorf("requested %q is not auto, api or login", a.Requested)
+	}
+	if a.Mode != ClaudeAuthAPI && a.Mode != ClaudeAuthLogin {
+		return fmt.Errorf("mode %q is not api or login", a.Mode)
+	}
+	switch a.DecidedBy {
+	case ClaudeAuthByFlag, ClaudeAuthByConfig, ClaudeAuthByDefault:
+	default:
+		return fmt.Errorf("decided_by %q is not flag, config or default", a.DecidedBy)
+	}
+	for _, r := range a.KeyEnv {
+		if r <= ' ' || r == 0x7f {
+			return fmt.Errorf("key_env %q has a control or space character", a.KeyEnv)
+		}
+	}
+	return nil
+}
+
 // Line is the console line that says which credential the run uses.
 func (a ClaudeAuth) Line() string {
 	auto := a.Requested == ClaudeAuthAuto

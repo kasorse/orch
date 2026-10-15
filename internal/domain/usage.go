@@ -25,6 +25,10 @@ type Usage struct {
 	// Limits is the account's rate-limit state after the call, when reported. It is the
 	// account's state, not the call's cost, so it is shown but never recorded.
 	Limits *RateLimits `json:"-"`
+	// APIKeySource is the credential source the claude CLI reported for the call
+	// (specs/claude-auth/SPEC.md §10); empty for other providers and for a CLI that reports none.
+	// Never summed by Add.
+	APIKeySource string `json:"api_key_source,omitempty"`
 }
 
 // Validate checks a recorded usage read back from disk: no counter is negative and the
@@ -35,6 +39,11 @@ func (u Usage) Validate() error {
 	}
 	if u.CostUSD < 0 || math.IsNaN(u.CostUSD) || math.IsInf(u.CostUSD, 0) {
 		return fmt.Errorf("cost_usd is %v", u.CostUSD)
+	}
+	if u.APIKeySource != "" {
+		if err := reportName(u.APIKeySource); err != nil {
+			return fmt.Errorf("api_key_source: %w", err)
+		}
 	}
 	return nil
 }
