@@ -34,8 +34,9 @@ like in stream-json.
     That is a §9 category, so the classifier needed no change.
   - The call ran until its timeout (2 minutes in the test) because the CLI keeps retrying.
     SPEC §16 D4's upgrade was therefore built: the adapter cancels the call at the first auth
-    `api_retry`. Check 3 now also requires the call to end in under 30 s. That assertion has not
-    been run live yet.
+    `api_retry`. Check 3 now also requires the call to end in under 30 s. Rerun live on 2026-10-15,
+    it passes: the call stopped after the first `api_retry` in 1.5 s, where it took 2 minutes
+    before.
 
 ## Gates
 

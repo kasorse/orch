@@ -243,7 +243,8 @@ api.anthropic.com.
 A wrong or revoked key held the first call, usually the translator's, for up to its timeout
 (`decision.timeout`, or `execution.timeout` for a step) before the run stopped. The adapter now
 cancels the call at the first auth-category `api_retry` (`authRetryWatcher` in
-`internal/provider/claude/stream.go`). The live check 3 asserts that the call ends in under 30 s.
+`internal/provider/claude/stream.go`). The live check 3 asserts that the call ends in under 30 s. Rerun 2026-10-15, it passes:
+one `api_retry` (`retry_delay_ms: 572`), then the stop, 1.5 s in all.
 
 **Not observed.** A 401 from api.anthropic.com itself. The CLI derives the category from the
 status, so the shape is expected to match, but that is not recorded here.
