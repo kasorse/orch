@@ -43,7 +43,7 @@ func TestBuildEnv_TableOfSpec7(t *testing.T) {
 	}
 
 	t.Run("api", func(t *testing.T) {
-		env, removed, err := buildEnv(base, domain.ClaudeAuthAPI, key)
+		env, removed, err := buildEnv(base, domain.ClaudeAuthAPI, key, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -70,7 +70,7 @@ func TestBuildEnv_TableOfSpec7(t *testing.T) {
 	})
 
 	t.Run("login", func(t *testing.T) {
-		env, removed, err := buildEnv(base, domain.ClaudeAuthLogin, "")
+		env, removed, err := buildEnv(base, domain.ClaudeAuthLogin, "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,13 +88,115 @@ func TestBuildEnv_TableOfSpec7(t *testing.T) {
 	})
 
 	t.Run("api without a key, unknown mode", func(t *testing.T) {
-		if _, _, err := buildEnv(base, domain.ClaudeAuthAPI, ""); err == nil {
+		if _, _, err := buildEnv(base, domain.ClaudeAuthAPI, "", nil); err == nil {
 			t.Error("api mode with no key must be an error")
 		}
-		if _, _, err := buildEnv(base, "bogus", ""); err == nil {
+		if _, _, err := buildEnv(base, "bogus", "", nil); err == nil {
 			t.Error("an unknown mode must be an error")
 		}
 	})
+}
+
+// SPEC §17.4: api_env is set in api mode, replacing an inherited value, and its names are
+// removed in login mode; an empty map changes nothing.
+func TestBuildEnv_APIEnv(t *testing.T) {
+	key := testKey()
+	base := []string{"PATH=/bin", "HOME=/home/x", "ANTHROPIC_BASE_URL=https://shell.example", "AWS_REGION=us-east-1",
+		"CLAUDE_CODE_USE_BEDROCK=1"}
+	apiEnv := map[string]string{
+		"ANTHROPIC_BASE_URL":           "https://gw.example",
+		"AWS_PROFILE":                  "claude-bedrock",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL": "bedrock/eu.anthropic.claude-opus-5-5",
+	}
+
+	t.Run("api sets and overrides", func(t *testing.T) {
+		env, removed, err := buildEnv(base, domain.ClaudeAuthAPI, key, apiEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(env, "\n")
+		for name, want := range apiEnv {
+			if v, ok := envValue(env, name); !ok || v != want {
+				t.Errorf("%s = %q, %v; want %q", name, v, ok, want)
+			}
+			if n := strings.Count(joined, name+"="); n != 1 {
+				t.Errorf("%s set %d times", name, n)
+			}
+		}
+		for _, name := range []string{"PATH", "HOME", "AWS_REGION"} {
+			if _, ok := envValue(env, name); !ok {
+				t.Errorf("%s was not inherited", name)
+			}
+		}
+		if v, _ := envValue(env, "ANTHROPIC_API_KEY"); v != key {
+			t.Errorf("ANTHROPIC_API_KEY = %q, want the key", v)
+		}
+		if !slices.Equal(removed, []string{"CLAUDE_CODE_USE_BEDROCK"}) {
+			t.Errorf("removed = %v, want only the §7 variable", removed)
+		}
+	})
+
+	t.Run("login removes the names that were exported", func(t *testing.T) {
+		env, removed, err := buildEnv(base, domain.ClaudeAuthLogin, "", apiEnv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name := range apiEnv {
+			if _, ok := envValue(env, name); ok {
+				t.Errorf("%s reached the child in login mode", name)
+			}
+		}
+		for _, name := range []string{"PATH", "HOME", "AWS_REGION", "CLAUDE_CODE_USE_BEDROCK"} {
+			if _, ok := envValue(env, name); !ok {
+				t.Errorf("%s was not inherited in login mode", name)
+			}
+		}
+		// AWS_PROFILE and the alias were not exported, so only the base URL is named.
+		if !slices.Equal(removed, []string{"ANTHROPIC_BASE_URL"}) {
+			t.Errorf("removed = %v, want [ANTHROPIC_BASE_URL]", removed)
+		}
+	})
+
+	t.Run("an empty map changes nothing", func(t *testing.T) {
+		for _, mode := range []string{domain.ClaudeAuthAPI, domain.ClaudeAuthLogin} {
+			wantEnv, wantRemoved, _ := buildEnv(base, mode, key, nil)
+			env, removed, err := buildEnv(base, mode, key, map[string]string{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(env, wantEnv) || !slices.Equal(removed, wantRemoved) {
+				t.Errorf("%s: an empty api_env changed the environment: %v, %v", mode, env, removed)
+			}
+		}
+	})
+
+	t.Run("never the key or what outranks it", func(t *testing.T) {
+		env, _, err := buildEnv(base, domain.ClaudeAuthAPI, key, map[string]string{"ANTHROPIC_API_KEY": "other", "ANTHROPIC_AUTH_TOKEN": "x"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := envValue(env, "ANTHROPIC_API_KEY"); v != key {
+			t.Errorf("api_env replaced the key")
+		}
+		if _, ok := envValue(env, "ANTHROPIC_AUTH_TOKEN"); ok {
+			t.Error("api_env brought ANTHROPIC_AUTH_TOKEN back")
+		}
+	})
+}
+
+// SetAuth keeps its own copy: a later change to the caller's map does not reach the child.
+func TestSetAuth_ClonesAPIEnv(t *testing.T) {
+	apiEnv := map[string]string{"AWS_PROFILE": "a"}
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	c := New(fake)
+	c.SetAuth(domain.ClaudeAuthAPI, testKey(), apiEnv)
+	apiEnv["AWS_PROFILE"] = "b"
+	if _, err := c.Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone}); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := envValue(fake.Calls[0].Env, "AWS_PROFILE"); v != "a" {
+		t.Errorf("AWS_PROFILE = %q, want the value SetAuth was given", v)
+	}
 }
 
 // api_key_env with a custom name: the child gets the key as ANTHROPIC_API_KEY and never under
@@ -108,7 +210,7 @@ func TestExecute_CustomKeyEnvReachesTheChildAsAnthropicAPIKey(t *testing.T) {
 
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
 	c := New(fake)
-	c.SetAuth(domain.ClaudeAuthAPI, key)
+	c.SetAuth(domain.ClaudeAuthAPI, key, nil)
 	if _, err := c.Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,14 +240,19 @@ func TestIgnoredEnvNamesRemovedVariablesOnly(t *testing.T) {
 	if got := c.IgnoredEnv(); got != nil {
 		t.Errorf("IgnoredEnv before SetAuth = %v", got)
 	}
-	c.SetAuth(domain.ClaudeAuthLogin, "")
+	c.SetAuth(domain.ClaudeAuthLogin, "", nil)
 	if got := c.IgnoredEnv(); len(got) != 0 {
-		t.Errorf("login mode ignores nothing, got %v", got)
+		t.Errorf("login mode without api_env ignores nothing, got %v", got)
 	}
-	c.SetAuth(domain.ClaudeAuthAPI, testKey())
+	c.SetAuth(domain.ClaudeAuthAPI, testKey(), nil)
 	got := c.IgnoredEnv()
 	if !slices.Contains(got, "CLAUDE_CODE_USE_BEDROCK") || slices.Contains(got, "ANTHROPIC_API_KEY") {
 		t.Errorf("IgnoredEnv = %v", got)
+	}
+	t.Setenv("ORCH_TEST_API_ENV_EXPORTED", "shell-value")
+	c.SetAuth(domain.ClaudeAuthLogin, "", map[string]string{"ORCH_TEST_API_ENV_EXPORTED": "a", "ORCH_TEST_API_ENV_UNSET": "b"})
+	if got := c.IgnoredEnv(); !slices.Equal(got, []string{"ORCH_TEST_API_ENV_EXPORTED"}) {
+		t.Errorf("login IgnoredEnv = %v, want the exported api_env name only", got)
 	}
 }
 
@@ -168,7 +275,7 @@ func TestCLIVersion_RunsUnderTheModesEnvironment(t *testing.T) {
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "gateway-token")
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "2.1.299 (Claude Code)"}}}
 	c := New(fake)
-	c.SetAuth(domain.ClaudeAuthAPI, key)
+	c.SetAuth(domain.ClaudeAuthAPI, key, map[string]string{"AWS_PROFILE": "claude-bedrock"})
 	if _, _, err := c.CLIVersion(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +285,9 @@ func TestCLIVersion_RunsUnderTheModesEnvironment(t *testing.T) {
 	}
 	if _, ok := envValue(env, "ANTHROPIC_AUTH_TOKEN"); ok {
 		t.Error("the probe inherited ANTHROPIC_AUTH_TOKEN in api mode")
+	}
+	if v, _ := envValue(env, "AWS_PROFILE"); v != "claude-bedrock" {
+		t.Errorf("the probe's AWS_PROFILE = %q, want the api_env value", v)
 	}
 }
 
@@ -193,7 +303,7 @@ func initEvent(source string) string {
 func executeUnder(mode, key string, res execution.ProcessResult) (provider.Result, error) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{res}}
 	c := New(fake)
-	c.SetAuth(mode, key)
+	c.SetAuth(mode, key, nil)
 	return c.Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 }
 
@@ -286,7 +396,7 @@ func TestExecute_AuthFailureWinsOverTimeout(t *testing.T) {
 		Errs:    []error{context.DeadlineExceeded},
 	}
 	c := New(fake)
-	c.SetAuth(domain.ClaudeAuthAPI, testKey())
+	c.SetAuth(domain.ClaudeAuthAPI, testKey(), nil)
 	_, err := c.Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	var pe *apperr.ProviderError
 	if !errors.As(err, &pe) || pe.Kind != apperr.FailureAuth || !errors.Is(err, context.DeadlineExceeded) {
@@ -348,7 +458,7 @@ func TestExecute_DoesNotLeakTheKey(t *testing.T) {
 			}
 			fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{tc.res}, Errs: errs}
 			c := New(fake)
-			c.SetAuth(domain.ClaudeAuthAPI, key)
+			c.SetAuth(domain.ClaudeAuthAPI, key, nil)
 			var live bytes.Buffer
 			var activity []string
 			res, err := c.Execute(context.Background(), provider.Request{

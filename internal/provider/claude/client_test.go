@@ -31,7 +31,7 @@ var common = []string{
 // to run, and most tests are not about the credential.
 func newLogin(e execution.ProcessExecutor) *Client {
 	c := New(e)
-	c.SetAuth(domain.ClaudeAuthLogin, "")
+	c.SetAuth(domain.ClaudeAuthLogin, "", nil)
 	return c
 }
 

@@ -52,6 +52,35 @@ it loses them, so one config works in both modes and a shell export cannot leak 
 - `run.json` holds the names, never a value. `summary.md` has the count.
 - Without `api_env`, existing scenarios and golden files are unchanged.
 
+## As built
+
+- 2026-10-15. `ClaudeProviderConfig.APIEnv` is decoded in its `UnmarshalYAML` raw struct, which
+  is the strict schema (an unknown key there was already refused). `apiEnvProblems` in
+  `internal/config/providers.go` checks the names in sorted order. `internal/secretscan` is a
+  stdlib-only leaf, so `config` imports it and the scan runs in `Validate`: a value that
+  `secretscan.Redact` changes is refused, naming the rule but not the value.
+- The variables `api` removes moved to `domain.ClaudeAPIModeRemoved()`, so the adapter and
+  config read one list. Config also refuses any `CLAUDE_CODE_USE_*` name.
+- The model variables (`domain.ClaudeModelVar`) are checked at the end of
+  `allowedModelProblems`, with the same message as a route.
+- `SetAuth(mode, key, apiEnv)` clones the map. `buildEnv(base, mode, key, apiEnv)` appends the
+  entries after the key in sorted order and drops inherited copies first. As a backstop for
+  validation it never appends `ANTHROPIC_API_KEY` or a variable `api` removes.
+- `app.claudeEnvReport` records `ClaudeAuth.APIEnv` and builds the `claude env (api): …` line,
+  which `ConsoleReporter.ClaudeAuth` prints under the mode line. It also builds the notices
+  (`ignored in api mode` / `ignored in login mode`). The §13 #12 `ANTHROPIC_BASE_URL` warning
+  had no code before this task. It now covers both sources: `(providers.claude.api_env)` or
+  `(inherited from the environment)`, host only.
+- `ClaudeAuth.Validate` refuses an `api_env` entry that is not a variable name, so
+  `persistence.validateRun` needed no change.
+- Tests: `TestValidate_ProvidersClaudeAPIEnv`, `TestLoad_ProvidersClaudeAPIEnv`,
+  `TestValidate_AllowedModels_APIEnvModelVariables`, `TestBuildEnv_APIEnv`,
+  `TestSetAuth_ClonesAPIEnv`, `TestClaudeEnvReport`, `TestApplyClaudeAuth_APIEnvReachesTheProbe`,
+  `TestRunSummary_ClaudeAuthAPIEnv`, and the integration scenarios
+  `TestClaudeAuth_APIEnvInAPIMode` and `TestClaudeAuth_APIEnvRemovedInLoginMode`.
+- Left to the operator: `scripts/check.sh` (root and `bench/`). The task is not marked done
+  until it passes.
+
 ## Gates
 
 `scripts/check.sh`

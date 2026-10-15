@@ -31,3 +31,17 @@ func TestRunSummary_ClaudeAuth(t *testing.T) {
 		t.Errorf("login part without the cost note:\n%s", got)
 	}
 }
+
+// specs/claude-auth/SPEC.md §17.5: api mode counts the api_env variables; login, which only
+// records the names it removed, shows no count.
+func TestRunSummary_ClaudeAuthAPIEnv(t *testing.T) {
+	run := summaryRun()
+	run.ClaudeAuth = &domain.ClaudeAuth{Requested: domain.ClaudeAuthAPI, Mode: domain.ClaudeAuthAPI, DecidedBy: domain.ClaudeAuthByConfig,
+		KeyEnv: "ANTHROPIC_API_KEY", APIEnv: []string{"ANTHROPIC_BASE_URL", "AWS_PROFILE", "AWS_REGION"}}
+	run.Resumes = []domain.Resume{{ClaudeAuth: &domain.ClaudeAuth{Requested: domain.ClaudeAuthLogin, Mode: domain.ClaudeAuthLogin,
+		DecidedBy: domain.ClaudeAuthByFlag, KeyEnv: "ANTHROPIC_API_KEY", APIEnv: []string{"ANTHROPIC_BASE_URL"}}}}
+	got := RunSummary(run, nil)
+	if !strings.Contains(got, "| Claude auth | api key ($ANTHROPIC_API_KEY), env: 3 variables; resume 1: CLI login |") {
+		t.Errorf("summary:\n%s", got)
+	}
+}

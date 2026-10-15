@@ -84,10 +84,11 @@ type authRunJSON struct {
 }
 
 type authRecord struct {
-	Requested string `json:"requested"`
-	Mode      string `json:"mode"`
-	DecidedBy string `json:"decided_by"`
-	KeyEnv    string `json:"key_env"`
+	Requested string   `json:"requested"`
+	Mode      string   `json:"mode"`
+	DecidedBy string   `json:"decided_by"`
+	KeyEnv    string   `json:"key_env"`
+	APIEnv    []string `json:"api_env"`
 }
 
 func loadAuthRun(t *testing.T, repoDir string) authRunJSON {
@@ -335,6 +336,114 @@ func TestClaudeAuth_ResumeSwitchesMode(t *testing.T) {
 	if len(run.Resumes) != 1 || run.Resumes[0].ClaudeAuth == nil || run.Resumes[0].ClaudeAuth.Mode != "login" || run.Resumes[0].ClaudeAuth.DecidedBy != "flag" {
 		t.Errorf("resumes = %+v, want one entry with login by flag", run.Resumes)
 	}
+}
+
+// apiEnvYAML is a gateway setup for providers.claude.api_env (SPEC §17.2), with stand-in values.
+const apiEnvYAML = "\nproviders:\n  claude:\n    api_env:\n" +
+	"      ANTHROPIC_BASE_URL: https://gw.ca09.example/v1\n" +
+	"      AWS_PROFILE: ca09-profile\n" +
+	"      ANTHROPIC_DEFAULT_OPUS_MODEL: ca09-opus-alias\n"
+
+// apiEnvValues are the values apiEnvYAML sets, by name.
+var apiEnvValues = map[string]string{
+	"ANTHROPIC_BASE_URL":           "https://gw.ca09.example/v1",
+	"AWS_PROFILE":                  "ca09-profile",
+	"ANTHROPIC_DEFAULT_OPUS_MODEL": "ca09-opus-alias",
+}
+
+// apiEnvNames are apiEnvValues' names, sorted, as run.json records them.
+var apiEnvNames = []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "AWS_PROFILE"}
+
+// clearAPIEnv unsets the api_env variables for the test (and restores them after).
+func clearAPIEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range apiEnvNames {
+		t.Setenv(name, "")
+		os.Unsetenv(name)
+	}
+}
+
+// §17.4, §17.5: in api mode every claude call gets api_env and the test command none of it;
+// run.json records the names, never a value, and summary.md counts them.
+func TestClaudeAuth_APIEnvInAPIMode(t *testing.T) {
+	clearAuthEnv(t)
+	clearAPIEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", authKey())
+	repoDir := fakeexec.InitGitFixture(t)
+	testEnv := filepath.Join(t.TempDir(), "test.env")
+	cfg, envDir := authRun(t, repoDir, func(o *configOptions) {
+		o.extraYAML = apiEnvYAML
+		o.testCommand = "env > '" + testEnv + "'"
+	})
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", authRequest)
+	mustSucceed(t, stdout, stderr, err)
+
+	for _, action := range authCalls {
+		env := callEnv(t, envDir, action)
+		for name, want := range apiEnvValues {
+			if env[name] != want {
+				t.Errorf("%s: %s = %q, want the api_env value", action, name, env[name])
+			}
+		}
+		if env["ANTHROPIC_API_KEY"] != authKey() {
+			t.Errorf("%s did not get the API key", action)
+		}
+	}
+	got := readEnvDump(t, testEnv)
+	for _, name := range apiEnvNames {
+		if _, ok := got[name]; ok {
+			t.Errorf("the test command inherited %s", name)
+		}
+	}
+	console := stdout + stderr
+	assertContains(t, "the console", console,
+		"claude env (api): ANTHROPIC_BASE_URL (gw.ca09.example), ANTHROPIC_DEFAULT_OPUS_MODEL, AWS_PROFILE",
+		"ANTHROPIC_BASE_URL is set (providers.claude.api_env): the API key goes to gw.ca09.example")
+	assertNotContains(t, "the console", console, "ca09-profile", "ca09-opus-alias", "gw.ca09.example/v1")
+
+	run := loadAuthRun(t, repoDir)
+	if run.ClaudeAuth == nil || run.ClaudeAuth.Mode != "api" || !equalStrings(run.ClaudeAuth.APIEnv, apiEnvNames) {
+		t.Errorf("claude_auth = %+v, want api with the api_env names", run.ClaudeAuth)
+	}
+	runJSON := readFile(t, runJSONPath(t, repoDir))
+	for _, v := range apiEnvValues {
+		assertNotContains(t, "run.json", runJSON, v)
+	}
+	assertContains(t, "summary.md", mustRunFile(t, repoDir, "summary.md"), "env: 3 variables")
+}
+
+// §17.4, D9: under --claude-auth login the same config removes the api_env names, so values
+// exported in the shell do not reach claude; the notice and run.json name them.
+func TestClaudeAuth_APIEnvRemovedInLoginMode(t *testing.T) {
+	clearAuthEnv(t)
+	clearAPIEnv(t)
+	t.Setenv("ANTHROPIC_BASE_URL", "https://shell.ca09.example")
+	t.Setenv("AWS_PROFILE", "ca09-shell-profile")
+	t.Setenv("ANTHROPIC_DEFAULT_OPUS_MODEL", "ca09-shell-alias")
+	repoDir := fakeexec.InitGitFixture(t)
+	cfg, envDir := authRun(t, repoDir, func(o *configOptions) { o.extraYAML = apiEnvYAML })
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "--claude-auth", "login", "run", authRequest)
+	mustSucceed(t, stdout, stderr, err)
+
+	for _, action := range authCalls {
+		env := callEnv(t, envDir, action)
+		for _, name := range apiEnvNames {
+			if v, ok := env[name]; ok {
+				t.Errorf("%s got %s=%q under --claude-auth login", action, name, v)
+			}
+		}
+	}
+	console := stdout + stderr
+	assertContains(t, "the console", console, "ignored in login mode: ANTHROPIC_BASE_URL, ANTHROPIC_DEFAULT_OPUS_MODEL, AWS_PROFILE")
+	assertNotContains(t, "the console", console, "claude env (api)", "ca09-shell-profile", "shell.ca09.example")
+
+	run := loadAuthRun(t, repoDir)
+	if run.ClaudeAuth == nil || run.ClaudeAuth.Mode != "login" || !equalStrings(run.ClaudeAuth.APIEnv, apiEnvNames) {
+		t.Errorf("claude_auth = %+v, want login with the removed names", run.ClaudeAuth)
+	}
+	assertNotContains(t, "summary.md", mustRunFile(t, repoDir, "summary.md"), "env: 3 variables")
 }
 
 // §12: the verify server runs the test command with the TestEnv alone, so the key the claude

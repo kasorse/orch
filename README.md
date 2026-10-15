@@ -571,6 +571,24 @@ providers:
   (`sk-ant-oat…`) belongs in `CLAUDE_CODE_OAUTH_TOKEN` with `--claude-auth login`.
 - A literal `api_key` in the config is rejected. `resume` decides the mode again from its own
   flag and environment. Details: MVP.md §46.
+- If the key goes to a gateway that serves other model names than your login, put the
+  gateway's variables in `providers.claude.api_env` instead of exporting them. They are set
+  for claude in `api` and removed in `login`, so the same config works in both modes and a
+  shell export cannot pull a subscription call onto the gateway:
+
+  ```yaml
+  providers:
+    claude:
+      api_env:
+        ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+        AWS_PROFILE: claude-bedrock
+        ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
+  ```
+
+  Routes keep `opus`/`sonnet`. The console prints `claude env (api): …` with the gateway's host
+  and no other value, and `summary.md` adds `, env: N variables`. No secret goes there:
+  credential names, a URL with a user or password, and values that look like a secret are
+  config errors. Only claude gets these variables; the test command does not.
 
 ## Usage
 

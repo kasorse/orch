@@ -163,11 +163,11 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 
-	mode, key, err := c.snapshot()
+	mode, key, apiEnv, err := c.snapshot()
 	if err != nil {
 		return provider.Result{}, err
 	}
-	env, _, err := buildEnv(execution.ScrubbedEnv(), mode, key)
+	env, _, err := buildEnv(execution.ScrubbedEnv(), mode, key, apiEnv)
 	if err != nil {
 		return provider.Result{}, err
 	}

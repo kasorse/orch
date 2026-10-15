@@ -12,6 +12,8 @@ import (
 func TestValidateRun_ClaudeAuth(t *testing.T) {
 	good := &domain.ClaudeAuth{Requested: domain.ClaudeAuthAuto, Mode: domain.ClaudeAuthAPI, DecidedBy: domain.ClaudeAuthByDefault, KeyEnv: "ANTHROPIC_API_KEY"}
 	login := &domain.ClaudeAuth{Requested: domain.ClaudeAuthLogin, Mode: domain.ClaudeAuthLogin, DecidedBy: domain.ClaudeAuthByFlag, KeyEnv: "ANTHROPIC_API_KEY"}
+	withEnv := &domain.ClaudeAuth{Requested: domain.ClaudeAuthAPI, Mode: domain.ClaudeAuthAPI, DecidedBy: domain.ClaudeAuthByConfig, KeyEnv: "ANTHROPIC_API_KEY",
+		APIEnv: []string{"ANTHROPIC_BASE_URL", "AWS_PROFILE"}}
 	withRun := func(a *domain.ClaudeAuth) *domain.Run {
 		return &domain.Run{ID: "r", Status: domain.RunFailed, ClaudeAuth: a}
 	}
@@ -25,6 +27,7 @@ func TestValidateRun_ClaudeAuth(t *testing.T) {
 		"a run in api mode":            withRun(good),
 		"a resume in another mode":     withResume(login),
 		"a resume without the field":   withResume(nil),
+		"api_env names":                withRun(withEnv),
 	} {
 		if err := validateRun(run, "r"); err != nil {
 			t.Errorf("%s: %v", name, err)
@@ -37,6 +40,9 @@ func TestValidateRun_ClaudeAuth(t *testing.T) {
 		"empty mode":        {Requested: "auto", DecidedBy: "flag", KeyEnv: "K"},
 		"unknown decider":   {Requested: "auto", Mode: "api", DecidedBy: "env", KeyEnv: "K"},
 		"space in key_env":  {Requested: "auto", Mode: "api", DecidedBy: "flag", KeyEnv: "A B"},
+		// SPEC §17.5: api_env holds names, so a value cannot be recorded there.
+		"a value in api_env": {Requested: "api", Mode: "api", DecidedBy: "flag", KeyEnv: "K", APIEnv: []string{"AWS_PROFILE=claude-bedrock"}},
+		"empty api_env name": {Requested: "api", Mode: "api", DecidedBy: "flag", KeyEnv: "K", APIEnv: []string{""}},
 	} {
 		if err := validateRun(withRun(a), "r"); err == nil || !strings.Contains(err.Error(), "claude_auth:") {
 			t.Errorf("run, %s: got %v, want a claude_auth error", name, err)

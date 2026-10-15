@@ -192,7 +192,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   or an authentication/billing error is `FailureAuth`, fatal in the translator, the LLM
   decision provider and every step. The key is env-only, redacted like the Jev key, and never
   in argv, config, `run.json` or logs; a failure never switches the mode, and `resume`
-  re-resolves it instead of reading it back.
+  re-resolves it instead of reading it back. `providers.claude.api_env` is claude's alone: set
+  in `api`, its names removed in `login`. No other process gets it, and it is never a secret:
+  `Validate` refuses credential names and secret-looking values, naming only the variable.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
   `git diff`, not just an implementation summary. Never parse phrases like "all tests should
@@ -347,7 +349,8 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `org_config` (`{path, sha256}` of the org file the run started under; each `resumes[]` entry
-has its own), `claude_auth` (`{requested, mode, decided_by, key_env}`, never the key; each
+has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
+holds variable names only; each
 `resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
 `options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
 read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a

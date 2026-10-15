@@ -41,7 +41,7 @@ func requireLiveKey(t *testing.T) string {
 func authCall(t *testing.T, mode, key string) (provider.Result, error) {
 	t.Helper()
 	c := claude.New(execution.NewOSProcessExecutor())
-	c.SetAuth(mode, key)
+	c.SetAuth(mode, key, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	return c.Execute(ctx, provider.Request{

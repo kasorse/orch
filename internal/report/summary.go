@@ -128,15 +128,20 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 }
 
 // claudeAuthLine is how the run's claude calls were authenticated, "api key ($ANTHROPIC_API_KEY,
-// auto)", with the mode of each resume when it differs from the part before it; "" for a run
-// written before the field. anyLogin reports whether any part ran on the CLI's login, where the
-// cost is the CLI's estimate and no money changes hands per token.
+// auto)", with ", env: N variables" for providers.claude.api_env in api mode, and the mode of
+// each resume when it differs from the part before it; "" for a run written before the field.
+// anyLogin reports whether any part ran on the CLI's login, where the cost is the CLI's
+// estimate and no money changes hands per token.
 func claudeAuthLine(run domain.Run) (line string, anyLogin bool) {
 	if run.ClaudeAuth == nil {
 		return "", false
 	}
 	describe := func(a domain.ClaudeAuth) string {
-		return strings.TrimPrefix(a.Line(), "claude auth: ")
+		s := strings.TrimPrefix(a.Line(), "claude auth: ")
+		if a.Mode == domain.ClaudeAuthAPI && len(a.APIEnv) > 0 {
+			s += fmt.Sprintf(", env: %d variables", len(a.APIEnv))
+		}
+		return s
 	}
 	line, anyLogin = describe(*run.ClaudeAuth), run.ClaudeAuth.Mode == domain.ClaudeAuthLogin
 	prev := run.ClaudeAuth.Mode

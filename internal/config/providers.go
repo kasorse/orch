@@ -4,12 +4,17 @@ package config
 
 import (
 	"fmt"
+	"maps"
+	"net/url"
+	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
+	"orchestrator/internal/secretscan"
 )
 
 // providers.claude.auth values. The empty string means auto.
@@ -35,6 +40,9 @@ type ClaudeProviderConfig struct {
 	Auth string `yaml:"auth"`
 	// APIKeyEnv names the variable that holds the Console API key; never the key itself.
 	APIKeyEnv string `yaml:"api_key_env"`
+	// APIEnv is set for the claude child in api mode and removed from its environment in login
+	// mode (specs/claude-auth/SPEC.md §17); never a secret, since the file is committed.
+	APIEnv map[string]string `yaml:"api_env"`
 
 	// apiKeyLiteralSet records that a literal "api_key" was written, which Validate rejects:
 	// the key comes from the environment, never from a file that might end up committed.
@@ -45,15 +53,17 @@ type ClaudeProviderConfig struct {
 // its value as a Go field.
 func (c *ClaudeProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Auth      string `yaml:"auth"`
-		APIKeyEnv string `yaml:"api_key_env"`
-		APIKey    string `yaml:"api_key"`
+		Auth      string            `yaml:"auth"`
+		APIKeyEnv string            `yaml:"api_key_env"`
+		APIKey    string            `yaml:"api_key"`
+		APIEnv    map[string]string `yaml:"api_env"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
 	c.Auth = raw.Auth
 	c.APIKeyEnv = raw.APIKeyEnv
+	c.APIEnv = raw.APIEnv
 	c.apiKeyLiteralSet = raw.APIKey != ""
 	return nil
 }
@@ -173,5 +183,67 @@ func providersProblems(cfg Config) []string {
 		problems = append(problems, "providers.claude.api_key must not be set in the configuration file; "+
 			"name an environment variable via providers.claude.api_key_env instead")
 	}
+	return append(problems, apiEnvProblems(cfg)...)
+}
+
+// redactedRuleRE finds the rule secretscan.Redact names in its replacement.
+var redactedRuleRE = regexp.MustCompile(`\[REDACTED:([a-z0-9-]+)\]`)
+
+// apiEnvProblems validates providers.claude.api_env (specs/claude-auth/SPEC.md §17.3), in the
+// order of the names. A message names the variable and never its value: the file is
+// committed, and a value that looks like a secret must not reach a console or a log either.
+func apiEnvProblems(cfg Config) []string {
+	var problems []string
+	c := cfg.Providers.Claude
+	credentials := cfg.CredentialEnvNames()
+	removed := domain.ClaudeAPIModeRemoved()
+	for _, name := range slices.Sorted(maps.Keys(c.APIEnv)) {
+		if !envNameRE.MatchString(name) {
+			problems = append(problems, fmt.Sprintf("providers.claude.api_env: %q must be an environment variable name (letters, digits, _)", name))
+			continue
+		}
+		key := "providers.claude.api_env." + name
+		switch {
+		case name == DefaultClaudeAPIKeyEnv || name == c.KeyEnv():
+			problems = append(problems, key+": the API key comes only from the environment (providers.claude.api_key_env), never from the configuration file")
+		case slices.Contains(removed, name) || strings.HasPrefix(name, "CLAUDE_CODE_USE_"):
+			problems = append(problems, key+": api mode removes this variable because it outranks the API key; setting it would undo the mode")
+		case execution.IsParentSessionVar(name):
+			problems = append(problems, key+": belongs to the agent session that launched the orchestrator; no child process gets it")
+		case slices.Contains(credentials, name):
+			problems = append(problems, key+": is a credential this config names; it comes only from the environment")
+		default:
+			if why := credentialLike(name); why != "" {
+				problems = append(problems, key+": looks like a credential ("+why+"); a credential belongs in the environment "+
+					"or in the profile a variable names, not in the committed configuration")
+			}
+		}
+		if problem := apiEnvValueProblem(c.APIEnv[name]); problem != "" {
+			problems = append(problems, key+": "+problem)
+		}
+	}
 	return problems
+}
+
+// apiEnvValueProblem reports why an api_env value is refused, without quoting it.
+func apiEnvValueProblem(v string) string {
+	if v == "" {
+		return "the value must not be empty"
+	}
+	for _, r := range v {
+		if unicode.IsControl(r) {
+			return "the value contains a control character"
+		}
+	}
+	if u, err := url.Parse(v); err == nil && u.User != nil {
+		return "the value is a URL with a user or password; the configuration file is committed and holds no secret"
+	}
+	if redacted := secretscan.Redact(v); redacted != v {
+		rule := "secret scan"
+		if m := redactedRuleRE.FindStringSubmatch(redacted); m != nil {
+			rule = "secret scan rule " + m[1]
+		}
+		return "the value looks like a secret (" + rule + "); the configuration file is committed and holds no secret"
+	}
+	return ""
 }

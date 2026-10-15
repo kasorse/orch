@@ -105,7 +105,7 @@ func exists(path string) bool {
 // about which account pays (the credential checks are specs/claude-auth/SPEC.md, CA07).
 func newClaude() *claude.Client {
 	c := claude.New(execution.NewOSProcessExecutor())
-	c.SetAuth(domain.ClaudeAuthLogin, "")
+	c.SetAuth(domain.ClaudeAuthLogin, "", nil)
 	return c
 }
 

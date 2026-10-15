@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -27,55 +28,50 @@ const (
 // apiModeRemoved are the variables that outrank or replace ANTHROPIC_API_KEY in the CLI's
 // precedence (SPEC §2). In api mode none of them reaches the child; in login mode they are
 // the operator's own setup and stay.
-var apiModeRemoved = []string{
-	"ANTHROPIC_AUTH_TOKEN",
-	"CLAUDE_CODE_USE_BEDROCK",
-	"CLAUDE_CODE_USE_VERTEX",
-	"CLAUDE_CODE_USE_FOUNDRY",
-	"CLAUDE_CODE_OAUTH_TOKEN",
-	"ANTHROPIC_PROFILE",
-	"ANTHROPIC_FEDERATION_RULE_ID",
-}
+var apiModeRemoved = domain.ClaudeAPIModeRemoved()
 
-// credentialAuth is the mode and key a Client was given; set is false until SetAuth.
+// credentialAuth is the mode, key and providers.claude.api_env a Client was given; set is
+// false until SetAuth.
 type credentialAuth struct {
-	mu   sync.RWMutex
-	set  bool
-	mode string
-	key  string
+	mu     sync.RWMutex
+	set    bool
+	mode   string
+	key    string
+	apiEnv map[string]string
 }
 
 // SetAuth fixes the credential mode (domain.ClaudeAuthAPI or ClaudeAuthLogin) every later
-// call and version probe runs under. key is the API key and is only used in api mode. A
-// Client whose auth was never set refuses to run.
-func (c *Client) SetAuth(mode, key string) {
+// call and version probe runs under. key is the API key and is only used in api mode.
+// apiEnv is providers.claude.api_env (SPEC §17): set in api mode, its names removed in login
+// mode. A Client whose auth was never set refuses to run.
+func (c *Client) SetAuth(mode, key string, apiEnv map[string]string) {
 	c.auth.mu.Lock()
 	defer c.auth.mu.Unlock()
-	c.auth.set, c.auth.mode, c.auth.key = true, mode, key
+	c.auth.set, c.auth.mode, c.auth.key, c.auth.apiEnv = true, mode, key, maps.Clone(apiEnv)
 }
 
-func (c *Client) snapshot() (mode, key string, err error) {
+func (c *Client) snapshot() (mode, key string, apiEnv map[string]string, err error) {
 	c.auth.mu.RLock()
 	defer c.auth.mu.RUnlock()
 	if !c.auth.set {
-		return "", "", apperr.NewConfigError("the claude credential mode was not set before the first call (specs/claude-auth/SPEC.md §3)", nil)
+		return "", "", nil, apperr.NewConfigError("the claude credential mode was not set before the first call (specs/claude-auth/SPEC.md §3)", nil)
 	}
-	return c.auth.mode, c.auth.key, nil
+	return c.auth.mode, c.auth.key, c.auth.apiEnv, nil
 }
 
 // env is the child's environment for the mode: the scrubbed environment of the orchestrator
-// with the table of SPEC §7 applied. removed names the variables api mode dropped that were
-// set - names only, never values.
+// with the table of SPEC §7 and api_env (§17.4) applied. removed names the variables the
+// mode dropped that were set - names only, never values.
 func (c *Client) env() (env, removed []string, err error) {
-	mode, key, err := c.snapshot()
+	mode, key, apiEnv, err := c.snapshot()
 	if err != nil {
 		return nil, nil, err
 	}
-	return buildEnv(execution.ScrubbedEnv(), mode, key)
+	return buildEnv(execution.ScrubbedEnv(), mode, key, apiEnv)
 }
 
-// IgnoredEnv names the variables api mode removes from the child's environment that are
-// set now, sorted; none in login mode.
+// IgnoredEnv names the variables the mode removes from the child's environment that are set
+// now, sorted: in api mode those that outrank the key, in login mode the api_env names.
 func (c *Client) IgnoredEnv() []string {
 	_, removed, err := c.env()
 	if err != nil {
@@ -84,7 +80,10 @@ func (c *Client) IgnoredEnv() []string {
 	return removed
 }
 
-func buildEnv(base []string, mode, key string) (env, removed []string, err error) {
+// buildEnv applies SPEC §7 and §17.4 to base. In api mode the key and then each apiEnv entry
+// are appended after every inherited variable of the same name is dropped; in login mode the
+// apiEnv names are dropped. An empty apiEnv leaves the result as it was without it.
+func buildEnv(base []string, mode, key string, apiEnv map[string]string) (env, removed []string, err error) {
 	switch mode {
 	case domain.ClaudeAuthAPI:
 		if key == "" {
@@ -94,22 +93,33 @@ func buildEnv(base []string, mode, key string) (env, removed []string, err error
 	default:
 		return nil, nil, apperr.NewConfigError(fmt.Sprintf("unknown claude auth mode %q", mode), nil)
 	}
-	env = make([]string, 0, len(base)+1)
+	env = make([]string, 0, len(base)+1+len(apiEnv))
 	for _, kv := range base {
 		name, _, _ := strings.Cut(kv, "=")
+		_, configured := apiEnv[name]
 		switch {
 		case name == apiKeyVar:
 			// Login never passes a key on; api replaces it with its own below.
-		case mode == domain.ClaudeAuthAPI && slices.Contains(apiModeRemoved, name):
+		case mode == domain.ClaudeAuthAPI && slices.Contains(apiModeRemoved, name),
+			mode == domain.ClaudeAuthLogin && configured:
 			if !slices.Contains(removed, name) {
 				removed = append(removed, name)
 			}
+		case configured:
+			// Api sets it below, so the inherited value never reaches the child.
 		default:
 			env = append(env, kv)
 		}
 	}
 	if mode == domain.ClaudeAuthAPI {
 		env = append(env, apiKeyVar+"="+key)
+		for _, name := range slices.Sorted(maps.Keys(apiEnv)) {
+			// Backstop for config validation (§17.3): api_env never replaces the key or
+			// brings back what outranks it.
+			if name != apiKeyVar && !slices.Contains(apiModeRemoved, name) {
+				env = append(env, name+"="+apiEnv[name])
+			}
+		}
 	}
 	slices.Sort(removed)
 	return env, removed, nil

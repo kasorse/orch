@@ -276,6 +276,8 @@ providers:                   # optional; absent = auth: auto, api_key_env: ANTHR
   claude:
     auth: auto               # auto | api | login; --claude-auth overrides it
     api_key_env: ANTHROPIC_API_KEY   # the variable that holds the key, never the key itself
+    api_env:                 # optional: set for claude in api mode, removed in login (§46.3)
+      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
 
 policy:
   context_depth:
@@ -4328,6 +4330,28 @@ environment-variable name, not a parent-session variable, and joins
 `test.env_pass` refuses it; only the claude adapter puts the value back, as
 `ANTHROPIC_API_KEY`. There is no `providers.codex`/`providers.gemini` and no org-layer floor.
 
+`providers.claude.api_env` is a map of variables for claude in `api` mode (§46.3), for a key
+whose endpoint is a gateway with its own model names:
+
+```yaml
+providers:
+  claude:
+    api_env:
+      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+      AWS_PROFILE: claude-bedrock
+      ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
+```
+
+Routes keep `opus`/`sonnet`; the CLI resolves the alias. `Validate` refuses a name that is not
+an environment-variable name, `ANTHROPIC_API_KEY` or `api_key_env`, a variable `api` removes
+(`CLAUDE_CODE_USE_*` included), a parent-session variable, a name in
+`Config.CredentialEnvNames()` or a credential-like name (the `test.env_pass` rule). It refuses
+an empty value, a control character, a URL with userinfo, and a value `internal/secretscan`
+flags. Every message names the variable, never the value. With the org's `allowed_models`
+(§45), the values of `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`,
+`ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_DEFAULT_*_MODEL` must be on the list, like a
+route's model.
+
 `--claude-auth auto|api|login` is valid with `run`, `resume` and `validate` in any position,
 `--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
 
@@ -4343,10 +4367,16 @@ Built in `internal/provider/claude` from `execution.ScrubbedEnv()`, also for the
 | `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY` | removed | inherited |
 | `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_PROFILE`, `ANTHROPIC_FEDERATION_RULE_ID` | removed | inherited |
 | `ANTHROPIC_BASE_URL` | inherited, warned once (host only) | inherited |
+| each name in `providers.claude.api_env` | set to the configured value, replacing an inherited one | removed |
 | everything else | inherited | inherited |
 
-The variables removed in `api` that were set are named once on the console (never their
-values). The key is read once in `app`, trimmed; whitespace or a control character inside it,
+The variables a mode removes that were set are named once on the console (`ignored in api
+mode: …`, `ignored in login mode: …`), never their values. In `api`, `ANTHROPIC_BASE_URL` gets
+one warning with its host and its source, `(providers.claude.api_env)` or `(inherited from the
+environment)`. With `api_env` the console also prints `claude env (api): ANTHROPIC_BASE_URL
+(host), AWS_PROFILE, …`, showing no value except that host. No other process gets `api_env`:
+not the test command, git, the verify server's test processes, codex or gemini. The key
+is read once in `app`, trimmed; whitespace or a control character inside it, is read once in `app`, trimmed; whitespace or a control character inside it,
 or the prefix `sk-ant-oat` (a `setup-token` subscription token), is a config error. It is
 passed only through the adapter's `Env`, never argv, config, `run.json`, logs or prompts, and
 is redacted from every error and output. The `orch` verify server never passes it on.
@@ -4378,11 +4408,14 @@ or fix loop. The message names the mode and what to try. Rate limits are not `Fa
 
 ## 46.6 Persistence and resume
 
-* `run.json`: `claude_auth: {requested, mode, decided_by, key_env}` at run start, and one in
-  each `resumes[]` entry. Never the key, its length or a hash.
+* `run.json`: `claude_auth: {requested, mode, decided_by, key_env, api_env}` at run start, and
+  one in each `resumes[]` entry. Never the key, its length or a hash. `api_env` (omitted when
+  empty) holds the sorted names of `providers.claude.api_env` that were set in `api`, or
+  removed because they were set in `login`. It never holds a value.
 * Each execution's `call.api_key_source`; the `usage` blocks of `decision.json` carry the same
   field.
-* `summary.md`: the `Claude auth` row (§43.2); `outcome.usage.cost_usd` stays the CLI's
+* `summary.md`: the `Claude auth` row (§43.2), with `, env: N variables` in `api` when
+  `api_env` is set; `outcome.usage.cost_usd` stays the CLI's
   estimate in both modes and is marked as not billed per token in `login`.
 * `resume` resolves the mode again from its own flag, the current config and environment,
   records it, and never reads `claude_auth` back to decide anything. A resume that changes the

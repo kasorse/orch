@@ -238,18 +238,25 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
-// ClaudeAuth reports how the claude CLI is authenticated (specs/claude-auth/SPEC.md §4) and the
-// notices that came with the decision. Neither holds the key.
-func (r *ConsoleReporter) ClaudeAuth(line string, notices []string) {
+// ClaudeAuth reports how the claude CLI is authenticated (specs/claude-auth/SPEC.md §4), the
+// providers.claude.api_env line in api mode (§17.5; "" for none) and the notices that came
+// with the decision. None holds the key.
+func (r *ConsoleReporter) ClaudeAuth(line, envLine string, notices []string) {
 	if r.Pretty {
 		st := r.st()
 		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(line))
+		if envLine != "" {
+			fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(envLine))
+		}
 		for _, n := range notices {
 			fmt.Fprintln(r.Out, st.red("⚠ "+n))
 		}
 		return
 	}
 	fmt.Fprintf(r.Out, "✓ %s\n", line)
+	if envLine != "" {
+		fmt.Fprintf(r.Out, "✓ %s\n", envLine)
+	}
 	for _, n := range notices {
 		fmt.Fprintf(r.Out, "Warning: %s\n", n)
 	}

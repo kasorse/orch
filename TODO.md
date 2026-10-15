@@ -757,7 +757,8 @@ authorities на его флаги, live-проверка `-tags security`, `Sup
 `ANTHROPIC_API_KEY`. Реализовано и описано в MVP.md §46; галочка ждёт `scripts/check.sh`
 (корень и `bench/`) и живой проверки CA07 (нужен ключ, вопрос Q5), которые запускает владелец.
 CA09 (`providers.claude.api_env`, SPEC §17): переменные окружения только для режима `api`
-(шлюз, алиасы моделей Bedrock), в `login` удаляются. Специфицировано 2026-10-15, не сделано.
+(шлюз, алиасы моделей Bedrock), в `login` удаляются. Специфицировано и реализовано 2026-10-15
+(MVP.md §46); как и CA01–CA08, ждёт `scripts/check.sh`.
 
 ### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
 Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна

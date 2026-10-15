@@ -1,6 +1,7 @@
 package config
 
 import (
+	"maps"
 	"strings"
 	"testing"
 )
@@ -180,6 +181,93 @@ func TestParseClaudeAuth(t *testing.T) {
 	}
 	if _, err := ParseClaudeAuth("subscription"); err == nil {
 		t.Error("an unknown value must be refused")
+	}
+}
+
+// specs/claude-auth/SPEC.md §17.2: api_env is part of the strict schema and parses into the map.
+func TestLoad_ProvidersClaudeAPIEnv(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, validV2("providers:\n  claude:\n    auth: api\n    api_env:\n"+
+		"      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal\n"+
+		"      AWS_PROFILE: claude-bedrock\n"+
+		"      ANTHROPIC_DEFAULT_HAIKU_MODEL: bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"ANTHROPIC_BASE_URL":            "https://ai-gateway.example.internal",
+		"AWS_PROFILE":                   "claude-bedrock",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0",
+	}
+	if got := cfg.Providers.Claude.APIEnv; !maps.Equal(got, want) {
+		t.Errorf("APIEnv = %v, want %v", got, want)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("want valid, got %v", err)
+	}
+}
+
+// §17.3: every class of refused name and value. Each message names the variable and never
+// holds the value.
+func TestValidate_ProvidersClaudeAPIEnv(t *testing.T) {
+	// Assembled at run time: no token-shaped literal in the repository (CLAUDE.md).
+	secret := "sk-" + "ant-" + "api03-" + strings.Repeat("Xy7Kq2Lm9P", 3)
+	gateway := map[string]string{
+		"ANTHROPIC_BASE_URL":           "https://ai-gateway.example.internal",
+		"AWS_PROFILE":                  "claude-bedrock",
+		"AWS_REGION":                   "eu-west-1",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL": "bedrock/eu.anthropic.claude-opus-5-5",
+	}
+	for name, tc := range map[string]struct {
+		keyEnv string
+		env    map[string]string
+		want   string // "" = valid
+	}{
+		"gateway setup":       {env: gateway},
+		"empty map":           {env: map[string]string{}},
+		"bad name":            {env: map[string]string{"AWS-PROFILE": "p"}, want: `providers.claude.api_env: "AWS-PROFILE" must be an environment variable name`},
+		"the default key":     {env: map[string]string{"ANTHROPIC_API_KEY": "v"}, want: "providers.claude.api_env.ANTHROPIC_API_KEY: the API key comes only from the environment"},
+		"the configured key":  {keyEnv: "ORCH_CLAUDE_KEY", env: map[string]string{"ORCH_CLAUDE_KEY": "v"}, want: "providers.claude.api_env.ORCH_CLAUDE_KEY: the API key comes only from the environment"},
+		"auth token":          {env: map[string]string{"ANTHROPIC_AUTH_TOKEN": "v"}, want: "providers.claude.api_env.ANTHROPIC_AUTH_TOKEN: api mode removes this variable"},
+		"use bedrock":         {env: map[string]string{"CLAUDE_CODE_USE_BEDROCK": "1"}, want: "providers.claude.api_env.CLAUDE_CODE_USE_BEDROCK: api mode removes this variable"},
+		"a future use_*":      {env: map[string]string{"CLAUDE_CODE_USE_ANYCLOUD": "1"}, want: "providers.claude.api_env.CLAUDE_CODE_USE_ANYCLOUD: api mode removes this variable"},
+		"oauth token":         {env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "v"}, want: "providers.claude.api_env.CLAUDE_CODE_OAUTH_TOKEN: api mode removes this variable"},
+		"profile":             {env: map[string]string{"ANTHROPIC_PROFILE": "v"}, want: "providers.claude.api_env.ANTHROPIC_PROFILE: api mode removes this variable"},
+		"federation rule":     {env: map[string]string{"ANTHROPIC_FEDERATION_RULE_ID": "v"}, want: "providers.claude.api_env.ANTHROPIC_FEDERATION_RULE_ID: api mode removes this variable"},
+		"parent session":      {env: map[string]string{"CLAUDECODE": "1"}, want: "providers.claude.api_env.CLAUDECODE: belongs to the agent session"},
+		"another credential":  {env: map[string]string{"JEV_API_KEY": "v"}, want: "providers.claude.api_env.JEV_API_KEY: is a credential this config names"},
+		"aws secret":          {env: map[string]string{"AWS_SECRET_ACCESS_KEY": "v"}, want: "providers.claude.api_env.AWS_SECRET_ACCESS_KEY: looks like a credential (contains SECRET)"},
+		"aws session token":   {env: map[string]string{"AWS_SESSION_TOKEN": "v"}, want: "providers.claude.api_env.AWS_SESSION_TOKEN: looks like a credential (contains TOKEN)"},
+		"empty value":         {env: map[string]string{"AWS_PROFILE": ""}, want: "providers.claude.api_env.AWS_PROFILE: the value must not be empty"},
+		"newline":             {env: map[string]string{"AWS_PROFILE": "claude\nbedrock"}, want: "providers.claude.api_env.AWS_PROFILE: the value contains a control character"},
+		"tab":                 {env: map[string]string{"AWS_PROFILE": "claude\tbedrock"}, want: "providers.claude.api_env.AWS_PROFILE: the value contains a control character"},
+		"url with userinfo":   {env: map[string]string{"ANTHROPIC_BASE_URL": "https://gwuser:gwpass@gw.example"}, want: "providers.claude.api_env.ANTHROPIC_BASE_URL: the value is a URL with a user or password"},
+		"url with a user":     {env: map[string]string{"ANTHROPIC_BASE_URL": "https://gwuser@gw.example"}, want: "providers.claude.api_env.ANTHROPIC_BASE_URL: the value is a URL with a user or password"},
+		"secret scan finding": {env: map[string]string{"ANTHROPIC_CUSTOM_HEADERS": secret}, want: "providers.claude.api_env.ANTHROPIC_CUSTOM_HEADERS: the value looks like a secret (secret scan"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Providers.Claude = ClaudeProviderConfig{APIKeyEnv: tc.keyEnv, APIEnv: tc.env}
+			err := Validate(cfg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("want valid, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want an error containing %q, got %v", tc.want, err)
+			}
+			for _, v := range tc.env {
+				if len(v) > 1 && strings.Contains(err.Error(), v) {
+					t.Errorf("the value %q appears in the error:\n%v", v, err)
+				}
+			}
+			for _, part := range []string{"gwpass", "gwuser", "Xy7Kq2Lm9P"} {
+				if strings.Contains(err.Error(), part) {
+					t.Errorf("a part of the value (%q) appears in the error:\n%v", part, err)
+				}
+			}
+		})
 	}
 }
 

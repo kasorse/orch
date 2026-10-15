@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -264,13 +266,13 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	}
 	// The adapter learns the mode before anything runs claude - the version probe below
 	// included, which gets the same environment as a call (SPEC §7).
-	ignored, err := applyClaudeAuth(registry, auth, os.LookupEnv)
+	apiEnv := cfg.Providers.Claude.APIEnv
+	ignored, err := applyClaudeAuth(registry, auth, apiEnv, os.LookupEnv)
 	if err != nil {
 		return fail(err)
 	}
-	if len(ignored) > 0 {
-		notices = append(notices, "ignored in api mode: "+strings.Join(ignored, ", "))
-	}
+	envLine, envNotices := claudeEnvReport(&auth, apiEnv, ignored, os.LookupEnv)
+	notices = append(notices, envNotices...)
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
 	if cfg.Test.Sandboxed() {
@@ -295,16 +297,17 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	}
 
 	reporter.ConfigValid()
-	reporter.ClaudeAuth(auth.Line(), notices)
+	reporter.ClaudeAuth(auth.Line(), envLine, notices)
 	return cfg, clis, org, auth, nil
 }
 
-// applyClaudeAuth hands the resolved credential mode to the claude adapter, and in api mode
-// the key, read here once from the variable the config names (specs/claude-auth/SPEC.md §12);
-// it is never stored anywhere else. It returns the names of the variables api mode removes
-// from claude's environment that are set. A registry whose claude client is not the real
-// adapter (a test double) has nothing to set.
-func applyClaudeAuth(registry *provider.Registry, auth domain.ClaudeAuth, lookup func(string) (string, bool)) ([]string, error) {
+// applyClaudeAuth hands the resolved credential mode and providers.claude.api_env to the
+// claude adapter, and in api mode the key, read here once from the variable the config names
+// (specs/claude-auth/SPEC.md §12); it is never stored anywhere else. It returns the names of
+// the variables the mode removes from claude's environment that are set: in api mode those
+// that outrank the key, in login mode the api_env names (§17.4). A registry whose claude
+// client is not the real adapter (a test double) has nothing to set.
+func applyClaudeAuth(registry *provider.Registry, auth domain.ClaudeAuth, apiEnv map[string]string, lookup func(string) (string, bool)) ([]string, error) {
 	client, err := registry.Resolve(string(provider.Claude))
 	if err != nil {
 		return nil, nil
@@ -320,8 +323,63 @@ func applyClaudeAuth(registry *provider.Registry, auth domain.ClaudeAuth, lookup
 			return nil, apperr.NewConfigError(fmt.Sprintf("claude auth mode api: $%s is not set or empty", auth.KeyEnv), nil)
 		}
 	}
-	adapter.SetAuth(auth.Mode, key)
+	adapter.SetAuth(auth.Mode, key, apiEnv)
 	return adapter.IgnoredEnv(), nil
+}
+
+// baseURLVar is where the claude CLI sends its requests; in api mode, where the key goes.
+const baseURLVar = "ANTHROPIC_BASE_URL"
+
+// claudeEnvReport records providers.claude.api_env in auth (names only, specs/claude-auth/
+// SPEC.md §17.5) and returns the console line for it in api mode ("" otherwise) and the
+// notices about claude's environment: the variables the mode ignores (ignored, from
+// applyClaudeAuth) and, in api mode, where ANTHROPIC_BASE_URL sends the key (§13 #12). No
+// value is printed except the host of ANTHROPIC_BASE_URL.
+func claudeEnvReport(auth *domain.ClaudeAuth, apiEnv map[string]string, ignored []string, lookup func(string) (string, bool)) (line string, notices []string) {
+	if auth.Mode != domain.ClaudeAuthAPI {
+		if len(ignored) > 0 {
+			auth.APIEnv = slices.Clone(ignored)
+			notices = append(notices, "ignored in login mode: "+strings.Join(ignored, ", "))
+		}
+		return "", notices
+	}
+	if len(ignored) > 0 {
+		notices = append(notices, "ignored in api mode: "+strings.Join(ignored, ", "))
+	}
+	if len(apiEnv) > 0 {
+		auth.APIEnv = slices.Sorted(maps.Keys(apiEnv))
+		shown := make([]string, len(auth.APIEnv))
+		for i, name := range auth.APIEnv {
+			shown[i] = name
+			if host := urlHost(apiEnv[name]); name == baseURLVar && host != "" {
+				shown[i] += " (" + host + ")"
+			}
+		}
+		line = "claude env (api): " + strings.Join(shown, ", ")
+	}
+	source := "providers.claude.api_env"
+	baseURL, set := apiEnv[baseURLVar]
+	if !set {
+		source = "inherited from the environment"
+		baseURL, set = lookup(baseURLVar)
+	}
+	if set && strings.TrimSpace(baseURL) != "" {
+		where := "the address it names"
+		if host := urlHost(baseURL); host != "" {
+			where = host
+		}
+		notices = append(notices, fmt.Sprintf("%s is set (%s): the API key goes to %s", baseURLVar, source, where))
+	}
+	return line, notices
+}
+
+// urlHost is the host (and port) of a URL, or "" when v has none; never the rest of it.
+func urlHost(v string) string {
+	u, err := url.Parse(strings.TrimSpace(v))
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 // orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);

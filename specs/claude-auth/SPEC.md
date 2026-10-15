@@ -305,7 +305,8 @@ finishes it on the key. A resume that changes the mode prints
 
 ## 17. The api mode's own environment (`providers.claude.api_env`)
 
-Added 2026-10-15, task CA09. Not built yet.
+Added 2026-10-15, task CA09. Built the same day (`scripts/check.sh` pending). The secret scan
+of §17.3 runs in `Validate`: `internal/secretscan` is a standard-library leaf `config` imports.
 
 ### 17.1 Problem
 
