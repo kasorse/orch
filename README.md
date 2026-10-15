@@ -538,15 +538,49 @@ your credentials in the `Authorization` header. Nothing is ever written to Jira.
 request goes to `jira.base_url` only — never to a URL you pasted, and never through a
 redirect — over `https` (plain `http` is accepted only for `localhost`/`127.0.0.1`/`::1`).
 
+## Running claude on an API key
+
+Every `claude` call (steps, translation, an LLM decision provider) uses one credential per
+process: `api` (a Claude Console API key, billed per token) or `login` (whatever the CLI is
+logged in with: a claude.ai subscription, `CLAUDE_CODE_OAUTH_TOKEN`, a cloud provider). The
+mode comes from `--claude-auth auto|api|login`, then `providers.claude.auth`, then `auto`
+(the key variable is set → `api`, otherwise `login`).
+
+```bash
+export ANTHROPIC_API_KEY=...             # the key goes in the environment, never in the config
+orchestrator --claude-auth api run "<task>"
+orchestrator --claude-auth login run "<task>"   # ignore the key, use the CLI's own login
+orchestrator --claude-auth api resume <run-id>  # finish a run that hit the subscription limit
+```
+
+```yaml
+providers:
+  claude:
+    auth: auto                      # auto | api | login
+    api_key_env: ANTHROPIC_API_KEY  # name of the variable that holds the key
+```
+
+- The console prints the resolved mode (`claude auth: api key (ANTHROPIC_API_KEY, auto)`), and
+  so does `validate`; `run.json` records it, and `summary.md` shows it. `api` with no usable
+  key is a config error before any call.
+- In `api` the orchestrator sets the key and removes the variables that would outrank it
+  (`ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`/`_VERTEX`/`_FOUNDRY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`). After each call it checks the `apiKeySource` the CLI reported; if
+  the CLI did not use the key, or the call fails on authentication or billing, the run stops
+  (exit 2) and never falls back to another mode. A key from `claude setup-token`
+  (`sk-ant-oat…`) belongs in `CLAUDE_CODE_OAUTH_TOKEN` with `--claude-auth login`.
+- A literal `api_key` in the config is rejected. `resume` decides the mode again from its own
+  flag and environment. Details: MVP.md §46.
+
 ## Usage
 
 ```
 orchestrator [--config path] version
-orchestrator [--config path] validate
-orchestrator [--config path] run [--verbose|-v] "<task description>"
+orchestrator [--config path] [--claude-auth m] validate
+orchestrator [--config path] [--claude-auth m] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
-orchestrator [--config path] [--mode m] resume <run-id>
+orchestrator [--config path] [--mode m] [--claude-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator decisions report
 orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]

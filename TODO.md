@@ -732,8 +732,8 @@ test или review.
    Code / Agent SDK. Зафиксировать в `docs/legal.md`, какие способы аутентификации
    допустимы для продукта (ожидаемо: API key, Bedrock, Vertex — без логина в подписку
    claude.ai у третьих лиц).
-2. Явная поддержка и документация `ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK` и
-   `CLAUDE_CODE_USE_VERTEX`. Проверить, что `ScrubbedEnv` их не режет, а S2 не отдаёт их
+2. Явная поддержка и документация `ANTHROPIC_API_KEY` (сделано в P11, `specs/claude-auth/`,
+   MVP.md §46), `CLAUDE_CODE_USE_BEDROCK` и `CLAUDE_CODE_USE_VERTEX`. Проверить, что `ScrubbedEnv` их не режет, а S2 не отдаёт их
    тестам.
 3. `doctor` (P2) показывает, каким способом аутентифицирован claude.
 
@@ -754,7 +754,8 @@ authorities на его флаги, live-проверка `-tags security`, `Sup
 `--claude-auth`, затем `providers.claude.auth`, затем `auto` (ключ задан → `api`). Адаптер
 собирает окружение под режим и сверяет `apiKeySource` из init-события. Ошибка
 аутентификации останавливает run, а `resume` может сменить режим. Закрывает п. 2 из P6 для
-`ANTHROPIC_API_KEY`.
+`ANTHROPIC_API_KEY`. Реализовано и описано в MVP.md §46; галочка ждёт `scripts/check.sh`
+(корень и `bench/`) и живой проверки CA07 (нужен ключ, вопрос Q5), которые запускает владелец.
 
 ### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
 Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна

@@ -22,6 +22,16 @@ like in stream-json.
    `authentication_failed`? a result error only?) and make `parseStream`'s classifier match.
 4. `api` with `ANTHROPIC_AUTH_TOKEN` set in the parent → still `ANTHROPIC_API_KEY` (§7 works).
 
+## As built
+
+- `test/security/claude_auth_test.go` (build tag `security`) holds the checks; they are skipped
+  unless `ORCH_LIVE_ANTHROPIC_KEY` holds a Console key. Each is one call on `haiku` with
+  `AuthorityNone` through `claude.Client.SetAuth`.
+- Not run: no key and no `claude` were available to the author, so nothing was observed and no
+  entry was added to `specs/permissions/DECISIONS.md`. What a non-retryable 401 looks like in
+  stream-json is still unrecorded, and the classifier follows only the four categories of
+  SPEC §9. Left to the operator, with the answer to Q5.
+
 ## Gates
 
 `go test -tags security ./test/security/... -run ClaudeAuth`, plus `scripts/check.sh`.
