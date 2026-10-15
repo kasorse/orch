@@ -571,6 +571,33 @@ func TestValidate_AllowedModels_ByComplexityWithoutModelInheritsTheBase(t *testi
 	}
 }
 
+// specs/claude-auth/SPEC.md §17.3, D8: a model variable in providers.claude.api_env changes the
+// model a route reaches, so its value must be on the list; other variables are not checked.
+func TestValidate_AllowedModels_APIEnvModelVariables(t *testing.T) {
+	const org = "/etc/orchestrator/org.yaml"
+	cfg := allowedConfig()
+	cfg.Providers.Claude.APIEnv = map[string]string{"AWS_PROFILE": "claude-bedrock", "ANTHROPIC_DEFAULT_OPUS_MODEL": "opus"}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("a listed alias and a non-model variable: %v", err)
+	}
+	for _, name := range []string{"ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "ANTHROPIC_CUSTOM_MODEL_OPTION",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL"} {
+		t.Run(name, func(t *testing.T) {
+			cfg := allowedConfig()
+			cfg.Providers.Claude.APIEnv = map[string]string{name: "bedrock/eu.anthropic.claude-opus-5-5"}
+			want := "providers.claude.api_env." + name + ": model bedrock/eu.anthropic.claude-opus-5-5 is not in allowed_models (" + org + ")"
+			if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want %q", err, want)
+			}
+		})
+	}
+	cfg = validConfig()
+	cfg.Providers.Claude.APIEnv = map[string]string{"ANTHROPIC_DEFAULT_OPUS_MODEL": "bedrock/eu.anthropic.claude-opus-5-5"}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("without allowed_models nothing is checked: %v", err)
+	}
+}
+
 func TestValidate_NoAllowlistChecksNothing(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Review.Model = "anything"

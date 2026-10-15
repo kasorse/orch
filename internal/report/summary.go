@@ -46,6 +46,10 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	}
 	row("Status", status)
 	row("Workflow", runStageSet(run))
+	authLine, anyLogin := claudeAuthLine(run)
+	if authLine != "" {
+		row("Claude auth", authLine)
+	}
 	row("Decision", decisionLine(run, trace))
 	row("Steps", fmt.Sprintf("%d (fix iterations %d)", len(run.Executions), out.FixIterations))
 	row("Wall time", duration(out.DurationMS))
@@ -57,6 +61,9 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	cost := money(out.Usage.CostUSD, true)
 	if n := out.Usage.PartialCalls; n > 0 {
 		cost += fmt.Sprintf(" or more: %s ended without a report, their cost is unknown", plural(n, "call"))
+	}
+	if anyLogin {
+		cost += " (estimate; billed to the subscription)"
 	}
 	row("Cost", cost)
 	if out.DecisionOverhead.Calls > 0 {
@@ -118,6 +125,39 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
+}
+
+// claudeAuthLine is how the run's claude calls were authenticated, "api key ($ANTHROPIC_API_KEY,
+// auto)", with ", env: N variables" for providers.claude.api_env in api mode, and the mode of
+// each resume when it differs from the part before it; "" for a run written before the field.
+// anyLogin reports whether any part ran on the CLI's login, where the cost is the CLI's
+// estimate and no money changes hands per token.
+func claudeAuthLine(run domain.Run) (line string, anyLogin bool) {
+	if run.ClaudeAuth == nil {
+		return "", false
+	}
+	describe := func(a domain.ClaudeAuth) string {
+		s := strings.TrimPrefix(a.Line(), "claude auth: ")
+		if a.Mode == domain.ClaudeAuthAPI && len(a.APIEnv) > 0 {
+			s += fmt.Sprintf(", env: %d variables", len(a.APIEnv))
+		}
+		return s
+	}
+	line, anyLogin = describe(*run.ClaudeAuth), run.ClaudeAuth.Mode == domain.ClaudeAuthLogin
+	prev := run.ClaudeAuth.Mode
+	for i, r := range run.Resumes {
+		if r.ClaudeAuth == nil {
+			continue
+		}
+		if r.ClaudeAuth.Mode == domain.ClaudeAuthLogin {
+			anyLogin = true
+		}
+		if r.ClaudeAuth.Mode != prev {
+			line += fmt.Sprintf("; resume %d: %s", i+1, describe(*r.ClaudeAuth))
+		}
+		prev = r.ClaudeAuth.Mode
+	}
+	return line, anyLogin
 }
 
 // reviewerNames lists the models whose answers the last review merged (actions.review.models),

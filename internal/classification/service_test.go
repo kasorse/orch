@@ -256,6 +256,27 @@ func TestClassify_OnFailureFail(t *testing.T) {
 	}
 }
 
+// SPEC §9: a credential the operator must fix is never answered with a manual choice.
+func TestClassify_AuthFailureNeverAsks(t *testing.T) {
+	authErr := &apperr.DecisionError{Provider: "claude", Kind: apperr.DecisionUnavailable,
+		Err: &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureAuth}}
+	cases := map[string]func(f fixture){
+		"pre-check":      func(f fixture) { f.provider.depthErr = authErr },
+		"classification": func(f fixture) { f.provider.tcErr = authErr },
+	}
+	for name, breakIt := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(0.9)
+			breakIt(f)
+			_, err := f.svc.Classify(context.Background(), Request{Text: "Fix the bug"})
+			var pe *apperr.ProviderError
+			if !errors.As(err, &pe) || pe.Kind != apperr.FailureAuth || f.chooser.calls != 0 {
+				t.Errorf("err = %v, chooser calls = %d; want the auth error, no choice", err, f.chooser.calls)
+			}
+		})
+	}
+}
+
 func TestClassify_CancellationNeverAsks(t *testing.T) {
 	f := newFixture(0.9)
 	f.provider.depthErr = &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionCancelled, Err: context.Canceled}

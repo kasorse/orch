@@ -163,9 +163,16 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, *d
 		kind = apperr.DecisionCancelled
 	case errors.Is(callCtx.Err(), context.DeadlineExceeded) || (providerErr != nil && providerErr.Kind == apperr.FailureTimeout):
 		kind = apperr.DecisionTimeout
+	case providerErr != nil && providerErr.APIStatus != 0:
+		// The CLI ran and the API refused it: a 400 for a model the endpoint does not serve is
+		// a configuration error, not an outage.
+		kind = apperr.DecisionKindForStatus(providerErr.APIStatus)
 	}
 	derr := p.fail(kind, "", fmt.Errorf("%s call failed: %w", logName, err))
 	derr.Attempts = 1
+	if providerErr != nil {
+		derr.StatusCode = providerErr.APIStatus
+	}
 	derr.Usage = result.Usage
 	return "", result.Usage, derr
 }

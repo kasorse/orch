@@ -101,6 +101,14 @@ func exists(path string) bool {
 	return err == nil
 }
 
+// newClaude is the adapter under the CLI's own login: these checks are about permissions, not
+// about which account pays (the credential checks are specs/claude-auth/SPEC.md, CA07).
+func newClaude() *claude.Client {
+	c := claude.New(execution.NewOSProcessExecutor())
+	c.SetAuth(domain.ClaudeAuthLogin, "", nil)
+	return c
+}
+
 // call runs one real provider call through the adapter - the same argv and scrubbed
 // environment the orchestrator uses - with the orchestrator's secret deny list.
 func call(t *testing.T, dir string, a domain.Authority, prompt string) string {
@@ -113,7 +121,7 @@ func callDenying(t *testing.T, dir string, a domain.Authority, deny []string, pr
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
-	res, err := claude.New(execution.NewOSProcessExecutor()).Execute(ctx, provider.Request{
+	res, err := newClaude().Execute(ctx, provider.Request{
 		Prompt: prompt, Model: model(), WorkingDir: dir, Authority: a,
 		DenyRead: deny,
 	})

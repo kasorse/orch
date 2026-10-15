@@ -27,6 +27,14 @@ var common = []string{
 	"--setting-sources", "",
 }
 
+// newLogin is a client under the CLI's own login: a Client whose auth was never set refuses
+// to run, and most tests are not about the credential.
+func newLogin(e execution.ProcessExecutor) *Client {
+	c := New(e)
+	c.SetAuth(domain.ClaudeAuthLogin, "", nil)
+	return c
+}
+
 func TestClient_BuildsExpectedArgsPerAuthority(t *testing.T) {
 	cases := []struct {
 		authority domain.Authority
@@ -40,7 +48,7 @@ func TestClient_BuildsExpectedArgsPerAuthority(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(string(tc.authority), func(t *testing.T) {
 			fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
-			_, err := New(fake).Execute(context.Background(), provider.Request{
+			_, err := newLogin(fake).Execute(context.Background(), provider.Request{
 				Prompt: "do the thing", Model: "opus", WorkingDir: "/tmp/repo", Authority: tc.authority,
 			})
 			if err != nil {
@@ -63,7 +71,7 @@ func TestClient_BuildsExpectedArgsPerAuthority(t *testing.T) {
 
 func TestClient_DenyReadBecomesSettings(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
-	_, err := New(fake).Execute(context.Background(), provider.Request{
+	_, err := newLogin(fake).Execute(context.Background(), provider.Request{
 		Prompt: "p", Model: "opus", Authority: domain.AuthorityRead, DenyRead: []string{".env", "*.pem"},
 	})
 	if err != nil {
@@ -81,7 +89,7 @@ func TestClient_DenyReadBecomesSettings(t *testing.T) {
 func TestClient_PromptOnStdin(t *testing.T) {
 	prompt := strings.Repeat("x", 1<<20)
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
-	_, err := New(fake).Execute(context.Background(), provider.Request{
+	_, err := newLogin(fake).Execute(context.Background(), provider.Request{
 		Prompt: prompt, Model: "opus", Authority: domain.AuthorityRead,
 	})
 	if err != nil {
@@ -101,7 +109,7 @@ func TestClient_PromptOnStdin(t *testing.T) {
 func TestClient_RefusesMissingOrUnknownAuthority(t *testing.T) {
 	for _, a := range []domain.Authority{"", "all"} {
 		fake := &execution.FakeProcessExecutor{}
-		_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: a})
+		_, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: a})
 		var authErr *apperr.AuthorityError
 		if !errors.As(err, &authErr) {
 			t.Errorf("authority %q: expected *apperr.AuthorityError, got %T: %v", a, err, err)
@@ -116,7 +124,7 @@ func TestClient_NonZeroExit(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{
 		Results: []execution.ProcessResult{{Stdout: "API Error: backend broke", Stderr: "boom", ExitCode: 1}},
 	}
-	c := New(fake)
+	c := newLogin(fake)
 
 	res, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", WorkingDir: "/repo", Authority: domain.AuthorityRead})
 	if err == nil {
@@ -158,7 +166,7 @@ func TestClient_PropagatesRunError(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{
 		Errs: []error{context.Canceled},
 	}
-	c := New(fake)
+	c := newLogin(fake)
 
 	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	if err == nil {
@@ -184,7 +192,7 @@ func TestClient_TimeoutPreservesExitCode(t *testing.T) {
 		Results: []execution.ProcessResult{{ExitCode: -1}},
 		Errs:    []error{context.DeadlineExceeded},
 	}
-	c := New(fake)
+	c := newLogin(fake)
 
 	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	var provErr *apperr.ProviderError
@@ -203,7 +211,7 @@ func TestClient_SpawnFailure(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{
 		Errs: []error{&exec.Error{Name: "claude", Err: exec.ErrNotFound}},
 	}
-	c := New(fake)
+	c := newLogin(fake)
 
 	_, err := c.Execute(context.Background(), provider.Request{Prompt: "x", Model: "opus", Authority: domain.AuthorityRead})
 	if err == nil {
@@ -237,7 +245,7 @@ func TestClient_ScrubsParentSessionEnv(t *testing.T) {
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
-	if _, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: domain.AuthorityRead}); err != nil {
+	if _, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: domain.AuthorityRead}); err != nil {
 		t.Fatal(err)
 	}
 	env := fake.Calls[0].Env

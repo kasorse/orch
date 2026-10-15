@@ -272,6 +272,13 @@ translation:
   model: haiku
   timeout: 60s
 
+providers:                   # optional; absent = auth: auto, api_key_env: ANTHROPIC_API_KEY (§46)
+  claude:
+    auth: auto               # auto | api | login; --claude-auth overrides it
+    api_key_env: ANTHROPIC_API_KEY   # the variable that holds the key, never the key itself
+    api_env:                 # optional: set for claude in api mode, removed in login (§46.3)
+      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+
 policy:
   context_depth:
     project_threshold: 0.5
@@ -522,6 +529,15 @@ remedy: route review to a provider that supports it: claude (actions.review.prov
 codex and gemini currently support no authority (their flags are unverified, §38), so any
 route to them fails here even when their executable is installed. `orchestrator validate`
 runs the same chain.
+
+### Claude credential resolution
+
+Inside the same chain, right after `ValidateDependencies`, `config.ResolveClaudeAuth` decides
+the credential mode of the process (`api` or `login`, §46) from `--claude-auth`,
+`providers.claude.auth` and the environment. An explicit `api` (or `auto` with an invalid key)
+without a usable key is a config error before the translator, Jev or any CLI runs; the
+resolved mode is handed to the claude adapter before the first `claude` process, the
+`--version` probe included. `validate` prints the same line.
 
 ### The org file and the budget
 
@@ -3655,6 +3671,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Started | When the run was created (`created_at`), before the decision. |
 | Status | The run's final status; for a failed or stopped run, followed by the reason's telling line (a provider error's `failure:` line, otherwise its first line). |
 | Workflow | The workflow's actions in order. |
+| Claude auth | Only when the run recorded one (§46.6): `api key (ANTHROPIC_API_KEY, auto)`, `CLI login (…)`; on a resumed run the mode of each part if they differ. In `login` the Cost row is marked as an estimate not billed per token. |
 | Decision | Who decided (`jev`, `llm`, `user`; `manual (run --stage)`), the decision provider and model that answered, the complexity, and whether the operator edited the decision on the review screen. |
 | Steps | Executions recorded (every attempt, retries and resumes included) and the fix iterations. |
 | Wall time | `outcome.duration_ms`: from the first step's start to the last step's finish, pauses between a stop and its resume included. The decision and the approval are not in it. |
@@ -4270,3 +4287,149 @@ protects against a repository's config, not against the machine's owner.
   planning; exploring models; a `--stage` run that still records probabilities.
 * Per-user or per-team policy beyond one org file, fetching the org config over the
   network, and enforcing anything against the machine's owner.
+
+# 46. Claude credentials
+
+Every call to the `claude` CLI (workflow steps, the translator, the LLM decision provider) runs
+under one credential mode per process. Design record and the owner's answers:
+`specs/claude-auth/`.
+
+## 46.1 Modes and resolution
+
+* **`api`**: a Claude Console API key from the environment variable
+  `providers.claude.api_key_env` (default `ANTHROPIC_API_KEY`), billed per token.
+* **`login`**: whatever the CLI itself is logged in with (a claude.ai subscription,
+  `CLAUDE_CODE_OAUTH_TOKEN`, a Console login, a cloud provider, a gateway). The orchestrator
+  never gives it an API key.
+
+`requested` is `--claude-auth` if given, else `providers.claude.auth`, else `auto`.
+`config.ResolveClaudeAuth` is one function over the config, the flag and an environment lookup,
+called in the fail-fast chain (§7) so `validate` and `run` answer alike:
+
+| requested | key variable | effective mode | console |
+|---|---|---|---|
+| `api` | set, valid | `api` | `claude auth: api key ($VAR)` |
+| `api` | unset, blank or invalid | config error, no run | |
+| `auto` | set, valid | `api` | `claude auth: api key ($VAR, auto)` |
+| `auto` | unset | `login` | `claude auth: CLI login (auto: $VAR not set)` |
+| `auto` | set but blank | `login` | warning: `$VAR is set but empty; using the CLI login` |
+| `auto` | set, invalid | config error, no run | |
+| `login` | anything | `login` | if set: `$VAR is set but not used (--claude-auth login)` |
+
+The result `{requested, mode, decided_by: flag|config|default, key_env}` is set on the claude
+adapter by `app` before the first call and persisted (§46.6). The mode is static: a failure
+never switches it (§31.1).
+
+## 46.2 Configuration and CLI
+
+`providers.claude.auth` (`auto | api | login`) and `providers.claude.api_key_env` are parsed
+strictly; `providers.claude.api_key` (a literal) is declared only to be rejected ("name an
+environment variable via providers.claude.api_key_env instead"). `api_key_env` must be an
+environment-variable name, not a parent-session variable, and joins
+`Config.CredentialEnvNames()`: every child process loses it through `ScrubbedEnv()` and
+`test.env_pass` refuses it; only the claude adapter puts the value back, as
+`ANTHROPIC_API_KEY`. There is no `providers.codex`/`providers.gemini` and no org-layer floor.
+
+`providers.claude.api_env` is a map of variables for claude in `api` mode (§46.3), for a key
+whose endpoint is a gateway with its own model names:
+
+```yaml
+providers:
+  claude:
+    api_env:
+      ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+      AWS_PROFILE: claude-bedrock
+      ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
+```
+
+Routes keep `opus`/`sonnet`; the CLI resolves the alias. `Validate` refuses a name that is not
+an environment-variable name, `ANTHROPIC_API_KEY` or `api_key_env`, a variable `api` removes
+(`CLAUDE_CODE_USE_*` included), a parent-session variable, a name in
+`Config.CredentialEnvNames()` or a credential-like name (the `test.env_pass` rule). It refuses
+an empty value, a control character, a URL with userinfo, and a value `internal/secretscan`
+flags. Every message names the variable, never the value. With the org's `allowed_models`
+(§45), the values of `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`,
+`ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_DEFAULT_*_MODEL` must be on the list, like a
+route's model.
+
+`--claude-auth auto|api|login` is valid with `run`, `resume` and `validate` in any position,
+`--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
+
+## 46.3 The child's environment
+
+Built in `internal/provider/claude` from `execution.ScrubbedEnv()`, also for the
+`claude --version` probe:
+
+| variable | `api` | `login` |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | set to the key | removed |
+| `ANTHROPIC_AUTH_TOKEN` | removed | inherited |
+| `CLAUDE_CODE_USE_BEDROCK`, `_VERTEX`, `_FOUNDRY` | removed | inherited |
+| `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_PROFILE`, `ANTHROPIC_FEDERATION_RULE_ID` | removed | inherited |
+| `ANTHROPIC_BASE_URL` | inherited, warned once (host only) | inherited |
+| each name in `providers.claude.api_env` | set to the configured value, replacing an inherited one | removed |
+| everything else | inherited | inherited |
+
+The variables a mode removes that were set are named once on the console (`ignored in api
+mode: …`, `ignored in login mode: …`), never their values. In `api`, `ANTHROPIC_BASE_URL` gets
+one warning with its host and its source, `(providers.claude.api_env)` or `(inherited from the
+environment)`. With `api_env` the console also prints `claude env (api): ANTHROPIC_BASE_URL
+(host), AWS_PROFILE, …`, showing no value except that host. No other process gets `api_env`:
+not the test command, git, the verify server's test processes, codex or gemini. The key
+is read once in `app`, trimmed; whitespace or a control character inside it, is read once in `app`, trimmed; whitespace or a control character inside it,
+or the prefix `sk-ant-oat` (a `setup-token` subscription token), is a config error. It is
+passed only through the adapter's `Env`, never argv, config, `run.json`, logs or prompts, and
+is redacted from every error and output. The `orch` verify server never passes it on.
+
+## 46.4 The `apiKeySource` check
+
+`parseStream` reads `apiKeySource` from the stream-json `system/init` event. After the call:
+
+| mode | `apiKeySource` | result |
+|---|---|---|
+| `api` | `ANTHROPIC_API_KEY` | ok |
+| `api` | anything else | the call fails, `FailureAuth` |
+| `login` | `ANTHROPIC_API_KEY` | the call fails, `FailureAuth` (defensive) |
+| `login` | anything else | ok, recorded |
+| any | no init event (a test double, plain text) | not checked, recorded as `""` |
+
+The check runs after the process ends, so the call that reveals a mismatch has already run.
+No `--bare` is used in any mode: it would drop CLAUDE.md and user settings, so the same task
+would get a different context depending on who pays.
+
+## 46.5 `FailureAuth`
+
+The `apperr` failure kind `FailureAuth` (exit code 2) covers the mismatch of §46.4 and a call
+whose stream carries `system/api_retry` with `error` in `authentication_failed`,
+`oauth_org_not_allowed`, `account_on_hold` or `billing_error`. It is fatal everywhere: the
+translator does not fall back to the original text, the LLM decision provider does not lead to
+the manual choice whatever `on_failure` says, and a workflow step fails the run with no retry
+or fix loop. The message names the mode and what to try. Rate limits are not `FailureAuth`.
+The CLI retries a refused credential for minutes (claude 2.1.300: a 401 up to ten times with
+backoff), so the adapter watches the live stream and stops the call at the first
+auth-category `api_retry`. The detail then ends with `stopped at the CLI's first retry`.
+
+## 46.6 Persistence and resume
+
+* `run.json`: `claude_auth: {requested, mode, decided_by, key_env, api_env}` at run start, and
+  one in each `resumes[]` entry. Never the key, its length or a hash. `api_env` (omitted when
+  empty) holds the sorted names of `providers.claude.api_env` that were set in `api`, or
+  removed because they were set in `login`. It never holds a value.
+* Each execution's `call.api_key_source`; the `usage` blocks of `decision.json` carry the same
+  field.
+* `summary.md`: the `Claude auth` row (§43.2), with `, env: N variables` in `api` when
+  `api_env` is set; `outcome.usage.cost_usd` stays the CLI's
+  estimate in both modes and is marked as not billed per token in `login`.
+* `resume` resolves the mode again from its own flag, the current config and environment,
+  records it, and never reads `claude_auth` back to decide anything. A resume that changes the
+  mode prints `claude auth changed since the run started: login → api`. The supported story: a
+  run stops on the subscription's usage window or a `FailureAuth`, and
+  `orchestrator resume --claude-auth api <id>` finishes it on the key.
+
+## 46.7 Not covered
+
+* A Messages API client in Go (TODO P12): it needs a change to §30.
+* Gateway, Bedrock, Vertex and Foundry as modes of their own: they work under `login`.
+* An HTTP preflight of the key, a mode per action, and an org-layer floor for the mode.
+* `bench/` runs `claude` for its baseline itself with the operator's environment as is
+  (`bench/README.md`).

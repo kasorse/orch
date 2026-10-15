@@ -159,6 +159,19 @@ func TestPrepare_FailuresFallBackToOriginal(t *testing.T) {
 	}
 }
 
+// SPEC §9: an authentication failure ends the run; it is not a translation to fall back from.
+func TestPrepare_AuthFailureIsAnError(t *testing.T) {
+	client := &fakeClient{err: &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureAuth, Detail: "claude auth (api): rejected"}}
+	_, err := newTranslator(client, &memLogger{}).Prepare(context.Background(), "run", "добавь кэш в ProductRepository")
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || pe.Kind != apperr.FailureAuth {
+		t.Fatalf("err = %v, want a FailureAuth ProviderError", err)
+	}
+	if pe.Action != logName {
+		t.Errorf("action = %q, want %q", pe.Action, logName)
+	}
+}
+
 func TestPrepare_CancellationIsAnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &fakeClient{delay: true}

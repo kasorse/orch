@@ -216,6 +216,21 @@ func TestCallFailures(t *testing.T) {
 		t.Errorf("the CLI failure must stay inspectable: %+v", pe)
 	}
 
+	// The CLI reported the API's own status: classified by it, not as an outage.
+	for status, kind := range map[int]apperr.DecisionFailureKind{
+		400: apperr.DecisionBadRequest,
+		401: apperr.DecisionAuth,
+		429: apperr.DecisionRateLimited,
+		529: apperr.DecisionUnavailable,
+	} {
+		p, _ := newProvider(&fakeClient{err: &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureExit, ExitCode: 1, APIStatus: status}}, both)
+		_, err := p.ContextDepth(context.Background(), "x")
+		assertKind(t, err, kind)
+		if derr := (*apperr.DecisionError)(nil); !errors.As(err, &derr) || derr.StatusCode != status {
+			t.Errorf("API status %d must be the decision error's status: %v", status, err)
+		}
+	}
+
 	p, l := newProvider(&fakeClient{block: true}, both)
 	p.Timeout = 20 * time.Millisecond
 	_, err = p.Classify(context.Background(), domain.ClassificationInput{Request: "x"})

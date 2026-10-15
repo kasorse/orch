@@ -732,8 +732,8 @@ test или review.
    Code / Agent SDK. Зафиксировать в `docs/legal.md`, какие способы аутентификации
    допустимы для продукта (ожидаемо: API key, Bedrock, Vertex — без логина в подписку
    claude.ai у третьих лиц).
-2. Явная поддержка и документация `ANTHROPIC_API_KEY`, `CLAUDE_CODE_USE_BEDROCK` и
-   `CLAUDE_CODE_USE_VERTEX`. Проверить, что `ScrubbedEnv` их не режет, а S2 не отдаёт их
+2. Явная поддержка и документация `ANTHROPIC_API_KEY` (сделано в P11, `specs/claude-auth/`,
+   MVP.md §46), `CLAUDE_CODE_USE_BEDROCK` и `CLAUDE_CODE_USE_VERTEX`. Проверить, что `ScrubbedEnv` их не режет, а S2 не отдаёт их
    тестам.
 3. `doctor` (P2) показывает, каким способом аутентифицирован claude.
 
@@ -747,6 +747,27 @@ authorities на его флаги, live-проверка `-tags security`, `Sup
 
 ### [ ] P8. Codex / Gemini — отложено
 По решению владельца от 2026-10-03: только по отдельной спеке. Не трогать до P7.
+
+### [x] P11. Claude по API-ключу или по логину CLI — P1 · M
+Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из
+переменной `providers.claude.api_key_env`) или `login` (логин самого CLI). Выбирается флагом
+`--claude-auth`, затем `providers.claude.auth`, затем `auto` (ключ задан → `api`). Адаптер
+собирает окружение под режим и сверяет `apiKeySource` из init-события. Ошибка
+аутентификации останавливает run, а `resume` может сменить режим. Закрывает п. 2 из P6 для
+`ANTHROPIC_API_KEY`. Реализовано и описано в MVP.md §46. Закрыто 2026-10-15: `scripts/check.sh` (корень и
+`bench/`) зелёный, живая проверка CA07 прошла (DECISIONS D17). После CA07 вызов с отвергнутым
+ключом останавливается на первом `api_retry`, а не ждёт таймаута.
+CA09 (`providers.claude.api_env`, SPEC §17): переменные окружения только для режима `api`
+(шлюз, алиасы моделей Bedrock), в `login` удаляются. Специфицировано и реализовано 2026-10-15
+(MVP.md §46), `scripts/check.sh` зелёный.
+
+### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
+Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна
+правка MVP.md §30. Инструменты Read/Grep/Glob/Edit/Write придётся реализовать на Go, а
+authority проверять в Go. Ещё нужны deny list, стоимость по `usage` и таблице цен, повторы
+на 429/529, prompt caching и `verify` как Go-инструмент. Контрол над authority будет
+сильнее, чем через флаги CLI, но взамен придётся поддерживать своего агента. Не начинать
+до P11 и B4. Отправная точка — `specs/claude-auth/SPEC.md` §14.
 
 ---
 

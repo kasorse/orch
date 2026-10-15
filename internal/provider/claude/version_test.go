@@ -26,7 +26,7 @@ func TestVersionRange(t *testing.T) {
 
 func TestCLIVersion(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "2.2.1 (Claude Code)\nmore\n"}}}
-	v, ok, err := New(fake).CLIVersion(context.Background())
+	v, ok, err := newLogin(fake).CLIVersion(context.Background())
 	if err != nil || ok || v != "2.2.1 (Claude Code)" {
 		t.Errorf("got %q, %v, %v", v, ok, err)
 	}
@@ -35,15 +35,15 @@ func TestCLIVersion(t *testing.T) {
 	}
 
 	fake = &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{ExitCode: 1}}}
-	if _, _, err := New(fake).CLIVersion(context.Background()); err == nil {
+	if _, _, err := newLogin(fake).CLIVersion(context.Background()); err == nil {
 		t.Error("non-zero exit must be an error")
 	}
 	fake = &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{}}, Errs: []error{errors.New("boom")}}
-	if _, _, err := New(fake).CLIVersion(context.Background()); err == nil {
+	if _, _, err := newLogin(fake).CLIVersion(context.Background()); err == nil {
 		t.Error("exec failure must be an error")
 	}
 	fake = &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: strings.Repeat("9", 200)}}}
-	if v, ok, _ := New(fake).CLIVersion(context.Background()); ok || len(v) > 64 {
+	if v, ok, _ := newLogin(fake).CLIVersion(context.Background()); ok || len(v) > 64 {
 		t.Errorf("long output: %d bytes, verified %v", len(v), ok)
 	}
 }

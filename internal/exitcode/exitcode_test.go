@@ -26,6 +26,8 @@ func TestFromError(t *testing.T) {
 		{"provider timeout", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureTimeout}, ProviderExecution},
 		{"provider spawn", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureSpawn}, ProviderExecution},
 		{"provider cancelled", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureCancelled}, UserCancellation},
+		{"provider auth", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureAuth}, ConfigOrDependency},
+		{"provider auth wrapped", fmt.Errorf("step: %w", &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureAuth}), ConfigOrDependency},
 		{"decision unavailable", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionUnavailable}, ProviderExecution},
 		{"decision timeout", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionTimeout}, ProviderExecution},
 		{"decision bad request", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionBadRequest}, ProviderExecution},

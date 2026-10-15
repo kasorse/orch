@@ -71,6 +71,24 @@ func TestProviderError_RendersFailureKindAndCommand(t *testing.T) {
 	}
 }
 
+func TestProviderError_RendersEveryFailureKindDescription(t *testing.T) {
+	for _, kind := range []FailureKind{FailureSpawn, FailureExit, FailureTimeout, FailureCancelled, FailureAuth} {
+		if desc := failureDescription(kind); desc == string(kind) || desc == "" {
+			t.Errorf("kind %q has no description (got %q)", kind, desc)
+		}
+	}
+}
+
+func TestProviderError_AuthRendersKindAndDetail(t *testing.T) {
+	err := &ProviderError{Provider: "claude", Kind: FailureAuth, Detail: "claude auth (api): billing_error"}
+	msg := err.Error()
+	for _, want := range []string{"failure: auth (", "detail: claude auth (api): billing_error"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected error message to contain %q, got: %s", want, msg)
+		}
+	}
+}
+
 func TestProviderError_TimeoutMentionsActionOverrideWhenSet(t *testing.T) {
 	err := &ProviderError{
 		Provider:          "codex",

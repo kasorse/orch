@@ -22,6 +22,24 @@ translation:
   model: haiku
   timeout: 60s
 
+# Optional: how the claude CLI is authenticated (MVP.md §46). api: a Console API key from the
+# variable api_key_env names, billed per token; login: the CLI's own login; auto (default):
+# api when that variable is set. --claude-auth overrides auth.
+# providers:
+#   claude:
+#     auth: auto                       # auto | api | login
+#     api_key_env: ANTHROPIC_API_KEY   # the variable that holds the key, never the key itself
+#     # Set for claude in api mode only, and removed in login mode, so a gateway's setup never
+#     # reaches a subscription call. Never a secret: credential names, a URL with a user or
+#     # password and values that look like a secret are refused. With an org allowed_models,
+#     # the model variables' values must be on that list.
+#     api_env:
+#       ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+#       AWS_PROFILE: claude-bedrock
+#       AWS_REGION: eu-west-1
+#       ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
+#       ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock/eu.anthropic.claude-sonnet-5-5
+
 policy:
   context_depth:
     project_threshold: 0.5   # P(project) >= threshold -> collect project context

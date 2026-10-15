@@ -28,7 +28,9 @@ the decision shape - complexity cut from one size number, three asked stages and
 template, cut proposals in `decisions calibrate`, `actions.implement.escalate`: MVP.md §9,
 §9.1, §31.1, §44.8, §45.4, with its design record in `specs/decision-shape/`;
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
-design record in `specs/benchmark/`.
+design record in `specs/benchmark/`;
+the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
+`FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -180,6 +182,19 @@ history, otherwise the state the history and the transition table give (MVP.md �
   outside the run-start baseline stops the step (`security.secret_scan.mode: stop`) or is
   recorded (`warn`); the review diff is redacted; a secret's value is never printed, logged,
   persisted or put in a prompt.
+- **The claude credential is set by the adapter for the resolved mode and checked against
+  `apiKeySource`** (MVP.md §46, `specs/claude-auth/`). One mode per process (`api` or `login`),
+  from `--claude-auth`, then `providers.claude.auth`, then `auto`, resolved by
+  `config.ResolveClaudeAuth` in the fail-fast chain. Only `internal/provider/claude` builds the
+  child's environment for the mode (the key from `providers.claude.api_key_env` goes back in
+  under `ANTHROPIC_API_KEY`; `workflow`, `policy`, `action` and `buildArgs` learn nothing about
+  it), and the `apiKeySource` the CLI reports after every call must match the mode: a mismatch
+  or an authentication/billing error is `FailureAuth`, fatal in the translator, the LLM
+  decision provider and every step. The key is env-only, redacted like the Jev key, and never
+  in argv, config, `run.json` or logs; a failure never switches the mode, and `resume`
+  re-resolves it instead of reading it back. `providers.claude.api_env` is claude's alone: set
+  in `api`, its names removed in `login`. No other process gets it, and it is never a secret:
+  `Validate` refuses credential names and secret-looking values, naming only the variable.
 - **Only exit codes and git diff are trusted, never LLM prose** (MVP.md §18/§19/§31.4): test
   pass/fail comes only from the test command's real exit code; review inspects the actual
   `git diff`, not just an implementation summary. Never parse phrases like "all tests should
@@ -334,13 +349,15 @@ Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` f
 `run --jira` task, the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `org_config` (`{path, sha256}` of the org file the run started under; each `resumes[]` entry
-has its own), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
+has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
+holds variable names only; each
+`resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
 `options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
 read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `provider.model_source` (`base`, `by_complexity.<level>` or `escalated.<level>`), `attempt`,
-`usage` (with `partial` for a call cut off before its final report), `call` (prompt size and
-cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
+`usage` (with `partial` for a call cut off before its final report), `call` (`api_key_source`
+as the CLI reported it, prompt size and cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
 guard passed, `diff` from git and `path_rules` (the `policy.paths` rules the run's net diff matched,
 with the stages the workflow lacks in `missing`; recorded also when they failed the step), and for any
 implement `tree_after` and `verify_calls`; a test

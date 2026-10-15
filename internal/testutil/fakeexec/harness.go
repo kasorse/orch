@@ -64,6 +64,14 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_ENV_DIR: if set, the environment of each call is saved to
 //     <dir>/<action>.env (the output of env), so tests can assert what a provider CLI
 //     inherits.
+//   - FAKE_API_KEY_SOURCE / FAKE_API_RETRY_ERROR / FAKE_API_RETRY_ACTION: stream-json mode.
+//     When FAKE_API_KEY_SOURCE or FAKE_API_RETRY_ERROR is set, the canned response is printed
+//     as a claude --output-format stream-json transcript: a system/init event whose
+//     apiKeySource is FAKE_API_KEY_SOURCE ("auto" = "ANTHROPIC_API_KEY" when the call's
+//     environment has that variable, else "none"; "none" when only the error is set), then,
+//     with FAKE_API_RETRY_ERROR, a system/api_retry event with that error category (only for
+//     the action FAKE_API_RETRY_ACTION when it is set), then the result event holding the
+//     response. Without either variable the response is printed as it is.
 //   - FAKE_STATE_DIR: directory used to keep small counter files
 //     (<action>_calls, e.g. implement_calls and review_calls; a call that
 //     FAKE_FAIL_ACTION fails is not counted) across invocations of the same test.
@@ -272,6 +280,26 @@ fi
 if [ -z "$response_file" ]; then
   echo "fakeexec: no response file configured for action $action" >&2
   exit 1
+fi
+
+stream_source="${FAKE_API_KEY_SOURCE:-}"
+retry_error=""
+if [ -n "${FAKE_API_RETRY_ERROR:-}" ] && { [ -z "${FAKE_API_RETRY_ACTION:-}" ] || [ "$FAKE_API_RETRY_ACTION" = "$action" ]; }; then
+  retry_error="$FAKE_API_RETRY_ERROR"
+fi
+if [ -n "$stream_source" ] || [ -n "$retry_error" ]; then
+  # Stream-json mode: the answer goes out as the result event of a transcript that starts with
+  # the init event, as the real CLI prints it (specs/claude-auth/SPEC.md §8, §9).
+  if [ "$stream_source" = "auto" ]; then
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then stream_source="ANTHROPIC_API_KEY"; else stream_source="none"; fi
+  fi
+  printf '{"type":"system","subtype":"init","apiKeySource":"%s"}\n' "${stream_source:-none}"
+  if [ -n "$retry_error" ]; then
+    printf '{"type":"system","subtype":"api_retry","error":"%s"}\n' "$retry_error"
+  fi
+  body=$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$response_file" | tr '\t' ' ' | awk '{printf "%s\\n", $0}')
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$body"
+  exit 0
 fi
 
 cat "$response_file"

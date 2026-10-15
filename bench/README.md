@@ -357,7 +357,9 @@ mirrors, workspaces and `validated.json` live. Not the host's home, SSH agent or
 it runs as the caller's uid, never root, and `run.sh` refuses a tasks or results directory that
 is the home directory or contains it. The image includes git, bwrap, Go, Python, Node and the
 claude CLI pinned inside the verified range; `orchbench` finds its configs in
-`/opt/orche/bench/configs`. The options `docker run` needs for bwrap inside a container, and why
+`/opt/orche/bench/configs`. The baseline `claude` (config A) gets the operator's environment as
+it is, not the orchestrator's `--claude-auth` resolution (MVP.md §46, `specs/claude-auth/`
+§13 #20): give both the same environment, so that both bill the same account. The options `docker run` needs for bwrap inside a container, and why
 each is there, are in `run.sh` and in
 [`TASK-BM13`](../specs/benchmark/tasks/TASK-BM13-container.md).
 

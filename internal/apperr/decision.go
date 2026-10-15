@@ -2,6 +2,7 @@ package apperr
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"orchestrator/internal/domain"
@@ -38,6 +39,25 @@ var transientDecisionFailures = map[DecisionFailureKind]bool{
 	DecisionConnection:  true,
 	DecisionRateLimited: true,
 	DecisionUnavailable: true,
+}
+
+// DecisionKindForStatus classifies an HTTP error status, whether Jev returned it or a
+// decision CLI reported it from its own API call.
+func DecisionKindForStatus(status int) DecisionFailureKind {
+	switch {
+	case status == http.StatusRequestTimeout:
+		return DecisionTimeout
+	case status == http.StatusTooManyRequests:
+		return DecisionRateLimited
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		return DecisionAuth
+	case status >= 400 && status < 500:
+		return DecisionBadRequest
+	case status >= 500: // includes 529 "overloaded"
+		return DecisionUnavailable
+	default: // 1xx/3xx never carry an answer
+		return DecisionInvalidResponse
+	}
 }
 
 // Transient reports whether retrying the same request may succeed.

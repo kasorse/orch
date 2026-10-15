@@ -102,6 +102,9 @@ func TestScan_Rules(t *testing.T) {
 		{`secret = "<your-secret-here-please>"`, ""},
 		{`api_key = "example-` + randomSecret + `"`, ""},
 		{`password = "short"`, ""},
+		{`const DefaultClaudeAPIKeyEnv = "ANTHROPIC_API_KEY"`, ""}, // names a variable
+		{`api_key_env: "OPENAI_API_KEY_V2"`, ""},
+		{`secret = "` + "JBSWY3DP" + "EHPK3PXPQ4ZA" + `"`, "generic-assignment"}, // base32, no underscore; split so this file has no finding
 	}
 	for _, tc := range cases {
 		got := ScanLines("cfg/app.go", []NumberedLine{{Number: 7, Text: tc.line}})

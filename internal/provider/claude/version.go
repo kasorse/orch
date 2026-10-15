@@ -68,12 +68,17 @@ func (c *Client) VerifiedRange() string {
 // nothing); a version outside the verified range, or one that cannot be parsed, is
 // verified == false with a nil error.
 func (c *Client) CLIVersion(ctx context.Context) (string, bool, error) {
+	// The probe runs under the same environment as a call (specs/claude-auth/SPEC.md §7).
+	env, _, err := c.env()
+	if err != nil {
+		return "", false, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, versionTimeout)
 	defer cancel()
 	res, err := c.Executor.Run(ctx, execution.Spec{
 		Executable: executable,
 		Args:       []string{"--version"},
-		Env:        execution.ScrubbedEnv(),
+		Env:        env,
 	})
 	if err != nil {
 		return "", false, fmt.Errorf("%s --version: %w", executable, err)

@@ -212,6 +212,43 @@ earlier authority check still holds. The run was not verbose, so which of its tw
 outcomes V-verify-2 took (claude refusing the writes, or the server refusing the run and
 writing `violation`) is not recorded; both mean nothing ran over a planted file.
 
+## D17 — The claude credential, checked live (claude-auth CA07)
+
+**Decision.** The claude-auth classifier stays as specified (`specs/claude-auth/SPEC.md` §8,
+§9). The live run confirmed `apiKeySource` and the `api_retry` auth category on a real CLI.
+
+**Live check.** `go test -tags security ./test/security/... -run ClaudeAuth`
+(`claude_auth_test.go`), one `haiku` call per check with `AuthorityNone`.
+
+**Results.** 2026-10-15, claude 2.1.300. The owner's key is a gateway key: the calls went
+through a LiteLLM gateway in front of Bedrock (`ANTHROPIC_BASE_URL` and
+`ANTHROPIC_DEFAULT_HAIKU_MODEL` were inherited from the shell). They did not go to
+api.anthropic.com.
+
+- Check 1, a valid key: passes. `system/init` reports `apiKeySource: "ANTHROPIC_API_KEY"` and
+  the model `bedrock/eu.anthropic.claude-haiku-4-5-20251001-v1:0`.
+- Check 3, a wrong key: passes as `FailureAuth`. The init event still says
+  `apiKeySource: "ANTHROPIC_API_KEY"`, so the source check alone cannot catch a refused key.
+  What does catch it: the gateway's 401 arrives as
+  `{"type":"system","subtype":"api_retry","attempt":N,"max_retries":10,"error_status":401,"error":"authentication_failed",...}`,
+  which is the category §9 already lists. The CLI **retries a 401**: nine `api_retry` events with
+  exponential backoff (0.5 s … 40 s) came before the test's 2-minute deadline killed the call
+  (exit -1). There was no result event. The call is classified through the timeout path of
+  the adapter's auth check.
+- Check 4, `ANTHROPIC_AUTH_TOKEN` in the parent: passes. api mode removes it and the key is used.
+- Check 2, `login`, run in a shell without the gateway variables and without
+  `ANTHROPIC_API_KEY`: passes. The source is not `ANTHROPIC_API_KEY`.
+
+**Consequence.** SPEC §16 D4's shortcut ("the check runs after the call") cost too much here.
+A wrong or revoked key held the first call, usually the translator's, for up to its timeout
+(`decision.timeout`, or `execution.timeout` for a step) before the run stopped. The adapter now
+cancels the call at the first auth-category `api_retry` (`authRetryWatcher` in
+`internal/provider/claude/stream.go`). The live check 3 asserts that the call ends in under 30 s. Rerun 2026-10-15, it passes:
+one `api_retry` (`retry_delay_ms: 572`), then the stop, 1.5 s in all.
+
+**Not observed.** A 401 from api.anthropic.com itself. The CLI derives the category from the
+status, so the shape is expected to match, but that is not recorded here.
+
 ## Fate of v1
 
 | v1 | fate in v2 |

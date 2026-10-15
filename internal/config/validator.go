@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"path"
 	"regexp"
@@ -74,6 +75,7 @@ func Validate(cfg Config) error {
 
 	problems = append(problems, decisionProblems(cfg)...)
 	problems = append(problems, pathRuleProblems(cfg)...)
+	problems = append(problems, providersProblems(cfg)...)
 
 	problems = append(problems, sandboxProblems(cfg.Test)...)
 	problems = append(problems, envPassProblems(cfg)...)
@@ -297,7 +299,8 @@ func extraReviewerProblems(cfg Config) []string {
 
 // allowedModelProblems checks every model the run can call against the org's allowed_models
 // (specs/governance/SPEC.md §6.2): each action's base model and by_complexity models, the
-// extra reviewers, the translator and the LLM decision provider. A route with no model is an
+// extra reviewers, the translator, the LLM decision provider and the model variables of
+// providers.claude.api_env. A route with no model is an
 // error, because the list cannot check the CLI's default. A by_complexity entry with no model
 // inherits the base, which is checked on its own; an empty extra reviewer is already refused
 // by extraReviewerProblems.
@@ -342,6 +345,14 @@ func allowedModelProblems(cfg Config) []string {
 	check("translation", cfg.Translation.Model)
 	if !cfg.Decision.UsesJev() {
 		check("decision", cfg.Decision.Model)
+	}
+	// A model variable in providers.claude.api_env changes the model a route reaches in api
+	// mode (specs/claude-auth/SPEC.md §17.3, D8). An empty value is apiEnvProblems' to report.
+	apiEnv := cfg.Providers.Claude.APIEnv
+	for _, name := range slices.Sorted(maps.Keys(apiEnv)) {
+		if domain.ClaudeModelVar(name) && strings.TrimSpace(apiEnv[name]) != "" {
+			check("providers.claude.api_env."+name, apiEnv[name])
+		}
 	}
 	return problems
 }

@@ -240,24 +240,7 @@ func (c *httpClient) attempt(ctx context.Context, method, path string, body []by
 		cause = errors.New(text)
 	}
 	return parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-		c.fail(statusKind(resp.StatusCode), resp.StatusCode, string(raw), cause)
-}
-
-func statusKind(status int) apperr.DecisionFailureKind {
-	switch {
-	case status == http.StatusRequestTimeout:
-		return apperr.DecisionTimeout
-	case status == http.StatusTooManyRequests:
-		return apperr.DecisionRateLimited
-	case status == http.StatusUnauthorized, status == http.StatusForbidden:
-		return apperr.DecisionAuth
-	case status >= 400 && status < 500:
-		return apperr.DecisionBadRequest
-	case status >= 500: // includes 529 "overloaded"
-		return apperr.DecisionUnavailable
-	default: // 1xx/3xx never carry an answer
-		return apperr.DecisionInvalidResponse
-	}
+		c.fail(apperr.DecisionKindForStatus(resp.StatusCode), resp.StatusCode, string(raw), cause)
 }
 
 // transportError classifies a failure that produced no HTTP response. ctx is the

@@ -29,6 +29,10 @@ type CallReport struct {
 	// MCPFailed names the configured MCP servers (extensions.mcp) the CLI could not start,
 	// sorted: the step ran without their tools.
 	MCPFailed []string `json:"mcp_failed,omitempty"`
+	// APIKeySource is the credential source the claude CLI reported in its init event
+	// ("ANTHROPIC_API_KEY", "none", ...); empty when the CLI reported none
+	// (specs/claude-auth/SPEC.md §8).
+	APIKeySource string `json:"api_key_source,omitempty"`
 	// ExtraCalls are the further calls of a review step with extra reviewers
 	// (actions.review.models), in call order; this report is the first call's. Empty for every
 	// other step.
@@ -81,6 +85,11 @@ func (c CallReport) Validate() error {
 	}
 	if len(c.Models) > maxReportNames || len(c.Tools) > maxReportNames || len(c.MCPFailed) > maxReportNames {
 		return fmt.Errorf("more than %d models, tools or MCP servers", maxReportNames)
+	}
+	if c.APIKeySource != "" {
+		if err := reportName(c.APIKeySource); err != nil {
+			return fmt.Errorf("api key source: %w", err)
+		}
 	}
 	if len(c.ExtraCalls) > maxReportNames {
 		return fmt.Errorf("more than %d extra calls", maxReportNames)

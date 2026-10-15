@@ -2,10 +2,12 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
@@ -24,7 +26,7 @@ const transcript = `{"type":"system","subtype":"init","cwd":"/repo","session_id"
 func TestExecute_ParsesStreamJSON(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: transcript}}}
 	var activity []string
-	res, err := New(fake).Execute(context.Background(), provider.Request{
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{
 		Prompt: "p", Model: "haiku", WorkingDir: "/repo", Authority: domain.AuthorityRead,
 		Activity: func(s string) { activity = append(activity, s) },
 	})
@@ -49,7 +51,7 @@ func TestExecute_ParsesStreamJSON(t *testing.T) {
 // A CLI or test double that prints plain text is taken as the answer, unchanged.
 func TestExecute_PlainOutputPassesThrough(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: `{"summary":"x"}`}}}
-	res, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,9 +64,34 @@ func TestExecute_PlainOutputPassesThrough(t *testing.T) {
 func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 	out := `{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 overloaded_error","num_turns":1}`
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: out, ExitCode: 1}}}
-	_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	_, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err == nil || !strings.Contains(err.Error(), "overloaded_error") {
 		t.Errorf("expected the API error text in %v", err)
+	}
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || pe.APIStatus != 529 {
+		t.Errorf("APIStatus = %+v, want 529", pe)
+	}
+}
+
+func TestAPIErrorStatus(t *testing.T) {
+	for text, want := range map[string]int{
+		"API Error: 400 litellm.BadRequestError: You passed in model=x": 400,
+		"API Error: 529 overloaded_error":                               529,
+		"API Error: 401":                                                401,
+		"  API Error: 429 rate\n":                                       429,
+		"API Error: 4000 x":                                             0,
+		"API Error: abc":                                                0,
+		"The answer mentions API Error: 400":                            0,
+		"":                                                              0,
+	} {
+		if got := apiErrorStatus(text); got != want {
+			t.Errorf("apiErrorStatus(%q) = %d, want %d", text, got, want)
+		}
+	}
+	// Only an error result carries a status: an answer that starts with the phrase is an answer.
+	if rep := parseStream(`{"type":"result","is_error":false,"result":"API Error: 400 x"}`); rep.apiStatus != 0 {
+		t.Errorf("a successful result must not carry an API status: %d", rep.apiStatus)
 	}
 }
 
@@ -129,7 +156,7 @@ func TestExecute_TimeoutReportsPartialUsage(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: stream, ExitCode: -1}},
 		Errs:    []error{context.DeadlineExceeded},
 	}
-	res, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "sonnet", Authority: domain.AuthorityRead})
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "sonnet", Authority: domain.AuthorityRead})
 	if err == nil {
 		t.Fatal("expected the timeout")
 	}

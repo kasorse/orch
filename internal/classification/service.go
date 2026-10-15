@@ -164,13 +164,13 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 }
 
 // manual handles a provider failure: the manual choice when allowed, else the error.
-// Cancellation never offers a choice - the user already said stop - and neither does
+// Cancellation and an authentication failure never offer a choice - the user already said stop - and neither does
 // the run's own deadline expiring: there would be no time left to run the stages.
 func (s *Service) manual(ctx context.Context, req Request, res Result, cause error) (Result, error) {
 	if ctx.Err() != nil || isCancellation(ctx, cause) {
 		return res, cause
 	}
-	if !s.AskOnFailure {
+	if !s.AskOnFailure || isAuthFailure(cause) {
 		return res, cause
 	}
 	res.DecisionError = cause
@@ -215,6 +215,13 @@ func callUsage(answered *domain.Usage, err error) *domain.Usage {
 		return derr.Usage
 	}
 	return nil
+}
+
+// isAuthFailure: a credential the operator must fix is never answered with a manual
+// choice (specs/claude-auth/SPEC.md §9).
+func isAuthFailure(err error) bool {
+	var perr *apperr.ProviderError
+	return errors.As(err, &perr) && perr.Kind == apperr.FailureAuth
 }
 
 func isCancellation(ctx context.Context, err error) bool {

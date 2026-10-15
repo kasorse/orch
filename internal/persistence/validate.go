@@ -70,6 +70,11 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("org_config: %w", err)
 		}
 	}
+	if run.ClaudeAuth != nil {
+		if err := run.ClaudeAuth.Validate(); err != nil {
+			return fmt.Errorf("claude_auth: %w", err)
+		}
+	}
 	if err := validateSecretScan(run); err != nil {
 		return err
 	}
@@ -104,6 +109,11 @@ func validateRun(run *domain.Run, runID string) error {
 		if r.OrgConfig != nil {
 			if err := r.OrgConfig.Validate(); err != nil {
 				return fmt.Errorf("resumes[%d].org_config: %w", i, err)
+			}
+		}
+		if r.ClaudeAuth != nil {
+			if err := r.ClaudeAuth.Validate(); err != nil {
+				return fmt.Errorf("resumes[%d].claude_auth: %w", i, err)
 			}
 		}
 		if !r.FromStatus.Valid() {
