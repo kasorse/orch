@@ -20,6 +20,10 @@ import (
 
 const executable = "claude"
 
+// errAuthRetry is the cause the adapter cancels a call with when its stream shows the
+// credential was refused (authRetryWatcher).
+var errAuthRetry = errors.New("the credential was refused; stopped at the CLI's first retry")
+
 type Client struct {
 	Executor execution.ProcessExecutor
 
@@ -216,8 +220,23 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 
-	res, err := c.Executor.Run(ctx, spec)
+	// The first auth-category api_retry ends the call; the check below reports it.
+	callCtx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	watcher := &authRetryWatcher{stop: func() { stop(errAuthRetry) }}
+	if spec.StdoutSink == nil {
+		spec.StdoutSink = watcher
+	} else {
+		spec.StdoutSink = io.MultiWriter(watcher, spec.StdoutSink)
+	}
+
+	res, err := c.Executor.Run(callCtx, spec)
 	flushStream()
+	stoppedOnAuth := ctx.Err() == nil && errors.Is(context.Cause(callCtx), errAuthRetry)
+	if stoppedOnAuth && errors.Is(err, context.Canceled) {
+		// Not a cancellation by the caller: nothing above this adapter may take it for one.
+		err = nil
+	}
 
 	// The key does not leave the adapter: not in the output, the logs the caller writes, the
 	// error text, nor the live stream.
@@ -249,9 +268,13 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 
 	// What the CLI used is checked whatever else the call did, an exit code of 0 and a good
 	// answer included: billing the wrong account is not an error the answer shows (SPEC §8).
-	// A cancelled or unspawnable call has nothing to check.
+	// A cancelled or unspawnable call has nothing to check; one stopped on an auth retry is
+	// checked like a finished one (err is nil then).
 	if err == nil || errors.Is(err, context.DeadlineExceeded) {
 		if detail := authFailure(mode, rep.apiKeySource, rep.authErr); detail != "" {
+			if stoppedOnAuth {
+				detail += " (" + errAuthRetry.Error() + ")"
+			}
 			return result, &apperr.ProviderError{
 				Provider:    string(provider.Claude),
 				Model:       req.Model,

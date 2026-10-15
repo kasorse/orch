@@ -30,3 +30,6 @@
   item 2 now points to P11 and MVP.md §46 for `ANTHROPIC_API_KEY`.
 - The README's `Status:` line and table say "written", not "done", for the same reason.
   Documentation only: no code or test changed, so there is no new gate to run.
+- Closed 2026-10-15. `scripts/check.sh` passed over CA01–CA09 and CA07 passed live, so the
+  README now says "done" and TODO.md P11 is ticked. MVP.md §46.5 also describes the live stop
+  at the first auth `api_retry` (D4 after CA07).

@@ -190,8 +190,12 @@ A call that fails with an error result `API Error: NNN …` (the API, or a gatew
 it, refused the request) carries that status as `ProviderError.APIStatus`; the LLM decision
 provider classifies it like a Jev HTTP status (`apperr.DecisionKindForStatus`), so a 400 for
 a model the endpoint does not serve is `bad_request`, not `unavailable` (2026-10-15).
-What a non-retryable 401 looks like in stream-json is not documented; task CA07 records it
-from a live call and the classifier follows that record (§15 Q5).
+A 401 is not final for the CLI: claude 2.1.300 retries it as `system/api_retry` with
+`error_status: 401, error: "authentication_failed"`, up to `max_retries: 10`, and the init event
+still reports `apiKeySource: ANTHROPIC_API_KEY` (CA07, `specs/permissions/DECISIONS.md` D17).
+The adapter watches the live stream (`authRetryWatcher`) and stops the call at the first
+auth-category `api_retry`, so a wrong key costs one retry delay and not the call's timeout
+(§16 D4, 2026-10-15).
 
 ## 10. Persistence and output
 
@@ -282,7 +286,7 @@ finishes it on the key. A resume that changes the mode prints
 | Q2 | Where does the key come from? | An environment variable named in the config (`providers.claude.api_key_env`), the literal rejected |
 | Q3 | How is the mode switched? | `auto` by default (key set → api), `providers.claude.auth` in config, `--claude-auth` flag over it; `login` removes the key so nothing is billed silently |
 | Q4 | Which calls does it cover? | All claude calls: steps, translator, LLM decision provider |
-| Q5 | Open: may a live check spend real API calls (CA07, about $0.05)? Which key? | — |
+| Q5 | May a live check spend real API calls (CA07, about $0.05)? Which key? | Yes (2026-10-15). The owner's key is a gateway (LiteLLM → Bedrock) key, set in the environment by the owner |
 
 ## 16. Defaults (the author's, stand unless changed)
 
@@ -293,9 +297,11 @@ finishes it on the key. A resume that changes the mode prints
 - **D3** No `--bare` in `api`: it would also drop CLAUDE.md and `extensions.user_settings`, so
   the same task would get a different context depending on who pays. §7 + §8 already guarantee
   the key is used.
-- **D4** The `apiKeySource` check runs after the call, not live on the init line. shortcut:
-  one call can run on the wrong credential before the run stops; move the check into the
-  stdout sink and cancel the call if that ever matters.
+- **D4** The `apiKeySource` check runs after the call, not live on the init line: one call
+  can run on the wrong credential before the run stops. An auth-category `api_retry` is acted
+  on live. The adapter's stdout sink cancels the call at the first one, because the CLI
+  retries a refused key for minutes (CA07, `specs/permissions/DECISIONS.md` D17; changed
+  2026-10-15).
 - **D5** The resolved mode reaches the adapter through a setter on `claude.Client` called by
   `app` after the fail-fast chain (the registry is built before the config is loaded, as for
   `execution.ScrubCredentials`), not through `provider.Request`: the workflow never learns it.

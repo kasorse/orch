@@ -4405,6 +4405,9 @@ whose stream carries `system/api_retry` with `error` in `authentication_failed`,
 translator does not fall back to the original text, the LLM decision provider does not lead to
 the manual choice whatever `on_failure` says, and a workflow step fails the run with no retry
 or fix loop. The message names the mode and what to try. Rate limits are not `FailureAuth`.
+The CLI retries a refused credential for minutes (claude 2.1.300: a 401 up to ten times with
+backoff), so the adapter watches the live stream and stops the call at the first
+auth-category `api_retry`. The detail then ends with `stopped at the CLI's first retry`.
 
 ## 46.6 Persistence and resume
 

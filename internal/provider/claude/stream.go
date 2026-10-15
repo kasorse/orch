@@ -134,7 +134,7 @@ func parseStream(stdout string) streamReport {
 					}
 				}
 			case "api_retry":
-				if cat := rawString(ev.Error); authErr == "" && authErrorCategories[cat] {
+				if cat := authRetryCategory(ev); authErr == "" {
 					authErr = cat
 				}
 			}
@@ -250,6 +250,59 @@ var authErrorCategories = map[string]bool{
 	"oauth_org_not_allowed": true,
 	"account_on_hold":       true,
 	"billing_error":         true,
+}
+
+// authRetryCategory is the category of a system/api_retry event when it is an
+// authentication one (authErrorCategories), "" for any other event.
+func authRetryCategory(ev streamEvent) string {
+	if ev.Type != "system" || ev.Subtype != "api_retry" {
+		return ""
+	}
+	if cat := rawString(ev.Error); authErrorCategories[cat] {
+		return cat
+	}
+	return ""
+}
+
+// maxWatchedLine bounds what authRetryWatcher buffers of one line. An api_retry event is a
+// few hundred bytes, so a longer line is skipped, not buffered.
+const maxWatchedLine = 64 << 10
+
+// authRetryWatcher reads the live stdout and calls stop once, on the first auth-category
+// api_retry. The CLI retries a refused credential up to ten times with backoff, for minutes
+// (specs/permissions/DECISIONS.md D17), and no retry changes the outcome (SPEC §16 D4).
+// os/exec writes stdout from one goroutine, so it needs no lock.
+type authRetryWatcher struct {
+	stop func()
+	buf  []byte
+	skip bool // the current line outgrew maxWatchedLine
+	done bool
+}
+
+func (w *authRetryWatcher) Write(p []byte) (int, error) {
+	n := len(p)
+	for len(p) > 0 && !w.done {
+		i := bytes.IndexByte(p, '\n')
+		if i < 0 {
+			if !w.skip {
+				w.buf = append(w.buf, p...)
+				if len(w.buf) > maxWatchedLine {
+					w.buf, w.skip = w.buf[:0], true
+				}
+			}
+			break
+		}
+		if !w.skip {
+			line := bytes.TrimSpace(append(w.buf, p[:i]...))
+			var ev streamEvent
+			if bytes.Contains(line, []byte(`"api_retry"`)) && json.Unmarshal(line, &ev) == nil && authRetryCategory(ev) != "" {
+				w.done = true
+				w.stop()
+			}
+		}
+		w.buf, w.skip, p = w.buf[:0], false, p[i+1:]
+	}
+	return n, nil
 }
 
 // rawString is the value of a JSON string, "" for anything else (absent, null, an object).

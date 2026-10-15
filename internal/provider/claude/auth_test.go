@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -504,5 +505,97 @@ func TestRedactWriter_KeySplitAcrossWrites(t *testing.T) {
 	w.Flush()
 	if strings.Contains(out.String(), key) || !strings.Contains(out.String(), "token "+redacted+" end\n") || !strings.HasSuffix(out.String(), "tail "+redacted) {
 		t.Errorf("output = %q", out.String())
+	}
+}
+
+// retryingExecutor behaves like a CLI that keeps retrying a refused key: it streams its
+// stdout to the sink, then runs until the context ends, and reports the context's error as
+// the real executor does.
+type retryingExecutor struct{ stdout string }
+
+func (e retryingExecutor) Run(ctx context.Context, spec execution.Spec) (execution.ProcessResult, error) {
+	if spec.StdoutSink != nil {
+		_, _ = spec.StdoutSink.Write([]byte(e.stdout))
+	}
+	select {
+	case <-ctx.Done():
+		return execution.ProcessResult{Stdout: e.stdout, ExitCode: -1}, ctx.Err()
+	case <-time.After(5 * time.Second):
+		return execution.ProcessResult{Stdout: e.stdout}, errors.New("the call was not stopped")
+	}
+}
+
+// DECISIONS D17: the CLI retries a 401 for minutes; the first auth api_retry ends the call.
+func TestExecute_StopsOnTheFirstAuthRetry(t *testing.T) {
+	stdout := initEvent("ANTHROPIC_API_KEY") + `{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed"}` + "\n"
+	c := New(retryingExecutor{stdout: stdout})
+	c.SetAuth(domain.ClaudeAuthAPI, testKey(), nil)
+	start := time.Now()
+	_, err := c.Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || pe.Kind != apperr.FailureAuth {
+		t.Fatalf("err = %v, want FailureAuth", err)
+	}
+	if errors.Is(err, context.Canceled) || !strings.Contains(pe.Detail, "stopped at the CLI's first retry") {
+		t.Errorf("the stop must read as an auth failure, not a cancellation: %v", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("the call was not stopped early: %v", time.Since(start))
+	}
+
+	// A rate limit is retried by the CLI as before: the call is not stopped.
+	limited := initEvent("ANTHROPIC_API_KEY") + `{"type":"system","subtype":"api_retry","attempt":1,"error":"rate_limit"}` + "\n"
+	c = New(retryingExecutor{stdout: limited})
+	c.SetAuth(domain.ClaudeAuthAPI, testKey(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err = c.Execute(ctx, provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	if !errors.As(err, &pe) || pe.Kind != apperr.FailureTimeout {
+		t.Errorf("rate limit: err = %v, want the caller's timeout", err)
+	}
+
+	// The caller's own cancellation stays a cancellation.
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	_, err = c.Execute(ctx, provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	if !errors.As(err, &pe) || pe.Kind != apperr.FailureCancelled {
+		t.Errorf("caller cancel: err = %v, want FailureCancelled", err)
+	}
+}
+
+func TestAuthRetryWatcher(t *testing.T) {
+	auth := `{"type":"system","subtype":"api_retry","error":"billing_error"}` + "\n"
+	cases := map[string][]string{
+		"one write":         {auth},
+		"split mid-line":    {auth[:17], auth[17:]},
+		"byte by byte":      strings.Split(auth, ""),
+		"after other lines": {initEvent("x") + `{"type":"assistant"}` + "\n", auth},
+		"after a long line": {strings.Repeat("a", maxWatchedLine+10), `"api_retry"}` + "\n" + auth},
+	}
+	for name, writes := range cases {
+		stops := 0
+		w := &authRetryWatcher{stop: func() { stops++ }}
+		for _, p := range writes {
+			if n, err := w.Write([]byte(p)); n != len(p) || err != nil {
+				t.Fatalf("%s: Write = %d, %v", name, n, err)
+			}
+		}
+		_, _ = w.Write([]byte(auth))
+		if stops != 1 {
+			t.Errorf("%s: stop called %d times, want 1", name, stops)
+		}
+	}
+	for name, stream := range map[string]string{
+		"rate limit":          `{"type":"system","subtype":"api_retry","error":"rate_limit"}` + "\n",
+		"no newline yet":      strings.TrimSuffix(auth, "\n"),
+		"category as text":    `{"type":"assistant","message":{"content":[{"type":"text","text":"api_retry authentication_failed"}]}}` + "\n",
+		"tail of a long line": strings.Repeat("a", maxWatchedLine+10) + `,"type":"system","subtype":"api_retry","error":"billing_error"}` + "\n",
+	} {
+		stops := 0
+		w := &authRetryWatcher{stop: func() { stops++ }}
+		_, _ = w.Write([]byte(stream))
+		if stops != 0 {
+			t.Errorf("%s: stop called", name)
+		}
 	}
 }

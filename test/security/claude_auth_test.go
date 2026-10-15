@@ -107,6 +107,10 @@ func TestClaudeAuth_WrongKeyIsAuthFailure(t *testing.T) {
 	if strings.Contains(err.Error(), wrong) {
 		t.Error("the error contains the key")
 	}
+	// The CLI retries a 401 for minutes; the adapter stops at the first retry (DECISIONS D17).
+	if res.Duration > 30*time.Second {
+		t.Errorf("the call ran %v; it should stop at the first auth retry", res.Duration)
+	}
 }
 
 // 4: api mode drops ANTHROPIC_AUTH_TOKEN from the child, so the key still wins.

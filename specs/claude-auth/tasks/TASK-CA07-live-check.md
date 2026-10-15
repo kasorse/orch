@@ -27,10 +27,15 @@ like in stream-json.
 - `test/security/claude_auth_test.go` (build tag `security`) holds the checks; they are skipped
   unless `ORCH_LIVE_ANTHROPIC_KEY` holds a Console key. Each is one call on `haiku` with
   `AuthorityNone` through `claude.Client.SetAuth`.
-- Not run: no key and no `claude` were available to the author, so nothing was observed and no
-  entry was added to `specs/permissions/DECISIONS.md`. What a non-retryable 401 looks like in
-  stream-json is still unrecorded, and the classifier follows only the four categories of
-  SPEC §9. Left to the operator, with the answer to Q5.
+- 2026-10-15, claude 2.1.300, run by the owner through a LiteLLM → Bedrock gateway (Q5: yes).
+  All four checks pass (check 2, `login`, in a shell without the gateway variables). The
+  events are recorded in `specs/permissions/DECISIONS.md` D17.
+  - A 401 is retried by the CLI as `api_retry` `authentication_failed` with `error_status: 401`.
+    That is a §9 category, so the classifier needed no change.
+  - The call ran until its timeout (2 minutes in the test) because the CLI keeps retrying.
+    SPEC §16 D4's upgrade was therefore built: the adapter cancels the call at the first auth
+    `api_retry`. Check 3 now also requires the call to end in under 30 s. That assertion has not
+    been run live yet.
 
 ## Gates
 

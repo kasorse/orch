@@ -748,17 +748,18 @@ authorities на его флаги, live-проверка `-tags security`, `Sup
 ### [ ] P8. Codex / Gemini — отложено
 По решению владельца от 2026-10-03: только по отдельной спеке. Не трогать до P7.
 
-### [ ] P11. Claude по API-ключу или по логину CLI — P1 · M
+### [x] P11. Claude по API-ключу или по логину CLI — P1 · M
 Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из
 переменной `providers.claude.api_key_env`) или `login` (логин самого CLI). Выбирается флагом
 `--claude-auth`, затем `providers.claude.auth`, затем `auto` (ключ задан → `api`). Адаптер
 собирает окружение под режим и сверяет `apiKeySource` из init-события. Ошибка
 аутентификации останавливает run, а `resume` может сменить режим. Закрывает п. 2 из P6 для
-`ANTHROPIC_API_KEY`. Реализовано и описано в MVP.md §46; галочка ждёт `scripts/check.sh`
-(корень и `bench/`) и живой проверки CA07 (нужен ключ, вопрос Q5), которые запускает владелец.
+`ANTHROPIC_API_KEY`. Реализовано и описано в MVP.md §46. Закрыто 2026-10-15: `scripts/check.sh` (корень и
+`bench/`) зелёный, живая проверка CA07 прошла (DECISIONS D17). После CA07 вызов с отвергнутым
+ключом останавливается на первом `api_retry`, а не ждёт таймаута.
 CA09 (`providers.claude.api_env`, SPEC §17): переменные окружения только для режима `api`
 (шлюз, алиасы моделей Bedrock), в `login` удаляются. Специфицировано и реализовано 2026-10-15
-(MVP.md §46); как и CA01–CA08, ждёт `scripts/check.sh`.
+(MVP.md §46), `scripts/check.sh` зелёный.
 
 ### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
 Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна
