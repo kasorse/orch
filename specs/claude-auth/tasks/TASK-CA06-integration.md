@@ -27,6 +27,23 @@ real CLI.
    environment has no `ANTHROPIC_API_KEY` (§12).
 10. `codex`/`gemini` adapters' environment (unit level if no route is possible): no key.
 
+## As built
+
+- `test/integration/claude_auth_test.go`, one test per scenario (1–9). The fake CLI
+  (`fakeexec.ProviderScript`) gained a stream-json mode: `FAKE_API_KEY_SOURCE` (`auto` = the key
+  if the call's environment has it, else `none`) and `FAKE_API_RETRY_ERROR` /
+  `FAKE_API_RETRY_ACTION` print a `system/init` (and `api_retry`) event and the answer as the
+  `result` event.
+- Scenario 10 is a unit test (`TestClient_GetsNoClaudeAPIKey` in `internal/provider/codex` and
+  `internal/provider/gemini`): no route to codex or gemini is possible, since neither adapter
+  supports any authority and config validation refuses every route to them. Scenario 2 also
+  greps the whole run directory for the key (the check CA05 left here).
+- The 'auth changed' notice of scenario 8 goes to stderr, so it is checked on both streams.
+- Scenarios 6 and 7 assert the `FailureAuth` kind and that the message names the mode; 8 asserts
+  `resumes[0].claude_auth` is `login` (by flag) while the run's stays `api`.
+- Left to the operator: `scripts/check.sh` (root and `bench/`) and the run outside the sandbox;
+  I could not run the new tests, so the task is not marked done and CA08 stays blocked.
+
 ## Gates
 
 `scripts/check.sh`, and the script outside the sandbox once before closing.

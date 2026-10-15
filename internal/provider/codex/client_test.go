@@ -154,6 +154,23 @@ func TestClient_ExecuteRefusesEveryAuthority(t *testing.T) {
 	}
 }
 
+// TestClient_GetsNoClaudeAPIKey: the key the claude adapter forwards to the claude CLI is a
+// credential variable (the app registers it at start-up), so no other provider inherits it
+// (specs/claude-auth/SPEC.md §7).
+func TestClient_GetsNoClaudeAPIKey(t *testing.T) {
+	execution.ScrubCredentials("ANTHROPIC_API_KEY")
+	t.Setenv("ANTHROPIC_API_KEY", "ca06-stand-in-key")
+	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "ok"}}}
+	if _, err := New(fake).run(context.Background(), provider.Request{Prompt: "x", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, kv := range fake.Calls[0].Env {
+		if strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") {
+			t.Errorf("the claude API key leaked to codex: %s", kv)
+		}
+	}
+}
+
 func TestClient_ScrubsParentSessionEnv(t *testing.T) {
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("CLAUDE_CODE_MESSAGING_SOCKET", "/tmp/sock")
