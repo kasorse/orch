@@ -12,10 +12,8 @@ import (
 	"time"
 
 	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
 	"orchestrator/internal/projectctx"
 	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/claude"
 )
 
 // The opt-in extensions (README "Extensions") widen a call in exactly two named ways: the
@@ -32,7 +30,7 @@ func callExt(t *testing.T, dir string, a domain.Authority, ext provider.Extensio
 			t.Setenv(k, v)
 		}
 	}
-	res, err := claude.New(execution.NewOSProcessExecutor()).Execute(ctx, provider.Request{
+	res, err := newClaude().Execute(ctx, provider.Request{
 		Prompt: prompt, Model: model(), WorkingDir: dir, Authority: a,
 		DenyRead: projectctx.DenyPatterns(nil), Extensions: ext,
 	})

@@ -55,6 +55,10 @@ func FromError(err error) int {
 		if providerErr.Kind == apperr.FailureCancelled {
 			return UserCancellation
 		}
+		// A credential the operator must fix, like a rejected Jev key (DecisionAuth).
+		if providerErr.Kind == apperr.FailureAuth {
+			return ConfigOrDependency
+		}
 		return ProviderExecution
 	}
 

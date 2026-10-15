@@ -262,6 +262,15 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	if err != nil {
 		return fail(err)
 	}
+	// The adapter learns the mode before anything runs claude - the version probe below
+	// included, which gets the same environment as a call (SPEC §7).
+	ignored, err := applyClaudeAuth(registry, auth, os.LookupEnv)
+	if err != nil {
+		return fail(err)
+	}
+	if len(ignored) > 0 {
+		notices = append(notices, "ignored in api mode: "+strings.Join(ignored, ", "))
+	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
 	if cfg.Test.Sandboxed() {
@@ -288,6 +297,31 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	reporter.ConfigValid()
 	reporter.ClaudeAuth(auth.Line(), notices)
 	return cfg, clis, org, auth, nil
+}
+
+// applyClaudeAuth hands the resolved credential mode to the claude adapter, and in api mode
+// the key, read here once from the variable the config names (specs/claude-auth/SPEC.md §12);
+// it is never stored anywhere else. It returns the names of the variables api mode removes
+// from claude's environment that are set. A registry whose claude client is not the real
+// adapter (a test double) has nothing to set.
+func applyClaudeAuth(registry *provider.Registry, auth domain.ClaudeAuth, lookup func(string) (string, bool)) ([]string, error) {
+	client, err := registry.Resolve(string(provider.Claude))
+	if err != nil {
+		return nil, nil
+	}
+	adapter, ok := client.(*claude.Client)
+	if !ok {
+		return nil, nil
+	}
+	key := ""
+	if auth.Mode == domain.ClaudeAuthAPI {
+		raw, _ := lookup(auth.KeyEnv)
+		if key = strings.TrimSpace(raw); key == "" {
+			return nil, apperr.NewConfigError(fmt.Sprintf("claude auth mode api: $%s is not set or empty", auth.KeyEnv), nil)
+		}
+	}
+	adapter.SetAuth(auth.Mode, key)
+	return adapter.IgnoredEnv(), nil
 }
 
 // orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);

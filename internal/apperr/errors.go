@@ -52,6 +52,7 @@ const (
 	FailureExit      FailureKind = "exit"      // ran, exited non-zero
 	FailureTimeout   FailureKind = "timeout"   // execution.timeout exceeded
 	FailureCancelled FailureKind = "cancelled" // SIGINT/SIGTERM
+	FailureAuth      FailureKind = "auth"      // the CLI did not use the run's credential, or it was refused
 )
 
 var failureDescriptions = map[FailureKind]string{
@@ -59,6 +60,7 @@ var failureDescriptions = map[FailureKind]string{
 	FailureExit:      "exit (the CLI ran and exited non-zero)",
 	FailureTimeout:   "timeout (exceeded execution.timeout)",
 	FailureCancelled: "cancelled (interrupted)",
+	FailureAuth:      "auth (the CLI did not use the run's credential, or the credential was refused)",
 }
 
 // ProviderError carries the actionable context spelled out in the spec: provider,
@@ -83,6 +85,9 @@ type ProviderError struct {
 	Stderr      string
 	LogPath     string // run-relative path to the raw logs, when persisted
 	Err         error
+	// Detail is one sentence the adapter adds to the rendered message, e.g. which credential
+	// mode a FailureAuth concerns. The adapter has already redacted it.
+	Detail string
 
 	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
 	// the run-wide execution.timeout was the one that fired: an action's own
@@ -110,6 +115,9 @@ func (e *ProviderError) Error() string {
 		fmt.Fprintf(&b, "failure: timeout (exceeded %s = %s)\n", setting, e.ConfiguredTimeout)
 	} else if e.Kind != "" {
 		fmt.Fprintf(&b, "failure: %s\n", failureDescription(e.Kind))
+	}
+	if e.Detail != "" {
+		fmt.Fprintf(&b, "detail: %s\n", e.Detail)
 	}
 	if e.Executable != "" {
 		fmt.Fprintf(&b, "command: %s\n", commandLine(e.Executable, e.Args))

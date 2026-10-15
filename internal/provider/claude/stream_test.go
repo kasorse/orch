@@ -24,7 +24,7 @@ const transcript = `{"type":"system","subtype":"init","cwd":"/repo","session_id"
 func TestExecute_ParsesStreamJSON(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: transcript}}}
 	var activity []string
-	res, err := New(fake).Execute(context.Background(), provider.Request{
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{
 		Prompt: "p", Model: "haiku", WorkingDir: "/repo", Authority: domain.AuthorityRead,
 		Activity: func(s string) { activity = append(activity, s) },
 	})
@@ -49,7 +49,7 @@ func TestExecute_ParsesStreamJSON(t *testing.T) {
 // A CLI or test double that prints plain text is taken as the answer, unchanged.
 func TestExecute_PlainOutputPassesThrough(t *testing.T) {
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: `{"summary":"x"}`}}}
-	res, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestExecute_PlainOutputPassesThrough(t *testing.T) {
 func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 	out := `{"type":"result","subtype":"success","is_error":true,"result":"API Error: 529 overloaded_error","num_turns":1}`
 	fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: out, ExitCode: 1}}}
-	_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+	_, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err == nil || !strings.Contains(err.Error(), "overloaded_error") {
 		t.Errorf("expected the API error text in %v", err)
 	}
@@ -129,7 +129,7 @@ func TestExecute_TimeoutReportsPartialUsage(t *testing.T) {
 		Results: []execution.ProcessResult{{Stdout: stream, ExitCode: -1}},
 		Errs:    []error{context.DeadlineExceeded},
 	}
-	res, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "sonnet", Authority: domain.AuthorityRead})
+	res, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "sonnet", Authority: domain.AuthorityRead})
 	if err == nil {
 		t.Fatal("expected the timeout")
 	}

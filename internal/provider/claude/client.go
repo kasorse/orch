@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -21,6 +22,10 @@ const executable = "claude"
 
 type Client struct {
 	Executor execution.ProcessExecutor
+
+	// auth is the credential mode of the process (auth.go); until SetAuth, Execute and
+	// CLIVersion refuse to run.
+	auth credentialAuth
 }
 
 func New(executor execution.ProcessExecutor) *Client {
@@ -158,18 +163,40 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 
+	mode, key, err := c.snapshot()
+	if err != nil {
+		return provider.Result{}, err
+	}
+	env, _, err := buildEnv(execution.ScrubbedEnv(), mode, key)
+	if err != nil {
+		return provider.Result{}, err
+	}
+	redact := redactor(key)
+
 	argv := buildArgs(req.Authority, req.DenyRead, req.Model, req.Effort, req.Extensions)
 	spec := execution.Spec{
 		Executable: executable,
 		Args:       argv,
 		Stdin:      req.Prompt,
 		WorkingDir: req.WorkingDir,
-		Env:        execution.ScrubbedEnv(),
+		Env:        env,
+	}
+	// What is shown live is redacted too: the key reaches the console only if nothing between
+	// the CLI and the terminal removes it.
+	stream := req.Stream
+	var redactors []*redactWriter
+	if stream != nil && key != "" {
+		rw := &redactWriter{w: stream, redact: redact}
+		stream, redactors = rw, append(redactors, rw)
+	}
+	flushStream := func() {
+		for _, rw := range redactors {
+			rw.Flush()
+		}
 	}
 	if req.Stream != nil || req.Activity != nil {
 		// The raw stream is JSON; what is shown live is the readable activity.
-		stream := req.Stream
-		spec.StdoutSink = &activityWriter{dir: req.WorkingDir, report: func(what string) {
+		var stdoutSink io.Writer = &activityWriter{dir: req.WorkingDir, report: func(what string) {
 			if req.Activity != nil {
 				req.Activity(what)
 			}
@@ -177,12 +204,25 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 				_, _ = stream.Write([]byte("→ " + what + "\n"))
 			}
 		}}
+		if key != "" {
+			// Redacted before the activity is read from it, so a cut to 60 characters cannot
+			// leave part of a key.
+			rw := &redactWriter{w: stdoutSink, redact: redact}
+			stdoutSink, redactors = rw, append(redactors, rw)
+		}
+		spec.StdoutSink = stdoutSink
 		if stream != nil {
 			spec.StderrSink = stream
 		}
 	}
 
 	res, err := c.Executor.Run(ctx, spec)
+	flushStream()
+
+	// The key does not leave the adapter: not in the output, the logs the caller writes, the
+	// error text, nor the live stream.
+	res.Stdout, res.Stderr = redact(res.Stdout), redact(res.Stderr)
+	err = redactError(err, redact)
 
 	// The answer is the stream's result event; anything else (an older CLI, a test
 	// double) is taken as printed.
@@ -192,8 +232,9 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	rep := parseStream(res.Stdout)
 	if rep.ok {
 		stdout = rep.text
-		if req.Stream != nil && rep.text != "" {
-			_, _ = req.Stream.Write([]byte(strings.TrimRight(rep.text, "\n") + "\n"))
+		if stream != nil && rep.text != "" {
+			_, _ = stream.Write([]byte(strings.TrimRight(rep.text, "\n") + "\n"))
+			flushStream()
 		}
 	}
 
@@ -204,6 +245,29 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		Duration: res.Duration,
 		Usage:    rep.usage,
 		Call:     rep.call,
+	}
+
+	// What the CLI used is checked whatever else the call did, an exit code of 0 and a good
+	// answer included: billing the wrong account is not an error the answer shows (SPEC §8).
+	// A cancelled or unspawnable call has nothing to check.
+	if err == nil || errors.Is(err, context.DeadlineExceeded) {
+		if detail := authFailure(mode, rep.apiKeySource, rep.authErr); detail != "" {
+			return result, &apperr.ProviderError{
+				Provider:    string(provider.Claude),
+				Model:       req.Model,
+				Kind:        apperr.FailureAuth,
+				Executable:  executable,
+				Args:        argv,
+				PromptBytes: len(req.Prompt),
+				WorkingDir:  req.WorkingDir,
+				ExitCode:    res.ExitCode,
+				Duration:    res.Duration,
+				Stdout:      stdout,
+				Stderr:      res.Stderr,
+				Err:         err,
+				Detail:      redact(detail),
+			}
+		}
 	}
 
 	if err != nil {

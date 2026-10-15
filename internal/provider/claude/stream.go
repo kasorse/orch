@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"orchestrator/internal/domain"
 )
@@ -24,6 +25,12 @@ import (
 type streamEvent struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
+	// type "system", subtype "init": where the CLI took its credential from
+	// (specs/claude-auth/SPEC.md §8). Raw, so a shape the spec does not document drops this
+	// field and not the whole event.
+	APIKeySource json.RawMessage `json:"apiKeySource"`
+	// type "system", subtype "api_retry": why the API call is being retried (§9).
+	Error json.RawMessage `json:"error"`
 	// type "system", subtype "init": each MCP server's status ("connected", "failed", ...)
 	MCPServers []struct {
 		Name   string `json:"name"`
@@ -72,6 +79,12 @@ type streamReport struct {
 	usage   *domain.Usage
 	call    *domain.CallReport
 	isError bool
+	// apiKeySource is what the init event said the credential came from; "" when there was
+	// no init event or it did not say.
+	apiKeySource string
+	// authErr is the first authentication-category error a system/api_retry event carried
+	// (authErrorCategories); "" when none did.
+	authErr string
 	// ok is true when stdout is a stream-json transcript with a result event; only then
 	// is text the answer.
 	ok bool
@@ -86,6 +99,8 @@ type streamReport struct {
 func parseStream(stdout string) streamReport {
 	var (
 		rep      streamReport
+		source   string
+		authErr  string
 		limits   *domain.RateLimits
 		messages = map[string]streamUsage{}
 		models   = map[string]bool{}
@@ -107,11 +122,17 @@ func parseStream(stdout string) streamReport {
 		case "system":
 			// A server that fails to start does not stop the CLI: the model just runs
 			// without its tools, so the run records it.
-			if ev.Subtype == "init" {
+			switch ev.Subtype {
+			case "init":
+				source = rawString(ev.APIKeySource)
 				for _, s := range ev.MCPServers {
 					if s.Status == "failed" {
 						mcpFail = append(mcpFail, s.Name)
 					}
+				}
+			case "api_retry":
+				if cat := rawString(ev.Error); authErr == "" && authErrorCategories[cat] {
+					authErr = cat
 				}
 			}
 		case "rate_limit_event":
@@ -189,10 +210,47 @@ func parseStream(stdout string) streamReport {
 		call.Models = modelList(models)
 	}
 	slices.SortFunc(call.Models, func(a, b domain.ModelUse) int { return strings.Compare(a.Model, b.Model) })
-	if len(call.Models) > 0 || len(call.Tools) > 0 || call.APIMS > 0 || len(call.MCPFailed) > 0 {
+	call.APIKeySource = boundedSource(source)
+	if len(call.Models) > 0 || len(call.Tools) > 0 || call.APIMS > 0 || len(call.MCPFailed) > 0 || call.APIKeySource != "" {
 		rep.call = call
 	}
+	rep.apiKeySource = call.APIKeySource
+	rep.authErr = authErr
 	return rep
+}
+
+// authErrorCategories are the system/api_retry error categories that mean the credential,
+// not the service, is the problem (specs/claude-auth/SPEC.md §9). Rate limits and overload
+// are not among them: the CLI retries those.
+var authErrorCategories = map[string]bool{
+	"authentication_failed": true,
+	"oauth_org_not_allowed": true,
+	"account_on_hold":       true,
+	"billing_error":         true,
+}
+
+// rawString is the value of a JSON string, "" for anything else (absent, null, an object).
+func rawString(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return s
+}
+
+// boundedSource keeps what the CLI said about its credential source printable and short,
+// since it is recorded in run.json and read back under domain.CallReport.Validate.
+func boundedSource(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if !unicode.IsPrint(r) {
+			return -1
+		}
+		return r
+	}, s)
+	if len(s) > 100 {
+		s = s[:100]
+	}
+	return strings.ToValidUTF8(s, "")
 }
 
 func modelList(set map[string]bool) []domain.ModelUse {
