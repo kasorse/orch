@@ -2,10 +2,12 @@ package claude
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
@@ -65,6 +67,31 @@ func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 	_, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
 	if err == nil || !strings.Contains(err.Error(), "overloaded_error") {
 		t.Errorf("expected the API error text in %v", err)
+	}
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || pe.APIStatus != 529 {
+		t.Errorf("APIStatus = %+v, want 529", pe)
+	}
+}
+
+func TestAPIErrorStatus(t *testing.T) {
+	for text, want := range map[string]int{
+		"API Error: 400 litellm.BadRequestError: You passed in model=x": 400,
+		"API Error: 529 overloaded_error":                               529,
+		"API Error: 401":                                                401,
+		"  API Error: 429 rate\n":                                       429,
+		"API Error: 4000 x":                                             0,
+		"API Error: abc":                                                0,
+		"The answer mentions API Error: 400":                            0,
+		"":                                                              0,
+	} {
+		if got := apiErrorStatus(text); got != want {
+			t.Errorf("apiErrorStatus(%q) = %d, want %d", text, got, want)
+		}
+	}
+	// Only an error result carries a status: an answer that starts with the phrase is an answer.
+	if rep := parseStream(`{"type":"result","is_error":false,"result":"API Error: 400 x"}`); rep.apiStatus != 0 {
+		t.Errorf("a successful result must not carry an API status: %d", rep.apiStatus)
 	}
 }
 

@@ -88,6 +88,9 @@ type ProviderError struct {
 	// Detail is one sentence the adapter adds to the rendered message, e.g. which credential
 	// mode a FailureAuth concerns. The adapter has already redacted it.
 	Detail string
+	// APIStatus is the HTTP status of the API error the CLI reported as its answer (for
+	// claude, "API Error: 400 ..."); 0 when it reported none.
+	APIStatus int
 
 	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
 	// the run-wide execution.timeout was the one that fired: an action's own

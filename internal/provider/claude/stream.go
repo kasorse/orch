@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,8 @@ type streamReport struct {
 	usage   *domain.Usage
 	call    *domain.CallReport
 	isError bool
+	// apiStatus is the HTTP status of an error result's "API Error: NNN ..." text; 0 otherwise.
+	apiStatus int
 	// apiKeySource is what the init event said the credential came from; "" when there was
 	// no init event or it did not say.
 	apiKeySource string
@@ -196,6 +199,9 @@ func parseStream(stdout string) streamReport {
 			call.Models = modelList(models)
 		}
 		rep = streamReport{text: *result.Result, usage: u, isError: result.IsError, ok: true}
+		if result.IsError {
+			rep.apiStatus = apiErrorStatus(*result.Result)
+		}
 	case len(messages) > 0:
 		u := &domain.Usage{Turns: len(messages), Limits: limits, Partial: true}
 		for _, m := range messages {
@@ -220,6 +226,20 @@ func parseStream(stdout string) streamReport {
 	}
 	rep.authErr = authErr
 	return rep
+}
+
+// apiErrorStatus is the status of the CLI's "API Error: NNN ..." answer, which it prints
+// when the API refused the request; 0 for any other text.
+func apiErrorStatus(text string) int {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), "API Error: ")
+	if !ok || len(rest) < 3 || (len(rest) > 3 && rest[3] != ' ') {
+		return 0
+	}
+	status, err := strconv.Atoi(rest[:3])
+	if err != nil || status < 100 {
+		return 0
+	}
+	return status
 }
 
 // authErrorCategories are the system/api_retry error categories that mean the credential,

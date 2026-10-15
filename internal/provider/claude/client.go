@@ -309,6 +309,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			Duration:    res.Duration,
 			Stdout:      stdout,
 			Stderr:      res.Stderr,
+			APIStatus:   rep.apiStatus,
 		}
 	}
 
