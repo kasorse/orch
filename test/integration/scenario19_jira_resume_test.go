@@ -28,8 +28,16 @@ func TestScenario19f_JiraResume(t *testing.T) {
 		t.Errorf("Jira got %d requests over run and resume, want 1", n)
 	}
 	lines := strings.Split(stdout, "\n")
-	if len(lines) < 4 || !strings.HasPrefix(lines[2], "Resuming run "+failed.ID) ||
-		!strings.HasPrefix(lines[3], "Task from PMC-1, fetched ") || !strings.HasSuffix(lines[3], " (not re-fetched)") {
+	// The validation lines, including the claude auth line, come first; the header follows.
+	at := 0
+	for i, l := range lines {
+		if strings.HasPrefix(l, "Resuming run ") {
+			at = i
+			break
+		}
+	}
+	if at == 0 || at+1 >= len(lines) || !strings.HasPrefix(lines[at], "Resuming run "+failed.ID) ||
+		!strings.HasPrefix(lines[at+1], "Task from PMC-1, fetched ") || !strings.HasSuffix(lines[at+1], " (not re-fetched)") {
 		t.Errorf("the resume header lacks the source line:\n%s", stdout)
 	}
 	if got := loadTaskSource(t, r.repoDir); got.Task.Description != pmc1Rendered(r.jira.URL(), "") {

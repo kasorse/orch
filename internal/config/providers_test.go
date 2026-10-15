@@ -107,6 +107,82 @@ func TestLoad_ProvidersClaudeLiteralKeyRejected(t *testing.T) {
 	}
 }
 
+func envLookup(m map[string]string) func(string) (string, bool) {
+	return func(k string) (string, bool) { v, ok := m[k]; return v, ok }
+}
+
+// Every row of SPEC §4 and corner cases 3-5, 13, 16.
+func TestResolveClaudeAuth(t *testing.T) {
+	key := "test-" + "key-123"
+	oauth := "sk-ant-" + "oat01-abc"
+	for name, tc := range map[string]struct {
+		auth, keyEnv, flag string
+		env                map[string]string
+		wantMode, wantBy   string
+		wantLine           string
+		wantNotice         string
+		wantErr            string
+	}{
+		"api with key":         {auth: "api", env: map[string]string{"ANTHROPIC_API_KEY": key}, wantMode: "api", wantBy: "config", wantLine: "claude auth: api key ($ANTHROPIC_API_KEY)"},
+		"api unset":            {auth: "api", wantErr: "ANTHROPIC_API_KEY is not set"},
+		"api blank":            {auth: "api", env: map[string]string{"ANTHROPIC_API_KEY": "  "}, wantErr: "is empty"},
+		"api invalid":          {auth: "api", env: map[string]string{"ANTHROPIC_API_KEY": "a b"}, wantErr: "whitespace"},
+		"auto with key":        {env: map[string]string{"ANTHROPIC_API_KEY": " " + key + "\n"}, wantMode: "api", wantBy: "default", wantLine: "claude auth: api key ($ANTHROPIC_API_KEY, auto)"},
+		"auto unset":           {wantMode: "login", wantBy: "default", wantLine: "claude auth: CLI login (auto: $ANTHROPIC_API_KEY not set)"},
+		"auto blank":           {env: map[string]string{"ANTHROPIC_API_KEY": ""}, wantMode: "login", wantBy: "default", wantNotice: "ANTHROPIC_API_KEY is set but empty; using the CLI login"},
+		"auto invalid":         {env: map[string]string{"ANTHROPIC_API_KEY": "a\tb"}, wantErr: "control character"},
+		"login key set":        {auth: "login", env: map[string]string{"ANTHROPIC_API_KEY": key}, wantMode: "login", wantBy: "config", wantNotice: "ANTHROPIC_API_KEY is set but not used (--claude-auth login)"},
+		"login key invalid":    {auth: "login", env: map[string]string{"ANTHROPIC_API_KEY": "a b"}, wantMode: "login", wantBy: "config", wantNotice: "is set but not used"},
+		"flag over config":     {auth: "api", flag: "login", wantMode: "login", wantBy: "flag"},
+		"configured env unset": {keyEnv: "ORCH_CLAUDE_KEY", env: map[string]string{"ANTHROPIC_API_KEY": key}, wantMode: "login", wantBy: "default", wantNotice: "ORCH_CLAUDE_KEY"},
+		"configured env used":  {keyEnv: "ORCH_CLAUDE_KEY", env: map[string]string{"ORCH_CLAUDE_KEY": key, "ANTHROPIC_API_KEY": "other"}, wantMode: "api", wantBy: "default", wantLine: "claude auth: api key ($ORCH_CLAUDE_KEY, auto)"},
+		"oauth token":          {env: map[string]string{"ANTHROPIC_API_KEY": oauth}, wantErr: "CLAUDE_CODE_OAUTH_TOKEN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Providers.Claude = ClaudeProviderConfig{Auth: tc.auth, APIKeyEnv: tc.keyEnv}
+			got, notices, err := ResolveClaudeAuth(cfg, tc.flag, envLookup(tc.env))
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("want an error containing %q, got %v", tc.wantErr, err)
+				}
+				for _, v := range tc.env {
+					if v = strings.TrimSpace(v); v != "" && strings.Contains(err.Error(), v) {
+						t.Errorf("the key appears in the error: %v", err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Mode != tc.wantMode || got.DecidedBy != tc.wantBy {
+				t.Errorf("got mode %q decided by %q, want %q by %q", got.Mode, got.DecidedBy, tc.wantMode, tc.wantBy)
+			}
+			if tc.wantLine != "" && got.Line() != tc.wantLine {
+				t.Errorf("Line() = %q, want %q", got.Line(), tc.wantLine)
+			}
+			if tc.wantNotice == "" && len(notices) != 0 {
+				t.Errorf("unexpected notices %q", notices)
+			}
+			if tc.wantNotice != "" && !strings.Contains(strings.Join(notices, "\n"), tc.wantNotice) {
+				t.Errorf("notices %q lack %q", notices, tc.wantNotice)
+			}
+		})
+	}
+}
+
+func TestParseClaudeAuth(t *testing.T) {
+	for _, v := range []string{"auto", "api", "login"} {
+		if got, err := ParseClaudeAuth(v); err != nil || got != v {
+			t.Errorf("ParseClaudeAuth(%q) = %q, %v", v, got, err)
+		}
+	}
+	if _, err := ParseClaudeAuth("subscription"); err == nil {
+		t.Error("an unknown value must be refused")
+	}
+}
+
 func TestLoad_ProvidersStrictKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		extra string

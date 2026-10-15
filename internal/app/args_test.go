@@ -50,6 +50,13 @@ func TestParseArgs(t *testing.T) {
 		{"stage missing value", []string{"run", "--stage"}, cliArgs{}, "--stage requires a value"},
 		{"stage comma", []string{"run", "--stage", "test,review", "x"}, cliArgs{}, "one stage per flag"},
 		{"bad mode", []string{"--mode", "yolo"}, cliArgs{}, "yolo"},
+		{"claude-auth separate, any position", []string{"run", "x", "--claude-auth", "api"},
+			cliArgs{configPath: defaultConfigPath, claudeAuth: "api", rest: []string{"run", "x"}}, ""},
+		{"claude-auth equals", []string{"--claude-auth=login", "validate"},
+			cliArgs{configPath: defaultConfigPath, claudeAuth: "login", rest: []string{"validate"}}, ""},
+		{"claude-auth twice", []string{"run", "--claude-auth", "api", "--claude-auth=login"}, cliArgs{}, "--claude-auth given twice"},
+		{"claude-auth bad value", []string{"--claude-auth", "sub", "run"}, cliArgs{}, "--claude-auth must be auto, api or login"},
+		{"claude-auth missing value", []string{"run", "--claude-auth"}, cliArgs{}, "--claude-auth requires a value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,6 +71,7 @@ func TestParseArgs(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got.configPath != tc.want.configPath || got.mode != tc.want.mode || got.verbose != tc.want.verbose ||
+				got.claudeAuth != tc.want.claudeAuth ||
 				got.jiraRef != tc.want.jiraRef || !slices.Equal(got.stages, tc.want.stages) || !slices.Equal(got.rest, tc.want.rest) {
 				t.Errorf("parseArgs(%q) = %+v, want %+v", tc.args, got, tc.want)
 			}
@@ -85,6 +93,21 @@ func TestRun_JiraOnlyWithRun(t *testing.T) {
 			}
 			if out.Len() != 0 {
 				t.Errorf("printed %q", out.String())
+			}
+		})
+	}
+}
+
+// --claude-auth belongs to run, resume and validate: a usage error elsewhere (corner case 13).
+func TestRun_ClaudeAuthOnlyWithRunResumeValidate(t *testing.T) {
+	for _, command := range [][]string{{"version"}, {"decisions", "report"}, {"runs", "report"}} {
+		t.Run(command[0], func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml", "--claude-auth", "api"}, command...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume and validate" {
+				t.Fatalf("got %v, want the --claude-auth usage error", err)
 			}
 		})
 	}

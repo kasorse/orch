@@ -24,7 +24,7 @@ import (
 // and on a run that has executed a step, the protected state is compared with the run's
 // start - git fingerprint first - before anything runs git status. Until the operator
 // approves, the persisted run is left exactly as it was found.
-func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	stderr = reporter.Wrap(stderr)
@@ -34,7 +34,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, osExec, reporter, noJiraDependencies)
+	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}

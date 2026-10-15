@@ -47,7 +47,7 @@ const defaultConfigPath = "orchestrator.yaml"
 
 const runsBaseDir = ".orchestrator/runs"
 
-const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--verbose] ` +
+const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
 	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
@@ -71,24 +71,27 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.allowRedTests && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
 	}
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" {
+		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume and validate"}
+	}
 
 	switch rest[0] {
 	case "version":
 		fmt.Fprintf(stdout, "orchestrator version %s\n", Version)
 		return nil
 	case "validate":
-		return runValidate(ctx, cli.configPath, stdout, stderr)
+		return runValidate(ctx, cli.configPath, cli.claudeAuth, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
 		if cli.jiraRef == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.mode, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
 		}
-		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.verbose, stdin, stdout, stderr)
+		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
 	case "decisions":
 		if len(rest) == 2 && rest[1] == "report" {
 			return decisionsReport(stdout)
@@ -134,11 +137,14 @@ type cliArgs struct {
 	// allowRedTests is --allow-red-tests: the task is to make failing tests pass, so a red
 	// pre-run test does not stop the run (specs/hardening/SPEC.md §8.4).
 	allowRedTests bool
+	// claudeAuth is --claude-auth (auto, api or login); empty if not given
+	// (specs/claude-auth/SPEC.md §6).
+	claudeAuth string
 	// rest are the positional arguments.
 	rest []string
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, --jira/--jira=X, the repeatable
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the repeatable
 // --stage/--stage=X, --allow-red-tests and --verbose/-v out of args, in any position, and returns them with the remaining
 // positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -169,6 +175,17 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, err
 			}
 			if cli.mode, err = domain.ParseRunMode(v); err != nil {
+				return cliArgs{}, err
+			}
+		case arg == "--claude-auth" || strings.HasPrefix(arg, "--claude-auth="):
+			if cli.claudeAuth != "" {
+				return cliArgs{}, fmt.Errorf("--claude-auth given twice")
+			}
+			v, err := value(&i, "--claude-auth")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.claudeAuth, err = config.ParseClaudeAuth(v); err != nil {
 				return cliArgs{}, err
 			}
 		case arg == "--jira" || strings.HasPrefix(arg, "--jira="):
@@ -210,21 +227,24 @@ const sandboxProbeTimeout = 10 * time.Second
 
 // loadAndValidateConfig runs the whole fail-fast chain (MVP.md §7): Load -> Validate ->
 // (register the credential variables to scrub) -> ValidateDependencies (-> the sandbox probe, with test.sandbox: bwrap) ->
-// ValidateAuthorities. The registry is only asked what its
+// ValidateAuthorities. ResolveClaudeAuth runs right after ValidateDependencies. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, error) {
+func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, error) {
 	reporter.ValidatingConfig()
+	fail := func(err error) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, error) {
+		return config.Config{}, nil, config.OrgSource{}, domain.ClaudeAuth{}, err
+	}
 
 	// The org layer is merged inside the Load step (specs/governance/SPEC.md §6.3), so every
 	// check below sees the merged config.
 	orgPath, _ := config.FindOrgConfig(orgConfigEtcPath, os.Getenv)
 	cfg, org, err := config.LoadLayered(configPath, orgPath)
 	if err != nil {
-		return config.Config{}, nil, config.OrgSource{}, err
+		return fail(err)
 	}
 	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, nil, config.OrgSource{}, err
+		return fail(err)
 	}
 	// From here on no child process - the sandbox probe included - inherits a variable
 	// the config names as a credential (specs/jira/SPEC.md §12).
@@ -234,7 +254,13 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 	opts := depOpts(cfg)
 	opts.Cost = registry
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, opts); err != nil {
-		return config.Config{}, nil, config.OrgSource{}, err
+		return fail(err)
+	}
+	// The credential mode of the claude CLI (specs/claude-auth/SPEC.md §4): decided here, so a
+	// bad api setup stops everything before any call. The key itself is not read here.
+	auth, notices, err := config.ResolveClaudeAuth(cfg, claudeAuthFlag, os.LookupEnv)
+	if err != nil {
+		return fail(err)
 	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
@@ -243,24 +269,25 @@ func loadAndValidateConfig(configPath string, registry *provider.Registry, execu
 		err := testexec.Probe(probeCtx, executor)
 		cancel()
 		if err != nil {
-			return config.Config{}, nil, config.OrgSource{}, err
+			return fail(err)
 		}
 	}
 	// Authority does not depend on the run mode (specs/permissions/SPEC.md §5.2), so this
 	// single check, before the mode is even known, is complete.
 	if err := config.ValidateAuthorities(cfg, registry); err != nil {
-		return config.Config{}, nil, config.OrgSource{}, err
+		return fail(err)
 	}
 
 	// The last check of the chain: it runs each routed CLI once (--version), which is
 	// not an AI call, and only after everything that needs no process at all.
 	clis, err := checkProviderCLIs(context.Background(), cfg, registry, reporter)
 	if err != nil {
-		return config.Config{}, nil, config.OrgSource{}, err
+		return fail(err)
 	}
 
 	reporter.ConfigValid()
-	return cfg, clis, org, nil
+	reporter.ClaudeAuth(auth.Line(), notices)
+	return cfg, clis, org, auth, nil
 }
 
 // orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);
@@ -364,11 +391,11 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 
 // runValidate checks the Jira variables whenever the section is present, so validate
 // answers "would run --jira work here?", and asks Jev whether it serves decision.model.
-func runValidate(ctx context.Context, configPath string, stdout, stderr io.Writer) error {
+func runValidate(ctx context.Context, configPath, claudeAuthFlag string, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
 	registry := newRegistry(executor)
-	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, executor, reporter,
+	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
@@ -592,7 +619,7 @@ func runsReport(stdout io.Writer, dir string) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, mode domain.RunMode, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -605,7 +632,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, clis, org, err := loadAndValidateConfig(configPath, registry, osExec, reporter,
+	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err

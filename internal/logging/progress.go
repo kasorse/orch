@@ -238,6 +238,23 @@ func (r *ConsoleReporter) ConfigValid() {
 	fmt.Fprintln(r.Out, "✓ configuration valid")
 }
 
+// ClaudeAuth reports how the claude CLI is authenticated (specs/claude-auth/SPEC.md §4) and the
+// notices that came with the decision. Neither holds the key.
+func (r *ConsoleReporter) ClaudeAuth(line string, notices []string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(line))
+		for _, n := range notices {
+			fmt.Fprintln(r.Out, st.red("⚠ "+n))
+		}
+		return
+	}
+	fmt.Fprintf(r.Out, "✓ %s\n", line)
+	for _, n := range notices {
+		fmt.Fprintf(r.Out, "Warning: %s\n", n)
+	}
+}
+
 // OrgConfig reports the org file the configuration was merged with, or "none" for an empty
 // path (validate only).
 func (r *ConsoleReporter) OrgConfig(path string) {

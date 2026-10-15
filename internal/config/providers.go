@@ -5,7 +5,10 @@ package config
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
+	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 )
 
@@ -69,6 +72,83 @@ func (c ClaudeProviderConfig) KeyEnv() string {
 		return env
 	}
 	return DefaultClaudeAPIKeyEnv
+}
+
+// ParseClaudeAuth validates a --claude-auth value: auto, api or login.
+func ParseClaudeAuth(v string) (string, error) {
+	switch v {
+	case ClaudeAuthAuto, ClaudeAuthAPI, ClaudeAuthLogin:
+		return v, nil
+	}
+	return "", fmt.Errorf("--claude-auth must be auto, api or login, got %q", v)
+}
+
+// ResolveClaudeAuth turns the --claude-auth flag ("" if not given), providers.claude and the
+// environment into the effective credential mode (specs/claude-auth/SPEC.md §4). lookup reads
+// the environment. The notices are warnings and remarks for the console; no message ever holds
+// the key's value. The key itself is read again by app, only when the mode is api.
+func ResolveClaudeAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.ClaudeAuth, []string, error) {
+	c := cfg.Providers.Claude
+	res := domain.ClaudeAuth{Requested: c.EffectiveAuth(), DecidedBy: domain.ClaudeAuthByDefault, KeyEnv: c.KeyEnv()}
+	switch {
+	case flag != "":
+		res.Requested, res.DecidedBy = flag, domain.ClaudeAuthByFlag
+	case c.Auth != "":
+		res.DecidedBy = domain.ClaudeAuthByConfig
+	}
+	env := res.KeyEnv
+	raw, set := lookup(env)
+	key := strings.TrimSpace(raw)
+	var notices []string
+
+	if res.Requested == ClaudeAuthLogin {
+		res.Mode = domain.ClaudeAuthLogin
+		if set {
+			notices = append(notices, fmt.Sprintf("%s is set but not used (--claude-auth login)", env))
+		}
+		return res, notices, nil
+	}
+
+	switch {
+	case !set || key == "":
+		if res.Requested == ClaudeAuthAPI {
+			if !set {
+				return domain.ClaudeAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf(
+					"claude auth is api but %s is not set; export the key or use --claude-auth login", env)}
+			}
+			return domain.ClaudeAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf(
+				"claude auth is api but %s is empty; export the key or use --claude-auth login", env)}
+		}
+		res.Mode = domain.ClaudeAuthLogin
+		if set {
+			res.KeyBlank = true
+			notices = append(notices, fmt.Sprintf("warning: %s is set but empty; using the CLI login", env))
+		}
+		if _, other := lookup(DefaultClaudeAPIKeyEnv); env != DefaultClaudeAPIKeyEnv && other {
+			notices = append(notices, fmt.Sprintf("%s is set but the configured key variable is %s, which has no key; "+
+				"%s is not used", DefaultClaudeAPIKeyEnv, env, DefaultClaudeAPIKeyEnv))
+		}
+		return res, notices, nil
+	}
+
+	if problem := claudeKeyProblem(key); problem != "" {
+		return domain.ClaudeAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf("%s %s", env, problem)}
+	}
+	res.Mode = domain.ClaudeAuthAPI
+	return res, notices, nil
+}
+
+// claudeKeyProblem reports why a trimmed, non-empty key is unusable, without quoting it.
+func claudeKeyProblem(key string) string {
+	if strings.HasPrefix(key, "sk-ant-oat") {
+		return "holds a subscription token; set it as CLAUDE_CODE_OAUTH_TOKEN and use --claude-auth login"
+	}
+	for _, r := range key {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "contains whitespace or a control character; it is not a valid API key"
+		}
+	}
+	return ""
 }
 
 // providersProblems validates providers.claude.

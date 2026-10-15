@@ -36,3 +36,15 @@ the fail-fast chain (`SPEC.md` §4, §6, §12).
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+- `ResolveClaudeAuth` is in `internal/config/providers.go`; `domain.ClaudeAuth` (with `Line()`
+  for the console text) in `internal/domain/claudeauth.go`. It does not return the key: `app`
+  will read the variable itself in CA03, only in `api` mode.
+- It runs in `app.loadAndValidateConfig` right after `ValidateDependencies` (whose signature is
+  unchanged), before the sandbox probe and `ValidateAuthorities`. The mode line and notices are
+  printed by `ConsoleReporter.ClaudeAuth` after "configuration valid", for `run`, `resume` and
+  `validate`. `loadAndValidateConfig` now returns the `domain.ClaudeAuth`; callers ignore it
+  until CA03/CA05.
+- Status: implemented; `scripts/check.sh` is left to the operator.
