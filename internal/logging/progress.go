@@ -364,10 +364,7 @@ func (r *ConsoleReporter) SetupStarted() {
 // (specs/worktree/SPEC.md §13): the base branch at the base commit, or only the commit when
 // HEAD was detached.
 func (r *ConsoleReporter) Worktree(path, branch, baseBranch, baseRef string) {
-	base := shortRef(baseRef)
-	if baseBranch != "" {
-		base = baseBranch + "@" + base
-	}
+	base := worktreeBase(baseBranch, baseRef)
 	if r.Pretty {
 		st := r.st()
 		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "worktree")), path, st.gray(fmt.Sprintf("(%s from %s)", branch, base)))
@@ -376,14 +373,94 @@ func (r *ConsoleReporter) Worktree(path, branch, baseBranch, baseRef string) {
 	fmt.Fprintf(r.Out, "Worktree: %s (%s from %s)\n", path, branch, base)
 }
 
-// WorktreeLeft reports at the end of a worktree run that its changes stay uncommitted in the
-// worktree.
-func (r *ConsoleReporter) WorktreeLeft(path string) {
+// WorktreeCommitted follows the commit on a worktree run's branch with where the branch starts
+// and how to take it (specs/worktree/SPEC.md §10.2).
+func (r *ConsoleReporter) WorktreeCommitted(branch, baseBranch, baseRef string) {
+	base := worktreeBase(baseBranch, baseRef)
 	if r.Pretty {
-		fmt.Fprintf(r.Out, "%s %s\n", r.st().gray("The changes are uncommitted in the worktree"), path)
+		fmt.Fprintf(r.Out, "%s\n  git merge %s\n", r.st().gray("Based on "+base+". To take it:"), branch)
 		return
 	}
-	fmt.Fprintf(r.Out, "The changes are uncommitted in the worktree %s\n", path)
+	fmt.Fprintf(r.Out, "Based on %s. To take it:\n  git merge %s\n", base, branch)
+}
+
+// maxConflictFiles is how many conflicting files WorktreeConflicts lists.
+const maxConflictFiles = 20
+
+// WorktreeConflicts warns that merging a worktree run's branch into the operator's branch
+// will conflict (specs/worktree/SPEC.md §10.3): the count, and the first maxConflictFiles
+// files.
+func (r *ConsoleReporter) WorktreeConflicts(branch, baseBranch string, files []string) {
+	r.stopSpin()
+	noun := "files"
+	if len(files) == 1 {
+		noun = "file"
+	}
+	head := fmt.Sprintf("merging %s into %s will conflict in %d %s:", branch, baseBranch, len(files), noun)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ "+head))
+	} else {
+		fmt.Fprintf(r.Out, "Warning: %s\n", head)
+	}
+	shown := files
+	if len(shown) > maxConflictFiles {
+		shown = shown[:maxConflictFiles]
+	}
+	for _, f := range shown {
+		fmt.Fprintf(r.Out, "  %s\n", f)
+	}
+	if n := len(files) - len(shown); n > 0 {
+		fmt.Fprintf(r.Out, "  ... and %d more\n", n)
+	}
+}
+
+// ConflictCheckSkipped reports that the conflict check against baseBranch did not run, and
+// why; the run's branch is there all the same.
+func (r *ConsoleReporter) ConflictCheckSkipped(baseBranch, why string) {
+	text := fmt.Sprintf("no conflict check against %s: %s", baseBranch, firstLine(why))
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().yellow("⚠ "+text))
+		return
+	}
+	fmt.Fprintf(r.Out, "Warning: %s\n", text)
+}
+
+// MergeTreeUnsupported notes that git is older than 2.38, which has no merge-tree
+// --write-tree, so the conflict check against baseBranch was skipped.
+func (r *ConsoleReporter) MergeTreeUnsupported(baseBranch string) {
+	text := fmt.Sprintf("git older than 2.38 cannot check for conflicts with %s (merge-tree --write-tree); the check was skipped", baseBranch)
+	if r.Pretty {
+		fmt.Fprintln(r.Out, r.st().gray(text))
+		return
+	}
+	fmt.Fprintf(r.Out, "Note: %s\n", text)
+}
+
+// WorktreeKept reports at the end of a worktree run that its worktree stays at path: nothing
+// was committed, or git did not remove it (why, "" when nothing went wrong).
+func (r *ConsoleReporter) WorktreeKept(path, why string) {
+	if why != "" {
+		why = " (" + firstLine(why) + ")"
+	}
+	if r.Pretty {
+		st := r.st()
+		if why != "" {
+			why = st.gray(why)
+		}
+		fmt.Fprintf(r.Out, "%s %s%s\n", st.gray("The worktree stays at"), path, why)
+		return
+	}
+	fmt.Fprintf(r.Out, "The worktree stays at %s%s\n", path, why)
+}
+
+// worktreeBase is where a worktree run starts: the base branch at the base commit, or only the
+// commit when HEAD was detached.
+func worktreeBase(baseBranch, baseRef string) string {
+	base := shortRef(baseRef)
+	if baseBranch != "" {
+		base = baseBranch + "@" + base
+	}
+	return base
 }
 
 // shortRef is the 7-character abbreviation of a commit SHA.

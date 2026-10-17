@@ -19,6 +19,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
 	"orchestrator/internal/guard"
+	"orchestrator/internal/interaction"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/provider"
@@ -428,6 +429,257 @@ func TestRunSetup_NothingToRun(t *testing.T) {
 	s.worktree = nil
 	if err := runSetup(context.Background(), s); err != nil {
 		t.Errorf("setup ran in place: %v", err)
+	}
+}
+
+// finishedWorktreeRun is a worktree run that completed under mode: its worktree, created from
+// main, changes main.go and adds notes.md, and its implementation proposed "Add main". review,
+// when set, is the run's last review; prepare, when set, runs in the operator's repository
+// before the worktree is created.
+func finishedWorktreeRun(t *testing.T, mode domain.RunMode, review *domain.ReviewResult, prepare func(dir string)) (*session, string, *bytes.Buffer) {
+	t.Helper()
+	ctx := context.Background()
+	s, dir, out := worktreeSession(t, true, domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement}, {Action: domain.ActionReview}}})
+	if prepare != nil {
+		prepare(dir)
+	}
+	if err := enterWorktree(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	run := s.run
+	run.PreRunRef = s.worktree.BaseRef
+	if err := recordBaseline(ctx, s.repo, run, s.newRepoGuard(s.protected)); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"main.go": "package main\n\nfunc main() {}\n", "notes.md": "notes\n"} {
+		if err := os.WriteFile(filepath.Join(s.repo.Dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run.Status, run.Mode = domain.RunCompleted, mode
+	run.Executions = []domain.StepExecution{{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted}}
+	if err := s.dispatcher.Restore(run, memArtifacts{0: `{"summary":"Add main","summary_short":"Add main","changed_files":null,"tests_added":null}`}); err != nil {
+		t.Fatal(err)
+	}
+	if review != nil {
+		run.Executions = append(run.Executions, domain.StepExecution{Index: 1, Action: domain.ActionReview, Status: domain.StepCompleted, ReviewResult: review})
+	}
+	out.Reset()
+	return s, dir, out
+}
+
+var failingReview = &domain.ReviewResult{Status: domain.ReviewFail, SummaryShort: "still broken",
+	Issues: []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "main.go", Description: "wrong"}}}
+
+// A completed worktree run commits on its own branch even under --mode manual and without
+// auto_commit, leaves the operator's HEAD and branch alone, and removes the worktree.
+func TestFinishWorktree_CommitsOnTheRunBranchAndRemoves(t *testing.T) {
+	s, dir, out := finishedWorktreeRun(t, domain.ModeManual, nil, nil)
+	ctx := context.Background()
+	w := s.worktree
+	head := gitIn(t, dir, "rev-parse", "HEAD")
+
+	sha := offerCommit(ctx, s, false)
+	if sha == "" || s.run.Commit != sha {
+		t.Fatalf("commit = %q (run.Commit %q), want one\n%s", sha, s.run.Commit, out)
+	}
+	finishWorktree(ctx, s, sha)
+
+	if got := gitIn(t, dir, "rev-parse", w.Branch); got != sha {
+		t.Errorf("%s = %s, want the commit %s", w.Branch, got, sha)
+	}
+	if got := gitIn(t, dir, "log", "-1", "--format=%B", sha); got != "Add main\n\nOrchestrator-Run: "+s.run.ID {
+		t.Errorf("commit message = %q", got)
+	}
+	if got := gitIn(t, dir, "rev-parse", "HEAD"); got != head {
+		t.Errorf("the operator's HEAD moved from %s to %s", head, got)
+	}
+	if got := gitIn(t, dir, "symbolic-ref", "--short", "HEAD"); got != "main" {
+		t.Errorf("the operator's branch = %s, want main", got)
+	}
+	if status := gitIn(t, dir, "status", "--porcelain"); status != "" {
+		t.Errorf("the operator's tree changed:\n%s", status)
+	}
+	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
+		t.Errorf("the worktree is still there: %v", err)
+	}
+	if list := gitIn(t, dir, "worktree", "list", "--porcelain"); strings.Contains(list, w.Path) {
+		t.Errorf("git still lists the worktree:\n%s", list)
+	}
+	want := "\nCommitted " + shortSHA(sha) + " to " + w.Branch + ": Add main\n" +
+		"Based on main@" + head[:7] + ". To take it:\n  git merge " + w.Branch + "\n"
+	if out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	saved, err := s.store.LoadRun(s.run.ID)
+	if err != nil || saved.Commit != sha || saved.Worktree == nil || !saved.Worktree.Removed || len(saved.Worktree.Conflicts) != 0 {
+		t.Errorf("saved run = %+v, %v; want the commit and removed", saved, err)
+	}
+}
+
+// Where auto_commit would not commit - here a failing review - --mode auto commits nothing and
+// keeps the worktree, printing its path.
+func TestFinishWorktree_WarningWithoutAnOperatorKeepsTheWorktree(t *testing.T) {
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAuto, failingReview, nil)
+	ctx := context.Background()
+	w := s.worktree
+
+	sha := offerCommit(ctx, s, false)
+	finishWorktree(ctx, s, sha)
+
+	if sha != "" || s.run.Commit != "" {
+		t.Errorf("committed %q", sha)
+	}
+	want := "\nNot committing automatically: the review did not pass: still broken; commit what you want yourself.\n" +
+		"The worktree stays at " + w.Path + "\n"
+	if out.String() != want {
+		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	if _, err := os.Stat(w.Path); err != nil {
+		t.Errorf("the worktree is gone: %v", err)
+	}
+	if got := gitIn(t, dir, "rev-parse", w.Branch); got != w.BaseRef || w.Removed {
+		t.Errorf("%s = %s, removed %v; want the base %s and kept", w.Branch, got, w.Removed, w.BaseRef)
+	}
+}
+
+// With an operator at the terminal, the warning becomes the §42.2 question on the run's
+// branch, and an empty answer is no.
+func TestOfferCommit_WorktreeWarningAsksDefaultNo(t *testing.T) {
+	s, _, out := finishedWorktreeRun(t, domain.ModeAcceptEdits, failingReview, nil)
+	s.prompter = interaction.NewTerminalPrompter(strings.NewReader("\n"), out)
+
+	if sha := offerCommit(context.Background(), s, true); sha != "" {
+		t.Fatalf("committed %s", sha)
+	}
+	got := out.String()
+	for _, want := range []string{"Warning: the review did not pass: still broken\n",
+		"Commit to " + s.worktree.Branch + "? [y]es / [N]o / [e]dit message: ",
+		"Not committed; the changes stay in the worktree.\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Not committing automatically") {
+		t.Errorf("the question was skipped:\n%s", got)
+	}
+}
+
+// A yes at that question commits on the run's branch.
+func TestOfferCommit_WorktreeWarningAskedYesCommits(t *testing.T) {
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAcceptEdits, failingReview, nil)
+	s.prompter = interaction.NewTerminalPrompter(strings.NewReader("y\n"), out)
+
+	sha := offerCommit(context.Background(), s, true)
+	if sha == "" || gitIn(t, dir, "rev-parse", s.worktree.Branch) != sha {
+		t.Fatalf("commit = %q, want one on %s\n%s", sha, s.worktree.Branch, out)
+	}
+}
+
+// A hook that refuses the commit leaves the run as it was and the worktree in place.
+func TestFinishWorktree_HookRefusesTheCommit(t *testing.T) {
+	s, _, out := finishedWorktreeRun(t, domain.ModeAuto, nil, func(dir string) {
+		hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
+		if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(hook, []byte("#!/bin/sh\necho refused >&2\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	finishWorktree(ctx, s, sha)
+
+	if sha != "" || s.run.Commit != "" || s.run.Status != domain.RunCompleted {
+		t.Errorf("commit %q, run.Commit %q, status %s", sha, s.run.Commit, s.run.Status)
+	}
+	if got := out.String(); !strings.Contains(got, "Commit failed: ") || !strings.Contains(got, "The worktree stays at "+s.worktree.Path+"\n") {
+		t.Errorf("output = %q", got)
+	}
+	if _, err := os.Stat(s.worktree.Path); err != nil || s.worktree.Removed {
+		t.Errorf("the worktree is gone: %v, removed %v", err, s.worktree.Removed)
+	}
+}
+
+// moveOperatorBranch commits, on the operator's main, a main.go that conflicts with the run's.
+func moveOperatorBranch(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() { println() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "commit", "-qam", "operator")
+}
+
+// The operator's branch moved with a conflicting change: the warning names the file and
+// run.json records it; the worktree is removed all the same.
+func TestFinishWorktree_RecordsConflicts(t *testing.T) {
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAuto, nil, nil)
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if sha == "" {
+		t.Fatalf("no commit:\n%s", out)
+	}
+	moveOperatorBranch(t, dir)
+	finishWorktree(ctx, s, sha)
+
+	if strings.Contains(out.String(), "older than 2.38") {
+		t.Skip("git has no merge-tree --write-tree")
+	}
+	w := s.worktree
+	if want := "Warning: merging " + w.Branch + " into main will conflict in 1 file:\n  main.go\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	saved, err := s.store.LoadRun(s.run.ID)
+	if err != nil || saved.Worktree == nil || !slices.Equal(saved.Worktree.Conflicts, []string{"main.go"}) || !saved.Worktree.Removed {
+		t.Errorf("saved worktree = %+v, %v; want conflicts [main.go] and removed", saved.Worktree, err)
+	}
+}
+
+// A git config that changed since the worktree was created could name a merge driver: the
+// conflict check does not run.
+func TestFinishWorktree_FingerprintMismatchSkipsTheConflictCheck(t *testing.T) {
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAuto, nil, nil)
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if sha == "" {
+		t.Fatalf("no commit:\n%s", out)
+	}
+	moveOperatorBranch(t, dir)
+	gitIn(t, dir, "config", "merge.evil.driver", "touch pwned")
+
+	finishWorktree(ctx, s, sha)
+	if want := "Warning: no conflict check against main: " + guard.GitViolation + " changed since the worktree was created\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if len(s.worktree.Conflicts) != 0 {
+		t.Errorf("conflicts = %q", s.worktree.Conflicts)
+	}
+}
+
+// git refuses to remove a worktree with something left in it: the worktree stays, its path
+// printed, and run.json does not say removed.
+func TestFinishWorktree_RemovalRefusedKeepsTheWorktree(t *testing.T) {
+	s, _, out := finishedWorktreeRun(t, domain.ModeAuto, nil, nil)
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if sha == "" {
+		t.Fatalf("no commit:\n%s", out)
+	}
+	w := s.worktree
+	if err := os.WriteFile(filepath.Join(w.Path, "leftover.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	finishWorktree(ctx, s, sha)
+
+	if want := "The worktree stays at " + w.Path + " (git worktree remove failed: "; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if _, err := os.Stat(w.Path); err != nil || w.Removed {
+		t.Errorf("the worktree: %v, removed %v", err, w.Removed)
+	}
+	if saved, err := s.store.LoadRun(s.run.ID); err != nil || saved.Worktree.Removed {
+		t.Errorf("saved worktree = %+v, %v", saved.Worktree, err)
 	}
 }
 

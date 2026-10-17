@@ -32,3 +32,45 @@ branch, and removes the worktree (`SPEC.md` §10).
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-18. Code, unit and integration tests are in. `scripts/check.sh` (root and `bench/`) run
+outside the sandbox is left to the operator, so the task is not closed in the README or TODO.md
+Q4 yet.
+
+- `offerCommit(ctx, s, canAsk) string` returns the commit. In place it is unchanged: the caller's
+  gate decides whether it runs, and `canAsk` is not read. In a worktree, `auto` is always true.
+  The branch in every message and in the question is the run's branch, and the worktree must
+  still be on it (a model that switched branches gets no commit). A §42.6 refusal turns into
+  the question when `canAsk` is true (`--mode` is not `auto` and stdin is a terminal);
+  otherwise the reason is printed. The order before `CommitAll` is unchanged:
+  `pre_run_ref == head_ref`, then `CheckBaseline`, whose baseline holds the `.git` pointer and
+  compares it before the fingerprint, then `git status`.
+- The session keeps the operator's repository (`session.operator`, set by `switchToWorktree`)
+  and its git fingerprint right after `git worktree add` (`session.operatorFingerprint`, set by
+  `openWorktree`). `s.repo` is the worktree by then. `finishWorktree` and `checkConflicts`
+  (`internal/app/worktree.go`) use only the operator's repository. A fingerprint that changed,
+  or cannot be read, skips the conflict check with a warning. A merge-tree error is a warning
+  too, and git < 2.38 prints a note. The removal is tried after every commit, whether or not
+  conflicts were found or the check was skipped. Any removal error keeps the worktree, and its
+  reason is printed next to the path.
+- A failed or stopped worktree run prints `The worktree stays at <path>` too, before its error.
+  A completed run with nothing to commit, or one whose commit was refused, keeps its worktree
+  (§10.4). `runs clean` (WT08) removes those.
+- Output: `Committed <12-char sha> to orchestrator/<id>: <header>` is the in-place line with the
+  run's branch. `Based on <base>@<7-char sha>. To take it:` / `  git merge orchestrator/<id>`
+  follows it (bare SHA on a detached HEAD). The conflict warning lists at most 20 files, then
+  `... and N more`, with the total in its first line. `WorktreeLeft` is gone.
+- `summary.md` is rendered by `writeOutcome` before the commit, so a worktree run renders it
+  again after `finishWorktree` (`saveSummary`). In place it is rendered once, as before. The
+  `Worktree` row is `orchestrator/<id> from <base>@<sha>; commit <sha>; conflicts: a, b; kept at
+  <path>`, each part only when it applies.
+- The failing-review acceptance case: with `implement` in the workflow, a failing review sends
+  the run back to implement, so a completed run never ends on one. The integration scenario
+  ends at `max_fix_iterations` (stopped), and the worktree is kept and printed. The completed
+  run with a warning is unit-tested (`TestFinishWorktree_WarningWithoutAnOperatorKeepsTheWorktree`,
+  and `TestOfferCommit_WorktreeWarningAsks*` for the question). In the conflict scenario, the
+  test command moves the operator's branch while the run is in its test step.
+- `internal/interaction` needed no change: `AskCommit` already names `offer.Branch`.
+- MVP.md §42/§47 still describe only the in-place commit; they move with WT10.

@@ -218,3 +218,24 @@ func TestRunSummary_PathRules(t *testing.T) {
 		t.Errorf("the last implement matched nothing\n%s", got)
 	}
 }
+
+// A worktree run's line: branch, base, commit, conflicts, and the path only while it is kept.
+func TestRunSummary_Worktree(t *testing.T) {
+	if got := RunSummary(summaryRun(), nil); strings.Contains(got, "| Worktree |") {
+		t.Errorf("an in-place run has a worktree row\n%s", got)
+	}
+
+	run := summaryRun()
+	run.Worktree = &domain.RunWorktree{Path: "/state/wt/r1", Branch: "orchestrator/" + run.ID,
+		BaseRef: "8d0e4b2a1b2c3d4e5f60718293a4b5c6d7e8f901", BaseBranch: "master", Conflicts: []string{"a.go", "b.go"}}
+	want := "| Worktree | orchestrator/" + run.ID + " from master@8d0e4b2; commit f350cf6; conflicts: a.go, b.go; kept at /state/wt/r1 |\n"
+	if got := RunSummary(run, nil); !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+
+	run.Commit, run.Worktree.Conflicts, run.Worktree.BaseBranch, run.Worktree.Removed = "", nil, "", true
+	want = "| Worktree | orchestrator/" + run.ID + " from 8d0e4b2 |\n"
+	if got := RunSummary(run, nil); !strings.Contains(got, want) {
+		t.Errorf("summary lacks %q\n%s", want, got)
+	}
+}

@@ -23,15 +23,18 @@ type worktreeRunJSON struct {
 	ID        string `json:"id"`
 	Status    string `json:"status"`
 	PreRunRef string `json:"pre_run_ref"`
+	Commit    string `json:"commit"`
 	Options   struct {
 		Isolation string `json:"isolation"`
 	} `json:"options"`
 	Worktree *struct {
-		Path       string `json:"path"`
-		Branch     string `json:"branch"`
-		BaseRef    string `json:"base_ref"`
-		BaseBranch string `json:"base_branch"`
-		AdminDir   string `json:"admin_dir"`
+		Path       string   `json:"path"`
+		Branch     string   `json:"branch"`
+		BaseRef    string   `json:"base_ref"`
+		BaseBranch string   `json:"base_branch"`
+		AdminDir   string   `json:"admin_dir"`
+		Conflicts  []string `json:"conflicts"`
+		Removed    bool     `json:"removed"`
 	} `json:"worktree"`
 	Executions []struct {
 		Action string `json:"action"`
@@ -55,10 +58,11 @@ func loadWorktreeRun(t *testing.T, repoDir string) worktreeRunJSON {
 // newWorktreeRun is a stage run under execution.isolation: worktree, with the worktrees under a
 // temporary state directory and the fake CLIs recording their argv and working directory. The
 // fake implement fixes fixture.go and writes added.txt relative to its working directory.
-func newWorktreeRun(t *testing.T, repoDir string) (r stageRun, argsDir, cwdDir string) {
+// mutate changes the rest of the config.
+func newWorktreeRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) (r stageRun, argsDir, cwdDir string) {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	r = newStageRun(t, repoDir, func(o *configOptions) { o.isolation = "worktree" })
+	r = newStageRun(t, repoDir, append([]func(*configOptions){func(o *configOptions) { o.isolation = "worktree" }}, mutate...)...)
 	argsDir, cwdDir = t.TempDir(), t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
 	t.Setenv("FAKE_CWD_DIR", cwdDir)
@@ -164,6 +168,24 @@ func resolved(t *testing.T, path string) string {
 	return r
 }
 
+// resolvedGone is resolved for a path that may no longer exist, such as a removed worktree:
+// it resolves the nearest existing ancestor and appends the rest.
+func resolvedGone(t *testing.T, path string) string {
+	t.Helper()
+	dir, rest := filepath.Clean(path), ""
+	for {
+		if _, err := os.Lstat(dir); err == nil {
+			return filepath.Join(resolved(t, dir), rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("no part of %s exists", path)
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
+}
+
 func TestWorktree_ImplementAndTestLeaveTheOperatorsTreeAlone(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	// The operator's work in progress: a change to a tracked file and an untracked file.
@@ -225,23 +247,50 @@ func TestWorktree_ImplementAndTestLeaveTheOperatorsTreeAlone(t *testing.T) {
 		t.Errorf("worktree path %s is not under the state directory", w.Path)
 	}
 
-	// The change is in the worktree, on top of HEAD: the fix, the new file, and not the
-	// operator's work in progress.
-	if got := readTrimmed(t, filepath.Join(w.Path, "fixture.go")); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
-		t.Errorf("worktree fixture.go = %q, want the fix", got)
+	// The change is committed on the run's branch, on top of HEAD: the fix, the new file, and
+	// not the operator's work in progress (SPEC.md §10.1).
+	tip, err := gitOutput(repoDir, "rev-parse", w.Branch)
+	if err != nil || run.Commit == "" || tip != run.Commit {
+		t.Fatalf("%s = %q (%v), run.json commit = %q; want the run's commit", w.Branch, tip, err, run.Commit)
 	}
-	if got := readTrimmed(t, filepath.Join(w.Path, "added.txt")); got != "-- implement call 1" {
-		t.Errorf("worktree added.txt = %q", got)
+	if parent, _ := gitOutput(repoDir, "rev-parse", run.Commit+"^"); parent != head {
+		t.Errorf("the commit's parent = %s, want the base %s", parent, head)
 	}
-	if _, err := os.Stat(filepath.Join(w.Path, "notes.txt")); !os.IsNotExist(err) {
-		t.Errorf("the operator's untracked file reached the worktree: %v", err)
+	if msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B", run.Commit); msg != "Fix Add to use +\n\nOrchestrator-Run: "+run.ID {
+		t.Errorf("commit message = %q", msg)
+	}
+	if got, _ := gitOutput(repoDir, "show", run.Commit+":fixture.go"); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
+		t.Errorf("committed fixture.go = %q, want the fix", got)
+	}
+	if got, _ := gitOutput(repoDir, "show", run.Commit+":added.txt"); got != "-- implement call 1" {
+		t.Errorf("committed added.txt = %q", got)
+	}
+	if files, _ := gitOutput(repoDir, "show", "--name-only", "--format=", run.Commit); files != "added.txt\nfixture.go" {
+		t.Errorf("committed files = %q, want added.txt and fixture.go only", files)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); !os.IsNotExist(err) {
 		t.Errorf("implement wrote into the operator's tree: %v", err)
 	}
+	if got, _ := gitOutput(repoDir, "symbolic-ref", "--short", "HEAD"); got != branch {
+		t.Errorf("the operator's branch = %s, want %s", got, branch)
+	}
+
+	// After the commit the worktree is gone and the branch stays (SPEC.md §10.4).
+	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
+		t.Errorf("the worktree %s is still there: %v", w.Path, err)
+	}
+	if list, _ := gitOutput(repoDir, "worktree", "list", "--porcelain"); strings.Contains(list, w.Path) {
+		t.Errorf("git still lists the worktree:\n%s", list)
+	}
+	if !w.Removed || len(w.Conflicts) != 0 {
+		t.Errorf("worktree.removed = %v, conflicts = %q; want removed, none", w.Removed, w.Conflicts)
+	}
+	summary, _ := runFile(t, repoDir, "summary.md")
+	assertContains(t, "summary.md", summary,
+		"| Worktree | orchestrator/"+run.ID+" from "+branch+"@"+head[:7]+"; commit "+run.Commit[:7]+" |")
 
 	// The provider ran in the worktree, with no deny rule for a runs directory it cannot reach.
-	if got, want := readTrimmed(t, filepath.Join(cwdDir, "implement.cwd")), resolved(t, w.Path); got != want {
+	if got, want := readTrimmed(t, filepath.Join(cwdDir, "implement.cwd")), resolvedGone(t, w.Path); got != want {
 		t.Errorf("implement ran in %s, want the worktree %s", got, want)
 	}
 	assertNotContains(t, "implement's argv", readTrimmed(t, filepath.Join(argsDir, "implement.args")), ".orchestrator/runs")
@@ -249,11 +298,113 @@ func TestWorktree_ImplementAndTestLeaveTheOperatorsTreeAlone(t *testing.T) {
 	assertContains(t, "stdout", stdout,
 		"Worktree: "+w.Path+" (orchestrator/"+run.ID+" from "+branch+"@"+head[:7]+")",
 		"Restore point: "+head,
-		"The changes are uncommitted in the worktree "+w.Path)
+		"Committed "+run.Commit[:12]+" to orchestrator/"+run.ID+": Fix Add to use +\n"+
+			"Based on "+branch+"@"+head[:7]+". To take it:\n  git merge orchestrator/"+run.ID+"\n")
+	assertNotContains(t, "stdout", stdout, "The worktree stays at")
 	assertContains(t, "stderr", stderr, "are not part of it (commit them first, or run with --inplace).")
 	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"implement"}) {
 		t.Errorf("invocations = %v, want [implement]", got)
 	}
+}
+
+// A review that keeps failing stops the run at max_fix_iterations under --mode auto: nothing is
+// committed, and the worktree stays for a resume, its path printed (SPEC.md §10.1, §10.4).
+func TestWorktree_FailingReviewKeepsTheWorktree(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "review", reviewFailResponse)
+	head, err := gitOutput(repoDir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "--stage", "review", "fix Add in fixture.go")
+	if err == nil {
+		t.Fatalf("a run whose review keeps failing succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+
+	run := loadWorktreeRun(t, repoDir)
+	w := run.Worktree
+	if w == nil {
+		t.Fatal("run.json has no worktree")
+	}
+	if run.Status == "completed" || run.Commit != "" || w.Removed {
+		t.Errorf("status = %s, commit = %q, removed = %v; want no commit and the worktree kept", run.Status, run.Commit, w.Removed)
+	}
+	if _, err := os.Stat(w.Path); err != nil {
+		t.Errorf("the worktree is gone: %v", err)
+	}
+	if tip, _ := gitOutput(repoDir, "rev-parse", w.Branch); tip != head {
+		t.Errorf("%s = %s, want the base %s", w.Branch, tip, head)
+	}
+	assertContains(t, "stdout", stdout, "The worktree stays at "+w.Path+"\n")
+	assertNotContains(t, "stdout", stdout, "Committed ")
+}
+
+// The operator's branch moves during the run with a change to the same line: the conflict
+// check names the file and run.json records it (SPEC.md §10.3). The test command plays the
+// operator, committing on their branch while the run is in its test step.
+func TestWorktree_ConflictWithTheMovedBranchIsReported(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	moved := filepath.Join(t.TempDir(), "moved.go")
+	if err := os.WriteFile(moved, []byte("package fixture\n\nfunc Add(a, b int) int {\n\treturn b - a\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testCommand := "cp '" + moved + "' '" + filepath.Join(repoDir, "fixture.go") + "' && git -C '" + repoDir +
+		"' commit -qam 'the operator moves on' && go test ./..."
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.testCommand = testCommand })
+	branch, err := gitOutput(repoDir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+	if strings.Contains(stdout, "older than 2.38") {
+		t.Skip("git has no merge-tree --write-tree")
+	}
+
+	run := loadWorktreeRun(t, repoDir)
+	w := run.Worktree
+	if run.Status != "completed" || run.Commit == "" || w == nil {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v", run.Status, run.Commit, w)
+	}
+	if !equalStrings(w.Conflicts, []string{"fixture.go"}) {
+		t.Errorf("worktree.conflicts = %q, want [fixture.go]", w.Conflicts)
+	}
+	assertContains(t, "stdout", stdout,
+		"Warning: merging orchestrator/"+run.ID+" into "+branch+" will conflict in 1 file:\n  fixture.go\n")
+	summary, _ := runFile(t, repoDir, "summary.md")
+	assertContains(t, "summary.md", summary, "; conflicts: fixture.go")
+}
+
+// A pre-commit hook that refuses the commit: the run stays completed with no commit, and the
+// worktree with its changes stays (SPEC.md §10.1, §10.4).
+func TestWorktree_CommitRefusedByAHookKeepsTheWorktree(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
+	if err := os.MkdirAll(filepath.Dir(hook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'commits are refused here' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, _, _ := newWorktreeRun(t, repoDir)
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	w := run.Worktree
+	if run.Status != "completed" || run.Commit != "" || w == nil || w.Removed {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed, no commit, kept", run.Status, run.Commit, w)
+	}
+	if got := readTrimmed(t, filepath.Join(w.Path, "fixture.go")); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
+		t.Errorf("worktree fixture.go = %q, want the fix", got)
+	}
+	assertContains(t, "stdout", stdout, "Commit failed: ", "commits are refused here", "The worktree stays at "+w.Path+"\n")
+	summary, _ := runFile(t, repoDir, "summary.md")
+	assertContains(t, "summary.md", summary, "; kept at "+w.Path+" |")
 }
 
 // O3: review alone under worktree reviews the operator's uncommitted change, in place.

@@ -985,6 +985,11 @@ type session struct {
 	// worktree is the run's worktree once the session switched to it (switchToWorktree);
 	// nil in place.
 	worktree *domain.RunWorktree
+	// operator is the operator's repository once the session switched to a worktree, where
+	// the end of the run checks for conflicts and removes the worktree; operatorFingerprint
+	// is its git fingerprint right after the worktree was created. nil and "" in place.
+	operator            *repository.Repository
+	operatorFingerprint string
 }
 
 // newSession builds the Dispatcher and resolves the guarded paths. Nothing here calls a
@@ -1180,6 +1185,10 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	runErr := engine.Run(runCtx, run)
 	outcomeErr := writeOutcome(store, run)
 	if runErr != nil {
+		if s.worktree != nil {
+			// A failed or stopped run keeps its worktree: a resume continues there.
+			s.reporter.WorktreeKept(s.worktree.Path, "")
+		}
 		return runErr
 	}
 	if outcomeErr != nil {
@@ -1188,16 +1197,21 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
-	// The commit on the run's branch is WT06; until then a worktree run's changes stay
-	// uncommitted in the worktree, and the §42 offer, which would commit there, is not made.
+	// A worktree run commits on its own branch without the question, checks it for conflicts
+	// and removes the worktree (specs/worktree/SPEC.md §10). Only where auto_commit would not
+	// commit is an operator at the terminal asked; --mode auto asks nothing.
 	if s.worktree != nil {
-		s.reporter.WorktreeLeft(s.worktree.Path)
+		sha := offerCommit(ctx, s, opts.mode != domain.ModeAuto && isTerminal(s.stdin))
+		finishWorktree(ctx, s, sha)
+		// summary.md was rendered before the commit: it gains the worktree line's commit,
+		// conflicts and removal.
+		saveSummary(store, run)
 		return nil
 	}
 	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
 	// --mode auto asks nothing. auto_commit does not apply to --mode manual.
 	if (s.cfg.AutoCommit && run.Mode != domain.ModeManual) || (opts.mode != domain.ModeAuto && isTerminal(s.stdin)) {
-		offerCommit(ctx, s)
+		offerCommit(ctx, s, true)
 	}
 	return nil
 }
@@ -1506,10 +1520,7 @@ func writeOutcome(store *persistence.Store, run *domain.Run) error {
 	default:
 		return nil
 	}
-	var trace *domain.DecisionTrace
-	if t, _, err := store.LoadDecision(run.ID); err == nil {
-		trace = &t
-	}
+	trace := loadTrace(store, run.ID)
 	outcome := domain.ComputeOutcome(*run, trace)
 	run.Outcome = &outcome
 	if err := store.SaveRun(run); err != nil {
@@ -1518,6 +1529,21 @@ func writeOutcome(store *persistence.Store, run *domain.Run) error {
 	// summary.md is for a reader and never read back; a run that ended is not failed
 	// over it.
 	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	return nil
+}
+
+// saveSummary renders summary.md again for a run whose record changed after writeOutcome,
+// such as a worktree run's commit and removal. Like writeOutcome, it never fails the run.
+func saveSummary(store *persistence.Store, run *domain.Run) {
+	_ = store.SaveSummary(run.ID, report.RunSummary(*run, loadTrace(store, run.ID)))
+}
+
+// loadTrace is the run's decision.json, or nil when there is none or the strict loader
+// refuses it.
+func loadTrace(store *persistence.Store, runID string) *domain.DecisionTrace {
+	if t, _, err := store.LoadDecision(runID); err == nil {
+		return &t
+	}
 	return nil
 }
 

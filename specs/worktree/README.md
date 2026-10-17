@@ -1,6 +1,7 @@
 # Run isolation in a git worktree
 
-Status: **specified** (2026-10-17), not started. The owner decided O1–O5 the same day
+Status: **in progress** (2026-10-18): the code of WT01–WT06 is in; a task is ticked in the table
+below only once its gates have passed. Specified 2026-10-17. The owner decided O1–O5 the same day
 (`SPEC.md` §18): `worktree` by default, a commit on the run's branch without the question,
 workflows without `implement` in place, setup sandboxed with the network, `run --inplace` for one
 run. TODO.md Q4.

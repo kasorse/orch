@@ -110,7 +110,7 @@ func TestOfferCommit_AutoCommitNeedsApprovalForManualRules(t *testing.T) {
 		{Match: "**/*.sql", Files: []string{"migrations/a.sql"}, Missing: []domain.Stage{}},
 	}
 	s, out, head := commitSession(t, matches)
-	offerCommit(context.Background(), s)
+	offerCommit(context.Background(), s, true)
 
 	want := "\nNot committing automatically: policy.paths requires manual approval: migrations/** (1 file); commit what you want yourself.\n"
 	if out.String() != want {
@@ -134,7 +134,7 @@ func TestOfferCommit_AutoCommitWithoutApprovalCommits(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, out, head := commitSession(t, c.matches)
-			offerCommit(context.Background(), s)
+			offerCommit(context.Background(), s, true)
 
 			if got := headOf(t, s); got == head || s.run.Commit != got {
 				t.Errorf("HEAD = %s (run.Commit %q), want a new commit after %s\n%s", got, s.run.Commit, head, out)

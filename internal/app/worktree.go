@@ -130,6 +130,8 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("creating the run's worktree changed %s in your repository "+
 			"(a post-checkout hook or a filter?); the run stops before any step. The worktree is at %s", guard.GitViolation, path)}
 	}
+	// The conflict check at the end of the run compares against it (finishWorktree).
+	s.operatorFingerprint = after
 	return &repository.Repository{Dir: path, Executor: repo.Executor}, nil
 }
 
@@ -142,14 +144,76 @@ func branchExistsError(branch string) error {
 // sandbox, the verify server, the secret scan and the review diff all read s.repo or
 // s.dispatcher.Repo. The store, the run directory and its lock stay in the operator's
 // repository; the runs directory is outside the worktree, so nothing in it is denied or
-// excluded there. s.protected is kept as it is: the config file's path relative to the
-// operator's repository is the one its copy in the worktree has.
+// excluded there; s.operator keeps that repository for the end of the run. s.protected is
+// kept as it is: the config file's path relative to the operator's repository is the one its
+// copy in the worktree has.
 func switchToWorktree(s *session, wt *repository.Repository) {
+	s.operator = s.repo
 	s.repo = wt
 	s.dispatcher.Repo = wt
 	s.runsRel = ""
 	s.dispatcher.RunsDir = ""
 	s.worktree = s.run.Worktree
+}
+
+// finishWorktree ends a completed worktree run after the commit (specs/worktree/SPEC.md
+// §10): with sha, the commit on the run's branch, it says how to take the branch, checks it
+// for conflicts with the operator's branch and removes the worktree; without one the worktree
+// stays and its path is printed. Nothing here fails a run that already completed: what goes
+// wrong is reported and the worktree is kept. The branch is never deleted: it is the result.
+func finishWorktree(ctx context.Context, s *session, sha string) {
+	w := s.worktree
+	if sha == "" || s.operator == nil {
+		s.reporter.WorktreeKept(w.Path, "")
+		return
+	}
+	s.reporter.WorktreeCommitted(w.Branch, w.BaseBranch, w.BaseRef)
+	// A detached HEAD has no branch to merge into.
+	if w.BaseBranch != "" {
+		checkConflicts(ctx, s, sha)
+	}
+	// Without --force: git refuses when anything is left in the worktree, which then stays.
+	if err := s.operator.RemoveWorktree(ctx, w.Path); err != nil {
+		s.reporter.WorktreeKept(w.Path, err.Error())
+		return
+	}
+	w.Removed = true
+	if err := s.store.SaveRun(s.run); err != nil {
+		fmt.Fprintf(s.reporter.PausingWriter(), "Removed the worktree %s, but run.json could not record it: %v\n", w.Path, err)
+	}
+}
+
+// checkConflicts asks git, in the operator's repository, whether merging the run's commit
+// sha into its base branch conflicts (specs/worktree/SPEC.md §10.3), and records the files in
+// worktree.conflicts. merge-tree runs a merge driver the git config names, so the config and
+// hooks must be the ones the worktree was created with; otherwise the check is skipped.
+func checkConflicts(ctx context.Context, s *session, sha string) {
+	w := s.worktree
+	fingerprint, err := s.operator.GitFingerprint(ctx)
+	if err != nil {
+		s.reporter.ConflictCheckSkipped(w.BaseBranch, "cannot read the git config and hooks: "+err.Error())
+		return
+	}
+	if fingerprint != s.operatorFingerprint {
+		s.reporter.ConflictCheckSkipped(w.BaseBranch, guard.GitViolation+" changed since the worktree was created")
+		return
+	}
+	files, supported, err := s.operator.MergeConflicts(ctx, w.BaseBranch, sha)
+	switch {
+	case err != nil:
+		s.reporter.ConflictCheckSkipped(w.BaseBranch, err.Error())
+		return
+	case !supported:
+		s.reporter.MergeTreeUnsupported(w.BaseBranch)
+		return
+	case len(files) == 0:
+		return
+	}
+	w.Conflicts = files
+	s.reporter.WorktreeConflicts(w.Branch, w.BaseBranch, files)
+	if err := s.store.SaveRun(s.run); err != nil {
+		fmt.Fprintf(s.reporter.PausingWriter(), "run.json could not record the conflicts: %v\n", err)
+	}
 }
 
 // runSetup runs worktree.setup once in a new worktree, with the network, before the restore

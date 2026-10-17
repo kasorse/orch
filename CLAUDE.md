@@ -298,6 +298,12 @@ history, otherwise the state the history and the transition table give (MVP.md �
   hooks. The message is the implementation's `summary_short` (without one, the operator
   types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
   `Repository.CommitAll` is the one call that writes the user's index and a branch. Nothing in the offer changes the run's status or exit code.
+  A worktree run (`specs/worktree/` §10) commits in its worktree on `orchestrator/<run-id>`
+  as under `auto_commit: true`, whatever the config and `--mode` say; only where §42.6 would
+  not commit is an operator at the terminal asked (default no). `finishWorktree` then runs
+  `merge-tree` against `base_branch` in the operator's repository (`session.operator`, after
+  its fingerprint matched the one taken at creation) and `git worktree remove` without
+  `--force`; without a commit the worktree stays.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 

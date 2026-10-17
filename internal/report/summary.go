@@ -125,6 +125,38 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if run.Commit != "" {
 		row("Commit", run.Commit)
 	}
+	if w := run.Worktree; w != nil {
+		row("Worktree", worktreeLine(run, *w))
+	}
+}
+
+// worktreeLine is a worktree run's branch, its base, its commit, the files a merge into the
+// base branch would conflict in, and the path while the worktree is kept
+// (specs/worktree/SPEC.md §10.2).
+func worktreeLine(run domain.Run, w domain.RunWorktree) string {
+	base := shortCommit(w.BaseRef)
+	if w.BaseBranch != "" {
+		base = w.BaseBranch + "@" + base
+	}
+	parts := []string{w.Branch + " from " + base}
+	if run.Commit != "" {
+		parts = append(parts, "commit "+shortCommit(run.Commit))
+	}
+	if len(w.Conflicts) > 0 {
+		parts = append(parts, "conflicts: "+strings.Join(w.Conflicts, ", "))
+	}
+	if !w.Removed {
+		parts = append(parts, "kept at "+w.Path)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// shortCommit is the 7-character abbreviation of a commit SHA.
+func shortCommit(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // claudeAuthLine is how the run's claude calls were authenticated, "api key ($ANTHROPIC_API_KEY,

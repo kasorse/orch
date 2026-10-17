@@ -20,14 +20,21 @@ const commitHeaderMax = 72
 // working tree. Go writes the message from the run - no provider is called. With
 // auto_commit the same checks run and the commit is made without the question, unless
 // there is something the question would have warned about or no message to use.
-func offerCommit(ctx context.Context, s *session) {
+//
+// A worktree run commits on its own branch, never the operator's, so it takes the auto_commit
+// path whatever the config and the mode say (specs/worktree/SPEC.md §10.1); where that path
+// would not commit, an operator at the terminal (canAsk) gets the question instead. In place
+// canAsk is not read: the caller asked only when someone is there. It returns the commit, or
+// "" when nothing was committed.
+func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 	run := s.run
 	if run.Status != domain.RunCompleted || run.Workflow == nil || !run.Workflow.Contains(domain.ActionImplement) {
-		return
+		return ""
 	}
 	out := s.reporter.PausingWriter()
+	inWorktree := s.worktree != nil
 	// A manual run is confirmed by a person step by step: it ends with the question too.
-	auto := s.cfg.AutoCommit && run.Mode != domain.ModeManual
+	auto := inWorktree || (s.cfg.AutoCommit && run.Mode != domain.ModeManual)
 	skip := func(why string) {
 		if auto {
 			fmt.Fprintf(out, "\nNot committing automatically: %s\n", why)
@@ -39,75 +46,93 @@ func offerCommit(ctx context.Context, s *session) {
 	// A run on top of uncommitted changes would commit them together with its own.
 	if run.PreRunRef == "" || run.PreRunRef != run.HeadRef {
 		skip("the run did not start from a clean commit; commit what you want yourself.")
-		return
+		return ""
 	}
 	// The git fingerprint first, before any git status; then the protected paths. git
-	// commit runs the repository's hooks, so they must be the ones the run started with.
+	// commit runs the repository's hooks, so they must be the ones the run started with. In
+	// a worktree the baseline holds its .git pointer, which is compared before either.
 	changed, err := action.CheckBaseline(ctx, s.repo, run.ResumeBaseline)
 	if err != nil {
 		skip("cannot compare the repository with the run-start state: " + err.Error())
-		return
+		return ""
 	}
 	if len(changed) > 0 {
 		skip("protected state changed since the run started: " + strings.Join(changed, ", "))
-		return
+		return ""
 	}
 	changes, err := s.repo.StatusSummary(ctx)
 	if err != nil {
 		skip(err.Error())
-		return
+		return ""
 	}
 	if changes == "" {
 		fmt.Fprintln(out, "\nNo changes to commit.")
-		return
+		return ""
 	}
 	branch, err := s.repo.Branch(ctx)
 	if err != nil {
 		skip(err.Error())
-		return
+		return ""
+	}
+	if inWorktree && branch != s.worktree.Branch {
+		skip(fmt.Sprintf("the worktree is on %q, not on the run's branch %s; commit what you want yourself.", branch, s.worktree.Branch))
+		return ""
 	}
 
 	offer := commitOffer(run, s.dispatcher.CommitImplementation())
 	offer.Branch, offer.Changes = branch, changes
 	header := offer.Header
-	// approval: manual is a person's yes at the question; auto_commit's yes was given in
-	// advance, before anyone knew which files would change (specs/governance/SPEC.md §4.5).
-	if auto && len(offer.PathRules) > 0 {
-		skip(approvalReason(offer.PathRules))
-		return
-	}
+	ask := !auto
 	if auto {
+		var why string
 		switch {
+		// approval: manual is a person's yes at the question; auto_commit's yes was given in
+		// advance, before anyone knew which files would change (specs/governance/SPEC.md §4.5).
+		case len(offer.PathRules) > 0:
+			why = approvalReason(offer.PathRules)
 		case len(offer.Warnings) > 0:
-			skip(strings.Join(offer.Warnings, "; ") + "; commit what you want yourself.")
-			return
+			why = strings.Join(offer.Warnings, "; ") + "; commit what you want yourself."
 		case header == "":
-			skip("the implementation proposed no commit message; commit what you want yourself.")
-			return
+			why = "the implementation proposed no commit message; commit what you want yourself."
 		}
-	} else {
+		switch {
+		case why == "":
+		case inWorktree && canAsk:
+			// The §42.2 question decides instead, with its default no.
+			ask = true
+		default:
+			skip(why)
+			return ""
+		}
+	}
+	if ask {
 		var ok bool
 		header, ok, err = interaction.AskCommit(s.prompter, out, offer)
 		if err != nil {
 			fmt.Fprintf(out, "\nNo answer (%v); nothing committed.\n", err)
-			return
+			return ""
 		}
 		if !ok {
-			fmt.Fprintln(out, "Not committed; the changes stay in the working tree.")
-			return
+			if inWorktree {
+				fmt.Fprintln(out, "Not committed; the changes stay in the worktree.")
+			} else {
+				fmt.Fprintln(out, "Not committed; the changes stay in the working tree.")
+			}
+			return ""
 		}
 	}
 	sha, err := s.repo.CommitAll(ctx, offer.Message(header))
 	if err != nil {
 		fmt.Fprintf(out, "Commit failed: %v\n", err)
-		return
+		return ""
 	}
 	run.Commit = sha
 	if err := s.store.SaveRun(run); err != nil {
 		fmt.Fprintf(out, "Committed %s, but run.json could not record it: %v\n", shortSHA(sha), err)
-		return
+		return sha
 	}
 	fmt.Fprintf(out, "\nCommitted %s to %s: %s\n", shortSHA(sha), branch, header)
+	return sha
 }
 
 // commitOffer proposes the message and the warnings for run. The header is the last
