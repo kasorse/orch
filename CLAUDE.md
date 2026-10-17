@@ -169,8 +169,12 @@ history, otherwise the state the history and the transition table give (MVP.md �
   before any `git status` — git status runs a planted `core.fsmonitor`. In a worktree run
   (`specs/worktree/`) the worktree's `.git` file is read in Go and compared with the recorded
   `admin_dir` before the fingerprint (`RepoGuard.GitPointer`, violation
-  `.git (worktree pointer)`), and the sandbox binds it read-only. `Dispatcher.Guard` is
-  required — `implement` and `test` refuse without one. Provider CLIs run with
+  `.git (worktree pointer)`), and the sandbox binds it read-only. `worktree.setup` runs once
+  (`runSetup`, only for a run with no executions and `setup_done: false`) in the test sandbox
+  with `Sandbox.Network` (the one place the network is allowed; a copy, never `s.runner`'s;
+  `json:"-"`, so verify.json cannot carry it) between two guard snapshots, inside the engine's
+  share of `execution.timeout` (the second snapshot is taken even when setup was killed).
+  `Dispatcher.Guard` is required — `implement` and `test` refuse without one. Provider CLIs run with
   `execution.ScrubbedEnv()`, which also drops the credential variables the config names
   (`Config.CredentialEnvNames`, registered right after `Validate`); every process that runs
   `test.command` gets the narrower `execution.TestEnv()` allowlist (plus `test.env_pass`,

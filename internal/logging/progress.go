@@ -349,6 +349,17 @@ func (r *ConsoleReporter) RestorePoint(ref string) {
 	fmt.Fprintf(r.Out, "Restore point: %s\n", ref)
 }
 
+// SetupStarted announces worktree.setup (specs/worktree/SPEC.md §9), which can run for a
+// while and has the network.
+func (r *ConsoleReporter) SetupStarted() {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "setup")), st.gray("running worktree.setup (network allowed)"))
+		return
+	}
+	fmt.Fprintln(r.Out, "Setup: running worktree.setup (network allowed)...")
+}
+
 // Worktree announces, after approval, the git worktree a run executes in and where it starts
 // (specs/worktree/SPEC.md §13): the base branch at the base commit, or only the commit when
 // HEAD was detached.

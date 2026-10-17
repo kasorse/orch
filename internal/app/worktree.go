@@ -7,12 +7,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"orchestrator/internal/action"
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/guard"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/repository"
+	"orchestrator/internal/testexec"
 )
 
 // worktreeRun reports whether a run that has not executed a step runs in its own git
@@ -147,6 +150,67 @@ func switchToWorktree(s *session, wt *repository.Repository) {
 	s.runsRel = ""
 	s.dispatcher.RunsDir = ""
 	s.worktree = s.run.Worktree
+}
+
+// runSetup runs worktree.setup once in a new worktree, with the network, before the restore
+// point, the baseline and the pre-run test (specs/worktree/SPEC.md §9). It never runs on a
+// tree a model has touched: only a run without executions whose setup has not completed. The
+// guard compares the git pointer, fingerprint and protected paths around it, so setup that
+// reaches outside the worktree (an unsandboxed one) fails the run. ctx is the engine's share of
+// execution.timeout: a setup that outlives it is killed and fails the run.
+func runSetup(ctx context.Context, s *session) error {
+	run, cfg := s.run, s.cfg
+	setup := strings.TrimSpace(cfg.Worktree.Setup)
+	if s.worktree == nil || setup == "" || len(run.Executions) > 0 || run.Worktree.SetupDone {
+		return nil
+	}
+	g := s.newRepoGuard(s.protected)
+	before, err := g.Snapshot(ctx)
+	if err != nil {
+		return &apperr.WorkflowError{Msg: "failed to record the protected state before worktree.setup", Err: err}
+	}
+
+	// A runner of its own: s.runner is the test steps', and must not get the network.
+	runner := &testexec.Runner{Executor: s.runner.Executor}
+	if cfg.Test.Sandboxed() {
+		sandbox, err := testSandbox(ctx, s.repo, cfg.Test, s.readOnlyFiles())
+		if err != nil {
+			return err
+		}
+		sandbox.Network = true
+		runner.Sandbox = sandbox
+	}
+	s.reporter.SetupStarted()
+	result, runErr := runner.Run(ctx, setup, s.repo.Dir, testexec.RunOptions{})
+	if runErr != nil {
+		// The runner discards the output of a run it had to kill or could not start, so the
+		// log says why there is none.
+		result = domain.TestResult{Stderr: fmt.Sprintf("worktree.setup did not finish: %v\n", runErr)}
+	}
+	_ = s.store.AppendCallLog(run.ID, "setup", "stdout", result.Stdout)
+	_ = s.store.AppendCallLog(run.ID, "setup", "stderr", result.Stderr)
+	logPath := s.store.CallLogPath(run.ID, "setup", "stderr")
+
+	// Checked whatever setup's end: a killed one may have changed the git config already. The
+	// deadline that killed it must not stop the check.
+	changed, err := g.Changed(context.WithoutCancel(ctx), before)
+	if err != nil {
+		return &apperr.WorkflowError{Msg: "failed to check protected paths after worktree.setup", Err: err}
+	}
+	if len(changed) > 0 {
+		return action.SetupViolation(changed, run.Worktree.BaseRef)
+	}
+	switch {
+	case errors.Is(runErr, context.DeadlineExceeded):
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("worktree setup failed (timed out: execution.timeout ran out); "+
+			"it and its child processes were killed; output in %s", logPath), Err: runErr}
+	case runErr != nil:
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("worktree setup failed; output in %s", logPath), Err: runErr}
+	case !result.Success:
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("worktree setup failed (exit %d); output in %s", result.ExitCode, logPath)}
+	}
+	run.Worktree.SetupDone = true
+	return s.store.SaveRun(run)
 }
 
 // gitPointer is the admin directory the worktree's .git file must name, "" in place.

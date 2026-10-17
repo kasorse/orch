@@ -3,6 +3,7 @@ package testexec
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -30,6 +31,11 @@ type Sandbox struct {
 	// ReadOnly and ReadWrite are test.ro_binds / test.rw_binds (caches, module stores).
 	ReadOnly  []string `json:"ro_binds"`
 	ReadWrite []string `json:"rw_binds"`
+	// Network leaves the network namespace out and keeps everything else: only worktree.setup
+	// (specs/worktree/SPEC.md §9) sets it, in Go, on a copy of the test sandbox. The test
+	// steps and the verify server never do: it is not serialised, so verify.json cannot carry
+	// it (verify.ReadSpec rejects "network" as an unknown field).
+	Network bool `json:"-"`
 }
 
 // baseMounts is what every sandboxed process sees before any bind: the whole filesystem
@@ -41,6 +47,14 @@ var baseMounts = []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/pr
 var isolation = []string{
 	"--unshare-user", "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
 	"--die-with-parent", "--new-session",
+}
+
+// isolationFlags is isolation, without --unshare-net when the sandbox has the network.
+func (s *Sandbox) isolationFlags() []string {
+	if !s.Network {
+		return isolation
+	}
+	return slices.DeleteFunc(slices.Clone(isolation), func(f string) bool { return f == "--unshare-net" })
 }
 
 // args builds the bwrap argv. Mount order is load-bearing - bwrap applies mounts in
@@ -63,7 +77,7 @@ func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	for _, d := range s.ReadWrite {
 		argv = append(argv, "--bind", d, d)
 	}
-	argv = append(argv, isolation...)
+	argv = append(argv, s.isolationFlags()...)
 	// extraEnv (Runner.Run has checked the names) reaches the command through --setenv, after
 	// every mount and before the command: bwrap would read a later option as part of it.
 	for _, kv := range extraEnv {

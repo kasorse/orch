@@ -1089,11 +1089,20 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		return err
 	}
 
+	// The engine's share of execution.timeout starts here: worktree.setup runs inside it.
+	runCtx, cancelRun := opts.engineContext()
+	defer cancelRun()
+
 	if len(run.Executions) == 0 {
 		// Everything below reads s.repo - the restore point, the baseline, the sandbox, the
 		// step guard, the secret baseline, the observer and the gate - so a worktree run
 		// switches to its worktree first.
 		if err := enterWorktree(ctx, s); err != nil {
+			return failRun(store, run, err)
+		}
+		// worktree.setup comes before the restore point and the baseline, so they include what
+		// it installed, and before the pre-run test, which may need it.
+		if err := runSetup(runCtx, s); err != nil {
 			return failRun(store, run, err)
 		}
 		if s.worktree != nil {
@@ -1115,9 +1124,6 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	// Pinned on every approved run and resume, so a run recorded before pinning existed
 	// gets its ref too.
 	pinRestorePoint(ctx, s.repo, run, s.reporter)
-
-	runCtx, cancelRun := opts.engineContext()
-	defer cancelRun()
 
 	if cfg.Test.Sandboxed() {
 		sandbox, err := testSandbox(ctx, s.repo, cfg.Test, s.readOnlyFiles())

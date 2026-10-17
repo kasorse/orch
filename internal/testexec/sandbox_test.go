@@ -51,6 +51,30 @@ func TestSandboxArgs(t *testing.T) {
 	}
 }
 
+// TestSandboxArgs_Network: worktree.setup's sandbox is the test sandbox with the network
+// namespace left out and nothing else changed.
+func TestSandboxArgs_Network(t *testing.T) {
+	sb := testSandbox()
+	sb.ReadOnlyFiles = []string{"/home/u/repo/.git"}
+	def := sb.args("/home/u/repo", "npm ci", nil)
+	sb.Network = true
+	net := sb.args("/home/u/repo", "npm ci", nil)
+
+	if slices.Contains(net, "--unshare-net") {
+		t.Errorf("a sandbox with the network must not unshare it: %q", net)
+	}
+	want := slices.DeleteFunc(slices.Clone(def), func(f string) bool { return f == "--unshare-net" })
+	if !slices.Equal(net, want) {
+		t.Errorf("got %q\nwant the default argv without --unshare-net: %q", net, want)
+	}
+	if !slices.Contains(def, "--unshare-net") {
+		t.Errorf("the default sandbox must unshare the network: %q", def)
+	}
+	if probe := ProbeArgs(); !slices.Contains(probe, "--unshare-net") {
+		t.Errorf("ProbeArgs must keep --unshare-net: %q", probe)
+	}
+}
+
 // TestSandboxArgs_WorktreePointer: in a linked worktree the .git file is bound read-only
 // after the worktree's writable bind and the git directories; before it, the repository bind
 // would make it writable again (specs/worktree/SPEC.md §12).
