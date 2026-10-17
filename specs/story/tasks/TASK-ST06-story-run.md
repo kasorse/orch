@@ -14,7 +14,9 @@ anything but a committed task, continue later.
 - `internal/app/story_run.go`:
   - pre-checks of §10.1, in order, before anything runs (the home's chain; parse and validate;
     frozen hashes of dispatched tasks; per repository: checkout, commit, no `.gitmodules`, base
-    branch, unknown `story/<slug>/*` branches, `orchestrator validate` as a child; budget)
+    branch, unknown `story/<slug>/*` branches, `orchestrator validate` as a child; budget);
+    each task's `repo` found as in §7.1 (`candidates`, unambiguous) and compared with
+    `story.json: services` when recorded - a hand-written spec gets `services` at its first start
   - first start: `bases`, `approved_at`, the plan printed, one confirmation at a terminal (A11)
   - the loop: pending → write `tasks/<ID>.json` (§11.1 text rendered from the task, the spec's
     approach and contracts, the done dependencies' As built lines, bounded), freeze, spawn

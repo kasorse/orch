@@ -84,13 +84,15 @@ it needs. What it does not take: a model choosing the order, or running tasks in
 - **Story home**: the repository where `story plan` / `story run` are invoked. It holds the spec
   (`<spec_dir>/<slug>/`) and the story state (`.orchestrator/stories/<slug>/`). It may also be
   one of the story's repositories.
-- **Story repositories**: a closed list of local git checkouts, one per service.
+- **Service**: a local git checkout directly under one of `story.roots`; its name is the
+  directory's name. The story home is a service too, under its own directory name.
+- **The story's services**: the ones its task names (§7.1). Only they are surveyed, and only they
+  can get tasks.
 
 ```yaml
 story:
-  repos:                          # the closed list a spec may name
-    billing: {path: ../billing, base: main}
-    gateway: {path: ~/src/gateway}  # base: the branch checked out at the first story run
+  roots: [..]                     # where the service checkouts live, side by side
+  max_services: 5                 # services one story may touch; 1..20, default 5
   spec_dir: specs                 # in the story home; default specs
   max_tasks: 12                   # 2..30; default 12
   max_cost_usd: 20                # optional; the whole story, every call and run
@@ -101,26 +103,31 @@ jira:
     link: parent                  # parent | field
     # field: customfield_10014    # with link: field (Epic Link on Server/Data Center)
     labels: [orchestrator]
-    components: {billing: Billing}  # optional, by repository name
+    components: {billing: Billing}  # optional, by service name
 ```
 
-- `story.repos.<name>.path` is absolute, `~/`-prefixed, or relative to the story home's root (a
-  team that checks services out side by side can commit it). Names match `^[a-z][a-z0-9-]{0,30}$`.
-- Each story repository keeps **its own** `orchestrator.yaml`: its test command, checks, policy,
-  routes and limits apply to its tasks. The story home's config contributes only `story` and
-  `jira`.
+- A root is absolute, `~/`-prefixed, or relative to the story home's root (`..` for checkouts
+  side by side, which a team can commit). Nothing is listed per service: a new checkout under a
+  root is a service at once.
+- A service's story base is the branch checked out in it when the story first starts (§9.2);
+  switch it there first if it should be another.
+- Each service keeps **its own** `orchestrator.yaml`: its test command, checks, policy, routes
+  and limits apply to its tasks. The story home's config contributes only `story` and `jira`.
 - Every key is in the strict schema; `jira.create` without the `jira` section, `link: field`
-  without `field`, a `components` key that is not a repository name, are config errors.
+  without `field`, are config errors. A `components` key that names no service is reported when
+  a story uses `jira.create`, not at load (services are found, not listed).
 
 ## 6. The flow
 
 ```
 orchestrator story plan "<request>" [--jira KEY] [--repo NAME]...
-  fail-fast: home config; each named repository exists and is a git checkout
+  fail-fast: home config
   [--jira] one GET of the issue (§39), rendered as the request
-  survey: one read-only call per repository, in that repository      (§7.1)
-  specify: one call with no tools, from the request and the surveys   (§7.2)
-  Go validates the answer; one task → print it as a run, write no spec (§7.3)
+  services: the ones the task names, found under story.roots         (§7.1)
+            (--repo names them instead); none, or too many → stop, no call made
+  survey: one read-only call per service of the story, in it          (§7.2)
+  specify: one call with no tools, from the request and the surveys   (§7.3)
+  Go validates the answer; one task → print it as a run, write no spec (§7.4)
   Go writes <spec_dir>/<slug>/ and stops                              (§8)
 
   … the operator reads, edits, commits the spec …
@@ -149,10 +156,39 @@ Both are calls outside the workflow, like the translator and the decision calls:
 with a fixed authority, recorded under the story's directory (`logs/`, `artifacts/`). Neither
 is a workflow action and neither appears in `domain.AuthorityFor`'s table.
 
-### 7.1 Survey
+### 7.1 Finding the services
 
-- One call per story repository named by `--repo` (default: every repository in
-  `story.repos`), with **`read` authority**, working directory = that repository, in place (it
+Reading every checkout next to the story home would cost a call each and mostly read
+unrelated code. The task is expected to name the services it touches - typed (`… в сервисах
+billing и gateway`), in the Jira ticket's text, or as the ticket's components - and Go finds
+them, with no model call:
+
+1. **Candidates.** Every immediate subdirectory of every root that has a `.git` entry and a name
+   matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`, plus the story home (once, by resolved path, if
+   it is also under a root). Read with `os.ReadDir` and
+   `os.Lstat`; no git runs over directories that are not used.
+2. **Mentions.** A candidate is named when its name occurs in the request (the typed text, or
+   the rendered ticket with the operator's notes) as a whole word, case-insensitively: not next
+   to a letter (any script), a digit, `_` or `-`. A Jira component whose name equals a candidate's
+   (case-insensitively) names it too; this needs the ticket's `components` (§39: one more field of
+   the same GET).
+3. **`--repo NAME`** (repeatable) names the services instead: exactly those, nothing detected.
+   Each must be a candidate.
+4. **Checks**, before any call: none named → `the task names no service under story.roots
+   (<roots>); name them in the task, e.g. "Сервисы: billing, gateway", or pass --repo`; more than
+   `story.max_services` → the list and `narrow it with --repo`; a named service found under two
+   roots → both paths and `remove the ambiguity in story.roots` (no root wins silently); a named
+   service whose `git rev-parse --show-toplevel` is not that directory → refused.
+5. **Shown and recorded.** `Services: billing (~/src/billing), gateway (~/src/gateway)`, before
+   the first call; `story.json: services` {name: path}.
+
+A short directory name that is also a word (`api`, `web`, `docs`) can be named by accident; the
+printed list shows it, and `--repo` corrects it. The cost of the mistake is one survey call.
+
+### 7.2 Survey
+
+- One call per service of the story (§7.1), with **`read` authority**, working directory = that
+  service's checkout, in place (it
   changes nothing, like a workflow without `implement`), with that repository's deny list
   (`projectctx.DenyPatterns` and its runs directory).
 - Route: that repository's `actions.analyze` base route (provider, model, effort, timeout) -
@@ -169,16 +205,19 @@ is a workflow action and neither appears in `domain.AuthorityFor`'s table.
   At most 4 KiB of summary, 30 files, 20 interfaces, 20 constraints; paths are clean and
   relative (displayed only, never opened by Go).
 
-### 7.2 Specify
+### 7.3 Specify
 
 - One call with **`none` authority** (no tools), on the story home's `actions.plan` base route.
-- Input: the request (`taskBlock`), each survey (`fence`), the closed list of repository names,
+- Input: the request (`taskBlock`), each survey (`fence`), the story's services as the closed
+  list of repository names,
   `story.max_tasks`, and the rules a task must follow:
   - a vertical slice that one run can implement, test and review (size S or M; an L is split);
   - after it, that repository's tests pass;
   - it changes exactly one repository;
   - it lists what it needs in `depends_on`; within one repository the tasks a task needs form a
     chain (§9.2);
+  - work it finds necessary in a service the task did not name goes into `out_of_scope` or
+    `risks`, never into a task;
   - contracts between repositories (an API, an event, a schema) are written in the spec, and the
     task that provides one comes before the tasks that consume it;
   - the spec and the tasks are written in the language of the request; IDs and keys are ASCII.
@@ -193,10 +232,10 @@ is a workflow action and neither appears in `domain.AuthorityFor`'s table.
  ]}
 ```
 
-### 7.3 Validation of the answer
+### 7.4 Validation of the answer
 
 - `slug` `^[a-z0-9][a-z0-9-]{1,39}$` and `<spec_dir>/<slug>` must not exist; `prefix`
-  `^[A-Z]{2}$`; task IDs `<prefix><NN>`, unique; `repo` in the surveyed set; `size` S, M or L;
+  `^[A-Z]{2}$`; task IDs `<prefix><NN>`, unique; `repo` one of the story's services; `size` S, M or L;
   `depends_on` names existing tasks; at most `story.max_tasks` tasks; at most 10 acceptance
   items of 300 runes; each text field bounded (8 KiB for a task, 16 KiB for the spec).
 - The graph rules of §9 (acyclic, the same-repository chain).
@@ -255,16 +294,17 @@ jira: PAY-124
 ### 9.1 Order
 
 Kahn's algorithm over `depends_on`, the smallest ID first among the ready tasks. A cycle, a
-dependency on a missing task, or a repository outside `story.repos` is a spec error naming the
-tasks. The order is a pure function of the files.
+dependency on a missing task, or a `repo` that is not a service (a candidate of §7.1) is a spec
+error naming the tasks. The order is a pure function of the files. A task the operator adds by
+hand may name any service, not only the ones the plan found.
 
 ### 9.2 Base of a task
 
 For task T in repository R, take T's ancestors (transitively, across repositories) that are in R,
 and keep the ones no other such ancestor depends on:
 
-- **none** → T is based on R's story base: the commit `story.repos.R.base` (or the branch
-  checked out in R) named at the story's first start, recorded in `story.json: bases.R`;
+- **none** → T is based on R's story base: the commit of the branch checked out in R at the
+  story's first start, recorded with the branch's name in `story.json: bases.R`;
 - **one** (A) → T is based on A's commit: its branch tip, stacked;
 - **more than one** → a spec error: `RF05 needs RF02 and RF03 in billing on different branches;
   make one depend on the other`. Git could merge them; deciding how is not the orchestrator's
@@ -290,7 +330,9 @@ working directory. Then, before anything runs:
 1. The home config's fail-fast chain (with the Jira dependencies when `jira.create` is set).
 2. Parse every task file; validate §8 and §9. On a continued story: each dispatched task's file
    (up to `## As built`) matches its recorded sha256 - a change is refused, naming the task.
-3. For every repository the pending tasks name: the path is a git checkout with a commit and no
+3. For every service the pending tasks name, found as in §7.1 (a candidate, unambiguous; its
+   path compared with `story.json: services` when recorded): the path is a git checkout with a
+   commit and no
    `.gitmodules` (worktree runs do not cover submodules, `specs/worktree/` §16); the story base
    branch exists; no `story/<slug>/<ID>` branch exists that `story.json` does not know; and
    `orchestrator validate` exits 0 there (that repository's whole fail-fast chain: its config,
@@ -442,7 +484,7 @@ PAY-1`. `story plan --jira` accepts any type.
 
 | file | content |
 |---|---|
-| `story.json` | slug, spec dir, `jira_parent`, `created_at`, `approved_at`, `bases` {repo: sha}, `status`, per task: `status`, `file_sha256`, `attempt`, `run_id`, `repo`, `branch`, `base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`; `calls` (survey, specify: usage, cost) |
+| `story.json` | slug, spec dir, `jira_parent`, `created_at`, `approved_at`, `services` {name: path}, `bases` {name: {branch, sha}}, `status`, per task: `status`, `file_sha256`, `attempt`, `run_id`, `repo`, `branch`, `base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`; `calls` (survey, specify: usage, cost) |
 | `ticket.json` | the fetched issue (`--jira`), an audit record |
 | `artifacts/survey-<repo>.json`, `artifacts/specify.json` | the prompts as sent and the answers |
 | `logs/survey-<repo>.*`, `logs/specify.*` | the calls' output |
@@ -464,7 +506,7 @@ load. `decision.json` gains `scope.story` and the `story task` reason on develop
 - **The spec is model-written data that becomes a task after the operator's approval.** It
   reaches each child as `Task.Description` through `taskBlock`, like a Jira ticket. It cannot
   name a stage, a model, a tool, an authority or a command; the front matter is parsed by Go with
-  a closed set of keys, and `repo` is checked against the closed list.
+  a closed set of keys, and `repo` must be a service found under `story.roots` (§7.1).
 - **Names are checked before they reach git**: slug, prefix, IDs and branch names by pattern; the
   base by SHA.
 - **Jira writes** only after approval, idempotent, to the configured host only, with the same
@@ -504,7 +546,7 @@ load. `decision.json` gains `scope.story` and the `story task` reason on develop
 | task | title | size | depends on |
 |---|---|---|---|
 | ST01 | `internal/story`: task files, graph, order, bases, README rendering | M | — |
-| ST02 | config: `story`, `jira.create`; story repository resolution | S | — |
+| ST02 | config: `story`, `jira.create`; finding the services the task names | S | ST01 |
 | ST03 | survey and specify: prompts, calls, strict answers, logs | M–L | ST02 |
 | ST04 | `story plan`: writing the spec, the one-task case, `.plan-<id>` | M | ST01, ST03 |
 | ST05 | `run --story-task`: input, worktree base and branch, development on, criteria, commit message | M | ST01, WT04, WT06 |
@@ -515,13 +557,12 @@ load. `decision.json` gains `scope.story` and the `story task` reason on develop
 | ST10 | scenarios, MVP.md §48 and the sections above, CLAUDE.md, README, example, TODO.md | M | all |
 
 ```
-ST02 ─┬─ ST03 ─┐
-      │        ├─ ST04
-ST01 ─┼────────┘
-      ├─ ST05 ─┐            (ST05 also needs WT04, WT06; ST06 needs WT07)
-      └────────┴─ ST06 ─ ST07 ─┐
-ST02 ─ ST08 ───────────────────┼─ ST10
-ST09 ──────────────────────────┘
+ST01 ─┬─ ST02 ─┬─ ST03 ─ ST04 ──────┐
+      │        ├─ ST08 ─────────────┤
+      │        └──────┐             │
+      └─ ST05 ─────── ST06 ─ ST07 ──┼─ ST10
+         (ST05 also needs WT04, WT06; ST06 needs WT07)
+ST09 ───────────────────────────────┘
 ```
 
 Estimate: 20–24 engineering days, after `specs/worktree/`. ST01, ST02 and ST09 can start
@@ -533,7 +574,7 @@ before the worktree work is done; ST05 and ST06 cannot.
 |---|---|
 | D1 | Story is a separate axis (`scope`), not a fourth complexity level; each task gets its own complexity. |
 | D2 | Triggers in v1: the explicit `story plan`, a Jira issue type, `specify` as the final arbiter (one task → not a story), and the scope probability recorded in shadow (§13). |
-| D3 | Services are separate local repositories, listed in a closed `story.repos`; each task runs in its repository with that repository's config. |
+| D3 | Services are separate local repositories; each task runs in its repository with that repository's config. Revised the same day: the task names its services and Go finds them under `story.roots` (§7.1), instead of a closed `story.repos` list and a survey of every repository. |
 | D4 | A branch per task, stacked at once on the branch it needs in the same repository; a rebase after review is the operator's, with git. |
 | D5 | Jira: child issues created after approval, idempotently; their type and link from config. |
 | D6 | The spec lives in the story home, by default the current repository, as `specs/<slug>/` in this repository's format. |
@@ -543,7 +584,7 @@ before the worktree work is done; ST05 and ST06 cannot.
 
 | # | default | why |
 |---|---|---|
-| A1 | A survey call per repository (`read`, in place) before specify, rather than the Context Manager's snapshot. | Contracts between services (OpenAPI, proto, events) are what a decomposition needs; a read session finds them, a file list may not. One call per repository needs no multi-directory authority. |
+| A1 | A survey call per service the task names (`read`, in place) before specify, rather than the Context Manager's snapshot. | Contracts between services (OpenAPI, proto, events) are what a decomposition needs; a read session finds them, a file list may not. Only the named services are read (D3), so the cost is one call per service the story touches. One call per repository needs no multi-directory authority. |
 | A2 | Survey and specify reuse the `actions.analyze` and `actions.plan` routes. | Static routing with no new keys. |
 | A3 | A story task always has development on (§11.2). | A task that changes nothing would leave no branch for its dependents. |
 | A4 | The task's acceptance items become review criteria (§11.2). | The approved spec, not a later plan, is what the task is checked against. |
@@ -551,6 +592,6 @@ before the worktree work is done; ST05 and ST06 cannot.
 | A6 | A dispatched task's file is frozen up to `## As built`. | What ran is what the record says. |
 | A7 | Jira children only for a story planned from a Jira issue. | Without a parent there is nothing to attach them to; creating parents is a later step. |
 | A8 | `run --jira` on a story issue type refuses, with the `story plan` command. | Running an epic as one task is the case this spec exists to avoid. |
-| A9 | `story.repos` paths may be relative to the story home. | Side-by-side checkouts make the config shareable. |
+| A9 | `story.roots` may be relative to the story home; a service's base is the branch checked out in it at the first start. | Side-by-side checkouts make the config shareable, and nothing is listed per service. |
 | A10 | The spec is written in the language of the request. | The operator and the Jira readers read it. |
 | A11 | The first start asks one confirmation at a terminal. | The order and the bases are Go's and are seen only then. |

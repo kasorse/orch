@@ -19,12 +19,15 @@ beyond the files it is handed.
   `RenderTaskFile(Task, sizes...)` for `story plan` and `SetJira(data, key)` for ST07, both
   byte-stable
 - `internal/story/graph.go`: `Validate(tasks, repos []string, maxTasks int) error` (IDs,
-  prefix, repositories in the closed list, missing dependencies, cycles naming the tasks);
+  prefix, repositories among the given service names, missing dependencies, cycles naming the
+  tasks);
   `Order(tasks) []string` (Kahn, smallest ID first); `Base(tasks, id) (parent string, err)` —
   §9.2: the same-repository ancestors no other such ancestor depends on; none → `""`, one → it,
   more → the error text of §9.2
 - `internal/story/readme.go`: `RenderREADME(title, status, tasks, states)` (golden)
 - `internal/story/asbuilt.go`: `AppendAsBuilt(data []byte, AsBuilt) []byte` — §10.3's section
+- `internal/story/services.go`: `Named(text string, components, candidates []string) []string` —
+  §7.1 point 2: whole-word, case-insensitive, Unicode-aware boundaries; components by equal name
 
 ## Acceptance
 
@@ -32,6 +35,9 @@ beyond the files it is handed.
   order on ties; cycle and missing dependency messages; the base rule — none, stacked, an
   ancestor in the same repository reached through another repository, and the diamond refused;
   the frozen hash ignores everything from `## As built` on and changes with any edit above it.
+- `Named`: `billing` in `… в сервисах billing и gateway.` and `Billing,`; not in `billing-v2`,
+  `prebilling` or `billing_old`; a component `Gateway` names `gateway`; a candidate named `c++`
+  is impossible (the name pattern), so no regex is built from a name.
 - Golden: README for a planned, a running and a completed story.
 - An import test: `internal/story` imports only `domain` and the standard library.
 

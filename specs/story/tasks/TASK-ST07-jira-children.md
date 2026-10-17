@@ -19,7 +19,8 @@
 - `internal/app/story_jira.go`: for each task without `jira` in the story's order: the intent
   saved, `Create`, the key into `story.json` and `story.SetJira` into the task file, the intent
   cleared; an intent without a key on start → the stop of §12.2; `link: parent` or the field;
-  components by repository; the project from the parent's key
+  components by service name (a key that names no service of the story is an error before any
+  request); the project from the parent's key
 - MVP.md §39 and §30 notes are ST10's
 
 ## Acceptance

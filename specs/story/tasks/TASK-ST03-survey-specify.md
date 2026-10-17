@@ -11,15 +11,16 @@ authorities and return validated answers.
 
 - `internal/action/story.go`: `BuildSurveyPrompt(request, repo)` and
   `BuildSpecifyPrompt(request, surveys, repos, maxTasks)` — the request through `taskBlock`, the
-  surveys through `fence`, the rules of §7.2 as fixed text; `Survey(ctx, repoDir, route)` with
+  surveys through `fence`, the rules of §7.3 as fixed text; `Survey(ctx, repoDir, route)` with
   `domain.AuthorityRead`, the repository's deny list (`projectctx.DenyPatterns` + its runs
   directory) and working directory; `Specify(ctx, route)` with `domain.AuthorityNone`; both
   record usage
 - `internal/story/answer.go`: `SurveyAnswer` and `SpecifyAnswer` with strict decoding (unknown
-  fields, sizes and patterns of §7.1 and §7.3); `SpecifyAnswer.Tasks()` → `[]story.Task` for
+  fields, sizes and patterns of §7.2 and §7.4); `SpecifyAnswer.Tasks()` → `[]story.Task` for
   `story.Validate`
 - `internal/action/testdata/prompts/`: `survey.txt`, `specify.txt` (golden, fixed nonce)
-- routes: the repository's `actions.analyze` base route for survey, the home's `actions.plan`
+- survey runs only for the story's services (§7.1), never for every candidate
+- routes: the service's `actions.analyze` base route for survey, the home's `actions.plan`
   base route for specify (A2); timeouts from those actions
 
 ## Acceptance

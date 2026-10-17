@@ -13,7 +13,8 @@ first.
 
 Some tasks are not one change: they span several services, or are safe only as a sequence of
 steps that each leave the system working. One run cannot span repositories, grows past what
-review reads well, and ends as one diff. `orchestrator story plan` surveys each repository with
+review reads well, and ends as one diff. The task names the services it touches; `orchestrator
+story plan` finds their checkouts under `story.roots` (no model call), surveys each of them with
 a read-only call, asks a tool-less call for a specification and tasks with dependencies, checks
 the answer and writes `specs/<slug>/` in this repository's own format. The operator reads and
 edits it. `orchestrator story run` is the approval: Go orders the tasks from their declared
@@ -29,7 +30,7 @@ every ordinary run looks, for a later calibration, and decides nothing.
 | task | title | size | depends on |
 |---|---|---|---|
 | [ST01](tasks/TASK-ST01-model.md) | `internal/story`: task files, graph, order, bases, README rendering | M | — |
-| [ST02](tasks/TASK-ST02-config.md) | config: `story`, `jira.create`; story repository resolution | S | — |
+| [ST02](tasks/TASK-ST02-config.md) | config: `story`, `jira.create`; finding the services the task names | S | ST01 |
 | [ST03](tasks/TASK-ST03-survey-specify.md) | survey and specify: prompts, calls, strict answers, logs | M–L | ST02 |
 | [ST04](tasks/TASK-ST04-story-plan.md) | `story plan`: writing the spec, the one-task case, `.plan-<id>` | M | ST01, ST03 |
 | [ST05](tasks/TASK-ST05-story-task-run.md) | `run --story-task`: input, base and branch, development on, criteria, commit message | M | ST01, WT04, WT06 |
@@ -40,13 +41,12 @@ every ordinary run looks, for a later calibration, and decides nothing.
 | [ST10](tasks/TASK-ST10-integration-docs.md) | scenarios, MVP.md §48, CLAUDE.md, README, example, TODO.md | M | all |
 
 ```
-ST02 ─┬─ ST03 ─┐
-      │        ├─ ST04
-ST01 ─┼────────┘
-      ├─ ST05 ─┐            (ST05 also needs WT04, WT06; ST06 needs WT07)
-      └────────┴─ ST06 ─ ST07 ─┐
-ST02 ─ ST08 ───────────────────┼─ ST10
-ST09 ──────────────────────────┘
+ST01 ─┬─ ST02 ─┬─ ST03 ─ ST04 ──────┐
+      │        ├─ ST08 ─────────────┤
+      │        └──────┐             │
+      └─ ST05 ─────── ST06 ─ ST07 ──┼─ ST10
+         (ST05 also needs WT04, WT06; ST06 needs WT07)
+ST09 ───────────────────────────────┘
 ```
 
 Estimate: 20–24 engineering days, after `specs/worktree/`. ST01, ST02 and ST09 can start before
