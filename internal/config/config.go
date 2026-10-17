@@ -413,11 +413,30 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
+	// Isolation is where a workflow with implement runs: worktree (the default) or inplace
+	// (specs/worktree/SPEC.md §6). Validate refuses any other value; read it through
+	// IsolationMode.
+	Isolation string `yaml:"isolation"`
+}
+
+// execution.isolation values.
+const (
+	IsolationWorktree = "worktree"
+	IsolationInplace  = "inplace"
+)
+
+// IsolationMode is execution.isolation, worktree when absent.
+func (e ExecutionConfig) IsolationMode() string {
+	if e.Isolation == "" {
+		return IsolationWorktree
+	}
+	return e.Isolation
 }
 
 func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Timeout string `yaml:"timeout"`
+		Timeout   string `yaml:"timeout"`
+		Isolation string `yaml:"isolation"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -427,7 +446,25 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 		return err
 	}
 	e.Timeout = d
+	e.Isolation = raw.Isolation
+	if e.Isolation == "" {
+		e.Isolation = IsolationWorktree
+	}
 	return nil
+}
+
+// WorktreeConfig is the top-level worktree section (specs/worktree/SPEC.md §6).
+type WorktreeConfig struct {
+	// Setup is a trusted operator command run once in a new worktree before any model step,
+	// like test.command. It only applies with isolation worktree.
+	Setup string `yaml:"setup"`
+}
+
+// WorktreeRun reports whether a run of wf happens in its own git worktree: isolation is
+// worktree and the workflow contains implement. A workflow without implement runs in place
+// (specs/worktree/SPEC.md §6, O3).
+func (c Config) WorktreeRun(wf domain.Workflow) bool {
+	return c.Execution.IsolationMode() == IsolationWorktree && wf.Contains(domain.ActionImplement)
 }
 
 // CurrentVersion is the only config version this build accepts.
@@ -439,6 +476,9 @@ type Config struct {
 	Test      TestConfig      `yaml:"test"`
 	Limits    LimitsConfig    `yaml:"limits"`
 	Execution ExecutionConfig `yaml:"execution"`
+
+	// Worktree configures the worktree isolation of a run (specs/worktree/SPEC.md §6).
+	Worktree WorktreeConfig `yaml:"worktree"`
 
 	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
 	Review ReviewConfig `yaml:"review"`

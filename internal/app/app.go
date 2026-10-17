@@ -50,7 +50,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -73,6 +73,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.allowRedTests && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
 	}
+	if cli.inplace && rest[0] != "run" {
+		return &apperr.ConfigError{Msg: "--inplace is only valid with run"}
+	}
 	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" {
 		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume and validate"}
 	}
@@ -88,7 +91,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cli.jiraRef == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.inplace, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -139,6 +142,9 @@ type cliArgs struct {
 	// allowRedTests is --allow-red-tests: the task is to make failing tests pass, so a red
 	// pre-run test does not stop the run (specs/hardening/SPEC.md §8.4).
 	allowRedTests bool
+	// inplace is --inplace: this run does not use a worktree whatever execution.isolation says
+	// (specs/worktree/SPEC.md §6, O5).
+	inplace bool
 	// claudeAuth is --claude-auth (auto, api or login); empty if not given
 	// (specs/claude-auth/SPEC.md §6).
 	claudeAuth string
@@ -147,7 +153,7 @@ type cliArgs struct {
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the repeatable
-// --stage/--stage=X, --allow-red-tests and --verbose/-v out of args, in any position, and returns them with the remaining
+// --stage/--stage=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them with the remaining
 // positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
 	cli := cliArgs{configPath: defaultConfigPath}
@@ -215,6 +221,8 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
+		case arg == "--inplace":
+			cli.inplace = true
 		case arg == "--verbose" || arg == "-v":
 			cli.verbose = true
 		default:
@@ -711,7 +719,7 @@ func runsReport(stdout io.Writer, dir string) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests, inplace bool, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -852,7 +860,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	reporter.Pause()
-	if err := checkWorktree(cfg, wf, dirty, stderr); err != nil {
+	if err := checkWorktree(decideCtx, repo, cfg, wf, inplace, dirty, stderr); err != nil {
 		return failRun(store, run, err)
 	}
 	// The review screen shows the stages itself, editable; the decision block above it
@@ -878,7 +886,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 			if err != nil {
 				return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the edited workflow", Err: err})
 			}
-			if err := checkWorktree(cfg, nwf, dirty, stderr); err != nil {
+			if err := checkWorktree(decideCtx, repo, cfg, nwf, inplace, dirty, stderr); err != nil {
 				return failRun(store, run, err)
 			}
 			run.Decision, run.Workflow = &d, &nwf
@@ -903,8 +911,17 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 // workflow that writes must start from a clean restore point (specs/permissions/SPEC.md
 // §7.2). It is checked before any approval prompt, so nobody approves a run that cannot
 // start. A dirty tree that is allowed only gets a warning.
-func checkWorktree(cfg config.Config, wf domain.Workflow, dirty bool, stderr io.Writer) error {
+//
+// A worktree run (cfg.WorktreeRun, and not inplace - run --inplace) writes in a fresh checkout
+// of HEAD, so the operator's dirty tree is never a refusal and security.require_clean_worktree
+// does not apply: it only gets the warning that the changes are not part of the run
+// (specs/worktree/SPEC.md §6).
+func checkWorktree(ctx context.Context, repo *repository.Repository, cfg config.Config, wf domain.Workflow, inplace, dirty bool, stderr io.Writer) error {
 	if !dirty {
+		return nil
+	}
+	if !inplace && cfg.WorktreeRun(wf) {
+		warnDirtyWorktreeRun(ctx, repo, stderr)
 		return nil
 	}
 	if wf.Contains(domain.ActionImplement) && cfg.Security.CleanWorktreeRequired() {
@@ -914,6 +931,31 @@ func checkWorktree(cfg config.Config, wf domain.Workflow, dirty bool, stderr io.
 	}
 	logging.DirtyRepoWarning(stderr)
 	return nil
+}
+
+// warnDirtyWorktreeRun prints the warning of a worktree run that starts beside a dirty tree.
+// The run's own directory does not count, as in IsDirty. If git cannot say which commit or how
+// many changes, the warning says so in general terms rather than failing the run.
+func warnDirtyWorktreeRun(ctx context.Context, repo *repository.Repository, stderr io.Writer) {
+	const tail = "(commit them first, or run with --inplace)."
+	if repo != nil {
+		head, herr := repo.HeadRef(ctx)
+		files, ferr := repo.ChangedFiles(ctx)
+		if herr == nil && ferr == nil {
+			n := 0
+			for _, f := range files {
+				if f != ".orchestrator" && !strings.HasPrefix(f, ".orchestrator/") {
+					n++
+				}
+			}
+			if len(head) > 7 {
+				head = head[:7]
+			}
+			fmt.Fprintf(stderr, "Warning: the run starts from HEAD %s; %d uncommitted changes in your tree are not part of it %s\n", head, n, tail)
+			return
+		}
+	}
+	fmt.Fprintf(stderr, "Warning: the run starts from HEAD; the uncommitted changes in your tree are not part of it %s\n", tail)
 }
 
 // session is what the part of a run after the decision needs. run and resume each build

@@ -106,7 +106,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		if err != nil {
 			return err
 		}
-		if err := checkWorktree(cfg, *run.Workflow, dirty, stderr); err != nil {
+		if err := checkWorktree(ctx, repo, cfg, *run.Workflow, false, dirty, stderr); err != nil {
 			return err
 		}
 		opts.dirty = dirty

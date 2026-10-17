@@ -285,6 +285,7 @@ limits:
 %s
 execution:
   timeout: %s
+  isolation: inplace
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		opts.pathRulesYAML(), opts.actionsYAML(),
 		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, opts.extraYAML)

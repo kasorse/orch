@@ -210,6 +210,15 @@ limits:
 
 execution:
   timeout: 15m
+  # Where a workflow with implement runs (specs/worktree/SPEC.md §6): worktree (default) is its
+  # own git worktree on a branch of its own, so your working tree is never touched; inplace is
+  # your working tree, which must be clean. `run --inplace` does that for one run.
+  # isolation: worktree
+
+# worktree:
+#   # Run once in a new worktree before any model step, with the network; trusted operator
+#   # config like test.command. A config error with isolation: inplace.
+#   setup: "npm ci"
 
 # What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement
 # writes, and only inside the repository. These keys only tighten the guards around

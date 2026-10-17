@@ -73,6 +73,15 @@ func Validate(cfg Config) error {
 		problems = append(problems, "execution.timeout must be a positive duration")
 	}
 
+	switch cfg.Execution.Isolation {
+	case "", IsolationWorktree, IsolationInplace:
+	default:
+		problems = append(problems, fmt.Sprintf("execution.isolation must be worktree (the default) or inplace, got %q", cfg.Execution.Isolation))
+	}
+	if cfg.Execution.Isolation == IsolationInplace && strings.TrimSpace(cfg.Worktree.Setup) != "" {
+		problems = append(problems, "worktree.setup needs execution.isolation: worktree; with inplace it would never run")
+	}
+
 	problems = append(problems, decisionProblems(cfg)...)
 	problems = append(problems, pathRuleProblems(cfg)...)
 	problems = append(problems, providersProblems(cfg)...)
