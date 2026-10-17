@@ -806,6 +806,10 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	run.ClaudeAuth = &auth
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
+	run.Options.Isolation = cfg.Execution.IsolationMode()
+	if inplace {
+		run.Options.Isolation = domain.IsolationInplace
+	}
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)

@@ -50,6 +50,9 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if err := validateWorktree(run); err != nil {
+		return err
+	}
 	for i, r := range run.Options.PathRules {
 		if err := r.Validate(); err != nil {
 			return fmt.Errorf("options.path_rules[%d]: %w", i, err)

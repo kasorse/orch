@@ -238,18 +238,56 @@ type Run struct {
 	// Commit is the commit the operator approved at the end of a completed run
 	// (MVP.md §42); empty when nothing was committed.
 	Commit string `json:"commit,omitempty"`
+	// Worktree is the git worktree the run executes in (specs/worktree/SPEC.md §8.2); nil for an
+	// inplace run and in a run written before the field.
+	Worktree *RunWorktree `json:"worktree,omitempty"`
+}
+
+// Values of RunOptions.Isolation.
+const (
+	IsolationInplace   = "inplace"
+	IsolationWorktree  = "worktree"
+	worktreeBranchBase = "orchestrator/"
+)
+
+// WorktreeBranch is the branch a run's worktree is on (specs/worktree/SPEC.md §8.2).
+func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
+
+// RunWorktree is the record of a run's worktree. Everything a resume uses from it is derived
+// and checked, never trusted (specs/worktree/SPEC.md §8).
+type RunWorktree struct {
+	Path       string   `json:"path"`
+	Branch     string   `json:"branch"`
+	BaseRef    string   `json:"base_ref"`
+	BaseBranch string   `json:"base_branch,omitempty"`
+	AdminDir   string   `json:"admin_dir"`
+	SetupDone  bool     `json:"setup_done,omitempty"`
+	Conflicts  []string `json:"conflicts,omitempty"`
+	Removed    bool     `json:"removed,omitempty"`
 }
 
 // RunOptions are the config choices that change how a run moves between steps. They are
 // copied into the run when it is created, so a resume follows the rule the run started with
 // whatever the config says now.
 type RunOptions struct {
+	// Isolation is where the run executes: IsolationInplace or IsolationWorktree, chosen at run
+	// start from execution.isolation and run --inplace (specs/worktree/SPEC.md §6). Empty in a
+	// run written before the field, which is inplace; see IsolationMode.
+	Isolation string `json:"isolation,omitempty"`
 	// ReviewFixMedium is review.fix_medium: a passing review with a medium issue sends the run
 	// back to implement once.
 	ReviewFixMedium bool `json:"review_fix_medium,omitempty"`
 	// PathRules is a copy of policy.paths (specs/governance/SPEC.md §4.4). Nil, never empty,
 	// when there are none, so a run without rules writes no options.
 	PathRules []PathRule `json:"path_rules,omitempty"`
+}
+
+// IsolationMode is the run's isolation, inplace when none was recorded.
+func (o RunOptions) IsolationMode() string {
+	if o.Isolation == "" {
+		return IsolationInplace
+	}
+	return o.Isolation
 }
 
 // SecretFinding is one likely secret a step added: where, which rule, and the fingerprint

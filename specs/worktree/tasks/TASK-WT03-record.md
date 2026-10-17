@@ -30,3 +30,17 @@ derived and checked, never trusted (`SPEC.md` §6, §8.1, §8.2).
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-17. Code and unit tests are in; `scripts/check.sh` is left to the operator, so the task
+is not closed in the README or TODO.md Q4 yet.
+
+- `RunOptions.Isolation` is a string (`domain.IsolationInplace` / `IsolationWorktree`);
+  `IsolationMode()` gives `inplace` for a run recorded without it. `runTask` sets it from
+  `execution.isolation` and `--inplace`. The per-workflow rule (no `implement` runs in place, O3)
+  is decided after approval and belongs to WT04, which overwrites it there.
+- `StateDir()` returns `(string, error)` (no home directory is an error); a relative
+  `$XDG_STATE_HOME` is ignored.
+- `base_branch` is checked with a copy of the repository package's cheap branch-name check
+  (`persistence` does not import `repository`); it is not run through `git check-ref-format`.
