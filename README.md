@@ -750,7 +750,7 @@ would end up in the same commit), or when git's config or hooks or a protected p
 changed since the run started (`git commit` runs those hooks). See `MVP.md` §42.
 
 `auto_commit: true` in the config commits without the question, in every mode including
-`--mode auto`, after the same checks. It does not commit when there is a warning (a failing
+`--mode auto` but not `--mode manual` (which still asks), after the same checks. It does not commit when there is a warning (a failing
 review, a likely secret) or no `summary_short` to use as the message, nor when the change
 matched a `policy.paths` rule with `approval: manual`; it says why and the changes stay in
 the working tree. Interactively, the question lists those rules and their files first.

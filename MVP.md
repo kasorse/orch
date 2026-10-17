@@ -3620,8 +3620,10 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 ## 42.6 `auto_commit`
 
-`auto_commit: true` (top level, default false) is the operator's yes given in advance. The
-commit is then made without the question, in every mode (`--mode auto` included) and
+`auto_commit: true` (top level, default false) is the operator's yes given in advance. It
+does not apply to `--mode manual`, where the person confirms every step: that run ends with
+the question of §42.2. In every other mode the
+commit is then made without the question (`--mode auto` included) and
 without a terminal, after every check of §42.1 but the first. It is not made, and
 `Not committing automatically: <why>` is printed, when the question would have shown a
 warning (§42.2) or there is no proposed message (no `summary_short`): nobody is there to

@@ -1122,8 +1122,8 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		s.reporter.Answer(answer)
 	}
 	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
-	// --mode auto asks nothing.
-	if s.cfg.AutoCommit || (opts.mode != domain.ModeAuto && isTerminal(s.stdin)) {
+	// --mode auto asks nothing. auto_commit does not apply to --mode manual.
+	if (s.cfg.AutoCommit && run.Mode != domain.ModeManual) || (opts.mode != domain.ModeAuto && isTerminal(s.stdin)) {
 		offerCommit(ctx, s)
 	}
 	return nil

@@ -26,7 +26,8 @@ func offerCommit(ctx context.Context, s *session) {
 		return
 	}
 	out := s.reporter.PausingWriter()
-	auto := s.cfg.AutoCommit
+	// A manual run is confirmed by a person step by step: it ends with the question too.
+	auto := s.cfg.AutoCommit && run.Mode != domain.ModeManual
 	skip := func(why string) {
 		if auto {
 			fmt.Fprintf(out, "\nNot committing automatically: %s\n", why)
