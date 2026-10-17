@@ -1893,7 +1893,11 @@ Model: sonnet
 ✓ PASS
 
 Run completed successfully.
+Run ID: <run id>
 ```
+
+The final status block ends with the run ID (also after a failed or stopped run), so it
+need not be looked up in the header.
 
 The decision summary shows, when they apply: a `translation: ru → en via <provider>/<model>`
 line (or a `Warning: translation failed (...)` line), the context depth with the

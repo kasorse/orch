@@ -257,6 +257,9 @@ func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 		stats += " · " + formatElapsed(time.Since(run.CreatedAt))
 	}
 	lines = append(lines, st.gray(stats))
+	if run.ID != "" {
+		lines = append(lines, st.gray("run id ")+run.ID)
+	}
 	fmt.Fprintln(r.Out)
 	// The result box on the left, the usage and limits cards stacked on the right of it -
 	// the same place the sidebar kept them during the run. A terminal too narrow for both

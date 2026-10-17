@@ -291,6 +291,18 @@ func TestRunFinished_Stopped(t *testing.T) {
 	}
 }
 
+func TestRunFinished_PrintsRunID(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.RunFinished(&domain.Run{ID: "run-123", Status: domain.RunFailed, FailureReason: "boom"})
+
+	want := "\nRun failed.\nReason: boom\nRun ID: run-123\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
 func TestAnnouncementHelpers(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)

@@ -492,6 +492,10 @@ func (r *ConsoleReporter) RunFinished(run *domain.Run) {
 	case domain.RunStopped:
 		fmt.Fprintf(r.Out, "\nRun stopped.\nReason: %s\n", run.FailureReason)
 	}
+	// The ID is repeated at the end, so it need not be hunted for in the header above.
+	if run.ID != "" {
+		fmt.Fprintf(r.Out, "Run ID: %s\n", run.ID)
+	}
 }
 
 // PreRunTestStarted announces the test command's run before the first step
