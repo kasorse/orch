@@ -4,7 +4,8 @@
 // objects, through a throwaway index; the tree and the index are untouched. The one ref it
 // writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint. CommitAll, the
 // one exception, stages and commits a finished run's changes on the operator's explicit
-// approval.)
+// approval.) The orchestrator also writes a run's own linked worktree and its branch
+// orchestrator/<run-id> (AddWorktree, RemoveWorktree); never the operator's tree, index or branch.
 package repository
 
 import (
@@ -366,8 +367,19 @@ func (r *Repository) GitFingerprint(ctx context.Context) (string, error) {
 		return "", err
 	}
 
+	gitDir, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err != nil {
+		return "", err
+	}
+
 	h := sha256.New()
 	hashFile(h, filepath.Join(strings.TrimSpace(common), "config"))
+	// A linked worktree adds its own admin directory: which one, and the config git reads
+	// from it under extensions.worktreeConfig. A plain checkout hashes as before.
+	if dir := strings.TrimSpace(gitDir); dir != strings.TrimSpace(common) {
+		fmt.Fprintf(h, "gitdir %s\n", dir)
+		hashFile(h, filepath.Join(dir, "config.worktree"))
+	}
 	hooksDir := strings.TrimSpace(hooks)
 	entries, err := os.ReadDir(hooksDir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
