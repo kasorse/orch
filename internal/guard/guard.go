@@ -28,8 +28,10 @@ import (
 type Guard interface {
 	// Snapshot records the protected state before an implement call.
 	Snapshot(ctx context.Context) (State, error)
-	// Changed returns what differs from before: protected paths the call changed, and
-	// ".git (config or hooks)" when the git fingerprint moved. Empty means no violation.
+	// Changed returns what differs from before: protected paths the call changed,
+	// ".git (config or hooks)" when the git fingerprint moved, and ".git (worktree pointer)"
+	// when a worktree's .git file no longer names its admin directory. Empty means no
+	// violation.
 	Changed(ctx context.Context, before State) ([]string, error)
 }
 
@@ -46,18 +48,34 @@ type State struct {
 	// untouched is not a violation (an ignored file, or any change when
 	// security.require_clean_worktree is false).
 	protected map[string]string
+	// gitPointer is the admin directory the worktree's .git file must name, "" in place
+	// (specs/worktree/SPEC.md §8.3). A resume baseline carries it, so CheckBaseline checks
+	// the pointer without the caller passing it.
+	gitPointer string
 }
 
 // Patterns returns a copy of the protected patterns the snapshot was taken with.
 func (s State) Patterns() []string { return append([]string(nil), s.patterns...) }
 
+// GitPointer returns the admin directory the snapshot expects the .git file to name, "" in
+// place.
+func (s State) GitPointer() string { return s.gitPointer }
+
 // GitViolation names a change to .git/config or the hooks in the list Changed returns.
 const GitViolation = ".git (config or hooks)"
+
+// PointerViolation names a linked worktree's .git file that no longer names its admin
+// directory (or cannot be read) in the list Changed returns.
+const PointerViolation = ".git (worktree pointer)"
 
 // RepoGuard is the Guard over a real repository.
 type RepoGuard struct {
 	Repo     *repository.Repository
 	Patterns []string
+	// GitPointer is the admin directory Repo's .git file must name when Repo is a run's
+	// linked worktree: the one AddWorktree returned, never what the file says now. Empty in
+	// place.
+	GitPointer string
 }
 
 // NewRepoGuard guards domain.DefaultProtectedPaths plus extra (security.protected_paths
@@ -84,7 +102,7 @@ func (g *RepoGuard) snapshotWith(ctx context.Context, fp string) (State, error) 
 	if err != nil {
 		return State{}, err
 	}
-	state := State{patterns: g.Patterns, gitFingerprint: fp, protected: map[string]string{}}
+	state := State{patterns: g.Patterns, gitFingerprint: fp, protected: map[string]string{}, gitPointer: g.GitPointer}
 	for _, p := range changed {
 		if g.protects(p) {
 			state.protected[p] = contentHash(filepath.Join(top, filepath.FromSlash(p)))
@@ -94,6 +112,11 @@ func (g *RepoGuard) snapshotWith(ctx context.Context, fp string) (State, error) 
 }
 
 func (g *RepoGuard) Changed(ctx context.Context, before State) ([]string, error) {
+	// In a linked worktree the .git file decides which git directory every git call below
+	// reads, so it is read in Go, before any of them (specs/worktree/SPEC.md §8.3).
+	if g.pointerChanged(before) {
+		return []string{PointerViolation}, nil
+	}
 	// The fingerprint is compared before anything runs git status: a planted
 	// core.fsmonitor would run on that very status call. rev-parse, which the fingerprint
 	// uses, does not run it.
@@ -126,14 +149,34 @@ func (g *RepoGuard) Changed(ctx context.Context, before State) ([]string, error)
 	return out, nil
 }
 
+// pointerChanged reports whether the .git file no longer names the expected admin directory:
+// the guard's own GitPointer, else the one the snapshot was taken with. A guard and a snapshot
+// that disagree are a change too. Unreadable counts as changed. In place there is nothing to
+// compare.
+func (g *RepoGuard) pointerChanged(before State) bool {
+	want := g.GitPointer
+	if want == "" {
+		want = before.gitPointer
+	} else if before.gitPointer != "" && before.gitPointer != want {
+		return true
+	}
+	if want == "" {
+		return false
+	}
+	got, err := repository.ReadGitPointer(g.Repo.Dir)
+	return err != nil || got != want
+}
+
 type stateJSON struct {
 	Patterns       []string          `json:"patterns"`
 	GitFingerprint string            `json:"git_fingerprint"`
 	Protected      map[string]string `json:"protected"`
+	// Pointer is absent in place and in a baseline recorded before worktree runs existed.
+	Pointer string `json:"pointer,omitempty"`
 }
 
 func (s State) MarshalJSON() ([]byte, error) {
-	return json.Marshal(stateJSON{Patterns: s.patterns, GitFingerprint: s.gitFingerprint, Protected: s.protected})
+	return json.Marshal(stateJSON{Patterns: s.patterns, GitFingerprint: s.gitFingerprint, Protected: s.protected, Pointer: s.gitPointer})
 }
 
 func (s *State) UnmarshalJSON(data []byte) error {
@@ -144,21 +187,25 @@ func (s *State) UnmarshalJSON(data []byte) error {
 	if j.GitFingerprint == "" || len(j.Patterns) == 0 || j.Protected == nil {
 		return errors.New("incomplete guard state")
 	}
-	*s = State{patterns: j.Patterns, gitFingerprint: j.GitFingerprint, protected: j.Protected}
+	if j.Pointer != "" && !filepath.IsAbs(j.Pointer) {
+		return errors.New("invalid guard state: pointer is not an absolute path")
+	}
+	*s = State{patterns: j.Patterns, gitFingerprint: j.GitFingerprint, protected: j.Protected, gitPointer: j.Pointer}
 	return nil
 }
 
 // CheckBaseline compares the repository with a run's recorded run-start baseline, before a
-// resume runs anything (specs/resume/SPEC.md §9.1). It guards the baseline's own patterns.
-// The git fingerprint is compared first, before any git status: a planted core.fsmonitor
-// would run on that very call. A nil error with an empty list means nothing protected
-// changed; otherwise the list names what did, as Changed does.
+// resume runs anything (specs/resume/SPEC.md §9.1). It guards the baseline's own patterns,
+// and in a worktree the .git pointer the baseline names. The pointer and then the git
+// fingerprint are compared first, before any git status: a planted core.fsmonitor would run
+// on that very call. A nil error with an empty list means nothing protected changed;
+// otherwise the list names what did, as Changed does.
 func CheckBaseline(ctx context.Context, repo *repository.Repository, baseline json.RawMessage) ([]string, error) {
 	var before State
 	if err := json.Unmarshal(baseline, &before); err != nil {
 		return nil, fmt.Errorf("invalid resume baseline: %w", err)
 	}
-	g := &RepoGuard{Repo: repo, Patterns: before.patterns}
+	g := &RepoGuard{Repo: repo, Patterns: before.patterns, GitPointer: before.gitPointer}
 	return g.Changed(ctx, before)
 }
 

@@ -98,6 +98,10 @@ type configOptions struct {
 	explore string
 	// maxCostUSD is limits.max_cost_usd; 0 renders none.
 	maxCostUSD float64
+	// isolation is execution.isolation; "" pins inplace, which every scenario that checks the
+	// result in the working directory needs (specs/worktree/SPEC.md §14). The worktree
+	// scenarios set "worktree" and point XDG_STATE_HOME at a temporary directory.
+	isolation string
 }
 
 // pathRulesYAML is the policy.paths and policy.explore keys that follow policy.stages, or
@@ -236,6 +240,10 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	if sandbox == "" {
 		sandbox = "none"
 	}
+	isolation := opts.isolation
+	if isolation == "" {
+		isolation = "inplace"
+	}
 	content := fmt.Sprintf(`version: 2
 
 decision:
@@ -285,10 +293,10 @@ limits:
 %s
 execution:
   timeout: %s
-  isolation: inplace
+  isolation: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		opts.pathRulesYAML(), opts.actionsYAML(),
-		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, opts.extraYAML)
+		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, isolation, opts.extraYAML)
 	content += opts.tailYAML()
 	content += opts.jira.yaml()
 

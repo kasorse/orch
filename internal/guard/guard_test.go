@@ -303,4 +303,136 @@ func TestCheckBaseline(t *testing.T) {
 			t.Error("accepted an empty baseline")
 		}
 	})
+
+	t.Run("the worktree pointer the baseline names", func(t *testing.T) {
+		wt, admin := linkedWorktree(t)
+		baseline := baselineOf(t, &RepoGuard{Repo: wt, Patterns: NewRepoGuard(wt, nil).Patterns, GitPointer: admin})
+		if changed, err := CheckBaseline(context.Background(), wt, baseline); err != nil || len(changed) != 0 {
+			t.Fatalf("CheckBaseline on an untouched worktree = %v, %v", changed, err)
+		}
+		put(t, wt.Dir, ".git", "gitdir: "+t.TempDir()+"\n")
+		changed, err := CheckBaseline(context.Background(), &repository.Repository{Dir: wt.Dir, Executor: failingExecutor{t}}, baseline)
+		if err != nil || !slices.Equal(changed, []string{PointerViolation}) {
+			t.Errorf("CheckBaseline = %v, %v; want [%s]", changed, err, PointerViolation)
+		}
+	})
+}
+
+// failingExecutor fails the test on any process it is asked to run.
+type failingExecutor struct{ t *testing.T }
+
+func (f failingExecutor) Run(_ context.Context, spec execution.Spec) (execution.ProcessResult, error) {
+	f.t.Errorf("ran %s %v: the pointer must be checked without running anything", spec.Executable, spec.Args)
+	return execution.ProcessResult{ExitCode: 1}, nil
+}
+
+// linkedWorktree adds a linked worktree to a guardRepo and returns it with its admin
+// directory.
+func linkedWorktree(t *testing.T) (*repository.Repository, string) {
+	t.Helper()
+	repo, _ := guardRepo(t)
+	head, err := repo.HeadRef(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "wt")
+	admin, err := repo.AddWorktree(context.Background(), path, "orchestrator/test", head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &repository.Repository{Dir: path, Executor: repo.Executor}, admin
+}
+
+// TestRepoGuard_GitPointer: a rewritten, removed or replaced .git file is reported as the
+// pointer violation, without running git - the file decides which git directory git reads.
+func TestRepoGuard_GitPointer(t *testing.T) {
+	const admin = "/repo/.git/worktrees/wt"
+	cases := []struct {
+		name  string
+		write func(t *testing.T, dir string)
+	}{
+		{"rewritten", func(t *testing.T, dir string) { put(t, dir, ".git", "gitdir: /planted/git\n") }},
+		{"removed", func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"a directory", func(t *testing.T, dir string) {
+			if err := os.Remove(filepath.Join(dir, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			put(t, dir, ".git", "gitdir: "+admin+"\n")
+			before := State{patterns: []string{"a"}, gitFingerprint: "f", protected: map[string]string{}, gitPointer: admin}
+			tc.write(t, dir)
+			g := &RepoGuard{Repo: &repository.Repository{Dir: dir, Executor: failingExecutor{t}}, Patterns: []string{"a"}, GitPointer: admin}
+			got, err := g.Changed(context.Background(), before)
+			if err != nil || !slices.Equal(got, []string{PointerViolation}) {
+				t.Errorf("Changed = %q, %v; want [%s]", got, err, PointerViolation)
+			}
+		})
+	}
+
+	t.Run("the guard's expectation, not the snapshot's, decides", func(t *testing.T) {
+		dir := t.TempDir()
+		put(t, dir, ".git", "gitdir: /planted/git\n")
+		// A snapshot taken over a planted pointer does not make it the expected one.
+		before := State{patterns: []string{"a"}, gitFingerprint: "f", protected: map[string]string{}, gitPointer: "/planted/git"}
+		g := &RepoGuard{Repo: &repository.Repository{Dir: dir, Executor: failingExecutor{t}}, Patterns: []string{"a"}, GitPointer: admin}
+		if got, _ := g.Changed(context.Background(), before); !slices.Equal(got, []string{PointerViolation}) {
+			t.Errorf("Changed = %q, want [%s]", got, PointerViolation)
+		}
+	})
+
+	t.Run("an untouched worktree", func(t *testing.T) {
+		wt, admin := linkedWorktree(t)
+		g := NewRepoGuard(wt, nil)
+		g.GitPointer = admin
+		before, err := g.Snapshot(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if before.GitPointer() != admin {
+			t.Errorf("Snapshot pointer = %q, want %q", before.GitPointer(), admin)
+		}
+		put(t, wt.Dir, "main.go", "package main // fixed\n")
+		if got, err := g.Changed(context.Background(), before); err != nil || len(got) != 0 {
+			t.Errorf("Changed = %q, %v; want nothing", got, err)
+		}
+	})
+}
+
+// TestState_PointerJSON: the pointer round-trips, and a baseline without it (in place, or
+// recorded before worktree runs) still loads.
+func TestState_PointerJSON(t *testing.T) {
+	in := State{patterns: []string{"a"}, gitFingerprint: "f", protected: map[string]string{}, gitPointer: "/repo/.git/worktrees/wt"}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back State
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("unmarshal %s: %v", data, err)
+	}
+	if back.GitPointer() != in.gitPointer {
+		t.Errorf("pointer = %q, want %q", back.GitPointer(), in.gitPointer)
+	}
+
+	var old State
+	if err := json.Unmarshal([]byte(`{"patterns":["a"],"git_fingerprint":"f","protected":{}}`), &old); err != nil {
+		t.Fatalf("a baseline without a pointer: %v", err)
+	}
+	if old.GitPointer() != "" {
+		t.Errorf("pointer = %q, want none", old.GitPointer())
+	}
+	if err := old.UnmarshalJSON([]byte(`{"patterns":["a"],"git_fingerprint":"f","protected":{},"pointer":"rel/dir"}`)); err == nil {
+		t.Error("accepted a relative pointer")
+	}
 }

@@ -154,6 +154,20 @@ func TestRunHeader_PrintsIDAndDir(t *testing.T) {
 	}
 }
 
+func TestWorktree_PrintsPathBranchAndBase(t *testing.T) {
+	const sha = "8d0e4b2a1b2c3d4e5f60718293a4b5c6d7e8f901"
+	for _, tc := range []struct{ baseBranch, want string }{
+		{"master", "Worktree: /state/wt/r1 (orchestrator/r1 from master@8d0e4b2)\n"},
+		{"", "Worktree: /state/wt/r1 (orchestrator/r1 from 8d0e4b2)\n"},
+	} {
+		var buf bytes.Buffer
+		NewConsoleReporter(&buf).Worktree("/state/wt/r1", "orchestrator/r1", tc.baseBranch, sha)
+		if buf.String() != tc.want {
+			t.Errorf("got %q, want %q", buf.String(), tc.want)
+		}
+	}
+}
+
 func TestCallReporter_ProviderCallStarted_PrintsShortLine(t *testing.T) {
 	var buf bytes.Buffer
 	c := CallReporter{ConsoleReporter: NewConsoleReporter(&buf)}

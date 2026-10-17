@@ -79,6 +79,12 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if run.Status == domain.RunCompleted {
 		return reportCompleted(s)
 	}
+	// A run that has its worktree continues there (specs/worktree/SPEC.md §11), which is not
+	// built yet (WT07). Until then it is refused, never continued in the operator's tree.
+	if run.Worktree != nil {
+		return &apperr.RunStateError{Kind: apperr.RunNotResumable, RunID: run.ID,
+			Msg: fmt.Sprintf("resuming a run in its worktree is not supported yet; its changes are in %s (branch %s)", run.Worktree.Path, run.Worktree.Branch)}
+	}
 	if err := checkBaselineRecorded(run); err != nil {
 		return err
 	}
@@ -106,7 +112,11 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		if err != nil {
 			return err
 		}
-		if err := checkWorktree(ctx, repo, cfg, *run.Workflow, false, dirty, stderr); err != nil {
+		// The clean-start rule follows the isolation the run recorded, never the current
+		// config (specs/worktree/SPEC.md §11), as executeWorkflow does.
+		modeCfg := cfg
+		modeCfg.Execution.Isolation = run.Options.IsolationMode()
+		if err := checkWorktree(ctx, repo, modeCfg, *run.Workflow, false, dirty, stderr); err != nil {
 			return err
 		}
 		opts.dirty = dirty

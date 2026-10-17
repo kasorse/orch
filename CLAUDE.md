@@ -166,7 +166,10 @@ history, otherwise the state the history and the transition table give (MVP.md �
   compares protected paths (git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
-  before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
+  before any `git status` — git status runs a planted `core.fsmonitor`. In a worktree run
+  (`specs/worktree/`) the worktree's `.git` file is read in Go and compared with the recorded
+  `admin_dir` before the fingerprint (`RepoGuard.GitPointer`, violation
+  `.git (worktree pointer)`), and the sandbox binds it read-only. `Dispatcher.Guard` is
   required — `implement` and `test` refuse without one. Provider CLIs run with
   `execution.ScrubbedEnv()`, which also drops the credential variables the config names
   (`Config.CredentialEnvNames`, registered right after `Validate`); every process that runs

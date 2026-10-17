@@ -82,6 +82,35 @@ func (r *Repository) AddWorktree(ctx context.Context, path, branch, base string)
 	return strings.TrimSpace(out), nil
 }
 
+// BranchExists reports whether refs/heads/<name> exists. An invalid name is refused without
+// running git.
+func (r *Repository) BranchExists(ctx context.Context, name string) (bool, error) {
+	if !validBranchName(name) {
+		return false, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a valid branch name", name)}
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"show-ref", "--verify", "--quiet", "refs/heads/" + name}, WorkingDir: r.Dir})
+	if err != nil {
+		return false, &apperr.RepositoryError{Msg: "failed to run git show-ref", Err: err}
+	}
+	switch result.ExitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	}
+	return false, &apperr.RepositoryError{Msg: "git show-ref failed: " + strings.TrimSpace(result.Stderr)}
+}
+
+// CommonDir returns the absolute path of the git directory every worktree of the repository
+// shares.
+func (r *Repository) CommonDir(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // ListWorktrees lists the repository's worktrees, the main one first.
 func (r *Repository) ListWorktrees(ctx context.Context) ([]Worktree, error) {
 	out, err := r.git(ctx, "worktree", "list", "--porcelain", "-z")

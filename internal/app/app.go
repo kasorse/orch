@@ -982,6 +982,9 @@ type session struct {
 	protected []string
 	// runsRel is the runs directory relative to the repository top level, or "".
 	runsRel string
+	// worktree is the run's worktree once the session switched to it (switchToWorktree);
+	// nil in place.
+	worktree *domain.RunWorktree
 }
 
 // newSession builds the Dispatcher and resolves the guarded paths. Nothing here calls a
@@ -1087,10 +1090,22 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 
 	if len(run.Executions) == 0 {
-		recordRestorePoint(ctx, s.repo, run, opts.dirty, s.reporter)
+		// Everything below reads s.repo - the restore point, the baseline, the sandbox, the
+		// step guard, the secret baseline, the observer and the gate - so a worktree run
+		// switches to its worktree first.
+		if err := enterWorktree(ctx, s); err != nil {
+			return failRun(store, run, err)
+		}
+		if s.worktree != nil {
+			// A fresh checkout of base_ref: the base is the restore point, with no snapshot.
+			run.PreRunRef = s.worktree.BaseRef
+			s.reporter.RestorePoint(run.PreRunRef)
+		} else {
+			recordRestorePoint(ctx, s.repo, run, opts.dirty, s.reporter)
+		}
 		// The guard over what the run must never change: the run-start baseline a resume
 		// is checked against.
-		if err := recordBaseline(ctx, s.repo, run, action.NewRepoGuard(s.repo, s.protected)); err != nil {
+		if err := recordBaseline(ctx, s.repo, run, s.newRepoGuard(s.protected)); err != nil {
 			return failRun(store, run, err)
 		}
 		if err := store.SaveRun(run); err != nil {
@@ -1105,7 +1120,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	defer cancelRun()
 
 	if cfg.Test.Sandboxed() {
-		sandbox, err := testSandbox(ctx, s.repo, cfg.Test)
+		sandbox, err := testSandbox(ctx, s.repo, cfg.Test, s.readOnlyFiles())
 		if err != nil {
 			return failRun(store, run, err)
 		}
@@ -1113,7 +1128,7 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	// The step guard also covers the runs directory's resume inputs, which change with
 	// every step and so cannot be part of the baseline.
-	s.dispatcher.Guard = action.NewRepoGuard(s.repo, slices.Concat(s.protected, action.RunDirPatterns(s.runsRel)))
+	s.dispatcher.Guard = s.newRepoGuard(slices.Concat(s.protected, action.RunDirPatterns(s.runsRel)))
 
 	if needsPreRunTest(*cfg, run) {
 		if err := preRunTest(runCtx, s); err != nil {
@@ -1166,6 +1181,12 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
+	}
+	// The commit on the run's branch is WT06; until then a worktree run's changes stay
+	// uncommitted in the worktree, and the §42 offer, which would commit there, is not made.
+	if s.worktree != nil {
+		s.reporter.WorktreeLeft(s.worktree.Path)
+		return nil
 	}
 	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
 	// --mode auto asks nothing. auto_commit does not apply to --mode manual.
@@ -1293,9 +1314,9 @@ func recordBaseline(ctx context.Context, repo *repository.Repository, run *domai
 }
 
 // testSandbox resolves test.sandbox: bwrap into the paths the sandbox binds: the
-// repository root writable, its git directories read-only over it, $HOME hidden, and the
-// configured binds.
-func testSandbox(ctx context.Context, repo *repository.Repository, t config.TestConfig) (*testexec.Sandbox, error) {
+// repository root writable, its git directories and roFiles (a worktree's .git file)
+// read-only over it, $HOME hidden, and the configured binds.
+func testSandbox(ctx context.Context, repo *repository.Repository, t config.TestConfig, roFiles []string) (*testexec.Sandbox, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, &apperr.ConfigError{Msg: "test.sandbox: cannot determine the home directory to hide", Err: err}
@@ -1309,7 +1330,7 @@ func testSandbox(ctx context.Context, repo *repository.Repository, t config.Test
 		return nil, err
 	}
 	ro, rw := t.ResolveBinds(home)
-	return &testexec.Sandbox{Home: home, RepoRoot: top, GitDirs: gitDirs, ReadOnly: ro, ReadWrite: rw}, nil
+	return &testexec.Sandbox{Home: home, RepoRoot: top, GitDirs: gitDirs, ReadOnlyFiles: roFiles, ReadOnly: ro, ReadWrite: rw}, nil
 }
 
 // configPattern returns the config file's path relative to the repository root when it

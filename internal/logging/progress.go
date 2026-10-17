@@ -349,6 +349,40 @@ func (r *ConsoleReporter) RestorePoint(ref string) {
 	fmt.Fprintf(r.Out, "Restore point: %s\n", ref)
 }
 
+// Worktree announces, after approval, the git worktree a run executes in and where it starts
+// (specs/worktree/SPEC.md §13): the base branch at the base commit, or only the commit when
+// HEAD was detached.
+func (r *ConsoleReporter) Worktree(path, branch, baseBranch, baseRef string) {
+	base := shortRef(baseRef)
+	if baseBranch != "" {
+		base = baseBranch + "@" + base
+	}
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "worktree")), path, st.gray(fmt.Sprintf("(%s from %s)", branch, base)))
+		return
+	}
+	fmt.Fprintf(r.Out, "Worktree: %s (%s from %s)\n", path, branch, base)
+}
+
+// WorktreeLeft reports at the end of a worktree run that its changes stay uncommitted in the
+// worktree.
+func (r *ConsoleReporter) WorktreeLeft(path string) {
+	if r.Pretty {
+		fmt.Fprintf(r.Out, "%s %s\n", r.st().gray("The changes are uncommitted in the worktree"), path)
+		return
+	}
+	fmt.Fprintf(r.Out, "The changes are uncommitted in the worktree %s\n", path)
+}
+
+// shortRef is the 7-character abbreviation of a commit SHA.
+func shortRef(ref string) string {
+	if len(ref) > 7 {
+		return ref[:7]
+	}
+	return ref
+}
+
 // RestorePointUnavailable reports that no restore point could be recorded; the run goes on.
 func (r *ConsoleReporter) RestorePointUnavailable(err error) {
 	if r.Pretty {

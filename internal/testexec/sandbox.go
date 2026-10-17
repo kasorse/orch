@@ -23,6 +23,10 @@ type Sandbox struct {
 	// core.fsmonitor into .git would run code outside the sandbox on the orchestrator's
 	// next git call.
 	GitDirs []string `json:"git_dirs"`
+	// ReadOnlyFiles are files inside RepoRoot re-bound read-only over it: a linked
+	// worktree's .git file, which decides which git directory the orchestrator's next git
+	// call reads (specs/worktree/SPEC.md §12). Each must exist.
+	ReadOnlyFiles []string `json:"ro_files,omitempty"`
 	// ReadOnly and ReadWrite are test.ro_binds / test.rw_binds (caches, module stores).
 	ReadOnly  []string `json:"ro_binds"`
 	ReadWrite []string `json:"rw_binds"`
@@ -42,12 +46,16 @@ var isolation = []string{
 // args builds the bwrap argv. Mount order is load-bearing - bwrap applies mounts in
 // order, later ones over earlier ones: the $HOME tmpfs must come before the repository
 // and cache binds (a repository under $HOME would otherwise be hidden), and the git
-// directories after the repository bind (or they would be writable again).
+// directories and read-only files after the repository bind (or the repository bind would
+// make them writable again).
 func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	argv := append([]string(nil), baseMounts...)
 	argv = append(argv, "--tmpfs", s.Home, "--bind", s.RepoRoot, s.RepoRoot)
 	for _, d := range s.GitDirs {
 		argv = append(argv, "--ro-bind", d, d)
+	}
+	for _, f := range s.ReadOnlyFiles {
+		argv = append(argv, "--ro-bind", f, f)
 	}
 	for _, d := range s.ReadOnly {
 		argv = append(argv, "--ro-bind", d, d)

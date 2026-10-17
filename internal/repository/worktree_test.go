@@ -75,6 +75,32 @@ func TestWorktree_Lifecycle(t *testing.T) {
 	}
 }
 
+func TestBranchExistsAndCommonDir(t *testing.T) {
+	repo, dir := realRepo(t)
+	ctx := context.Background()
+	if ok, err := repo.BranchExists(ctx, "orchestrator/r1"); err != nil || ok {
+		t.Fatalf("BranchExists before = %v, %v; want false", ok, err)
+	}
+	wtPath, _ := addTestWorktree(t, repo, dir)
+	if ok, err := repo.BranchExists(ctx, "orchestrator/r1"); err != nil || !ok {
+		t.Errorf("BranchExists after = %v, %v; want true", ok, err)
+	}
+
+	common, err := repo.CommonDir(ctx)
+	if err != nil || !sameDir(common, filepath.Join(dir, ".git")) {
+		t.Errorf("CommonDir = %q, %v", common, err)
+	}
+	wtCommon, err := (&Repository{Dir: wtPath, Executor: repo.Executor}).CommonDir(ctx)
+	if err != nil || !sameDir(wtCommon, common) {
+		t.Errorf("CommonDir in the worktree = %q, %v; want %q", wtCommon, err, common)
+	}
+
+	fake := &execution.FakeProcessExecutor{}
+	if _, err := (&Repository{Dir: dir, Executor: fake}).BranchExists(ctx, "-x"); err == nil || len(fake.Calls) != 0 {
+		t.Errorf("BranchExists(-x) = %v with calls %v; want a refusal without git", err, fake.Calls)
+	}
+}
+
 func sameDir(a, b string) bool {
 	ra, _ := filepath.EvalSymlinks(a)
 	rb, _ := filepath.EvalSymlinks(b)
