@@ -36,6 +36,8 @@ derived and checked, never trusted (`SPEC.md` §6, §8.1, §8.2).
 2026-10-17. Code and unit tests are in; `scripts/check.sh` is left to the operator, so the task
 is not closed in the README or TODO.md Q4 yet.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `RunOptions.Isolation` is a string (`domain.IsolationInplace` / `IsolationWorktree`);
   `IsolationMode()` gives `inplace` for a run recorded without it. `runTask` sets it from
   `execution.isolation` and `--inplace`. The per-workflow rule (no `implement` runs in place, O3)

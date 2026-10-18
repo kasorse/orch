@@ -342,6 +342,15 @@ the date and what was built differently from the plan, and why. A task under `be
 runs the four gates in `bench/`: it is a separate module, and the root `go test ./...` does
 not test it.
 
+Inside an orchestrator run, do all of this in the same change as the code; do not leave it to the
+operator. The run's `test` step (`scripts/check.sh`) is the task's gate, and the run only
+commits after that step passes, so a task that fails its gate never reaches the branch. The one
+exception is a gate the test step cannot run, such as `go test -tags security
+./test/security/...`, which makes live calls: leave a task with such a gate unticked, and say
+in its As built which gate is left to the operator. The four `bench/` tests that skip under
+bwrap are run outside the sandbox once per specification, before its branch merges, and
+recorded in the README's `Status:` line; they are not a gate for each task.
+
 ## Build & test
 
 ```
@@ -356,7 +365,8 @@ cd bench && go test ./...   # bench/ is a separate module; the root go test does
 first failure; it is also the orchestrator's `test.command` for this repository, so a run's
 test step covers both modules. Under the bwrap sandbox four `bench/` tests skip (nested
 bwrap, `orchestrator validate`, the end-to-end `TestPipeline` of `bench/test` among them); run
-the script outside the sandbox before closing a task.
+the script outside the sandbox once per specification, before its branch merges (rebuild
+`bin/orchestrator` first, since the `orchestrator validate` test uses it).
 
 Tests need no network, no Jev key and no real provider CLIs: `test/integration` uses fake
 executables (`internal/testutil/fakeexec`, routed by the `ACTION: <name>` first line of every

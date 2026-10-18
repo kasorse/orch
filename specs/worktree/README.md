@@ -1,10 +1,11 @@
 # Run isolation in a git worktree
 
-Status: **in progress** (2026-10-18): the code of WT01–WT07 is in; a task is ticked in the table
-below only once its gates have passed. Specified 2026-10-17. The owner decided O1–O5 the same day
-(`SPEC.md` §18): `worktree` by default, a commit on the run's branch without the question,
-workflows without `implement` in place, setup sandboxed with the network, `run --inplace` for one
-run. TODO.md Q4.
+Status: **done** (specified 2026-10-17; 2026-10-18): WT01–WT10 done. `scripts/check.sh` (root and
+`bench/`) passed outside the sandbox on 2026-10-18 over all of them, and the live suite
+(`go test -tags security ./test/security/...`, V-wt-1…3 included) passed on claude 2.1.302. The
+owner decided O1–O5 on 2026-10-17 (`SPEC.md` §18): `worktree` by default, a commit on the run's
+branch without the question, workflows without `implement` in place, setup sandboxed with the
+network, `run --inplace` for one run. TODO.md Q4 is ticked.
 
 | document | role |
 |---|---|
@@ -28,16 +29,16 @@ The operator's working tree, index and branch are never touched.
 
 | task | title | size | depends on |
 |---|---|---|---|
-| [WT01](tasks/TASK-WT01-config.md) | config: `execution.isolation`, `worktree.setup`, `run --inplace`, clean-start rule per mode | S | — |
-| [WT02](tasks/TASK-WT02-repository.md) | repository: add/remove/list worktrees, `.git` pointer, fingerprint, `merge-tree` | M | — |
-| [WT03](tasks/TASK-WT03-record.md) | `run.json: worktree`, path derivation, strict validation | S | — |
-| [WT04](tasks/TASK-WT04-run-in-worktree.md) | `run` in a worktree: creation, session switch, guard pointer, sandbox bind, output | L | WT01–WT03 |
-| [WT05](tasks/TASK-WT05-setup.md) | setup: networked sandbox, never after a step, guard, logs | M | WT04 |
-| [WT06](tasks/TASK-WT06-end-of-run.md) | end of run: commit on the run branch, conflicts, removal, `summary.md` | M | WT04 |
-| [WT07](tasks/TASK-WT07-resume.md) | resume in the worktree | M | WT04 |
-| [WT08](tasks/TASK-WT08-runs-clean.md) | `runs clean` | S | WT03 |
-| [WT09](tasks/TASK-WT09-live-checks.md) | live checks V-wt-1…3 | S | WT04 |
-| [WT10](tasks/TASK-WT10-integration-docs.md) | scenarios, bench configs, MVP.md §47, CLAUDE.md, README, example, TODO Q4 | M | all |
+| [WT01](tasks/TASK-WT01-config.md) | config: `execution.isolation`, `worktree.setup`, `run --inplace`, clean-start rule per mode ✓ | S | — |
+| [WT02](tasks/TASK-WT02-repository.md) | repository: add/remove/list worktrees, `.git` pointer, fingerprint, `merge-tree` ✓ | M | — |
+| [WT03](tasks/TASK-WT03-record.md) | `run.json: worktree`, path derivation, strict validation ✓ | S | — |
+| [WT04](tasks/TASK-WT04-run-in-worktree.md) | `run` in a worktree: creation, session switch, guard pointer, sandbox bind, output ✓ | L | WT01–WT03 |
+| [WT05](tasks/TASK-WT05-setup.md) | setup: networked sandbox, never after a step, guard, logs ✓ | M | WT04 |
+| [WT06](tasks/TASK-WT06-end-of-run.md) | end of run: commit on the run branch, conflicts, removal, `summary.md` ✓ | M | WT04 |
+| [WT07](tasks/TASK-WT07-resume.md) | resume in the worktree ✓ | M | WT04 |
+| [WT08](tasks/TASK-WT08-runs-clean.md) | `runs clean` ✓ | S | WT03 |
+| [WT09](tasks/TASK-WT09-live-checks.md) | live checks V-wt-1…3 ✓ | S | WT04 |
+| [WT10](tasks/TASK-WT10-integration-docs.md) | scenarios, bench configs, MVP.md §47, CLAUDE.md, README, example, TODO Q4 ✓ | M | all |
 
 ```
 WT01 ─┐
@@ -65,8 +66,9 @@ independent after WT04.
 - Every new config key is declared in the strict schema; every new `run.json` field is validated
   on load.
 - Tests need no network and no real CLI, except WT09 (`-tags security`).
-- Each task ends green on `scripts/check.sh` (root and `bench/`), run outside the sandbox before
-  closing it.
+- Each task ends green on `scripts/check.sh` (root and `bench/`). In an orchestrator run that is
+  the run's `test` step; `scripts/check.sh` runs once outside the sandbox before the branch merges.
 - When a task is done: tick it here and in TODO.md (Q4), update the `Status:` line above, and add
   an `## As built` section to the task file with the date and anything built differently, and
-  why.
+  why. In an orchestrator run, do this in the same change as the code; the run commits only
+  after its test step passes. WT09's live suite is left to the operator.

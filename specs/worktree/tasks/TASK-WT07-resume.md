@@ -39,6 +39,8 @@ is the one the run created (`SPEC.md` §11).
 outside the sandbox, is left to the operator, so the task is not closed in the README or TODO.md
 Q4 yet.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `verifyRunWorktree` (`internal/app/worktree.go`) runs the checks in the order §11 gives. The
   only git commands before it accepts are in the operator's repository: `rev-parse
   --git-common-dir` for the derivation, then `git worktree list`. A path recorded differently

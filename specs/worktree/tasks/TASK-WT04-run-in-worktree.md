@@ -47,6 +47,8 @@ worktree run ends with its changes uncommitted in the worktree, and prints the p
 2026-10-17. Code, unit and integration tests are in; `scripts/check.sh` (root and `bench/`) is
 left to the operator, so the task is not closed in the README or TODO.md Q4 yet.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `enterWorktree` (`internal/app/worktree.go`) runs in `executeWorkflow` for a run with no
   executions, after approval and before the restore point. It keys off `run.json:
   options.isolation` and the approved workflow, not the config. A workflow without `implement`

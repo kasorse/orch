@@ -30,6 +30,8 @@
 Code and tests written 2026-10-18 (`internal/app/clean.go`, `clean_test.go`); `scripts/check.sh`
 not yet run, so the task is not ticked in `README.md` or TODO.md.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `--older-than` takes `<N>d` or any Go duration; the age is measured from `run.created_at`.
 - Only the flat runs directory is walked (`Store.RunIDs`), not nested bench trees.
 - The run is reloaded after the lock is taken. A worktree directory already gone is recorded as

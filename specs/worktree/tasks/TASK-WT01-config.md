@@ -34,3 +34,9 @@ mode (`SPEC.md` §6). Nothing runs in a worktree yet.
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-17; closed 2026-10-18, when `scripts/check.sh` (root and `bench/`) passed outside the
+sandbox. Built as planned: `ExecutionConfig.Isolation`, the top-level `worktree:` section,
+`Config.WorktreeRun` and `run --inplace`, with the unit tests in `internal/config/isolation_test.go`.

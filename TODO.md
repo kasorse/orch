@@ -424,9 +424,9 @@ pass rate.
 **2026-10-11:** шлюзы `scripts/check.sh` прошли, QL10 закрыта (сценарий 45). Остаётся `[~]`
 до прогона F против B в бенче (QL15).
 
-### [ ] Q4. Изоляция run'а в git worktree — P1 · L
-> WT01–WT10 написаны; нормативный текст — MVP.md §47. Остаётся `[ ]` до `scripts/check.sh`
-> (корень и `bench/`) вне sandbox — шлюз за оператором; после него поставить `[x]`.
+### [x] Q4. Изоляция run'а в git worktree — P1 · L
+> WT01–WT10 сделаны (2026-10-18); нормативный текст — MVP.md §47. `scripts/check.sh` (корень и
+> `bench/`) вне sandbox и `go test -tags security ./test/security/...` (claude 2.1.302) прошли.
 > Спека и задачи: [`specs/worktree/`](specs/worktree/README.md) (WT01–WT10, 2026-10-17).
 > Решения O1–O5 приняты (`SPEC.md` §18): worktree по умолчанию, коммит в ветку run'а без
 > вопроса, workflow без implement — в дереве оператора, setup в sandbox с сетью, `run --inplace`.

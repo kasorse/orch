@@ -39,6 +39,8 @@ pre-run test, and never on a tree a model has touched (`SPEC.md` §9).
 outside the sandbox is left to the operator, so the task is not closed in the README or TODO.md
 Q4 yet.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `Sandbox.Network` is `json:"-"`: it is set only in Go, on the copy `runSetup` builds, and never
   serialised, so a verify.json naming `network` is still rejected as an unknown field and the
   verify server can never get the network.

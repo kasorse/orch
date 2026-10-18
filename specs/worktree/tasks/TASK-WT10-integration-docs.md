@@ -31,3 +31,12 @@ with the pinned configs.
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-18; closed the same day. The run's test step passed under bwrap, where the bench's
+`TestRenderedConfigsPassOrchestratorValidate` is skipped. Outside the sandbox it failed at first
+with `unknown configuration keys: isolation` on all six configs. The configs were right; the test
+reads `bin/orchestrator`, which had been built before WT01. Once it was rebuilt
+(`go build -o bin/orchestrator ./cmd/orchestrator`), `scripts/check.sh` passed with no bench test
+skipped. Before running that gate, rebuild `bin/orchestrator` from the current tree.

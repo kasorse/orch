@@ -39,6 +39,8 @@ branch, and removes the worktree (`SPEC.md` §10).
 outside the sandbox is left to the operator, so the task is not closed in the README or TODO.md
 Q4 yet.
 
+Closed 2026-10-18: `scripts/check.sh` (root and `bench/`) passed outside the sandbox.
+
 - `offerCommit(ctx, s, canAsk) string` returns the commit. In place it is unchanged: the caller's
   gate decides whether it runs, and `canAsk` is not read. In a worktree, `auto` is always true.
   The branch in every message and in the question is the run's branch, and the worktree must

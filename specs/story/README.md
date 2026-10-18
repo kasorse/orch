@@ -70,7 +70,9 @@ the worktree work is done; ST05 and ST06 cannot.
 - Every new config key is in the strict schema; every new `run.json`, `decision.json` and
   `story.json` field is validated on load.
 - Tests need no network and no real CLI.
-- Each task ends green on `scripts/check.sh` (root and `bench/`), run outside the sandbox before
-  closing it.
+- Each task ends green on `scripts/check.sh` (root and `bench/`). In an orchestrator run that is
+  the run's `test` step; `scripts/check.sh` runs once outside the sandbox before the branch merges.
 - When a task is done: tick it here and in TODO.md, update the `Status:` line above, and add an
   `## As built` section to the task file with the date and anything built differently, and why.
+  In an orchestrator run, do this in the same change as the code; the run commits only after its
+  test step passes.

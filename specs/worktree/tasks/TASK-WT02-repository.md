@@ -43,3 +43,10 @@ gains the run's worktree and branch.
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-17; closed 2026-10-18, when `scripts/check.sh` (root and `bench/`) passed outside the
+sandbox. Built as planned, plus two helpers the later tasks needed: `BranchExists` (WT04 refuses
+an existing `orchestrator/<run-id>`) and `CommonDir` (the admin directory is checked to lie under
+`<common>/worktrees/`).

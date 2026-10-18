@@ -76,9 +76,8 @@ func buildArgs(a domain.Authority, denyRead []string, model, effort string, ext 
 	// confined to the working directory (verified against claude 2.1.287: a Read of
 	// /etc/hosts is denied either way). In a linked worktree this confinement is what keeps a
 	// step out of the operator's tree and runs directory; test/security/worktree_test.go
-	// (V-wt-1…3, specs/worktree/SPEC.md §12) checks it, and the version it passed on is
-	// recorded in specs/worktree/tasks/TASK-WT09-live-checks.md. Only user settings are loaded, never the
-	// repository's own .claude/ settings or hooks.
+	// (V-wt-1…3, specs/worktree/SPEC.md §12) checks it; verified against claude 2.1.302.
+	// Only user settings are loaded, never the repository's own .claude/ settings or hooks.
 	sources, restricted := "", true
 	if ext.UserSettings {
 		sources, restricted = "user", false

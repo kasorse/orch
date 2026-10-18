@@ -39,6 +39,11 @@ real claude CLI. Left to the operator: `go test -tags security ./test/security/.
 `scripts/check.sh`. The task is not ticked in `README.md`, and the verified CLI version is not
 yet named in the `client.go` comment, until that run passes.
 
+Closed 2026-10-18: `go test -tags security ./test/security/...` (V-wt-1…3) passed on claude
+2.1.302, and `scripts/check.sh` (root and `bench/`) passed outside the sandbox. The version is
+named in the `client.go` comment. No behaviour differed from the plan, so `specs/permissions/` is
+unchanged.
+
 - The fixture is the existing repository plus `git worktree add`; the operator-only sentinel is
   in an untracked file there, so the worktree cannot hold it.
 - V-wt-2 logs whether the CLI refused the `.git` rewrite; if it did not, it asserts
