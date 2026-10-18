@@ -335,6 +335,10 @@ limits:
 
 execution:
   timeout: 15m
+  isolation: worktree          # worktree (default) | inplace: where implement runs (§47)
+
+# worktree:
+#   setup: "npm ci"            # optional; trusted, runs once before any step, with the network (§47.4)
 
 security:                      # optional (§38); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
@@ -2808,6 +2812,12 @@ SHA naming a commit in the repository is `corrupt`; it is checked only after the
 fingerprint check. Run IDs are hex and dashes only, so an argument can never name a path
 outside `.orchestrator/runs/`.
 
+A run with a `worktree` record (§47) is loaded the same way, and the record is validated
+strictly: `branch` is `orchestrator/<run-id>`, `base_ref` a full SHA, `admin_dir` lies directly
+under `<common dir>/worktrees/`. The worktree's path is derived from the run ID (§47.2); the
+stored `path` is only compared, never read as a path to use. `options.isolation` decides the
+mode, not the current config.
+
 ## 37.5 Entry state and prompt context
 
 `workflow.Entry(run)` is a pure function of the history. `Engine.Run` always enters
@@ -2887,6 +2897,13 @@ The clean-worktree rule applies only to a run that has not executed a step. Afte
 the tree is dirty by design, and the baseline protects it. Changes to non-protected files
 between the stop and the resume are allowed. The overview lists the working tree, and
 review reads the real diff, so manual fixes are reviewed like the model's.
+
+**A worktree run** (§47) resumes in its worktree, and the three checks above run there. Before
+any git command in it, the `.git` pointer is read in Go and compared with `admin_dir`, and
+`git worktree list --porcelain` in the operator's repository must list the derived path on
+`refs/heads/orchestrator/<run-id>`. A missing worktree is a `RunStateError`: `the run's worktree
+<path> is gone; start a new run`. The operator's tree may be dirty and on any branch: it plays
+no part. `worktree.setup` never runs on a run that has executions.
 
 ## 37.9 Locking
 
@@ -3029,8 +3046,15 @@ human sees and confirms between steps.
 
 ## 38.3 Guards around implement
 
-* **Clean start.** A workflow containing `implement` refuses a dirty worktree (exit 2,
-  before any approval prompt) unless `security.require_clean_worktree: false`.
+* **Clean start.** In `inplace` mode (§47.1) a workflow containing `implement` refuses a
+  dirty worktree (exit 2, before any approval prompt) unless
+  `security.require_clean_worktree: false`. In worktree mode the key does not apply: the
+  run's tree is a fresh checkout of a commit, clean by construction, and a dirty operator tree
+  only gets a warning.
+* **The `.git` pointer.** In a linked worktree `.git` is a file that decides which git
+  directory every git call reads. It must read exactly `gitdir: <admin_dir>\n`; it is read in
+  Go, never through git, and compared before the fingerprint in every guard comparison. A
+  mismatch is a violation named `.git (worktree pointer)`.
 * **Restore point.** Before the first step `run.json` records `pre_run_ref`: HEAD, or on a
   dirty tree a snapshot commit of the whole tree (untracked files included) written through
   a throwaway index - the working tree, index and stash list are untouched. Once the run is
@@ -3449,6 +3473,9 @@ limits:
   `KEY`, `KEYS`, `PASS`, `COOKIE` segment), a declared credential or a parent-session
   variable is a validation error, with no override. Provider CLIs keep
   `execution.ScrubbedEnv()` (§38.2).
+* In a worktree run (§47) the test sandbox binds the worktree writable and its `.git` file
+  read-only (a file bind after the worktree bind); the git directories are outside it and
+  read-only. `worktree.setup` runs under the same mounts, but **with the network** (§47.4).
 * `test.sandbox` absent means `bwrap` (§38.3). `none` must be written out; the authority
   line then ends with `— NOT sandboxed: network, $HOME and your files are reachable` on
   every run. A host without a working bwrap fails fast, naming both remedies.
@@ -3562,6 +3589,10 @@ After the engine has finished and the final answer (if any) is printed, `run` an
 Anything that stops the offer is printed as `Not offering a commit: <why>`; none of it
 changes the run's status or exit code.
 
+In a worktree run (§47) the commit is made on the run's own branch `orchestrator/<run-id>`
+without this question, under the §42.6 rules, and the question is asked only when those rules
+refuse the automatic commit and the operator is at the terminal (§47.5).
+
 ## 42.2 The question
 
 ```
@@ -3615,7 +3646,8 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 ## 42.5 Not covered
 
-* A separate branch per run, Conventional Commit types, pushing, merge requests (TODO W1/W2).
+* Conventional Commit types, pushing, merge requests (TODO W1/W2). A branch per run exists in
+  worktree mode (§47); `inplace` still commits on the current branch.
 * Committing a part of the changes: the operator commits by hand when they want that.
 
 ## 42.6 `auto_commit`
@@ -3632,7 +3664,8 @@ read the one or write the other. It is not made either when the last implement m
 files would change. It prints `Not committing automatically: policy.paths requires manual
 approval: <match> (<n> files); commit what you want yourself.` and the changes stay in the
 working tree; `outcome.approval_required` (§43.3) is true. The message is the one §42.2 proposes; the commit is
-§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed.
+§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed. A worktree run (§47) behaves as if
+`auto_commit` were true, on its own branch.
 
 ---
 
@@ -3677,6 +3710,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Started | When the run was created (`created_at`), before the decision. |
 | Status | The run's final status; for a failed or stopped run, followed by the reason's telling line (a provider error's `failure:` line, otherwise its first line). |
 | Workflow | The workflow's actions in order. |
+| Worktree | Only for a worktree run (§47): the branch, the base (`<branch>@<short sha>`), the commit, `conflicts: <files>` when the merge check found some, and `kept at <path>` when the worktree was not removed. |
 | Claude auth | Only when the run recorded one (§46.6): `api key (ANTHROPIC_API_KEY, auto)`, `CLI login (…)`; on a resumed run the mode of each part if they differ. In `login` the Cost row is marked as an estimate not billed per token. |
 | Decision | Who decided (`jev`, `llm`, `user`; `manual (run --stage)`), the decision provider and model that answered, the complexity, and whether the operator edited the decision on the review screen. |
 | Steps | Executions recorded (every attempt, retries and resumes included) and the fix iterations. |
@@ -4439,3 +4473,101 @@ auth-category `api_retry`. The detail then ends with `stopped at the CLI's first
 * An HTTP preflight of the key, a mode per action, and an org-layer floor for the mode.
 * `bench/` runs `claude` for its baseline itself with the operator's environment as is
   (`bench/README.md`).
+
+---
+
+# 47. The worktree run
+
+Normative. A workflow with `implement` runs in its own git worktree on its own branch and
+leaves the operator's working tree, index and branch untouched. The design record, with the
+reasoning and the owner's decisions, is `specs/worktree/SPEC.md`.
+
+## 47.1 Modes
+
+```yaml
+execution:
+  isolation: worktree   # worktree (default) | inplace
+worktree:
+  setup: "npm ci"       # optional; trusted operator config, like test.command
+```
+
+* `inplace` is the behaviour of §38.3 and §42 unchanged.
+* `worktree` applies to workflows that contain `implement`, decided on the workflow the
+  operator approved. A workflow without `implement` runs in place: `run --stage review` still
+  reviews the operator's uncommitted work (§40.4).
+* `run --inplace` makes one run `inplace` whatever the config says. There is no flag the
+  other way.
+* The choice is recorded in `run.json: options.isolation`; a resume continues in that mode.
+* `worktree.setup` with `isolation: inplace` is a config error. `isolation` accepts the two
+  values only.
+* A dirty operator tree gets one warning, not a refusal: `The run starts from HEAD <short>;
+  <n> uncommitted changes in your tree are not part of it (commit them first, or run with
+  --inplace).` An unborn HEAD is a config error naming `isolation: inplace`.
+
+## 47.2 Creation and identity
+
+After approval and before the restore point: `git worktree add --quiet -b
+orchestrator/<run-id> <path> <base_ref>`, where `base_ref` is the commit HEAD names. The path
+is `<state>/orchestrator/worktrees/<repo-id>/<run-id>`, `<state>` being `$XDG_STATE_HOME` or
+`~/.local/state` and `<repo-id>` the first 16 hex digits of the sha256 of the common git
+directory's resolved path. It is outside the repository and not configurable. The path and
+the branch come from the run ID alone; the orchestrator refuses rather than reuse either.
+`run.json: worktree` is saved at once: `path`, `branch`, `base_ref`, `base_branch` (empty when
+detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every step, guard,
+sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its
+lock stay in the operator's repository. The restore point is `base_ref`, pinned as in §38.3.
+Console: `Worktree: <path> (orchestrator/<id> from <branch>@<short>)`.
+
+## 47.3 The `.git` pointer
+
+The worktree's `.git` file must read exactly `gitdir: <admin_dir>\n` (§38.3). The file
+fingerprint also covers `<admin_dir>/config.worktree` and the `admin_dir` path. The file
+tools of the provider are confined to the working directory, so a step cannot reach the
+operator's tree or the runs directory; live checks V-wt-1…3 (`go test -tags security
+./test/security/...`) verify that.
+
+## 47.4 Setup
+
+`worktree.setup` is a shell string run with `sh -c` in the worktree, once, right after
+creation, before the restore point, the baseline and the pre-run test - never after a step has
+run. A resume of a run with executions never runs it; a resume of a run with none and
+`setup_done: false` does. It runs under the test sandbox's mounts (§41.3) **with the
+network**, with `execution.TestEnv()` plus `test.env_pass`; with `test.sandbox: none` it runs
+unsandboxed. The git fingerprint and the pointer are compared after it: the git config and
+hooks are shared with the operator's repository, so a change fails the run. A non-zero exit or
+a timeout fails the run before any step (`worktree setup failed (exit <n>)`), output in
+`logs/setup.{stdout,stderr}.log`. Private registry credentials are not covered.
+
+## 47.5 The end of the run
+
+A completed run commits its changes on `orchestrator/<run-id>` without the §42 question, under
+the §42.6 rules: no commit when the question would show a warning, when there is no
+`summary_short`, or when the last implement matched a `policy.paths` rule with `approval:
+manual`. An operator at the terminal then gets `Commit to orchestrator/<run-id>? [y]es / [N]o
+/ [e]dit message`; under `--mode auto` the changes stay in the worktree and its path is
+printed. Before the commit the pointer and `CheckBaseline` are checked in the worktree. Output:
+`Committed <sha> to orchestrator/<run-id>: <header>`, then `Based on <branch>@<short>. To take
+it: git merge orchestrator/<run-id>`.
+
+When `base_branch` is set, `git merge-tree --write-tree --name-only --no-messages <branch>
+<commit>` reports conflicts with the operator's branch as it is now (git ≥ 2.38; older git
+skips the check with a note). The files are warned about and recorded in
+`worktree.conflicts`; nothing is resolved. After a successful commit the worktree is removed
+with `git worktree remove` (never `--force`; a worktree git refuses to remove is kept and its
+path printed). The branch stays: it is the result. Without a commit the worktree stays. The
+`summary.md` has a Worktree row (§43.2).
+
+## 47.6 `orchestrator runs clean [--older-than 7d] [--dry-run]`
+
+For every run older than the limit whose worktree is not removed and whose lock is free,
+removes the worktree with `git worktree remove` (a worktree with changes is kept and listed),
+then `git worktree prune`, and sets `worktree.removed`. It never deletes a branch, a ref or a
+run directory.
+
+## 47.7 Not covered
+
+* Parallel runs (§30), pushing and merge requests (TODO W2).
+* Copying ignored files (`.env`, `node_modules`) from the operator's tree: setup installs what
+  it needs.
+* Submodules (use `inplace`), warm worktree pools, an org floor for `execution.isolation`,
+  macOS.

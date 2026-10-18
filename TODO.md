@@ -425,6 +425,8 @@ pass rate.
 до прогона F против B в бенче (QL15).
 
 ### [ ] Q4. Изоляция run'а в git worktree — P1 · L
+> WT01–WT10 написаны; нормативный текст — MVP.md §47. Остаётся `[ ]` до `scripts/check.sh`
+> (корень и `bench/`) вне sandbox — шлюз за оператором; после него поставить `[x]`.
 > Спека и задачи: [`specs/worktree/`](specs/worktree/README.md) (WT01–WT10, 2026-10-17).
 > Решения O1–O5 приняты (`SPEC.md` §18): worktree по умолчанию, коммит в ветку run'а без
 > вопроса, workflow без implement — в дереве оператора, setup в sandbox с сетью, `run --inplace`.
@@ -563,6 +565,8 @@ run started …» / «New failures since the run started: …» в промпт�
 
 ### [ ] W1. Финал: коммит, ветка, отчёт для человека — P0 · M
 **Зачем:** 0.4. Результат run'а должен быть готов к ревью человеком.
+**Сделано Q4/WT (MVP.md §47):** ветка `orchestrator/<id>` и коммит в неё без вопроса в режиме
+worktree; остальное ниже (Conventional Commits, trailer решения, `report.md`) — по-прежнему здесь.
 **Уже есть (MVP.md §42):** в конце завершённого run'а с implement оператор видит изменения и
 отвечает на вопрос «коммитить?»; коммит в текущую ветку, сообщение из
 `implementation.summary` + trailer `Orchestrator-Run`, до коммита — проверка guard'а по

@@ -210,9 +210,11 @@ limits:
 
 execution:
   timeout: 15m
-  # Where a workflow with implement runs (specs/worktree/SPEC.md §6): worktree (default) is its
-  # own git worktree on a branch of its own, so your working tree is never touched; inplace is
-  # your working tree, which must be clean. `run --inplace` does that for one run.
+  # Where a workflow with implement runs (MVP.md §47): worktree (default) is its own git
+  # worktree on a branch of its own, so your working tree is never touched; inplace is your
+  # working tree, which must be clean (security.require_clean_worktree). `run --inplace` does
+  # that for one run. Workflows without implement always run in your tree. Benchmarks and
+  # scripts that read the result in the working tree should pin `inplace`.
   # isolation: worktree
 
 # worktree:

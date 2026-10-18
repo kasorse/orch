@@ -160,6 +160,16 @@ history, otherwise the state the history and the transition table give (MVP.md �
   live check (`go test -tags security ./test/security/...`) has verified, and refuses
   anything else — a silent downgrade is the one unacceptable failure. Never pass
   `bypassPermissions` or any equivalent.
+- **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
+  `implement` under `execution.isolation: worktree` (the default) runs every step, guard,
+  scan, review diff and commit in `<state>/orchestrator/worktrees/<repo-id>/<run-id>`; the
+  orchestrator writes git objects, `orchestrator/<run-id>`, the worktree and
+  `refs/orchestrator/` there and nothing in the operator's working tree, index or branch. The
+  worktree's path is derived from the run ID, never read from `run.json`; the mode comes from
+  `options.isolation`, not the current config. The `.git` pointer is checked in Go before
+  every fingerprint, `worktree.setup` runs only before any step, and a new test or scenario
+  that reads the result in the working tree pins `isolation: inplace`. New run artifacts:
+  `run.json: worktree` and `logs/setup.{stdout,stderr}.log`.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
   run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)

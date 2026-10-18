@@ -583,6 +583,49 @@ func TestWorktree_ResumeRefusesAWorktreeItCannotTrust(t *testing.T) {
 	refused("directory removed", "the run's worktree "+w.Path+" is gone; start a new run")
 }
 
+// A setup that fails stops the run before any step: no model ran, the output is in
+// logs/setup.*.log and the worktree stays (SPEC.md §9).
+func TestWorktree_FailingSetupStopsBeforeAnyStep(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) {
+		o.extraYAML = "\nworktree:\n  setup: \"echo setup-broke >&2; exit 3\"\n"
+	})
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	if err == nil {
+		t.Fatalf("a run whose setup fails succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	assertContains(t, "error", err.Error(), "worktree setup failed (exit 3)")
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status == "completed" || run.Worktree == nil || len(run.Executions) != 0 {
+		t.Fatalf("status = %s, worktree = %+v, executions = %d; want a failed run with no step", run.Status, run.Worktree, len(run.Executions))
+	}
+	if log, _ := runFile(t, repoDir, "logs/setup.stderr.log"); !strings.Contains(log, "setup-broke") {
+		t.Errorf("logs/setup.stderr.log = %q, want the setup's output", log)
+	}
+	if got := invocations(t, r.invocationsLog); len(got) != 0 {
+		t.Errorf("invocations = %v, want none", got)
+	}
+}
+
+// A setup that changes the shared git config fails the run: the config and hooks are the
+// operator's (SPEC.md §9, Guard).
+func TestWorktree_SetupChangingGitConfigFailsTheRun(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) {
+		o.extraYAML = "\nworktree:\n  setup: \"git config core.hooksPath /tmp/planted\"\n"
+	})
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	if err == nil {
+		t.Fatalf("a setup that changed .git/config succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if got := invocations(t, r.invocationsLog); len(got) != 0 {
+		t.Errorf("invocations = %v, want none", got)
+	}
+}
+
 // O3: review alone under worktree reviews the operator's uncommitted change, in place.
 func TestWorktree_ReadOnlyWorkflowRunsInPlace(t *testing.T) {
 	repoDir := dirtyFixture(t)

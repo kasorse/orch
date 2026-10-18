@@ -761,6 +761,31 @@ review, a likely secret) or no `summary_short` to use as the message, nor when t
 matched a `policy.paths` rule with `approval: manual`; it says why and the changes stay in
 the working tree. Interactively, the question lists those rules and their files first.
 
+### Taking the result from its branch (worktree runs)
+
+By default (`execution.isolation: worktree`) a workflow with `implement` runs in its own git
+worktree under `$XDG_STATE_HOME/orchestrator/worktrees/` (`~/.local/state/...`), on a branch
+`orchestrator/<run-id>` that starts at your current HEAD. Your working tree, index and branch
+are never touched, so you can keep working (uncommitted changes are not part of the run; the
+run warns when there are some). When the run completes, its changes are committed on that
+branch without the question above (same rules as `auto_commit`: not with a warning, a missing
+`summary_short` or a `policy.paths` rule with `approval: manual`), the worktree is removed,
+and you take the result with git:
+
+```
+Committed 3f2a9c1 to orchestrator/<run-id>: Fix Add to use +
+Based on master@8d0e4b2. To take it:
+  git merge orchestrator/<run-id>
+```
+
+If your branch moved on and the merge would conflict, the run says so and lists the files
+(`git merge-tree`, git ≥ 2.38); you resolve it with git. A failed or stopped run keeps its
+worktree for `resume`, which continues there. `worktree.setup` (for example `npm ci`) runs once
+in a fresh worktree before any step, in the test sandbox but with the network.
+`orchestrator run --inplace` runs one run in your working tree as before, and
+`execution.isolation: inplace` makes that the default. Old worktrees are removed with
+`orchestrator runs clean` (branches are never deleted). See `MVP.md` §47.
+
 ### Resuming a run
 
 ```
@@ -904,7 +929,9 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # pre_run_ref, head_ref, resume_baseline, resumes, provider_cli
                         # (CLI versions), allow_red_tests, pre_run_test,
                         # secret_scan_baseline, secret_findings (never a value),
-                        # commit (the SHA, when you approved the commit at the end);
+                        # commit (the SHA, when you approved the commit at the end),
+                        # worktree (path, branch, base_ref, conflicts, removed) and
+                        # options.isolation for a worktree run;
                         # per step: usage (tokens, cost, partial), call (prompt size and
                         # cuts, models, API time, tool calls), an implement's diff;
                         # outcome (status, fix iterations, last test and review result,
@@ -919,6 +946,7 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   logs/<NNN>-<action>.{stdout,stderr}.log  # raw provider/test output per step
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls
+  logs/setup.{stdout,stderr}.log           # worktree.setup, worktree runs only
   logs/pre-run-test.{stdout,stderr}.log    # the tests before any change, when red
   logs/<NNN>-test.<check>.{stdout,stderr}.log  # each `checks:` command (pre-run-test.<check>.* before the run)
   logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log  # each verify call of an implement step
