@@ -59,6 +59,40 @@ type JiraField struct {
 	Label string `yaml:"label"`
 }
 
+// jira.create.link values: the child points at its parent through the standard parent field,
+// or through a custom field (Epic Link on Server and Data Center).
+const (
+	JiraLinkParent = "parent"
+	JiraLinkField  = "field"
+)
+
+// JiraCreateConfig is jira.create (specs/story/SPEC.md §5).
+type JiraCreateConfig struct {
+	// IssueType is the children's type, e.g. Story.
+	IssueType string `yaml:"issue_type"`
+	// Link is parent (the default) or field.
+	Link string `yaml:"link"`
+	// Field is the custom field holding the parent with link: field.
+	Field  string   `yaml:"field"`
+	Labels []string `yaml:"labels"`
+	// Components maps a service name to the Jira component its children get.
+	Components map[string]string `yaml:"components"`
+}
+
+// UnmarshalYAML defaults link to parent.
+func (c *JiraCreateConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	type plain JiraCreateConfig
+	var raw plain
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	*c = JiraCreateConfig(raw)
+	if c.Link == "" {
+		c.Link = JiraLinkParent
+	}
+	return nil
+}
+
 // JiraConfig describes the Jira instance run --jira reads one issue from. The credentials
 // themselves are never part of it: EmailEnv and TokenEnv only name environment variables.
 type JiraConfig struct {
@@ -74,6 +108,9 @@ type JiraConfig struct {
 	// MaxBytes caps the rendered task.
 	MaxBytes int
 	Fields   []JiraField
+	// Create is how story run creates the child issues of a story (specs/story/SPEC.md §12);
+	// nil means it creates nothing in Jira.
+	Create *JiraCreateConfig
 
 	// literalSecrets lists the jiraSecretKeys the YAML set, without their values, which
 	// validateJira rejects (as JevConfig.apiKeyLiteralSet does for decision.jev.api_key).
@@ -93,6 +130,9 @@ func (j *JiraConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxRetries *int        `yaml:"max_retries"`
 		MaxBytes   *int        `yaml:"max_bytes"`
 		Fields     []JiraField `yaml:"fields"`
+
+		Create *JiraCreateConfig `yaml:"create"`
+
 		// The jiraSecretKeys, declared only so a strict decode (Load) accepts them and
 		// validateJira can reject them with its own message; their values are discarded.
 		Token    any `yaml:"token"`
@@ -141,6 +181,7 @@ func (j *JiraConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		TokenEnv: raw.TokenEnv,
 		Timeout:  timeout, MaxRetries: maxRetries, MaxBytes: maxBytes,
 		Fields:         raw.Fields,
+		Create:         raw.Create,
 		literalSecrets: literal,
 	}
 	return nil
@@ -192,6 +233,45 @@ func validateJira(j JiraConfig) []string {
 	}
 
 	problems = append(problems, jiraFieldProblems(j.Fields)...)
+	if j.Create != nil {
+		problems = append(problems, jiraCreateProblems(*j.Create)...)
+	}
+	return problems
+}
+
+// jiraCreateProblems checks jira.create (specs/story/SPEC.md §5). The block lives inside jira,
+// so a jira.create without the rest of the section is also reported by validateJira's own
+// required keys (base_url, auth, token_env).
+func jiraCreateProblems(c JiraCreateConfig) []string {
+	var problems []string
+	if strings.TrimSpace(c.IssueType) == "" {
+		problems = append(problems, "jira.create.issue_type is required")
+	}
+	switch c.Link {
+	case JiraLinkParent:
+		if c.Field != "" {
+			problems = append(problems, "jira.create.field applies only to link: field; remove it for link: parent")
+		}
+	case JiraLinkField:
+		switch {
+		case c.Field == "":
+			problems = append(problems, "jira.create.field is required with link: field")
+		case !jiraFieldIDPattern.MatchString(c.Field):
+			problems = append(problems, fmt.Sprintf("jira.create.field %q must be a custom field id (customfield_<N>)", c.Field))
+		}
+	default:
+		problems = append(problems, fmt.Sprintf("jira.create.link must be %s or %s, got %q", JiraLinkParent, JiraLinkField, c.Link))
+	}
+	for i, l := range c.Labels {
+		if strings.TrimSpace(l) == "" || strings.ContainsAny(l, " \t\r\n") {
+			problems = append(problems, fmt.Sprintf("jira.create.labels[%d] %q must be a non-empty label without whitespace", i, l))
+		}
+	}
+	for name, comp := range c.Components {
+		if strings.TrimSpace(comp) == "" {
+			problems = append(problems, fmt.Sprintf("jira.create.components.%s must name a Jira component", name))
+		}
+	}
 	return problems
 }
 

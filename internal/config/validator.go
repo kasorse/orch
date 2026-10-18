@@ -114,6 +114,9 @@ func Validate(cfg Config) error {
 	if cfg.Jira != nil {
 		problems = append(problems, validateJira(*cfg.Jira)...)
 	}
+	if cfg.Story != nil {
+		problems = append(problems, validateStory(*cfg.Story)...)
+	}
 
 	providers := map[string]string{}
 	for _, pm := range cfg.actionProviderModels() {

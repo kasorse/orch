@@ -71,6 +71,7 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
 	problems = append(problems, budgetProblems(cfg, opts.Cost)...)
+	problems = append(problems, storyBudgetProblems(cfg, opts.Cost)...)
 	if opts.Jira {
 		problems = append(problems, jiraCredentialProblems(cfg.Jira, opts.getenv)...)
 	}
