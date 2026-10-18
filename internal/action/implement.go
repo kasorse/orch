@@ -212,7 +212,9 @@ func violationMessage(heading string, changed []string, restoreRef string) strin
 	return b.String()
 }
 
-// parseImplementation is lenient, matching parseAnalysis - see its comment.
+// parseImplementation is lenient, matching parseAnalysis - see its comment. An object that
+// does not decode (an unescaped quote in a model's summary) still gives the fields written
+// after the break, so summary_short, the commit message (MVP.md §42.2), is not lost.
 func parseImplementation(output string) domain.ImplementationArtifact {
 	var artifact domain.ImplementationArtifact
 	if obj := extractJSONObject(output); obj != "" {
@@ -220,7 +222,11 @@ func parseImplementation(output string) domain.ImplementationArtifact {
 			return artifact
 		}
 	}
-	return domain.ImplementationArtifact{Summary: output}
+	artifact = domain.ImplementationArtifact{Summary: output}
+	recoverField(output, "summary_short", &artifact.SummaryShort)
+	recoverField(output, "changed_files", &artifact.ChangedFiles)
+	recoverField(output, "tests_added", &artifact.TestsAdded)
+	return artifact
 }
 
 // preRunFailureForImplement is the red pre-run test implement should see: only until the
