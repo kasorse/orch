@@ -1,7 +1,9 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
@@ -10,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"orchestrator/internal/apperr"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
@@ -405,6 +408,179 @@ func TestWorktree_CommitRefusedByAHookKeepsTheWorktree(t *testing.T) {
 	assertContains(t, "stdout", stdout, "Commit failed: ", "commits are refused here", "The worktree stays at "+w.Path+"\n")
 	summary, _ := runFile(t, repoDir, "summary.md")
 	assertContains(t, "summary.md", summary, "; kept at "+w.Path+" |")
+}
+
+// A worktree run that stopped at its test step resumes in its worktree (SPEC.md §11,
+// TASK-WT07): meanwhile the operator switched branches, committed, and left their tree dirty;
+// the resume completes and commits on the run's branch and leaves that tree byte for byte as
+// it was.
+func TestWorktree_ResumeContinuesInTheWorktree(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	// The tests fail until the marker, outside both trees, exists.
+	marker := filepath.Join(t.TempDir(), "tests-may-pass")
+	testCommand := "test -f '" + marker + "' && go test ./..."
+	r, _, cwdDir := newWorktreeRun(t, repoDir, func(o *configOptions) {
+		o.testCommand = testCommand
+		o.maxFixIterations = 1
+	})
+	branch, err := gitOutput(repoDir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	if err == nil {
+		t.Fatalf("a run whose tests keep failing succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	stopped := loadWorktreeRun(t, repoDir)
+	w := stopped.Worktree
+	if w == nil || stopped.Status == "completed" || w.Removed || len(stopped.Executions) == 0 ||
+		stopped.Executions[len(stopped.Executions)-1].Action != "test" {
+		t.Fatalf("status = %s, worktree = %+v, executions = %+v; want a run stopped at test with its worktree", stopped.Status, w, stopped.Executions)
+	}
+	assertContains(t, "stdout", stdout, "The worktree stays at "+w.Path+"\n")
+
+	// The operator moves on in their own tree: another branch, a commit, and work in progress.
+	gitRun(t, repoDir, "switch", "-q", "-c", "other")
+	if err := os.WriteFile(filepath.Join(repoDir, "operator.txt"), []byte("the operator's own work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repoDir, "add", "operator.txt")
+	gitRun(t, repoDir, "commit", "-qm", "the operator's commit")
+	f, err := os.OpenFile(filepath.Join(repoDir, "fixture.go"), os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("\n// the operator's work in progress\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := os.WriteFile(filepath.Join(repoDir, "notes.txt"), []byte("wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	settleTree(t, repoDir)
+	before := operatorState(t, repoDir)
+
+	if err := os.WriteFile(marker, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raised := jevConfig(t, r.jev, func(o *configOptions) {
+		o.isolation = "worktree"
+		o.testCommand = testCommand
+		o.maxFixIterations = 3
+	})
+	stdout, stderr, err = resume(t, repoDir, raised, stopped.ID)
+	mustSucceed(t, stdout, stderr, err)
+
+	if after := operatorState(t, repoDir); !maps.Equal(after, before) {
+		for k, v := range after {
+			if before[k] != v {
+				t.Errorf("the resume changed the operator's %s:\nbefore: %q\nafter:  %q", k, before[k], v)
+			}
+		}
+		for k := range before {
+			if _, ok := after[k]; !ok {
+				t.Errorf("the resume removed the operator's %s", k)
+			}
+		}
+	}
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || len(run.Executions) <= len(stopped.Executions) {
+		t.Fatalf("status = %s, executions = %+v; want completed with the history appended", run.Status, run.Executions)
+	}
+	if resumed := loadResumedRun(t, repoDir); len(resumed.Resumes) != 1 {
+		t.Errorf("resumes = %+v, want one", resumed.Resumes)
+	}
+	rw := run.Worktree
+	if rw == nil || rw.Path != w.Path || !rw.Removed || len(rw.Conflicts) != 0 {
+		t.Fatalf("worktree = %+v, want the same one, removed, no conflicts", rw)
+	}
+	tip, err := gitOutput(repoDir, "rev-parse", rw.Branch)
+	if err != nil || run.Commit == "" || tip != run.Commit {
+		t.Fatalf("%s = %q (%v), run.json commit = %q; want the run's commit", rw.Branch, tip, err, run.Commit)
+	}
+	if parent, _ := gitOutput(repoDir, "rev-parse", run.Commit+"^"); parent != rw.BaseRef {
+		t.Errorf("the commit's parent = %s, want the base %s", parent, rw.BaseRef)
+	}
+	if got, _ := gitOutput(repoDir, "show", run.Commit+":fixture.go"); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
+		t.Errorf("committed fixture.go = %q, want the fix without the operator's work", got)
+	}
+	if _, err := os.Stat(w.Path); !os.IsNotExist(err) {
+		t.Errorf("the worktree %s is still there: %v", w.Path, err)
+	}
+	// The resumed implement ran in the worktree, not in the operator's tree.
+	if got, want := readTrimmed(t, filepath.Join(cwdDir, "implement.cwd")), resolvedGone(t, w.Path); got != want {
+		t.Errorf("the resumed implement ran in %s, want the worktree %s", got, want)
+	}
+	assertContains(t, "stdout", stdout,
+		"Worktree: "+w.Path+" (orchestrator/"+run.ID+" from "+branch+"@"+rw.BaseRef[:7]+")",
+		"Committed "+run.Commit[:12]+" to orchestrator/"+run.ID+": Fix Add to use +\n")
+	// The operator's fingerprint, taken at the resume, lets the conflict check run.
+	assertNotContains(t, "stdout", stdout, "no conflict check")
+}
+
+// A worktree that may not be the run's own is never resumed (SPEC.md §11): a rewritten .git
+// pointer, a run.json without the worktree, a removed directory. Each refusal leaves run.json
+// byte for byte as it was and calls no provider.
+func TestWorktree_ResumeRefusesAWorktreeItCannotTrust(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	t.Setenv("FAKE_FAIL_ACTION", "implement")
+	if _, _, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go"); err == nil {
+		t.Fatal("expected implement to fail the run")
+	}
+	t.Setenv("FAKE_FAIL_ACTION", "")
+	failed := loadWorktreeRun(t, repoDir)
+	w := failed.Worktree
+	if failed.Status != "failed" || w == nil || len(failed.Executions) == 0 {
+		t.Fatalf("status = %s, worktree = %+v, executions = %+v", failed.Status, w, failed.Executions)
+	}
+	calls := len(invocations(t, r.invocationsLog))
+	path := runJSONPath(t, repoDir)
+
+	refused := func(what, want string) {
+		t.Helper()
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = resume(t, repoDir, r.cfg, failed.ID)
+		var rerr *apperr.RunStateError
+		if !errors.As(err, &rerr) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: got %T %v, want a RunStateError naming %q", what, err, err, want)
+		}
+		if after, _ := os.ReadFile(path); !bytes.Equal(after, before) {
+			t.Errorf("%s: the refused resume changed run.json", what)
+		}
+		if got := len(invocations(t, r.invocationsLog)); got != calls {
+			t.Errorf("%s: the refused resume called a provider (%d calls, was %d)", what, got, calls)
+		}
+	}
+
+	pointerFile := filepath.Join(w.Path, ".git")
+	pointer, err := os.ReadFile(pointerFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pointerFile, []byte("gitdir: "+filepath.Join(repoDir, ".git", "worktrees", "elsewhere")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refused("pointer rewritten", ".git (worktree pointer)")
+	if err := os.WriteFile(pointerFile, pointer, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	original := editRunJSON(t, repoDir, func(run map[string]any) { delete(run, "worktree") })
+	refused("no worktree recorded", "no worktree is recorded")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.RemoveAll(w.Path); err != nil {
+		t.Fatal(err)
+	}
+	refused("directory removed", "the run's worktree "+w.Path+" is gone; start a new run")
 }
 
 // O3: review alone under worktree reviews the operator's uncommitted change, in place.

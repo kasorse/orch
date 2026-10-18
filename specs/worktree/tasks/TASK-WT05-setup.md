@@ -65,4 +65,5 @@ Q4 yet.
   `logs/setup.stdout.log` and `logs/setup.stderr.log` through `AppendCallLog`.
 - The resume acceptance cases are tested on `runSetup` directly
   (`TestRunSetup_OnlyForARunWithoutExecutionsAndSetupNotDone`): until WT07, `resume` refuses a
-  run that has a worktree, so no resume reaches it end to end.
+  run that has a worktree, so no resume reaches it end to end. WT07 lifted that refusal, and
+  also stopped `runSetup` once the run-start baseline is recorded (see its As built).

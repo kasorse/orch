@@ -284,7 +284,12 @@ history, otherwise the state the history and the transition table give (MVP.md ย
   strictly (paths derived, never read; `workflow.Verify`), refusing rather than
   repairing. On a run that has executed a step, the git fingerprint is compared with
   `resume_baseline` before any `git status`, then the protected paths, then HEAD against
-  `head_ref`. The run directory is `flock`ed by the one `run`/`resume` that owns it.
+  `head_ref`. A worktree run (`specs/worktree/` ยง11) resumes in its worktree only after
+  `verifyRunWorktree` accepted it, with nothing but git in the operator's repository run
+  before: the derived path equals the record, the directory exists, its `.git` file (read
+  in Go) names the recorded `admin_dir` under `<common>/worktrees/`, and `git worktree list`
+  shows it on `orchestrator/<id>`; the operator's tree plays no part. The run directory is
+  `flock`ed by the one `run`/`resume` that owns it.
   Until the operator approves, a resume changes nothing on disk. `run` and `resume` share
   one tail after the decision (`executeWorkflow` in `internal/app/app.go`); keep it that
   way.

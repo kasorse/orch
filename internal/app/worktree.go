@@ -30,8 +30,13 @@ func worktreeRun(run *domain.Run) bool {
 // enterWorktree applies the isolation rule to a run that has not executed a step, once the
 // operator approved its workflow (specs/worktree/SPEC.md §6, §7). A workflow without
 // implement runs in place whatever options.isolation said (O3), and the record is rewritten
-// to say so. A worktree run gets its worktree, and the session switches to it.
+// to say so. A worktree run gets its worktree, and the session switches to it. A resumed run
+// whose worktree was created before its first step is already in it (resumeInWorktree): it is
+// never created twice.
 func enterWorktree(ctx context.Context, s *session) error {
+	if s.worktree != nil {
+		return nil
+	}
 	run := s.run
 	if !worktreeRun(run) {
 		if run.Options.Isolation == domain.IsolationWorktree {
@@ -156,6 +161,103 @@ func switchToWorktree(s *session, wt *repository.Repository) {
 	s.worktree = s.run.Worktree
 }
 
+// resumeInWorktree moves a resumed session into the run's worktree once verifyRunWorktree has
+// shown it is the one the run created (specs/worktree/SPEC.md §11), switching exactly as a
+// fresh run does. The operator's git fingerprint, the conflict check's reference at the end of
+// the run (finishWorktree), is taken now rather than at creation. A config or hook changed in
+// between still stops a run that executed a step: the worktree's baseline, compared next,
+// hashes the same shared config and hooks.
+func resumeInWorktree(ctx context.Context, s *session) error {
+	wt, err := verifyRunWorktree(ctx, s.repo, s.run)
+	if err != nil {
+		return err
+	}
+	fingerprint, err := s.repo.GitFingerprint(ctx)
+	if err != nil {
+		return err
+	}
+	switchToWorktree(s, wt)
+	s.operatorFingerprint = fingerprint
+	return nil
+}
+
+// verifyRunWorktree checks that the worktree run.json records is the one the run created,
+// before any git command runs in it (specs/worktree/SPEC.md §8.3, §11). In this order: the path
+// derived from repo, the operator's repository, is the recorded one; the directory is there;
+// its .git file, read in Go, names the recorded admin directory, which lies directly under
+// <common>/worktrees/; and git worktree list, run in repo, lists the path on the run's branch.
+// Only then is the worktree's Repository returned. git spells paths symlink-resolved, so a
+// resolved match counts where the literal one fails. Nothing here writes run.json.
+func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *domain.Run) (*repository.Repository, error) {
+	w := run.Worktree
+	refuse := func(kind apperr.RunStateKind, msg string, err error) error {
+		return &apperr.RunStateError{Kind: kind, RunID: run.ID, Msg: msg, Err: err}
+	}
+	if w.Removed {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s was removed; its branch %s stays; start a new run", w.Path, w.Branch), nil)
+	}
+
+	common, err := repo.CommonDir(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state, err := persistence.StateDir()
+	if err != nil {
+		return nil, &apperr.ConfigError{Msg: "cannot find the run's worktree", Err: err}
+	}
+	want := persistence.WorktreePath(state, common, run.ID)
+	if w.Path != want && !sameResolvedPath(w.Path, want) {
+		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.path is %s, but this repository's worktree for the run is %s "+
+			"(resumed from another repository, or with another $XDG_STATE_HOME?)", w.Path, want), nil)
+	}
+	if branch := domain.WorktreeBranch(run.ID); w.Branch != branch {
+		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q, want %q", w.Branch, branch), nil)
+	}
+
+	info, err := os.Lstat(w.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s is gone; start a new run", w.Path), nil)
+	}
+	if err != nil {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("cannot check the run's worktree %s", w.Path), err)
+	}
+	if !info.IsDir() {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s is not a directory; start a new run", w.Path), nil)
+	}
+
+	pointer, err := repository.ReadGitPointer(w.Path)
+	if err != nil {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s: %s cannot be checked", w.Path, guard.PointerViolation), err)
+	}
+	if pointer != w.AdminDir {
+		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s: %s names %s, not the recorded admin directory %s",
+			w.Path, guard.PointerViolation, pointer, w.AdminDir), nil)
+	}
+	worktrees := filepath.Join(common, "worktrees")
+	if parent := filepath.Dir(w.AdminDir); parent != worktrees && !sameResolvedPath(parent, worktrees) {
+		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.admin_dir %s is not directly under %s", w.AdminDir, worktrees), nil)
+	}
+
+	list, err := repo.ListWorktrees(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range list {
+		if entry.Path != w.Path && !sameResolvedPath(entry.Path, w.Path) {
+			continue
+		}
+		if ref := "refs/heads/" + w.Branch; entry.Branch != ref {
+			on := entry.Branch
+			if on == "" {
+				on = "a detached HEAD"
+			}
+			return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s is on %s, not %s", w.Path, on, ref), nil)
+		}
+		return &repository.Repository{Dir: w.Path, Executor: repo.Executor}, nil
+	}
+	return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("git does not list the run's worktree %s in this repository", w.Path), nil)
+}
+
 // finishWorktree ends a completed worktree run after the commit (specs/worktree/SPEC.md
 // §10): with sha, the commit on the run's branch, it says how to take the branch, checks it
 // for conflicts with the operator's branch and removes the worktree; without one the worktree
@@ -218,14 +320,16 @@ func checkConflicts(ctx context.Context, s *session, sha string) {
 
 // runSetup runs worktree.setup once in a new worktree, with the network, before the restore
 // point, the baseline and the pre-run test (specs/worktree/SPEC.md §9). It never runs on a
-// tree a model has touched: only a run without executions whose setup has not completed. The
+// tree a model has touched: only a run without executions and without a run-start baseline (a
+// process killed in its first step recorded no execution, but the baseline) whose setup has not
+// completed. The
 // guard compares the git pointer, fingerprint and protected paths around it, so setup that
 // reaches outside the worktree (an unsandboxed one) fails the run. ctx is the engine's share of
 // execution.timeout: a setup that outlives it is killed and fails the run.
 func runSetup(ctx context.Context, s *session) error {
 	run, cfg := s.run, s.cfg
 	setup := strings.TrimSpace(cfg.Worktree.Setup)
-	if s.worktree == nil || setup == "" || len(run.Executions) > 0 || run.Worktree.SetupDone {
+	if s.worktree == nil || setup == "" || len(run.Executions) > 0 || len(run.ResumeBaseline) > 0 || run.Worktree.SetupDone {
 		return nil
 	}
 	g := s.newRepoGuard(s.protected)

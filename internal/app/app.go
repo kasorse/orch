@@ -987,7 +987,8 @@ type session struct {
 	worktree *domain.RunWorktree
 	// operator is the operator's repository once the session switched to a worktree, where
 	// the end of the run checks for conflicts and removes the worktree; operatorFingerprint
-	// is its git fingerprint right after the worktree was created. nil and "" in place.
+	// is its git fingerprint right after the worktree was created, or on a resume right after
+	// the worktree was verified (resumeInWorktree). nil and "" in place.
 	operator            *repository.Repository
 	operatorFingerprint string
 }

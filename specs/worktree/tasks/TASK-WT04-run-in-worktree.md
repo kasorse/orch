@@ -72,7 +72,7 @@ left to the operator, so the task is not closed in the README or TODO.md Q4 yet.
 - Until WT06, a worktree run makes no §42 commit offer. It ends by printing `The changes are
   uncommitted in the worktree <path>`. Until WT07, `resume` refuses a run that has a worktree
   (`RunNotResumable`, naming its path and branch) rather than continuing it in the operator's
-  tree.
+  tree. WT07 replaced that refusal with the resume in the worktree.
 - The fake provider gained `FAKE_CWD_DIR`, which records each call's working directory. The
   integration config helper gained `isolation` (default `inplace`, as before).
 - Not done here: `bench/configs/*.yaml` do not pin `execution.isolation: inplace` yet (WT10). With
