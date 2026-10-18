@@ -652,3 +652,23 @@ func TestWorktree_ReadOnlyWorkflowRunsInPlace(t *testing.T) {
 		t.Errorf("invocations = %v, want [review]", got)
 	}
 }
+
+// run --worktree makes one run a worktree run under execution.isolation: inplace, and the
+// operator's tree keeps none of the change.
+func TestWorktree_FlagOverridesInplaceConfig(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.isolation = "inplace" })
+	settleTree(t, repoDir)
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--worktree", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Options.Isolation != "worktree" || run.Worktree == nil {
+		t.Fatalf("status = %s, options.isolation = %q, worktree = %+v; want completed, worktree, recorded",
+			run.Status, run.Options.Isolation, run.Worktree)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); !os.IsNotExist(err) {
+		t.Errorf("the change landed in the operator's tree: %v", err)
+	}
+}

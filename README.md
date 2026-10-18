@@ -763,7 +763,8 @@ the working tree. Interactively, the question lists those rules and their files 
 
 ### Taking the result from its branch (worktree runs)
 
-By default (`execution.isolation: worktree`) a workflow with `implement` runs in its own git
+With `execution.isolation: worktree` (or `run --worktree` for one run; the default is
+`inplace`) a workflow with `implement` runs in its own git
 worktree under `$XDG_STATE_HOME/orchestrator/worktrees/` (`~/.local/state/...`), on a branch
 `orchestrator/<run-id>` that starts at your current HEAD. Your working tree, index and branch
 are never touched, so you can keep working (uncommitted changes are not part of the run; the
@@ -782,8 +783,7 @@ If your branch moved on and the merge would conflict, the run says so and lists 
 (`git merge-tree`, git ≥ 2.38); you resolve it with git. A failed or stopped run keeps its
 worktree for `resume`, which continues there. `worktree.setup` (for example `npm ci`) runs once
 in a fresh worktree before any step, in the test sandbox but with the network.
-`orchestrator run --inplace` runs one run in your working tree as before, and
-`execution.isolation: inplace` makes that the default. Old worktrees are removed with
+`orchestrator run --inplace` runs one run in your working tree under a worktree config. Old worktrees are removed with
 `orchestrator runs clean` (branches are never deleted). See `MVP.md` §47.
 
 ### Resuming a run

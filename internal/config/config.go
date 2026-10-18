@@ -413,8 +413,9 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
-	// Isolation is where a workflow with implement runs: worktree (the default) or inplace
-	// (specs/worktree/SPEC.md §6). Validate refuses any other value; read it through
+	// Isolation is where a workflow with implement runs: inplace (the default) or worktree
+	// (specs/worktree/SPEC.md §6); run --inplace and run --worktree override it for one run.
+	// Empty when absent, so Validate can tell a written inplace; read it through
 	// IsolationMode.
 	Isolation string `yaml:"isolation"`
 }
@@ -425,10 +426,10 @@ const (
 	IsolationInplace  = "inplace"
 )
 
-// IsolationMode is execution.isolation, worktree when absent.
+// IsolationMode is execution.isolation, inplace when absent.
 func (e ExecutionConfig) IsolationMode() string {
 	if e.Isolation == "" {
-		return IsolationWorktree
+		return IsolationInplace
 	}
 	return e.Isolation
 }
@@ -447,16 +448,14 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 	}
 	e.Timeout = d
 	e.Isolation = raw.Isolation
-	if e.Isolation == "" {
-		e.Isolation = IsolationWorktree
-	}
 	return nil
 }
 
 // WorktreeConfig is the top-level worktree section (specs/worktree/SPEC.md §6).
 type WorktreeConfig struct {
 	// Setup is a trusted operator command run once in a new worktree before any model step,
-	// like test.command. It only applies with isolation worktree.
+	// like test.command. It only applies to a worktree run (execution.isolation: worktree or
+	// run --worktree).
 	Setup string `yaml:"setup"`
 }
 

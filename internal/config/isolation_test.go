@@ -15,13 +15,13 @@ func workflowOf(actions ...domain.ActionType) domain.Workflow {
 	return wf
 }
 
-func TestLoad_IsolationDefaultsToWorktree(t *testing.T) {
+func TestLoad_IsolationDefaultsToInplace(t *testing.T) {
 	cfg, err := Load(writeTempConfig(t, validV2("")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Execution.IsolationMode(); got != IsolationWorktree {
-		t.Errorf("IsolationMode() = %q, want worktree", got)
+	if got := cfg.Execution.IsolationMode(); got != IsolationInplace {
+		t.Errorf("IsolationMode() = %q, want inplace", got)
 	}
 	if err := Validate(cfg); err != nil && strings.Contains(err.Error(), "isolation") {
 		t.Errorf("the default isolation is refused: %v", err)
@@ -82,8 +82,12 @@ func TestConfig_WorktreeRun(t *testing.T) {
 	cfg := validConfig()
 	impl := workflowOf(domain.ActionImplement, domain.ActionTest)
 	readOnly := workflowOf(domain.ActionReview)
+	if cfg.WorktreeRun(impl) {
+		t.Error("default isolation with implement is a worktree run")
+	}
+	cfg.Execution.Isolation = IsolationWorktree
 	if !cfg.WorktreeRun(impl) {
-		t.Error("default isolation with implement is not a worktree run")
+		t.Error("worktree isolation with implement is not a worktree run")
 	}
 	if cfg.WorktreeRun(readOnly) {
 		t.Error("a workflow without implement is a worktree run")

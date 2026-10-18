@@ -335,7 +335,7 @@ limits:
 
 execution:
   timeout: 15m
-  isolation: worktree          # worktree (default) | inplace: where implement runs (§47)
+  isolation: inplace           # inplace (default) | worktree: where implement runs (§47)
 
 # worktree:
 #   setup: "npm ci"            # optional; trusted, runs once before any step, with the network (§47.4)
@@ -4486,7 +4486,7 @@ reasoning and the owner's decisions, is `specs/worktree/SPEC.md`.
 
 ```yaml
 execution:
-  isolation: worktree   # worktree (default) | inplace
+  isolation: worktree   # inplace (default) | worktree
 worktree:
   setup: "npm ci"       # optional; trusted operator config, like test.command
 ```
@@ -4495,11 +4495,13 @@ worktree:
 * `worktree` applies to workflows that contain `implement`, decided on the workflow the
   operator approved. A workflow without `implement` runs in place: `run --stage review` still
   reviews the operator's uncommitted work (§40.4).
-* `run --inplace` makes one run `inplace` whatever the config says. There is no flag the
-  other way.
+* `run --inplace` and `run --worktree` make one run `inplace` or `worktree` whatever the
+  config says; given together they are a usage error. (Changed 2026-10-18: the default was
+  `worktree` with no flag the other way; the owner moved it to `inplace` so that a chain of
+  runs lands on the current branch without a merge after each.)
 * The choice is recorded in `run.json: options.isolation`; a resume continues in that mode.
-* `worktree.setup` with `isolation: inplace` is a config error. `isolation` accepts the two
-  values only.
+* `worktree.setup` with `isolation: inplace` written out is a config error; with the key absent
+  it runs only in a `run --worktree` run. `isolation` accepts the two values only.
 * A dirty operator tree gets one warning, not a refusal: `The run starts from HEAD <short>;
   <n> uncommitted changes in your tree are not part of it (commit them first, or run with
   --inplace).` An unborn HEAD is a config error naming `isolation: inplace`.

@@ -161,7 +161,7 @@ history, otherwise the state the history and the transition table give (MVP.md �
   anything else — a silent downgrade is the one unacceptable failure. Never pass
   `bypassPermissions` or any equivalent.
 - **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
-  `implement` under `execution.isolation: worktree` (the default) runs every step, guard,
+  `implement` under `execution.isolation: worktree` (or `run --worktree`; the default is `inplace`) runs every step, guard,
   scan, review diff and commit in `<state>/orchestrator/worktrees/<repo-id>/<run-id>`; the
   orchestrator writes git objects, `orchestrator/<run-id>`, the worktree and
   `refs/orchestrator/` there and nothing in the operator's working tree, index or branch. The

@@ -210,16 +210,16 @@ limits:
 
 execution:
   timeout: 15m
-  # Where a workflow with implement runs (MVP.md §47): worktree (default) is its own git
-  # worktree on a branch of its own, so your working tree is never touched; inplace is your
-  # working tree, which must be clean (security.require_clean_worktree). `run --inplace` does
-  # that for one run. Workflows without implement always run in your tree. Benchmarks and
-  # scripts that read the result in the working tree should pin `inplace`.
-  # isolation: worktree
+  # Where a workflow with implement runs (MVP.md §47): inplace (default) is your working
+  # tree, which must be clean (security.require_clean_worktree), and the commit lands on your
+  # branch; worktree is its own git worktree on a branch of its own, so your working tree is
+  # never touched. `run --worktree` / `run --inplace` choose for one run. Workflows without
+  # implement always run in your tree.
+  # isolation: inplace
 
 # worktree:
 #   # Run once in a new worktree before any model step, with the network; trusted operator
-#   # config like test.command. A config error with isolation: inplace.
+#   # config like test.command. Only in a worktree run; a config error with isolation: inplace.
 #   setup: "npm ci"
 
 # What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement

@@ -98,7 +98,7 @@ is a branch, and merging it is a person's job.
 
 ```yaml
 execution:
-  isolation: worktree   # worktree (default, O1) | inplace
+  isolation: worktree   # inplace (default since 2026-10-18, O1) | worktree
 worktree:
   setup: "npm ci"       # optional; trusted operator config, like test.command
 ```
@@ -112,8 +112,9 @@ worktree:
   that adds `implement` makes the run a worktree run).
 - **`run --inplace`** (O5) makes one run `inplace` whatever the config says, with today's
   clean-start rule. It is how the operator lets `implement` continue their uncommitted work
-  (with `security.require_clean_worktree: false`, as today). There is no flag the other way: a
-  repository that wants worktrees says so in its config.
+  (with `security.require_clean_worktree: false`, as today). **`run --worktree`** makes one run
+  `worktree` the same way (added 2026-10-18 with the default change, O1); the two together are
+  a usage error.
 - **The choice is recorded** in `run.json: options.isolation` at run start (with the other
   options a resume reads instead of the config, §44): a resume continues in the mode the run
   started in, whatever the config or a flag says then.
@@ -122,7 +123,8 @@ worktree:
   (§45.2) therefore holds without a check. A dirty operator tree gets one warning instead:
   `The run starts from HEAD <short>; <n> uncommitted changes in your tree are not part of it
   (commit them first, or run with --inplace).`
-- **`worktree.setup`** with `isolation: inplace` is a config error (it would never run).
+- **`worktree.setup`** with `isolation: inplace` written out is a config error (it would never
+  run); with the key absent it runs only in a `run --worktree` run.
   `worktree` is declared in the strict schema; `isolation` accepts the two values only.
 
 ## 7. Lifecycle of a worktree run
@@ -391,7 +393,7 @@ independent after WT04.
 
 | # | question | decision |
 |---|---|---|
-| O1 | Default of `execution.isolation`. | **`worktree`** (TODO Q4 item 7). Existing configs change behaviour: the result lands on a branch, not in the tree. The bench and the scenarios that check the tree pin `inplace` (§14). |
+| O1 | Default of `execution.isolation`. | **`worktree`** (TODO Q4 item 7). Existing configs change behaviour: the result lands on a branch, not in the tree. The bench and the scenarios that check the tree pin `inplace` (§14). **Changed 2026-10-18 to `inplace`**, with `run --worktree` for one run: a chain of task runs (ST01, ST02, ...) based every run on the same HEAD and needed a manual merge after each; under `inplace` with `auto_commit: true` each run commits on the current branch and the next starts from it. The pins stay. |
 | O2 | Commit on the run's branch without the §42 question. | **Yes** (§10.1), under the §42.6 rules. Without it the result sits uncommitted under `~/.local/state`, and story needs a commit per task. |
 | O3 | Workflows without `implement`: in place or in a worktree. | **In place** (§6): `run --stage review` keeps reviewing the operator's uncommitted changes. |
 | O4 | Setup sandboxed with the network, or unsandboxed. | **Sandboxed with the network** (§9): the test sandbox's mounts, `$HOME` hidden, only before any model step. |
