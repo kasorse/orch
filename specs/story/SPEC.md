@@ -1,6 +1,6 @@
 # Spec: Story — a task split into a specification and ordered subtasks
 
-Status: **specified** (2026-10-17), not started. The owner's decisions are in §19 (taken
+Status: **specified** (2026-10-17), in progress (ST01 done, see `README.md`). The owner's decisions are in §19 (taken
 2026-10-17 while scoping), the author's defaults in §20. Depends on `specs/worktree/` (WT04,
 WT06, WT07). Once ST10 is done, MVP.md §48 becomes the normative home and this file stays the
 design record.

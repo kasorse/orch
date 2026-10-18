@@ -1,0 +1,12 @@
+# Partial refunds
+
+Status: **planned** (0 of 3 tasks done)
+
+| done | task | title | repository | depends on | jira | status | branch |
+|---|---|---|---|---|---|---|---|
+| [ ] | RF01 | Refund amount in the billing model | billing | — | PAY-123 | pending | — |
+| [ ] | RF02 | Expose partial refunds in the public API | gateway | RF01 | PAY-124 | pending | — |
+| [ ] | RF03 | Refund report | billing | RF01 | — | pending | — |
+
+Run it with `orchestrator story run <this directory>` and follow it with `orchestrator story status <this directory>`.
+This file is generated and rewritten whenever a status changes: edits are lost, the task files are the source.
