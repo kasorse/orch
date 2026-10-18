@@ -600,6 +600,7 @@ orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] [--mode m] [--claude-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
+orchestrator runs clean [--older-than <N>d] [--dry-run]
 orchestrator decisions report
 orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
@@ -630,6 +631,11 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
   written before `outcome` existed are computed on the fly. It needs no config and calls
   nothing. The benchmark in [`bench/`](bench/README.md) uses it on the run directories it
   collects.
+- `runs clean [--older-than <N>d] [--dry-run]` — removes the git worktrees of runs older than
+  the limit (default 7 days, by the run's `created_at`) whose worktree is still there. A run in
+  use is skipped; a worktree git refuses to remove (uncommitted files) is kept and listed with
+  git's reason. Never `--force`, and no branch is deleted: `orchestrator/<run-id>` stays.
+  `--dry-run` lists what would be removed and changes nothing.
 - `decisions report` — the older name of the last part of `runs report`, kept as an alias:
   compares the two complexity questions (`choice` and `score`) over
   the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,

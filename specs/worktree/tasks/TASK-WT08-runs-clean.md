@@ -24,3 +24,14 @@
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+Code and tests written 2026-10-18 (`internal/app/clean.go`, `clean_test.go`); `scripts/check.sh`
+not yet run, so the task is not ticked in `README.md` or TODO.md.
+
+- `--older-than` takes `<N>d` or any Go duration; the age is measured from `run.created_at`.
+- Only the flat runs directory is walked (`Store.RunIDs`), not nested bench trees.
+- The run is reloaded after the lock is taken. A worktree directory already gone is recorded as
+  removed without calling git; the single `PruneWorktrees` drops its administrative data.
+- Unreadable runs are listed as skipped and do not stop the command.

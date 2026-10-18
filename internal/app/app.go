@@ -50,7 +50,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -107,6 +107,13 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return decisionsCalibrate(stdout, args)
 	case "runs":
+		if len(rest) > 1 && rest[1] == "clean" {
+			cleanOpts, err := runsCleanArgs(rest[2:])
+			if err != nil {
+				return err
+			}
+			return runsClean(ctx, stdout, cleanOpts)
+		}
 		dir, err := runsReportArgs(rest[1:])
 		if err != nil {
 			return err
