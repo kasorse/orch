@@ -33,6 +33,8 @@ func TestFromError(t *testing.T) {
 		{"decision bad request", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionBadRequest}, ProviderExecution},
 		{"decision auth", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionAuth}, ConfigOrDependency},
 		{"decision cancelled", &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionCancelled}, UserCancellation},
+		{"invalid planning answer", &apperr.InvalidResponseError{Call: "specify", Field: "tasks[1].repo"}, ProviderExecution},
+		{"invalid planning answer wrapped", fmt.Errorf("story plan: %w", &apperr.InvalidResponseError{Call: "survey"}), ProviderExecution},
 		{"jira auth", &apperr.JiraError{Kind: apperr.JiraAuth}, ConfigOrDependency},
 		{"jira not found", &apperr.JiraError{Kind: apperr.JiraNotFound}, ConfigOrDependency},
 		{"jira redirect", &apperr.JiraError{Kind: apperr.JiraRedirect}, ConfigOrDependency},

@@ -229,6 +229,33 @@ func (e *ExecutionError) Error() string {
 }
 func (e *ExecutionError) Unwrap() error { return e.Err }
 
+// InvalidResponseError is the answer of a planning call of a story (specs/story/SPEC.md §7: a
+// survey or specify) that holds no JSON object or breaks one of the answer's rules. Field names
+// the offending field as the answer spells it (tasks[1].repo), "" for the answer as a whole.
+// Like an invalid decision answer it is the provider failing, so it maps to exit code 3.
+type InvalidResponseError struct {
+	Call  string // survey, specify
+	Repo  string // the repository a survey was of; "" for specify
+	Field string
+	Msg   string
+	Err   error
+}
+
+func (e *InvalidResponseError) Error() string {
+	var b strings.Builder
+	b.WriteString(e.Call)
+	if e.Repo != "" {
+		b.WriteString(" of " + e.Repo)
+	}
+	b.WriteString(": invalid response: ")
+	if e.Field != "" {
+		b.WriteString(e.Field + ": ")
+	}
+	b.WriteString(e.Msg)
+	return b.String()
+}
+func (e *InvalidResponseError) Unwrap() error { return e.Err }
+
 // LimitExceededError signals that a workflow limit (max steps / max fix iterations) was
 // reached. Reason is pre-formatted for direct CLI display.
 type LimitExceededError struct {
