@@ -278,3 +278,20 @@ security:
 #   fields:                        # extra text custom fields, rendered in this order when non-empty
 #     - id: customfield_10035      # ids: GET <base_url>/rest/api/2/field
 #       label: Acceptance criteria
+#   create:                        # story run creates a story's child issues (specs/story/SPEC.md §12); absent: none
+#     issue_type: Story            # the children's type
+#     link: parent                 # parent | field
+#     # field: customfield_10014   # with link: field (Epic Link on Server/Data Center)
+#     labels: [orchestrator]
+#     components: {billing: Billing}   # optional, service name -> Jira component
+
+# Optional: a task split into a specification and ordered subtasks across services
+# (specs/story/SPEC.md §5). The task names the services it touches; they are the checkouts
+# directly under these roots. Nothing is listed per service.
+# story:
+#   roots: [..]                    # absolute, ~/-prefixed, or relative to the story home
+#   max_services: 5                # services one story may touch; 1..20
+#   spec_dir: specs                # in the story home
+#   max_tasks: 12                  # 2..30
+#   max_cost_usd: 20               # optional; the whole story - needs cost-reporting providers
+#   jira_issue_types: [Epic]       # run --jira on these refuses; default none

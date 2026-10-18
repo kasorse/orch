@@ -39,3 +39,27 @@ names are found on disk as §7.1 says, with no model call.
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+2026-10-18. Built; `scripts/check.sh` (root and `bench/`) has not been run - that gate is left to
+the operator, and this task is not closed until it passes.
+
+- ST01 was not yet in the repository, so `internal/story/services.go` holds `Named` alone (with
+  its test); the rest of ST01 is unchanged.
+- `StoryConfig` is `Config.Story *StoryConfig` (nil without the section); `ResolveRoots(home)` is
+  a method on it, `~/` against the user's home directory.
+- `jira.create` sits inside `jira`, so "`jira.create` without `jira`" cannot be written; a
+  `create` block with the rest of the section missing is reported by `jira.base_url is
+  required` and the other required keys. `link` defaults to `parent`; `field` with `link: parent`
+  is refused; labels may not contain whitespace.
+- `story.max_cost_usd` needing cost-reporting providers is checked with the other budget checks in
+  `ValidateDependencies` (`storyBudgetProblems`, in `story.go`), because only there is the provider
+  registry known. It covers `actions.analyze` (survey) and `actions.plan` (specify); the children
+  use their own repositories' configs.
+- `candidates(roots, home)` takes the resolved roots; `findServices` additionally takes the
+  context, a `execution.ProcessExecutor` (the only place git runs, for the named services) and
+  the roots for the messages. The story home is a candidate once, by resolved path, even when it
+  is under a root.
+- Not done: the commented `story` / `jira.create` blocks of `orchestrator.example.yaml` are
+  added, but nothing yet calls `findServices` (ST03, ST04, ST06).

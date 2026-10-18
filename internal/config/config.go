@@ -502,6 +502,10 @@ type Config struct {
 	// section is absent, which is valid - only run --jira needs it.
 	Jira *JiraConfig `yaml:"jira"`
 
+	// Story configures story plan and story run (specs/story/SPEC.md §5); nil when the section
+	// is absent, which is valid.
+	Story *StoryConfig `yaml:"story"`
+
 	// Extensions opts provider calls into the operator's MCP servers and Claude user
 	// settings (extensions.go). Absent means none, as before.
 	Extensions ExtensionsConfig `yaml:"extensions"`

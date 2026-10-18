@@ -1,6 +1,7 @@
 # Story — a task split into a specification and ordered subtasks
 
-Status: **specified** (2026-10-17), not started. Owner's decisions D1–D7 and author's defaults
+Status: **in progress** (specified 2026-10-17): ST02 built 2026-10-18, its `scripts/check.sh`
+gate pending. Owner's decisions D1–D7 and author's defaults
 A1–A11 in `SPEC.md` §19–§20. Builds on [`specs/worktree/`](../worktree/README.md), which comes
 first.
 
