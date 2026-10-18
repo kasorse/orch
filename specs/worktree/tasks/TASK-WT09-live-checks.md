@@ -31,3 +31,16 @@ differs from the plan.
 ## Gates
 
 `scripts/check.sh`; `go test -tags security ./test/security/...`
+
+## As built
+
+Test written 2026-10-18 (`test/security/worktree_test.go`); it has not been run, since it needs the
+real claude CLI. Left to the operator: `go test -tags security ./test/security/...` and
+`scripts/check.sh`. The task is not ticked in `README.md`, and the verified CLI version is not
+yet named in the `client.go` comment, until that run passes.
+
+- The fixture is the existing repository plus `git worktree add`; the operator-only sentinel is
+  in an untracked file there, so the worktree cannot hold it.
+- V-wt-2 logs whether the CLI refused the `.git` rewrite; if it did not, it asserts
+  `guard.RepoGuard.Changed` returns exactly `.git (worktree pointer)`.
+- V-wt-3's positive control runs claude in the operator's tree with project settings loaded.
