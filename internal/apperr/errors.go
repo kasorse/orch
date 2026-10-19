@@ -48,11 +48,12 @@ func NewDependencyError(msg string, cause error) *DependencyError {
 type FailureKind string
 
 const (
-	FailureSpawn     FailureKind = "spawn"     // executable not found / not executable
-	FailureExit      FailureKind = "exit"      // ran, exited non-zero
-	FailureTimeout   FailureKind = "timeout"   // execution.timeout exceeded
-	FailureCancelled FailureKind = "cancelled" // SIGINT/SIGTERM
-	FailureAuth      FailureKind = "auth"      // the CLI did not use the run's credential, or it was refused
+	FailureSpawn     FailureKind = "spawn"      // executable not found / not executable
+	FailureExit      FailureKind = "exit"       // ran, exited non-zero
+	FailureTimeout   FailureKind = "timeout"    // execution.timeout exceeded
+	FailureCancelled FailureKind = "cancelled"  // SIGINT/SIGTERM
+	FailureAuth      FailureKind = "auth"       // the CLI did not use the run's credential, or it was refused
+	FailureRateLimit FailureKind = "rate_limit" // the subscription's usage limit refused the call
 )
 
 var failureDescriptions = map[FailureKind]string{
@@ -61,6 +62,7 @@ var failureDescriptions = map[FailureKind]string{
 	FailureTimeout:   "timeout (exceeded execution.timeout)",
 	FailureCancelled: "cancelled (interrupted)",
 	FailureAuth:      "auth (the CLI did not use the run's credential, or the credential was refused)",
+	FailureRateLimit: "rate_limit (the account's usage limit was reached)",
 }
 
 // ProviderError carries the actionable context spelled out in the spec: provider,
@@ -91,6 +93,9 @@ type ProviderError struct {
 	// APIStatus is the HTTP status of the API error the CLI reported as its answer (for
 	// claude, "API Error: 400 ..."); 0 when it reported none.
 	APIStatus int
+	// ResetsAt is when the usage limit of a FailureRateLimit resets, as the CLI reported it;
+	// zero when it did not say.
+	ResetsAt time.Time
 
 	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
 	// the run-wide execution.timeout was the one that fired: an action's own

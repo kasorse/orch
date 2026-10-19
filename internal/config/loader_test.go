@@ -239,6 +239,23 @@ execution: {timeout: 15m}
 ` + extra
 }
 
+// execution.rate_limit_wait: absent waits with the default, 0 turns waiting off.
+func TestLoad_RateLimitWait(t *testing.T) {
+	for yaml, want := range map[string]time.Duration{
+		"execution: {timeout: 15m}":                       DefaultRateLimitWait,
+		"execution: {timeout: 15m, rate_limit_wait: 0s}":  0,
+		"execution: {timeout: 15m, rate_limit_wait: 10m}": 10 * time.Minute,
+	} {
+		cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), "execution: {timeout: 15m}", yaml, 1)))
+		if err != nil {
+			t.Fatalf("%s: %v", yaml, err)
+		}
+		if cfg.Execution.RateLimitWait != want {
+			t.Errorf("%s: RateLimitWait = %s, want %s", yaml, cfg.Execution.RateLimitWait, want)
+		}
+	}
+}
+
 func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		yaml string

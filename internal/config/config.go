@@ -437,11 +437,19 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
+	// RateLimitWait turns on waiting for a step the account's usage limit refused: the run
+	// sleeps until the reset time the CLI reported, or this long when it reported none, and
+	// retries the step. 0 fails the run at once; absent means DefaultRateLimitWait.
+	RateLimitWait time.Duration `yaml:"rate_limit_wait"`
 }
+
+// DefaultRateLimitWait is execution.rate_limit_wait when the key is absent.
+const DefaultRateLimitWait = 5 * time.Minute
 
 func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Timeout string `yaml:"timeout"`
+		Timeout       string `yaml:"timeout"`
+		RateLimitWait string `yaml:"rate_limit_wait"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -451,6 +459,12 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 		return err
 	}
 	e.Timeout = d
+	e.RateLimitWait = DefaultRateLimitWait
+	if raw.RateLimitWait != "" {
+		if e.RateLimitWait, err = parseDurationField("execution.rate_limit_wait", raw.RateLimitWait); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

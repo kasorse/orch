@@ -32,6 +32,11 @@ type streamEvent struct {
 	APIKeySource json.RawMessage `json:"apiKeySource"`
 	// type "system", subtype "api_retry": why the API call is being retried (§9).
 	Error json.RawMessage `json:"error"`
+	// type "assistant" (and "result"): the typed cause of an API error the CLI answered with.
+	// "usage_limit_reached" is the account's own usage limit, the one refusal that a reset
+	// clears; its params carry rate_limit_info.resetsAt (Unix seconds). Raw, like apiKeySource.
+	APIError       json.RawMessage `json:"api_error"`
+	APIErrorParams json.RawMessage `json:"api_error_params"`
 	// type "system", subtype "init": each MCP server's status ("connected", "failed", ...)
 	MCPServers []struct {
 		Name   string `json:"name"`
@@ -88,6 +93,10 @@ type streamReport struct {
 	// authErr is the first authentication-category error a system/api_retry event carried
 	// (authErrorCategories); "" when none did.
 	authErr string
+	// usageLimit is set when an event said the account's usage limit refused the call;
+	// limitResets is when it resets, zero when no event said.
+	usageLimit  bool
+	limitResets time.Time
 	// ok is true when stdout is a stream-json transcript with a result event; only then
 	// is text the answer.
 	ok bool
@@ -101,16 +110,18 @@ type streamReport struct {
 // either way. A stdout with neither gives a zero report and no usage.
 func parseStream(stdout string) streamReport {
 	var (
-		rep      streamReport
-		source   string
-		authErr  string
-		limits   *domain.RateLimits
-		messages = map[string]streamUsage{}
-		models   = map[string]bool{}
-		tools    = map[string]int{}
-		seenTool = map[string]bool{}
-		result   *streamEvent
-		mcpFail  []string
+		rep         streamReport
+		source      string
+		authErr     string
+		usageLimit  bool
+		limitResets time.Time
+		limits      *domain.RateLimits
+		messages    = map[string]streamUsage{}
+		models      = map[string]bool{}
+		tools       = map[string]int{}
+		seenTool    = map[string]bool{}
+		result      *streamEvent
+		mcpFail     []string
 	)
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
@@ -120,6 +131,12 @@ func parseStream(stdout string) streamReport {
 		var ev streamEvent
 		if json.Unmarshal([]byte(line), &ev) != nil {
 			continue
+		}
+		if rawString(ev.APIError) == "usage_limit_reached" {
+			usageLimit = true
+			if t := limitResetsAt(ev.APIErrorParams); !t.IsZero() {
+				limitResets = t
+			}
 		}
 		switch ev.Type {
 		case "system":
@@ -225,7 +242,22 @@ func parseStream(stdout string) streamReport {
 		rep.usage.APIKeySource = call.APIKeySource
 	}
 	rep.authErr = authErr
+	rep.usageLimit, rep.limitResets = usageLimit, limitResets
 	return rep
+}
+
+// limitResetsAt is the reset time in a usage_limit_reached error's params, zero when they
+// do not carry one.
+func limitResetsAt(params json.RawMessage) time.Time {
+	var p struct {
+		RateLimitInfo struct {
+			ResetsAt int64 `json:"resetsAt"`
+		} `json:"rate_limit_info"`
+	}
+	if json.Unmarshal(params, &p) != nil || p.RateLimitInfo.ResetsAt <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(p.RateLimitInfo.ResetsAt, 0)
 }
 
 // apiErrorStatus is the status of the CLI's "API Error: NNN ..." answer, which it prints

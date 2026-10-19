@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
@@ -71,6 +72,30 @@ func TestExecute_ErrorResultTextIsTheStdout(t *testing.T) {
 	var pe *apperr.ProviderError
 	if !errors.As(err, &pe) || pe.APIStatus != 529 {
 		t.Errorf("APIStatus = %+v, want 529", pe)
+	}
+}
+
+// The account's usage limit is its own failure kind, with the reset time; any other
+// rate_limit refusal (a throttle, an org policy) carries no api_error and stays an exit.
+func TestExecute_UsageLimitIsARateLimitFailure(t *testing.T) {
+	limited := `{"type":"assistant","message":{"id":"m1","content":[]},"error":"rate_limit","api_error":"usage_limit_reached","api_error_params":{"rate_limit_info":{"status":"rejected","resetsAt":1999999999,"rateLimitType":"five_hour"}}}
+{"type":"result","subtype":"success","is_error":true,"result":"You've hit your limit","num_turns":1}`
+	throttled := `{"type":"assistant","message":{"id":"m1","content":[]},"error":"rate_limit"}
+{"type":"result","subtype":"success","is_error":true,"result":"Request rejected (429)","num_turns":1}`
+	for name, tc := range map[string]struct {
+		out    string
+		kind   apperr.FailureKind
+		resets time.Time
+	}{
+		"usage limit": {limited, apperr.FailureRateLimit, time.Unix(1999999999, 0)},
+		"throttle":    {throttled, apperr.FailureExit, time.Time{}},
+	} {
+		fake := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: tc.out, ExitCode: 1}}}
+		_, err := newLogin(fake).Execute(context.Background(), provider.Request{Prompt: "p", Model: "m", Authority: domain.AuthorityNone})
+		var pe *apperr.ProviderError
+		if !errors.As(err, &pe) || pe.Kind != tc.kind || !pe.ResetsAt.Equal(tc.resets) {
+			t.Errorf("%s: got %+v, want kind %s resets %v", name, pe, tc.kind, tc.resets)
+		}
 	}
 }
 
