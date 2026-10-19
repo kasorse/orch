@@ -152,6 +152,15 @@ func TestStoryTask_RunsOnItsBranchAndBaseWithDevelopmentForced(t *testing.T) {
 	if !equalStrings(d.Workflow, []string{"analyze", "implement", "test", "review"}) {
 		t.Errorf("workflow = %v, want analyze, implement, test, review", d.Workflow)
 	}
+	// A story task is never a story: the scope question is not asked (specs/story/SPEC.md §13).
+	if d.Scope != nil {
+		t.Errorf("decision.json scope = %+v, want none for a story task", d.Scope)
+	}
+	for i, body := range r.jev.Bodies() {
+		if strings.Contains(body, "scope_story") {
+			t.Errorf("Jev request %d asks the scope question of a story task:\n%s", i, body)
+		}
+	}
 	for _, s := range d.Stages {
 		switch s.Stage {
 		case "development":

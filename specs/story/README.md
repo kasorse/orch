@@ -45,7 +45,7 @@ every ordinary run looks, for a later calibration, and decides nothing.
 | [ST06](tasks/TASK-ST06-story-run.md) | `story run` / `status`: state, lock, pre-checks, dispatch, resume, retry, As built, budget ✓ | L | ST01, ST02, ST05, WT07 |
 | [ST07](tasks/TASK-ST07-jira-children.md) | Jira children: create, wiki rendering, intents, front matter write-back ✓ | M | ST06 |
 | [ST08](tasks/TASK-ST08-jira-story-type.md) | `run --jira` refuses a story issue type ✓ | S | ST02 |
-| [ST09](tasks/TASK-ST09-scope-question.md) | the scope question (shadow) | M | — |
+| [ST09](tasks/TASK-ST09-scope-question.md) | the scope question (shadow) ✓ | M | — |
 | [ST10](tasks/TASK-ST10-integration-docs.md) | scenarios, MVP.md §48, CLAUDE.md, README, example, TODO.md | M | all |
 
 ```

@@ -108,7 +108,7 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 
 	reporter.Deciding()
 	// The manual choice waits on userCtx: Ctrl-C still cancels it, execution.timeout does not.
-	res, err := svc.Classify(ctx, classification.Request{RunID: run.ID, Text: text, UserCtx: userCtx})
+	res, err := svc.Classify(ctx, classification.Request{RunID: run.ID, Text: text, UserCtx: userCtx, StoryTask: storyTask})
 	if err != nil {
 		return decisionOutcome{}, err
 	}

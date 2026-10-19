@@ -10,7 +10,9 @@ import (
 	"orchestrator/internal/decision"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/interaction"
+	"orchestrator/internal/policy"
 	"orchestrator/internal/translate"
+	"orchestrator/internal/workflow"
 )
 
 type fakeTranslator struct {
@@ -423,6 +425,102 @@ func TestResultTrace_RecordsThePolicyHash(t *testing.T) {
 }
 
 func ptrf(v float64) *float64 { return &v }
+
+// The scope question is shadow data (specs/story/SPEC.md §13): the provider's answer reaches
+// decision.json as scope.story and nothing else.
+func TestResultTrace_RecordsTheScope(t *testing.T) {
+	f := newFixture(0.9)
+	f.provider.tc.Scope = &domain.ScopeDecision{Story: 0.35}
+	res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).Scope; got == nil || got.Story != 0.35 {
+		t.Errorf("trace scope = %+v, want story 0.35", got)
+	}
+
+	// Not asked, or the provider failed: nothing is recorded.
+	f = newFixture(0.9)
+	res, err = f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).Scope; got != nil {
+		t.Errorf("trace scope = %+v, want none when the provider gave none", got)
+	}
+	f = newFixture(0.9)
+	f.provider.tcErr = jevDown
+	res, err = f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).Scope; got != nil {
+		t.Errorf("trace scope after a provider failure = %+v, want none", got)
+	}
+}
+
+// A story task skips the question, and its decision is still recorded under the same questions
+// hash as every other provider-decided run: the hash names the question set, so calibration
+// keeps story tasks with the runs whose stage answers they share (specs/story/SPEC.md §13).
+func TestClassify_StoryTaskSkipsTheScopeQuestion(t *testing.T) {
+	f := newFixture(0.9)
+	asked, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.provider.input.SkipScope {
+		t.Error("an ordinary run must ask the scope question")
+	}
+
+	skipped, err := f.svc.Classify(context.Background(), Request{Text: "fix", StoryTask: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.provider.input.SkipScope {
+		t.Error("a story task must skip the scope question")
+	}
+	if a, s := asked.Trace(domain.Workflow{}).QuestionsHash, skipped.Trace(domain.Workflow{}).QuestionsHash; a != s || s != decision.QuestionsHash() {
+		t.Errorf("questions hash asked %q, skipped %q, want both %q", a, s, decision.QuestionsHash())
+	}
+}
+
+// The policy, the workflow and the routes never read the scope answer: the same stage and
+// complexity answers give byte-for-byte the same decision whatever it is. The routes follow
+// from the decision alone (config.ActionsConfig.Route takes a domain.Decision), so comparing
+// the decision, the workflow built from it and the trace covers them.
+func TestScopeAnswerChangesNothingButItself(t *testing.T) {
+	type outcome struct{ decision, workflow, trace string }
+	run := func(scope float64) outcome {
+		f := newFixture(0.9)
+		f.provider.tc.Scope = &domain.ScopeDecision{Story: scope}
+		res, err := f.svc.Classify(context.Background(), Request{RunID: "r", Text: "add a cache"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Decision = policy.Explore(res.Decision, f.svc.Policy, "r")
+		wf, err := workflow.Build(res.Decision.Stages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trace := res.Trace(wf)
+		if trace.Scope == nil || trace.Scope.Story != scope {
+			t.Fatalf("trace scope = %+v, want story %v", trace.Scope, scope)
+		}
+		trace.Scope = nil // the one field that may differ
+		mustJSON := func(v any) string {
+			b, err := json.Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(b)
+		}
+		return outcome{mustJSON(res.Decision), mustJSON(wf), mustJSON(trace)}
+	}
+	low, high := run(0.05), run(0.95)
+	if low != high {
+		t.Errorf("the scope answer changed the outcome:\nscope 0.05: %+v\nscope 0.95: %+v", low, high)
+	}
+}
 
 // Each decision round's usage reaches the trace (specs/benchmark/SPEC.md §11.1), also the
 // usage of a provider call that failed before the manual choice.

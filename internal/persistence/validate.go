@@ -505,6 +505,19 @@ func validateQuestionsHash(h string) error {
 	return nil
 }
 
+// validateDecisionScope checks decision.json's scope.story (specs/story/SPEC.md §13): when
+// present, a probability in [0, 1]. It is absent for --stage, --story-task and in a trace
+// written before the scope question.
+func validateDecisionScope(s *domain.ScopeDecision) error {
+	if s == nil {
+		return nil
+	}
+	if err := s.Validate(); err != nil {
+		return fmt.Errorf("scope.story: %w", err)
+	}
+	return nil
+}
+
 // validateComplexityOutcome checks the size cuts (specs/decision-shape/SPEC.md §10): each
 // source's size, when present, in [0, 2] and, when present, 0 < cuts.medium <
 // cuts.complex <= 2. Both are absent in a trace written before them.

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/decision"
 )
 
 var complexityLevels = []string{
@@ -179,6 +180,22 @@ func TestMock_Stages(t *testing.T) {
 	for request, want := range cases {
 		if got := enabled(mustDecide(t, classificationRequest(request))); !reflect.DeepEqual(got, want) {
 			t.Errorf("%q: stages = %v, want %v", request, got, want)
+		}
+	}
+}
+
+func TestMock_ScopeAnswersWeakWhateverTheRequest(t *testing.T) {
+	for _, request := range []string{
+		"Fix a typo in the README",
+		"Redesign the architecture of the workflow engine across all services",
+		"What is a mutex?",
+	} {
+		req := classificationRequest(request)
+		scope := decision.ScopeQuestion()
+		req.Questions[scope.ID] = yesNoQuestion(scope)
+		a := mustDecide(t, req).Answers[scope.ID]
+		if a.Type != questionNoul || a.Noul == nil || *a.Noul != 0.15 {
+			t.Errorf("%q: scope answer = %+v, want noul 0.15", request, a)
 		}
 	}
 }

@@ -70,6 +70,12 @@ func buildClassifyPrompt(input domain.ClassificationInput, sources []domain.Comp
 	}
 	shape = append(shape, fmt.Sprintf("  %q: {%s}", stagesKey, strings.Join(stageShape, ", ")))
 
+	if !input.SkipScope {
+		q := decision.ScopeQuestion()
+		fmt.Fprintf(&b, "Scope question: the probability that the answer is yes.\n\nQuestion %q: %s\n  yes: %s\n  no: %s\n\n", q.ID, q.Instructions, q.True, q.False)
+		shape = append(shape, fmt.Sprintf("  %q: <p>", scopeKey))
+	}
+
 	fmt.Fprintf(&b, "Answer shape:\n{\n%s\n}\n\n", strings.Join(shape, ",\n"))
 	if err := writeState(&b, decision.NewClassificationState(input)); err != nil {
 		return "", err
@@ -79,6 +85,9 @@ func buildClassifyPrompt(input domain.ClassificationInput, sources []domain.Comp
 
 // stagesKey holds the stage probabilities in the classification answer.
 const stagesKey = "stages"
+
+// scopeKey holds the shadow scope probability in the classification answer.
+const scopeKey = "scope"
 
 func writeChoice(b *strings.Builder, q decision.ChoiceQuestion) {
 	fmt.Fprintf(b, "Question %q: %s\nOptions (a probability for each, summing to 1):\n", q.ID, q.Instructions)

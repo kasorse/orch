@@ -52,7 +52,8 @@ func authRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) (cfg,
 		"decide-context": `{"context_depth": {"none": 0.9, "project": 0.1}}`,
 		"decide-classify": `{"complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
  "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
- "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95}}`,
+ "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95},
+ "scope": 0.2}`,
 	} {
 		writeResponse(t, responses, name, body)
 	}

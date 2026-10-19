@@ -56,6 +56,9 @@ type Request struct {
 	// Ctrl-C like the run's, but without execution.timeout's deadline - time the user
 	// spends deciding is not the run's time (T12). Nil means the run's context.
 	UserCtx context.Context
+	// StoryTask is run --story-task: the shadow scope question is not asked, because a
+	// story task is never a story (specs/story/SPEC.md §13). QuestionsHash stays the same.
+	StoryTask bool
 }
 
 // Timings of each step. A step that did not run is zero.
@@ -146,6 +149,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 		ContextDepth:   selectedDepth,
 		ContextLimited: res.ContextLimited,
 		Project:        res.Project,
+		SkipScope:      req.StoryTask,
 	})
 	res.Timings.Classification = time.Since(start)
 	res.Usage.Classification = callUsage(tc.Usage, err)
@@ -275,6 +279,10 @@ func (r Result) Trace(wf domain.Workflow) domain.DecisionTrace {
 	}
 	if r.Classification != nil {
 		t.Model = r.Classification.Model
+		if r.Classification.Scope != nil {
+			scope := *r.Classification.Scope
+			t.Scope = &scope
+		}
 	}
 	if r.Depth != nil {
 		t.ContextDepth = &domain.ContextDepthTrace{

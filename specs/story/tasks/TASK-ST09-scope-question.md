@@ -35,3 +35,32 @@ Every provider-decided run records how story-like its task looks, and nothing us
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+- `decision.ScopeQuestion()` (ID `scope_story`, the §13 text with true/false criteria, no stage)
+  is part of `QuestionsHash`, which therefore changes; `StageQuestions` does not return it.
+- `domain.ScopeDecision{Story}` is `TaskClassification.Scope` and `DecisionTrace.Scope`
+  (`scope.story` in `decision.json`), both optional. `TaskClassification.Validate` and
+  `decodeDecision` (`validateDecisionScope`) range-check it when present; a trace without it, as
+  from `--stage`, `--story-task` or before ST09, still loads.
+- ST05 added no flag, so the flag is new: `classification.Request.StoryTask` sets
+  `domain.ClassificationInput.SkipScope`, and `decideWithProvider` passes its `storyTask`. The
+  zero value asks the question. The state sent to a provider does not carry it.
+- Jev: the question is sent as a `noul` question only when asked, and the answer is required
+  (`InvalidResponse` when missing) only then; an answer to an unasked one is an "unexpected
+  answer". The mock answers 0.15.
+- LLM: an asked question adds a "Scope question" block and `"scope": <p>` to the prompt; the
+  parser requires `scope` when asked and refuses it when not. There are no prompt goldens; the
+  Jev goldens (`classification_*.golden.json`) and the `classification_response.json` fixture were
+  edited by hand to what `-update` writes, and the Jev golden tests pass against them.
+- The questions hash of a story task is the same constant as every other run's, although it did
+  not ask the question: the hash names the question set, and a test pins it. `decisions
+  calibrate` groups by `trace.QuestionsHash` (`internal/report/shape.go`), so the new decisions
+  form their own group with no code change there; the policy, workflow and route code was not
+  touched, and `TestScopeAnswerChangesNothingButItself` runs it with scope 0.05 and 0.95 and
+  compares the results byte for byte (routes depend on the `Decision` alone).
+- MVP.md is unchanged; the §9.1 re-check note is ST10's.
+- `scripts/check.sh`: every package's tests, the integration tests included, passed; the first
+  run stopped only on `gofmt -l` for `internal/domain/trace.go`, whose field alignment was then
+  fixed.

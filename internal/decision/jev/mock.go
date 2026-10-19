@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/decision"
 )
 
 // MockModelPrefix marks the model reported by the mock client, so a decision trace
@@ -294,8 +295,12 @@ func (s requestSignals) scoreDistribution(n int) []float64 {
 	return probs
 }
 
-// noul answers the stage_<name> questions; unknown ids get an undecided 0.5.
+// noul answers the stage_<name> questions and the shadow scope question (always weak: the
+// mock has no signal for it); unknown ids get an undecided 0.5.
 func (s requestSignals) noul(id string) float64 {
+	if id == decision.QuestionScopeStory {
+		return mockWeak
+	}
 	var yes bool
 	switch strings.TrimPrefix(id, "stage_") {
 	case "research":
