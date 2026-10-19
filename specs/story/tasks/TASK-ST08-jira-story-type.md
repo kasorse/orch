@@ -21,3 +21,10 @@ An issue whose type is in `story.jira_issue_types` is not run as one task (`SPEC
 ## Gates
 
 `scripts/check.sh`
+
+## As built
+
+`runTask` compares `ticket.Type` with each `story.jira_issue_types` entry (`strings.EqualFold`)
+right after `taskFromJira`; a match returns a `ConfigError` naming `story plan --jira <KEY>`
+before `store.NewRun`. Tests: `test/integration/story_jira_type_test.go`. `scripts/check.sh`
+was not run here; it is left to the operator.

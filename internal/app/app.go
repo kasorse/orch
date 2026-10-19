@@ -997,6 +997,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 		if ticket, task.Description, err = taskFromJira(decideCtx, cfg, jiraKey, text, reporter); err != nil {
 			return err
 		}
+		if cfg.Story != nil {
+			for _, t := range cfg.Story.JiraIssueTypes {
+				if strings.EqualFold(t, strings.TrimSpace(ticket.Type)) {
+					return &apperr.ConfigError{Msg: fmt.Sprintf("%s is a %s, which story.jira_issue_types sends to a story plan, not one run; run: orchestrator story plan --jira %s",
+						ticket.Key, ticket.Type, ticket.Key)}
+				}
+			}
+		}
 		task.Source = &domain.TaskSource{
 			Kind: domain.TaskSourceJira, Key: ticket.Key, RequestedKey: ticket.RequestedKey,
 			URL: ticket.URL, FetchedAt: ticket.FetchedAt, Notes: strings.TrimSpace(text) != "",
