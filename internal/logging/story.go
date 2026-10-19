@@ -183,6 +183,13 @@ func (r *ConsoleReporter) StoryConfirm(tasks, repos int) {
 	fmt.Fprintf(r.Out, "\nRun %s in %s? [Y/n] ", storyCount(tasks, "task", "tasks"), storyCount(repos, "repository", "repositories"))
 }
 
+// StoryNote prints a one-line remark that is not a step: why something is skipped, or what was
+// done on the way.
+func (r *ConsoleReporter) StoryNote(text string) {
+	r.stopSpin()
+	fmt.Fprintf(r.Out, "Note: %s\n", text)
+}
+
 // StoryCancelled says the operator answered no, and that nothing was written.
 func (r *ConsoleReporter) StoryCancelled() {
 	fmt.Fprintln(r.Out, "Cancelled: nothing was started and nothing was written.")

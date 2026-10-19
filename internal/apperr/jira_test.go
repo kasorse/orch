@@ -9,6 +9,7 @@ func TestJiraFailureKind_Transient(t *testing.T) {
 	cases := map[JiraFailureKind]bool{
 		JiraTimeout: true, JiraConnection: true, JiraRateLimited: true, JiraUnavailable: true,
 		JiraAuth: false, JiraNotFound: false, JiraRedirect: false, JiraInvalidResponse: false, JiraCancelled: false,
+		JiraRejected: false,
 	}
 	for kind, want := range cases {
 		if got := kind.Transient(); got != want {
@@ -39,6 +40,13 @@ func TestJiraError_Message(t *testing.T) {
 			Detail: "fields.customfield_10035: not a text field; remove it from jira.fields"},
 			"Jira answered PMC-1 with an unexpected response: fields.customfield_10035: not a text field; remove it from jira.fields (HTTP 200)"},
 		{"cancelled", &JiraError{Key: "PMC-1", Kind: JiraCancelled}, "fetching PMC-1 from Jira was cancelled"},
+		{"create rejected", &JiraError{Key: "PAY-1", Op: JiraOpCreate, Kind: JiraRejected, StatusCode: 400, Detail: "components: Component name 'x' is not valid"},
+			"Jira rejected the child issue of PAY-1: components: Component name 'x' is not valid (HTTP 400)"},
+		{"create invalid", &JiraError{Key: "PAY-1", Op: JiraOpCreate, Kind: JiraInvalidResponse, StatusCode: 201, Detail: "no key"},
+			"Jira answered the creation of a child of PAY-1 with an unexpected response: no key (HTTP 201)"},
+		{"create cancelled", &JiraError{Key: "PAY-1", Op: JiraOpCreate, Kind: JiraCancelled},
+			"creating a child issue of PAY-1 was cancelled"},
+		{"create timeout", &JiraError{Key: "PAY-1", Op: JiraOpCreate, Kind: JiraTimeout, Detail: "10s"}, "Jira did not answer within 10s"},
 		{"body", &JiraError{Key: "PMC-1", Kind: JiraUnavailable, StatusCode: 500, Body: "oops"},
 			"Jira is unavailable (HTTP 500)\n\nresponse body:\noops"},
 	}

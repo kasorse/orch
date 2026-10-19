@@ -87,7 +87,7 @@ func FromError(err error) int {
 		switch jiraErr.Kind {
 		case apperr.JiraCancelled:
 			return UserCancellation
-		case apperr.JiraAuth, apperr.JiraNotFound, apperr.JiraRedirect:
+		case apperr.JiraAuth, apperr.JiraNotFound, apperr.JiraRedirect, apperr.JiraRejected:
 			return ConfigOrDependency
 		}
 		return ProviderExecution

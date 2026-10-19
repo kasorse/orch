@@ -1,6 +1,7 @@
 package jira
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -122,7 +123,7 @@ type Options struct {
 	UserAgent  string
 }
 
-// Client fetches issues from one Jira instance.
+// Client fetches issues from one Jira instance and creates the child issues of a story.
 type Client struct {
 	opts  Options
 	creds Credentials
@@ -190,47 +191,78 @@ func (c *Client) requestURL(key string) string {
 	return c.opts.BaseURL + issuePath + url.PathEscape(key) + "?fields=" + strings.Join(fields, ",")
 }
 
-// attempt performs one HTTP round trip. retryAfter is the parsed Retry-After header of a
-// failed response, or zero.
-func (c *Client) attempt(ctx context.Context, key string) (domain.Ticket, time.Duration, *apperr.JiraError) {
+// response is what one round trip answered with, other than a redirect. retryAfter is the
+// parsed Retry-After header, or zero.
+type response struct {
+	status     int
+	raw        []byte
+	retryAfter time.Duration
+}
+
+// do performs one HTTP round trip: method on target with body (nil for none), under one
+// attempt's timeout. Every failure that is not an answer to act on - a request that cannot be
+// built, a transport error, a body over the limit, a 3xx - is a *JiraError for key.
+func (c *Client) do(ctx context.Context, method, target string, body []byte, key string) (response, *apperr.JiraError) {
 	actx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(actx, http.MethodGet, c.requestURL(key), nil)
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(actx, method, target, reader)
 	if err != nil {
-		return domain.Ticket{}, 0, c.fail(key, apperr.JiraInvalidResponse, 0, "", "", fmt.Errorf("build request: %w", err))
+		jerr := c.fail(key, apperr.JiraInvalidResponse, 0, "", "", fmt.Errorf("build request: %w", err))
+		jerr.NotSent = true
+		return response{}, jerr
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.opts.UserAgent)
 	req.Header.Set("Authorization", c.creds.header())
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return domain.Ticket{}, 0, c.transportError(ctx, actx, key, err)
+		return response{}, c.transportError(ctx, actx, key, err)
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
-		return domain.Ticket{}, 0, c.transportError(ctx, actx, key, fmt.Errorf("read response: %w", err))
+		return response{}, c.transportError(ctx, actx, key, fmt.Errorf("read response: %w", err))
 	}
 	if len(raw) > maxResponseBody {
-		return domain.Ticket{}, 0, c.fail(key, apperr.JiraInvalidResponse, resp.StatusCode,
+		return response{}, c.fail(key, apperr.JiraInvalidResponse, resp.StatusCode,
 			"the response body is larger than 1 MiB", "", nil)
 	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		return response{}, c.fail(key, apperr.JiraRedirect, resp.StatusCode, redirectHost(resp), "", nil)
+	}
+	return response{status: resp.StatusCode, raw: raw, retryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())}, nil
+}
 
-	status := resp.StatusCode
-	switch {
-	case status == http.StatusOK:
-		ticket, detail := toTicket(raw, key, c.opts, c.now())
+// attempt performs one GET of key. retryAfter is the parsed Retry-After header of a failed
+// response, or zero.
+func (c *Client) attempt(ctx context.Context, key string) (domain.Ticket, time.Duration, *apperr.JiraError) {
+	res, jerr := c.do(ctx, http.MethodGet, c.requestURL(key), nil, key)
+	if jerr != nil {
+		return domain.Ticket{}, 0, jerr
+	}
+	if res.status == http.StatusOK {
+		ticket, detail := toTicket(res.raw, key, c.opts, c.now())
 		if detail != "" {
-			return domain.Ticket{}, 0, c.fail(key, apperr.JiraInvalidResponse, status, detail, "", nil)
+			return domain.Ticket{}, 0, c.fail(key, apperr.JiraInvalidResponse, res.status, detail, "", nil)
 		}
 		return ticket, 0, nil
-	case status >= 300 && status < 400:
-		return domain.Ticket{}, 0, c.fail(key, apperr.JiraRedirect, status, redirectHost(resp), "", nil)
 	}
+	return domain.Ticket{}, res.retryAfter, c.statusError(key, res)
+}
 
+// statusError is the JiraError of a response that is not the success the caller expects.
+func (c *Client) statusError(key string, res response) *apperr.JiraError {
+	status := res.status
 	kind, detail := apperr.JiraInvalidResponse, ""
 	switch status {
 	case http.StatusUnauthorized:
@@ -246,8 +278,7 @@ func (c *Client) attempt(ctx context.Context, key string) (domain.Ticket, time.D
 	default:
 		detail = "unexpected status " + strconv.Itoa(status)
 	}
-	return domain.Ticket{}, parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
-		c.fail(key, kind, status, detail, string(raw), nil)
+	return c.fail(key, kind, status, detail, string(res.raw), nil)
 }
 
 // redirectHost is the host a 3xx points at, or "" when it has no usable Location. Only

@@ -43,6 +43,7 @@ func TestFromError(t *testing.T) {
 		{"jira rate limited", &apperr.JiraError{Kind: apperr.JiraRateLimited}, ProviderExecution},
 		{"jira unavailable", &apperr.JiraError{Kind: apperr.JiraUnavailable}, ProviderExecution},
 		{"jira invalid response", &apperr.JiraError{Kind: apperr.JiraInvalidResponse}, ProviderExecution},
+		{"jira rejected", &apperr.JiraError{Kind: apperr.JiraRejected}, ConfigOrDependency},
 		{"jira cancelled", &apperr.JiraError{Kind: apperr.JiraCancelled}, UserCancellation},
 		{"jira wrapped", fmt.Errorf("fetch: %w", &apperr.JiraError{Kind: apperr.JiraAuth}), ConfigOrDependency},
 		{"limit", &apperr.LimitExceededError{Reason: "too many steps"}, WorkflowOrLimit},

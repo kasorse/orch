@@ -102,7 +102,11 @@ func storyRun(ctx context.Context, dirArg string, opts storyRunOptions, stdin io
 	if !opts.explicitConfig && !filepath.IsAbs(configPath) {
 		configPath = filepath.Join(loc.home, configPath)
 	}
-	cfg, _, _, _, err := loadAndValidateConfig(configPath, opts.claudeAuth, registry, osExec, reporter, noJiraDependencies)
+	// With jira.create the credentials are checked here, before any request or child (§10.1 point 1).
+	needJira := func(c config.Config) config.DependencyOptions {
+		return config.DependencyOptions{Jira: c.Jira != nil && c.Jira.Create != nil}
+	}
+	cfg, _, _, _, err := loadAndValidateConfig(configPath, opts.claudeAuth, registry, osExec, reporter, needJira)
 	if err != nil {
 		return err
 	}
@@ -164,10 +168,15 @@ func (r *storyRunner) run() error {
 	if err := r.checkBudget(); err != nil {
 		return err
 	}
-	if err := r.ensureJiraChildren(); err != nil {
+	if err := r.checkJiraChildren(); err != nil {
 		return err
 	}
 	if err := r.approve(); err != nil {
+		return err
+	}
+	// Nothing is written to Jira before the operator's answer (§6), and nothing is dispatched
+	// before the issues exist (§12.2).
+	if err := r.createJiraChildren(); err != nil {
 		return err
 	}
 	if err := r.reconcile(); err != nil {
@@ -405,18 +414,6 @@ func (r *storyRunner) checkBudget() error {
 	if total := r.rec.TotalCostUSD(); total >= *limit {
 		return &apperr.LimitExceededError{Reason: fmt.Sprintf("Story status: stopped\nReason: the story has cost $%.2f, story.max_cost_usd is $%.2f\n\n"+
 			"Raise story.max_cost_usd to continue it.", total, *limit)}
-	}
-	return nil
-}
-
-// ensureJiraChildren is the place where story run creates the Jira issues of the tasks that have
-// none, before the first dispatch (specs/story/SPEC.md §12.2); ST07 fills it in. Until then it
-// only keeps the rule that a task whose issue may exist already is not dispatched.
-func (r *storyRunner) ensureJiraChildren() error {
-	for _, id := range r.order {
-		if rt := r.rec.Tasks[id]; rt.JiraIntent && rt.Jira == "" {
-			return &apperr.ConfigError{Msg: id + ": a Jira issue may already exist; set jira: <KEY> or jira: none in its front matter"}
-		}
 	}
 	return nil
 }

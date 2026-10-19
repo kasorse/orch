@@ -14,8 +14,9 @@ import (
 
 // taskFromJira fetches the issue key names and renders it, with the operator's notes,
 // into the task text (specs/jira/SPEC.md §10). The whole text is printed before anything
-// is decided, so the operator sees what the ticket's author wrote (F2). This is the only
-// place the credential values are read from the environment.
+// is decided, so the operator sees what the ticket's author wrote (F2). This and
+// storyRunner.newJiraClient are the only places the credential values are read from the
+// environment.
 func taskFromJira(ctx context.Context, cfg config.Config, key, notes string, reporter *logging.ConsoleReporter) (domain.Ticket, string, error) {
 	j := cfg.Jira
 	creds := jira.NewCredentials(j.Auth, os.Getenv(j.EmailEnv), os.Getenv(j.TokenEnv))
