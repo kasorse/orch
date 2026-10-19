@@ -68,6 +68,7 @@ limits:
 
 execution:
   timeout: "30m0s"
+  isolation: inplace   # the bench's final check reads the workspace tree
 
 security:
   require_clean_worktree: true
