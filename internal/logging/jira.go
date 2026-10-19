@@ -70,5 +70,14 @@ func (r *ConsoleReporter) TaskBlock(key, text string) {
 // taskSourceLine is the resume header's reminder that a Jira task is the one persisted
 // when the run started: resume never contacts Jira (SPEC.md §11.3).
 func taskSourceLine(src *domain.TaskSource) string {
+	if src.Kind == domain.TaskSourceStory {
+		return storySourceLine(src)
+	}
 	return fmt.Sprintf("Task from %s, fetched %s (not re-fetched)", src.Key, src.FetchedAt.Local().Format("2006-01-02 15:04"))
+}
+
+// storySourceLine is the same reminder for a story task, whose text and criteria are the ones
+// persisted when the run started (specs/story/SPEC.md §11.1): resume needs no story file.
+func storySourceLine(src *domain.TaskSource) string {
+	return fmt.Sprintf("Task %s (%s) on %s", src.StoryRef(), src.StoryDetail(), src.Branch)
 }

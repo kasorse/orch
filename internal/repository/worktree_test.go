@@ -231,4 +231,7 @@ func TestMergeConflicts(t *testing.T) {
 	if _, _, err := repo.MergeConflicts(ctx, "-x", "side"); err == nil {
 		t.Error("an option-like ref must be refused")
 	}
+	if files, _, err := repo.MergeConflicts(ctx, "no-such-branch", "side"); err == nil {
+		t.Errorf("an unknown ref = %q, nil; want an error, not a clean merge", files)
+	}
 }

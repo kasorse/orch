@@ -266,8 +266,12 @@ func (r *Repository) MergeConflicts(ctx context.Context, ours, theirs string) (f
 	case 0:
 		return nil, true, nil
 	case 1:
-		// The first field is the tree id, the rest the conflicted paths.
+		// The first field is the tree id, the rest the conflicted paths. git also exits 1,
+		// with no tree, for a ref it cannot resolve.
 		fields := strings.Split(result.Stdout, "\x00")
+		if strings.TrimSpace(fields[0]) == "" {
+			return nil, true, &apperr.RepositoryError{Msg: "git merge-tree failed: " + strings.TrimSpace(result.Stderr)}
+		}
 		for _, f := range fields[1:] {
 			if f != "" {
 				files = append(files, f)

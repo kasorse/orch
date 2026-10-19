@@ -137,8 +137,9 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 
 // commitOffer proposes the message and the warnings for run. The header is the last
 // implementation's summary_short, cut to one line of commitHeaderMax runes and prefixed
-// with the Jira key for a run --jira task; whatever the cut left out goes into the body,
-// followed by the Orchestrator-Run trailer. Without a summary_short the header is "" and
+// with the Jira key for a run --jira task or a story task that has one; whatever the cut left
+// out goes into the body, followed by the Orchestrator-Run trailer and, for a story task, the
+// Orchestrator-Story one. Without a summary_short the header is "" and
 // the operator is asked to write it.
 func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interaction.CommitOffer {
 	var body strings.Builder
@@ -146,8 +147,8 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 	if impl != nil {
 		if source := strings.TrimSpace(impl.SummaryShort); source != "" {
 			prefix := ""
-			if run.Task.Source != nil && run.Task.Source.Key != "" {
-				prefix = run.Task.Source.Key + ": "
+			if key := ticketKey(run.Task.Source); key != "" {
+				prefix = key + ": "
 			}
 			first, _, _ := strings.Cut(source, "\n")
 			header = truncateRunes(prefix+strings.TrimSpace(first), commitHeaderMax)
@@ -157,6 +158,9 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 		}
 	}
 	body.WriteString("Orchestrator-Run: " + run.ID + "\n")
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		body.WriteString("Orchestrator-Story: " + src.StoryRef() + "\n")
+	}
 
 	var warnings []string
 	if r := lastReview(run); r != nil && r.Decide() == domain.ReviewFail {
@@ -167,6 +171,18 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 	}
 	return interaction.CommitOffer{Header: header, Body: body.String(), Warnings: warnings,
 		PathRules: domain.ManualApprovalMatches(domain.LastImplementPathRules(*run))}
+}
+
+// ticketKey is the Jira key a commit header starts with: the issue a run --jira task was
+// rendered from, or the key of a story task; "" when there is none.
+func ticketKey(src *domain.TaskSource) string {
+	switch {
+	case src == nil:
+		return ""
+	case src.Kind == domain.TaskSourceStory:
+		return src.Jira
+	}
+	return src.Key
 }
 
 // approvalReason is why auto_commit does not commit a change that matched approval: manual

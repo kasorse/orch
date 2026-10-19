@@ -126,7 +126,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 			// operator's dirty tree only gets the warning.
 			modeCfg := cfg
 			modeCfg.Execution.Isolation = run.Options.IsolationMode()
-			if err := checkWorktree(ctx, repo, modeCfg, *run.Workflow, dirty, stderr); err != nil {
+			if err := checkWorktreeFor(ctx, repo, modeCfg, *run.Workflow, dirty, run.Task.Source, stderr); err != nil {
 				return err
 			}
 			opts.dirty = dirty

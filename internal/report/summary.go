@@ -37,7 +37,11 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 
 	row("Task", excerpt(run.Task.Description, 120))
 	if src := run.Task.Source; src != nil {
-		row("Source", fmt.Sprintf("%s %s (%s)", src.Kind, src.Key, src.URL))
+		if src.Kind == domain.TaskSourceStory {
+			row("Source", fmt.Sprintf("%s %s (%s) on %s", src.Kind, src.StoryRef(), src.StoryDetail(), src.Branch))
+		} else {
+			row("Source", fmt.Sprintf("%s %s (%s)", src.Kind, src.Key, src.URL))
+		}
 	}
 	row("Started", run.CreatedAt.Format("2006-01-02 15:04:05 -0700"))
 	status := string(out.Status)

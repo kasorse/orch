@@ -405,7 +405,10 @@ validated:
 - `text` is what Go rendered (bounded to 32 KiB): the story's title and the task's place in it,
   the task file's body, the spec's approach and contracts (as context, not the task), and for
   every done task this one depends on, its As built line. It becomes `Task.Description`, and
-  `task.source` records `{kind: story, story, task, attempt, jira}`, displayed only.
+  `task.source` records `{kind: story, story, task, attempt, jira}`, displayed only, and also
+  the `branch`, `base_ref` and `base_branch` the run was asked for: a resume that comes before
+  the worktree exists has no other place to find them, and run.json is the only thing a resume
+  reads. All of them are validated on load, the branch against the story and task recorded.
 - `base_ref` must be a commit in this repository; `branch` must match
   `^story/[a-z0-9-]+/[A-Z]{2}[0-9]{2}(\.[0-9]+)?$` and not exist; `base_branch` (for the
   conflict check, `specs/worktree/` §10.3) is the repository's story base branch, not the

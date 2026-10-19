@@ -62,6 +62,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	}
 	prompt := BuildReviewPrompt(ReviewPromptInput{
 		Task:           run.Task.Description,
+		Acceptance:     run.Task.Acceptance,
 		Analysis:       d.lastAnalysis,
 		Plan:           d.lastPlan,
 		Implementation: d.lastImpl,
@@ -78,7 +79,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}
-	criteria := planCriteria(d.lastPlan)
+	criteria := reviewCriteria(run.Task.Acceptance, d.lastPlan)
 	first, err := parseReviewStrict(result.Output, criteria)
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}
@@ -161,7 +162,7 @@ func parseReviewStrict(output string, criteria []string) (domain.ReviewResult, e
 	// Validate has checked the range and uniqueness of the indexes, so exactly n verdicts
 	// are exactly 1..n.
 	if len(review.Criteria) != len(criteria) {
-		return domain.ReviewResult{}, fmt.Errorf("the plan has %d acceptance criteria and the review has %d verdicts",
+		return domain.ReviewResult{}, fmt.Errorf("the task and the plan have %d acceptance criteria and the review has %d verdicts",
 			len(criteria), len(review.Criteria))
 	}
 	slices.SortFunc(review.Criteria, func(a, b domain.CriterionVerdict) int { return a.Index - b.Index })

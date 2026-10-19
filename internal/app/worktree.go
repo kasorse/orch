@@ -57,19 +57,33 @@ func enterWorktree(ctx context.Context, s *session) error {
 
 // openWorktree creates the run's worktree from the operator's repository s.repo
 // (specs/worktree/SPEC.md §7, §8): on the branch orchestrator/<run-id>, at the derived path,
-// from the commit HEAD names. run.json: worktree is saved as soon as git created it, so a
-// failure after that never leaves a worktree the run cannot find. It returns the worktree's
-// Repository; nothing has switched to it yet.
+// from the commit HEAD names. A story task (specs/story/SPEC.md §11) is created on the branch
+// and from the commit its task input gave, which run.json records in task.source, with the
+// input's base branch for the conflict check; the operator's HEAD and branch play no part.
+// run.json: worktree is saved as soon as git created it, so a failure after that never leaves a
+// worktree the run cannot find. It returns the worktree's Repository; nothing has switched to
+// it yet.
 func openWorktree(ctx context.Context, s *session) (*repository.Repository, error) {
 	repo, run := s.repo, s.run
-	base, err := repo.HeadRef(ctx)
-	if err != nil {
-		return nil, &apperr.ConfigError{Msg: "a worktree run starts from the commit HEAD names, and HEAD names none (a repository without commits?)\n\n" +
-			"Make a first commit, or run in place: set execution.isolation: inplace, or run with --inplace.", Err: err}
-	}
-	baseBranch, err := repo.Branch(ctx)
-	if err != nil {
-		return nil, err
+	var base, baseBranch string
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		// The commit may have gone since the task input was checked, or the run be resumed
+		// before it had a worktree. CommitExists refuses anything but a full SHA.
+		base, baseBranch = src.BaseRef, src.BaseBranch
+		if ok, err := repo.CommitExists(ctx, base); err != nil {
+			return nil, err
+		} else if !ok {
+			return nil, &apperr.ConfigError{Msg: fmt.Sprintf("the story task's base_ref %s is not a commit in this repository", base)}
+		}
+	} else {
+		var err error
+		if base, err = repo.HeadRef(ctx); err != nil {
+			return nil, &apperr.ConfigError{Msg: "a worktree run starts from the commit HEAD names, and HEAD names none (a repository without commits?)\n\n" +
+				"Make a first commit, or run in place: set execution.isolation: inplace, or run with --inplace.", Err: err}
+		}
+		if baseBranch, err = repo.Branch(ctx); err != nil {
+			return nil, err
+		}
 	}
 	common, err := repo.CommonDir(ctx)
 	if err != nil {
@@ -80,7 +94,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return nil, &apperr.ConfigError{Msg: "cannot place the run's worktree", Err: err}
 	}
 	path := persistence.WorktreePath(state, common, run.ID)
-	branch := domain.WorktreeBranch(run.ID)
+	branch := domain.RunWorktreeBranch(run)
 
 	// Neither is ever reused: an existing one belongs to something else.
 	if exists, err := repo.BranchExists(ctx, branch); err != nil {
@@ -210,7 +224,7 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.path is %s, but this repository's worktree for the run is %s "+
 			"(resumed from another repository, or with another $XDG_STATE_HOME?)", w.Path, want), nil)
 	}
-	if branch := domain.WorktreeBranch(run.ID); w.Branch != branch {
+	if branch := domain.RunWorktreeBranch(run); w.Branch != branch {
 		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q, want %q", w.Branch, branch), nil)
 	}
 
@@ -298,6 +312,11 @@ func checkConflicts(ctx context.Context, s *session, sha string) {
 	}
 	if fingerprint != s.operatorFingerprint {
 		s.reporter.ConflictCheckSkipped(w.BaseBranch, guard.GitViolation+" changed since the worktree was created")
+		return
+	}
+	// A story task's base branch need not exist in this repository.
+	if exists, err := s.operator.BranchExists(ctx, w.BaseBranch); err == nil && !exists {
+		s.reporter.ConflictCheckSkipped(w.BaseBranch, "the branch does not exist in this repository")
 		return
 	}
 	files, supported, err := s.operator.MergeConflicts(ctx, w.BaseBranch, sha)

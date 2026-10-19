@@ -32,12 +32,14 @@ import (
 	"orchestrator/internal/jira"
 	"orchestrator/internal/logging"
 	"orchestrator/internal/persistence"
+	"orchestrator/internal/policy"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/claude"
 	"orchestrator/internal/provider/codex"
 	"orchestrator/internal/provider/gemini"
 	"orchestrator/internal/report"
 	"orchestrator/internal/repository"
+	"orchestrator/internal/story"
 	"orchestrator/internal/testexec"
 	"orchestrator/internal/tui"
 	"orchestrator/internal/workflow"
@@ -83,6 +85,11 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" {
 		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume and validate"}
 	}
+	if cli.storyTaskFile != "" {
+		if err := checkStoryTaskFlags(cli, rest); err != nil {
+			return err
+		}
+	}
 
 	switch rest[0] {
 	case "version":
@@ -92,10 +99,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runValidate(ctx, cli.configPath, cli.claudeAuth, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
-		if cli.jiraRef == "" && len(rest) < 2 {
+		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -146,6 +153,82 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+// checkStoryTaskFlags refuses the hidden --story-task where it does not belong: outside run,
+// and with anything else that says what the task is or where it runs (specs/story/SPEC.md
+// §11.1). The input file gives the text, the stages are the policy's plus development, and the
+// run is always a worktree run. Nothing has been created when this answers.
+func checkStoryTaskFlags(cli cliArgs, rest []string) error {
+	switch {
+	case rest[0] != "run":
+		return &apperr.ConfigError{Msg: "--story-task is only valid with run"}
+	case len(cli.stages) > 0:
+		return &apperr.ConfigError{Msg: "--story-task cannot be combined with --stage"}
+	case cli.jiraRef != "":
+		return &apperr.ConfigError{Msg: "--story-task cannot be combined with --jira"}
+	case cli.isolation != "":
+		return &apperr.ConfigError{Msg: "--story-task cannot be combined with --" + cli.isolation + ": a story task always runs in a worktree"}
+	case len(rest) > 1:
+		return &apperr.ConfigError{Msg: "--story-task cannot be combined with task text: the text is in the task input"}
+	}
+	return nil
+}
+
+// storyTaskReason is the reason decision.json gives development, and testing with it, for a
+// story task (specs/story/SPEC.md §11.2).
+const storyTaskReason = "story task"
+
+// maxStoryTaskFileBytes bounds the task input file read: its text may be 32 KiB, which JSON can
+// spell in up to six times as many bytes.
+const maxStoryTaskFileBytes = 256 << 10
+
+// readStoryTask reads and validates the task input file of run --story-task. It reads at most
+// maxStoryTaskFileBytes, so a wrong path to a large file costs nothing.
+func readStoryTask(path string) (story.TaskInput, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return story.TaskInput{}, &apperr.ConfigError{Msg: "cannot read the story task input", Err: err}
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxStoryTaskFileBytes+1))
+	if err != nil {
+		return story.TaskInput{}, &apperr.ConfigError{Msg: "cannot read the story task input " + path, Err: err}
+	}
+	if len(data) > maxStoryTaskFileBytes {
+		return story.TaskInput{}, &apperr.ConfigError{Msg: fmt.Sprintf("the story task input %s is over %d bytes", path, maxStoryTaskFileBytes)}
+	}
+	in, err := story.ParseTaskInput(data)
+	if err != nil {
+		return story.TaskInput{}, &apperr.ConfigError{Msg: fmt.Sprintf("%s: %v", path, err)}
+	}
+	return in, nil
+}
+
+// storyTaskSource is the task.source a story task records: who it is, and the branch and base
+// it was asked to run on, so that a resume needs no story file.
+func storyTaskSource(in story.TaskInput) *domain.TaskSource {
+	return &domain.TaskSource{
+		Kind: domain.TaskSourceStory, Story: in.Story, Task: in.Task, Attempt: in.Attempt, Jira: in.Jira,
+		Branch: in.Branch, BaseRef: in.BaseRef, BaseBranch: in.BaseBranch,
+	}
+}
+
+// checkStoryTarget refuses a story task whose base_ref is not a commit of repo or whose branch
+// exists already, before a run is created (specs/story/SPEC.md §11.1).
+func checkStoryTarget(ctx context.Context, repo *repository.Repository, in story.TaskInput) error {
+	if ok, err := repo.CommitExists(ctx, in.BaseRef); err != nil {
+		return err
+	} else if !ok {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("the story task's base_ref %s is not a commit in this repository", in.BaseRef)}
+	}
+	if exists, err := repo.BranchExists(ctx, in.Branch); err != nil {
+		return err
+	} else if exists {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("the story task's branch %s already exists; it is not reused. "+
+			"Delete it (git branch -D %s), or dispatch a retry on another branch.", in.Branch, in.Branch)}
+	}
+	return nil
+}
+
 // cliArgs is the command line after parseArgs.
 type cliArgs struct {
 	configPath string
@@ -157,6 +240,9 @@ type cliArgs struct {
 	verbose bool
 	// jiraRef is --jira's value: an issue key or its URL (specs/jira/SPEC.md §6).
 	jiraRef string
+	// storyTaskFile is the hidden --story-task's value: the task input file of a story's child
+	// run (specs/story/SPEC.md §11.1).
+	storyTaskFile string
 	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
 	// §4); empty means the decision layer chooses.
 	stages []domain.Stage
@@ -177,7 +263,7 @@ type cliArgs struct {
 	rest []string
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the repeatable
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -231,6 +317,17 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 			if cli.jiraRef = strings.TrimSpace(v); cli.jiraRef == "" {
 				return cliArgs{}, fmt.Errorf("--jira requires an issue key or URL")
+			}
+		case arg == "--story-task" || strings.HasPrefix(arg, "--story-task="):
+			if cli.storyTaskFile != "" {
+				return cliArgs{}, fmt.Errorf("--story-task given twice")
+			}
+			v, err := value(&i, "--story-task")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.storyTaskFile = v; cli.storyTaskFile == "" {
+				return cliArgs{}, fmt.Errorf("--story-task requires a file")
 			}
 		case arg == "--stage" || strings.HasPrefix(arg, "--stage="):
 			v, err := value(&i, "--stage")
@@ -758,13 +855,26 @@ func runsReport(stdout io.Writer, dir string) error {
 }
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
-// (run --jira), the operator's notes on the ticket, which may be empty.
-func runTask(ctx context.Context, configPath, text, jiraRef string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+// (run --jira), the operator's notes on the ticket, which may be empty. With storyTaskFile (the
+// hidden run --story-task) the task is the one that file describes (specs/story/SPEC.md §11).
+func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
 	// the spinner and step around the sidebar.
 	stderr = reporter.Wrap(stderr)
+
+	// The input is read and checked first: a malformed one creates no run, and costs no
+	// validation chain.
+	var storyIn *story.TaskInput
+	if storyTaskFile != "" {
+		in, err := readStoryTask(storyTaskFile)
+		if err != nil {
+			return err
+		}
+		storyIn = &in
+		text = in.Text
+	}
 
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
@@ -779,6 +889,10 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	}
 	if isolation != "" {
 		cfg.Execution.Isolation = isolation
+	}
+	if storyIn != nil {
+		// Whatever execution.isolation says (specs/story/SPEC.md §11.2).
+		cfg.Execution.Isolation = domain.IsolationWorktree
 	}
 	reporter.TestCommand = cfg.Test.Command
 	var jiraKey string
@@ -819,6 +933,12 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 	if err != nil {
 		return err
 	}
+	if storyIn != nil {
+		// Before the run exists, as the checks of the input itself.
+		if err := checkStoryTarget(decideCtx, repo, *storyIn); err != nil {
+			return err
+		}
+	}
 
 	var stream io.Writer
 	if verbose {
@@ -827,6 +947,10 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 
 	task := domain.Task{Description: text, CreatedAt: time.Now()}
 	var ticket domain.Ticket
+	if storyIn != nil {
+		task.Acceptance = storyIn.Acceptance
+		task.Source = storyTaskSource(*storyIn)
+	}
 	if jiraKey != "" {
 		// The one Jira request. A failure creates no run: there is nothing to resume
 		// without a task (specs/jira/SPEC.md J2).
@@ -857,7 +981,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	defer unlock()
-	if task.Source != nil {
+	if jiraKey != "" {
 		if err := store.SaveTicket(run.ID, ticket); err != nil {
 			return failRun(store, run, err)
 		}
@@ -877,7 +1001,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		out, err = decideManual(stages, task.Description, reporter)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
-			reporter, prompter, interactive, stream, stderr)
+			reporter, prompter, interactive, storyIn != nil, stream, stderr)
 	}
 	if err != nil {
 		return failRun(store, run, err)
@@ -904,7 +1028,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		return err
 	}
 	reporter.Pause()
-	if err := checkWorktree(decideCtx, repo, cfg, wf, dirty, stderr); err != nil {
+	if err := checkWorktreeFor(decideCtx, repo, cfg, wf, dirty, task.Source, stderr); err != nil {
 		return failRun(store, run, err)
 	}
 	// The review screen shows the stages itself, editable; the decision block above it
@@ -926,11 +1050,20 @@ func runTask(ctx context.Context, configPath, text, jiraRef string, stages []dom
 		// make a dirty tree a refusal), and run.json and decision.json rewritten, so a
 		// resume continues exactly what was approved.
 		onEdit: func(d domain.Decision) error {
+			if storyIn != nil {
+				// WithEdit rebuilds the forced stages from the policy alone: a story task is a
+				// code change whatever the edit says.
+				kept := policy.ForceDevelopment(d, storyTaskReason)
+				if !slices.Equal(kept.Stages.EnabledStages(), d.Stages.EnabledStages()) {
+					fmt.Fprintln(stderr, "A story task always implements and tests: development stays on.")
+				}
+				d = kept
+			}
 			nwf, err := workflow.Build(d.Stages)
 			if err != nil {
 				return failRun(store, run, &apperr.WorkflowError{Msg: "failed to build the edited workflow", Err: err})
 			}
-			if err := checkWorktree(decideCtx, repo, cfg, nwf, dirty, stderr); err != nil {
+			if err := checkWorktreeFor(decideCtx, repo, cfg, nwf, dirty, task.Source, stderr); err != nil {
 				return failRun(store, run, err)
 			}
 			run.Decision, run.Workflow = &d, &nwf
@@ -974,6 +1107,26 @@ func checkWorktree(ctx context.Context, repo *repository.Repository, cfg config.
 			"or set security.require_clean_worktree: false to run on top of them."}
 	}
 	logging.DirtyRepoWarning(stderr)
+	return nil
+}
+
+// checkWorktreeFor is checkWorktree for the task src came from. A story task's worktree is made
+// from the commit its task input names, not from HEAD (specs/story/SPEC.md §11.2), so the
+// warning about a dirty tree says that commit.
+func checkWorktreeFor(ctx context.Context, repo *repository.Repository, cfg config.Config, wf domain.Workflow, dirty bool, src *domain.TaskSource, stderr io.Writer) error {
+	if !dirty || src == nil || src.Kind != domain.TaskSourceStory || !cfg.WorktreeRun(wf) {
+		return checkWorktree(ctx, repo, cfg, wf, dirty, stderr)
+	}
+	n := 0
+	if files, err := repo.ChangedFiles(ctx); err == nil {
+		for _, f := range files {
+			if f != ".orchestrator" && !strings.HasPrefix(f, ".orchestrator/") {
+				n++
+			}
+		}
+	}
+	fmt.Fprintf(stderr, "Warning: the run starts from the story task's base %s; the uncommitted changes in your tree (%d) are not part of it.\n",
+		shortSHA(src.BaseRef), n)
 	return nil
 }
 

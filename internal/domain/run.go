@@ -258,6 +258,16 @@ const (
 // WorktreeBranch is the branch a run's worktree is on (specs/worktree/SPEC.md §8.2).
 func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
 
+// RunWorktreeBranch is the branch run's worktree must be on: the branch a story task was given
+// (specs/story/SPEC.md §11.1), else orchestrator/<run-id>. Loading checks that a story task's
+// branch has the story pattern and names its story and task.
+func RunWorktreeBranch(run *Run) string {
+	if src := run.Task.Source; src != nil && src.Kind == TaskSourceStory {
+		return src.Branch
+	}
+	return WorktreeBranch(run.ID)
+}
+
 // RunWorktree is the record of a run's worktree. Everything a resume uses from it is derived
 // and checked, never trusted (specs/worktree/SPEC.md §8).
 type RunWorktree struct {

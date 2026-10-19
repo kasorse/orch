@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +94,15 @@ func TestResumeOverview_Golden(t *testing.T) {
 				Kind: domain.TaskSourceJira, Key: "PMC-2789", URL: "https://example.atlassian.net/browse/PMC-2789",
 				// Local, so the golden file reads 10:12 in any time zone.
 				FetchedAt: time.Date(2026, 9, 30, 10, 12, 30, 0, time.Local),
+			}}},
+			entry: domain.ActionAnalyze, why: "start",
+			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
+		},
+		{
+			name: "resume_story_source",
+			run: domain.Run{Status: domain.RunPending, Task: domain.Task{Description: "RF02: ...", Acceptance: []string{"one"}, Source: &domain.TaskSource{
+				Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1, Jira: "PAY-124",
+				Branch: "story/refunds/RF02", BaseRef: strings.Repeat("a", 40), BaseBranch: "main",
 			}}},
 			entry: domain.ActionAnalyze, why: "start",
 			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},

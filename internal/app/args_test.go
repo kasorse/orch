@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -84,6 +86,72 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("parseArgs(%q) = %+v, want %+v", tc.args, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseArgs_StoryTask(t *testing.T) {
+	for _, args := range [][]string{{"run", "--story-task", "t.json"}, {"--story-task=t.json", "run"}} {
+		got, err := parseArgs(args)
+		if err != nil || got.storyTaskFile != "t.json" || !slices.Equal(got.rest, []string{"run"}) {
+			t.Errorf("parseArgs(%q) = %+v, %v", args, got, err)
+		}
+	}
+	for _, args := range [][]string{{"run", "--story-task"}, {"run", "--story-task="}, {"run", "--story-task", "a", "--story-task", "b"}} {
+		if _, err := parseArgs(args); err == nil {
+			t.Errorf("parseArgs(%q) succeeded", args)
+		}
+	}
+}
+
+// --story-task is hidden and belongs to run alone, without the flags that say what the task is or
+// where it runs: a usage error before any config is read.
+func TestRun_StoryTaskFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"validate", []string{"validate", "--story-task", "t.json"}, "--story-task is only valid with run"},
+		{"stage", []string{"run", "--story-task", "t.json", "--stage", "review"}, "--story-task cannot be combined with --stage"},
+		{"jira", []string{"run", "--story-task", "t.json", "--jira", "PMC-1"}, "--story-task cannot be combined with --jira"},
+		{"inplace", []string{"run", "--story-task", "t.json", "--inplace"}, "--story-task cannot be combined with --inplace"},
+		{"worktree", []string{"run", "--story-task", "t.json", "--worktree"}, "--story-task cannot be combined with --worktree"},
+		{"text", []string{"run", "--story-task", "t.json", "fix it"}, "--story-task cannot be combined with task text"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml"}, tc.args...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want an error containing %q", err, tc.want)
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed %q", out.String())
+			}
+		})
+	}
+	if strings.Contains(usage, "story-task") {
+		t.Error("the usage text lists the hidden --story-task")
+	}
+}
+
+// A task input that breaks a rule is refused before the configuration is even read.
+func TestRun_StoryTaskInputIsCheckedFirst(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "t.json")
+	if err := os.WriteFile(path, []byte(`{"story":"refunds"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "--story-task", path}, strings.NewReader(""), &out, &out)
+	var cerr *apperr.ConfigError
+	if !errors.As(err, &cerr) || !strings.Contains(err.Error(), "the task input") {
+		t.Fatalf("got %v, want a refusal of the task input", err)
+	}
+	err = Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "--story-task", path + ".missing"}, strings.NewReader(""), &out, &out)
+	if !errors.As(err, &cerr) || !strings.Contains(err.Error(), "cannot read the story task input") {
+		t.Fatalf("got %v, want a refusal of the missing file", err)
 	}
 }
 

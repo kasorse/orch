@@ -120,6 +120,74 @@ func TestOpenWorktree_ExistingPathIsRefused(t *testing.T) {
 	}
 }
 
+// A story task's worktree is created on the branch and from the commit its task input gave,
+// with the input's base branch, whatever HEAD and the operator's branch are
+// (specs/story/SPEC.md §11).
+func TestOpenWorktree_StoryTaskUsesItsBranchAndBase(t *testing.T) {
+	s, dir, _ := worktreeSession(t, true, implementTest)
+	base := gitIn(t, dir, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(dir, "later.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-qm", "later")
+	head := gitIn(t, dir, "rev-parse", "HEAD")
+	s.run.Task.Source = &domain.TaskSource{
+		Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1,
+		Branch: "story/refunds/RF02", BaseRef: base, BaseBranch: "release",
+	}
+
+	wt, err := openWorktree(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := s.run.Worktree
+	if w == nil || w.Branch != "story/refunds/RF02" || w.BaseRef != base || w.BaseBranch != "release" {
+		t.Fatalf("worktree = %+v, want story/refunds/RF02 from %s, base branch release", w, base)
+	}
+	if got := gitIn(t, wt.Dir, "rev-parse", "HEAD"); got != base || got == head {
+		t.Errorf("the worktree is at %s, want the base %s (HEAD is %s)", got, base, head)
+	}
+	if got := gitIn(t, wt.Dir, "symbolic-ref", "--short", "HEAD"); got != "story/refunds/RF02" {
+		t.Errorf("the worktree is on %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(wt.Dir, "later.go")); !os.IsNotExist(err) {
+		t.Errorf("the worktree has a file of a commit past the base: %v", err)
+	}
+	if _, err := verifyRunWorktree(context.Background(), s.repo, s.run); err != nil {
+		t.Errorf("the worktree it created does not verify: %v", err)
+	}
+}
+
+func TestOpenWorktree_StoryTaskRefusals(t *testing.T) {
+	t.Run("a base that is not a commit", func(t *testing.T) {
+		s, _, _ := worktreeSession(t, true, implementTest)
+		s.run.Task.Source = &domain.TaskSource{
+			Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1,
+			Branch: "story/refunds/RF02", BaseRef: strings.Repeat("a", 40), BaseBranch: "main",
+		}
+		_, err := openWorktree(context.Background(), s)
+		var cerr *apperr.ConfigError
+		if !errors.As(err, &cerr) || !strings.Contains(err.Error(), "not a commit") {
+			t.Fatalf("got %T %v, want a ConfigError about the base", err, err)
+		}
+		if s.run.Worktree != nil {
+			t.Errorf("worktree recorded: %+v", s.run.Worktree)
+		}
+	})
+	t.Run("an existing branch", func(t *testing.T) {
+		s, dir, _ := worktreeSession(t, true, implementTest)
+		s.run.Task.Source = &domain.TaskSource{
+			Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1,
+			Branch: "story/refunds/RF02", BaseRef: gitIn(t, dir, "rev-parse", "HEAD"), BaseBranch: "main",
+		}
+		gitIn(t, dir, "branch", "story/refunds/RF02")
+		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "not reused") {
+			t.Fatalf("got %v, want the existing-branch refusal", err)
+		}
+	})
+}
+
 // A worktree run gets its worktree recorded at once, and the session switches to it.
 func TestEnterWorktree_CreatesRecordsAndSwitches(t *testing.T) {
 	s, dir, out := worktreeSession(t, true, implementTest)
@@ -654,6 +722,26 @@ func TestFinishWorktree_FingerprintMismatchSkipsTheConflictCheck(t *testing.T) {
 	}
 	if len(s.worktree.Conflicts) != 0 {
 		t.Errorf("conflicts = %q", s.worktree.Conflicts)
+	}
+}
+
+// A base branch this repository does not have - a story task's may live elsewhere - skips
+// the conflict check instead of passing it as clean.
+func TestFinishWorktree_MissingBaseBranchSkipsTheConflictCheck(t *testing.T) {
+	s, _, out := finishedWorktreeRun(t, domain.ModeAuto, nil, nil)
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if sha == "" {
+		t.Fatalf("no commit:\n%s", out)
+	}
+	s.worktree.BaseBranch = "release-9"
+
+	finishWorktree(ctx, s, sha)
+	if want := "Warning: no conflict check against release-9: the branch does not exist in this repository\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("output lacks %q:\n%s", want, out)
+	}
+	if len(s.worktree.Conflicts) != 0 || !s.worktree.Removed {
+		t.Errorf("conflicts = %q, removed %v; want none and removed", s.worktree.Conflicts, s.worktree.Removed)
 	}
 }
 

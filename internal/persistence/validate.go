@@ -13,6 +13,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/secretscan"
+	"orchestrator/internal/story"
 	"orchestrator/internal/testreport"
 )
 
@@ -31,6 +32,14 @@ func validateRun(run *domain.Run, runID string) error {
 	if run.Task.Source != nil {
 		if err := validateTaskSource(*run.Task.Source); err != nil {
 			return fmt.Errorf("task.source: %w", err)
+		}
+	}
+	if len(run.Task.Acceptance) > 0 {
+		if run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceStory {
+			return fmt.Errorf("task.acceptance on a task that is not a story task")
+		}
+		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance); err != nil {
+			return err
 		}
 	}
 	if run.Workflow != nil {
@@ -313,8 +322,44 @@ func validateReport(t domain.TestResult) error {
 // are only displayed, never used to make a request, but the run directory is
 // model-writable, so they are validated like everything else read back.
 func validateTaskSource(src domain.TaskSource) error {
-	if src.Kind != domain.TaskSourceJira {
-		return fmt.Errorf("unknown kind %q", src.Kind)
+	switch src.Kind {
+	case domain.TaskSourceJira:
+		return validateJiraSource(src)
+	case domain.TaskSourceStory:
+		return validateStorySource(src)
+	}
+	return fmt.Errorf("unknown kind %q", src.Kind)
+}
+
+// validateStorySource checks a story task's source (specs/story/SPEC.md §11.1). The branch is
+// the one a worktree is created on, and the base is passed to git: each is checked by the same
+// rules as the task input, and the branch must belong to the recorded story and task.
+func validateStorySource(src domain.TaskSource) error {
+	switch {
+	case !story.ValidSlug(src.Story):
+		return fmt.Errorf("story %q is not a story slug", src.Story)
+	case !story.ValidID(src.Task):
+		return fmt.Errorf("task %q is not a task ID", src.Task)
+	case src.Attempt < 1:
+		return fmt.Errorf("attempt is %d, want 1 or more", src.Attempt)
+	case src.Jira != "" && !story.ValidJiraKey(src.Jira):
+		return fmt.Errorf("jira %q is not a Jira key", src.Jira)
+	case !story.ValidBranch(src.Branch, src.Story, src.Task):
+		return fmt.Errorf("branch %q is not story/%s/%s or story/%s/%s.<n>", src.Branch, src.Story, src.Task, src.Story, src.Task)
+	case !isCommitSHA(src.BaseRef):
+		return fmt.Errorf("base_ref %q is not a full commit SHA", src.BaseRef)
+	case !validBranchName(src.BaseBranch):
+		return fmt.Errorf("base_branch %q is not a valid branch name", src.BaseBranch)
+	case src.Key != "" || src.RequestedKey != "" || src.URL != "" || !src.FetchedAt.IsZero() || src.Notes:
+		return fmt.Errorf("a story task has no Jira ticket fields (key, requested_key, url, fetched_at, notes)")
+	}
+	return nil
+}
+
+func validateJiraSource(src domain.TaskSource) error {
+	if src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" ||
+		src.Branch != "" || src.BaseRef != "" || src.BaseBranch != "" {
+		return fmt.Errorf("a Jira task has no story fields")
 	}
 	if !domain.ValidTicketKey(src.Key) {
 		return fmt.Errorf("key %q is not an issue key", src.Key)

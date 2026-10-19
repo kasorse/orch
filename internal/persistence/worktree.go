@@ -55,11 +55,21 @@ func validateWorktree(run *domain.Run) error {
 	if run.Options.IsolationMode() != domain.IsolationWorktree {
 		return fmt.Errorf("worktree recorded on a run with options.isolation %q", run.Options.IsolationMode())
 	}
-	if want := domain.WorktreeBranch(run.ID); w.Branch != want {
+	// A story task's branch and base are the ones its task input gave, recorded in task.source
+	// (validated with it); the worktree must be the one created on them.
+	if want := domain.RunWorktreeBranch(run); w.Branch != want {
 		return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, want)
 	}
 	if !isCommitSHA(w.BaseRef) {
 		return fmt.Errorf("worktree.base_ref %q is not a full commit SHA", w.BaseRef)
+	}
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		if w.BaseRef != src.BaseRef {
+			return fmt.Errorf("worktree.base_ref is %q, but task.source.base_ref is %q", w.BaseRef, src.BaseRef)
+		}
+		if w.BaseBranch != src.BaseBranch {
+			return fmt.Errorf("worktree.base_branch is %q, but task.source.base_branch is %q", w.BaseBranch, src.BaseBranch)
+		}
 	}
 	if w.BaseBranch != "" && !validBranchName(w.BaseBranch) {
 		return fmt.Errorf("worktree.base_branch %q is not a valid branch name", w.BaseBranch)
