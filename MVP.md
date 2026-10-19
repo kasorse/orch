@@ -626,6 +626,11 @@ same state:
   and `analysis` (is the cause or the place to change not yet known?). Planning, testing and
   review are not asked: their answers repeated the task's size (§9.1); they come from the
   level and from development (§9).
+* `scope_story` (yes/no, a shadow question, §48.9) - does fulfilling the request need several
+  changes that are each worth reviewing and merging on their own, in different services or as
+  steps that each leave the system working? Its probability is recorded in `decision.json` as
+  `scope.story` and **decides nothing**: no threshold, no hint, no workflow change. It is not
+  asked for `--stage` (no provider) or `--story-task` (a story task is never a story).
 
 Answers are strictly validated: the expected questions only, the right answer type,
 exactly our options, values in [0, 1], distributions summing to 1. Anything else is an
@@ -787,6 +792,12 @@ Size spreads tasks for routing (§44.8) but, on the same data, does not predict 
 need a fix (about 45% did, at every size). A failed check escalating the model
 (`actions.implement.escalate`, §31.1, §44.8) is the lever for those. Recalibrate when the
 decision model, the task stream or the questions' wording changes.
+
+**Recalibration note (the scope question, 2026-10-19).** The fourth question `scope_story`
+(§8.2, §48.9) joined the classification call, which changes `questions_hash`: `decisions
+calibrate` keeps the old and the new decisions apart. One more question in the same call may
+move the other answers, so the cuts and thresholds above are to be re-checked once enough
+decisions with the new hash exist; until then they are the values measured without it.
 
 ---
 
@@ -2397,18 +2408,20 @@ model benchmarking
 automatic model selection
 cost optimization
 automatic provider fallback
-parallel workflows
+parallel workflows (a story runs its tasks one at a time, §48)
 multi-agent parallel execution
 Web UI
 REST API
 IDE plugin
-GitHub/GitLab integration; Jira beyond reading one issue for `run --jira` (§39)
+GitHub/GitLab integration; Jira beyond reading one issue for `run --jira` (§39) and the
+child issues of an approved story (§48.7)
 remote repository execution
 RAG
 persistent conversational memory
 database
 custom dynamically defined action types
-arbitrary user-defined workflow language
+arbitrary user-defined workflow language (a story's spec is a list of tasks, not one: it names
+what to change and where, never stages, models or tools, §48)
 a mode that bypasses provider permission checks
 per-action configurable authority or a permission policy language
 per-tool-call approval during a step
@@ -3361,7 +3374,8 @@ header shows the source line (§27).
 
 ## 39.10 Not covered
 
-* Writing to Jira: comments, transitions, worklogs, links.
+* Writing to Jira other than the child issues of an approved story (§39.11, §48.7): comments,
+  transitions, worklogs, links. Resume and `run --jira` write nothing.
 * Comments, linked issues, sub-tasks, attachments, images; JQL, boards, sprints.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
 * Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
@@ -3369,6 +3383,22 @@ header shows the source line (§27).
 * Deferred (`specs/jira/SPEC.md` §19): an outcome comment or transition at the end of a
   run, comments and linked issues as sections. (Fencing the task block in prompts is done:
   §20.)
+
+## 39.11 Story: the issue type and the children
+
+Normative; the story itself is §48.
+
+* **A story issue type.** `story.jira_issue_types` (default none) lists issue types that are
+  not one task. `run --jira KEY` on an issue of such a type (compared case-insensitively)
+  refuses before creating a run: `PAY-1 is an Epic (story.jira_issue_types): plan it with
+  orchestrator story plan --jira PAY-1`, a `ConfigError`. `story plan --jira` accepts any type.
+  The ticket's `components` (names only, §39.4) are kept in `ticket.json` for `story plan` to
+  find services by; they are never part of the task text.
+* **Child issues.** With `jira.create` and a story planned from a Jira issue, `story run` creates
+  one issue per task without a key, after the operator's approval (§48.7). This is the first
+  write to Jira, and the only one: `POST /rest/api/2/issue` to `jira.base_url`, with the same
+  credential handling as the read (§39.8), no redirects, and idempotent (an intent is recorded
+  before each request, a request that may have reached Jira is never repeated).
 
 ---
 
@@ -3644,7 +3674,8 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
   the artifacts on resume), cut to its first
   line and 72 runes (`...` marks a cut), prefixed with `KEY: ` for a
   `run --jira` task. What the cut left out goes into the body; the body ends with the
-  `Orchestrator-Run: <run-id>` trailer.
+  `Orchestrator-Run: <run-id>` trailer. The commit of a story task (§48.5) also gets the trailer
+  `Orchestrator-Story: <slug>/<ID>`, and its header the task's Jira key when it has one.
 * Without a `summary_short` (the model left it out, or no implementation artifact is
   left) no message is proposed: the orchestrator says
   `The implementation proposed no commit message.` and asks for one line; an empty answer
@@ -4590,6 +4621,10 @@ with `git worktree remove` (never `--force`; a worktree git refuses to remove is
 path printed). The branch stays: it is the result. Without a commit the worktree stays. The
 `summary.md` has a Worktree row (§43.2).
 
+A story task (§48.5) is the same run on a branch and from a base that the story gives it
+(`story/<slug>/<ID>` from a given commit) instead of `orchestrator/<run-id>` from HEAD; its
+commit message carries the `Orchestrator-Story` trailer (§42.2).
+
 ## 47.6 `orchestrator runs clean [--older-than 7d] [--dry-run]`
 
 For every run older than the limit whose worktree is not removed and whose lock is free,
@@ -4604,3 +4639,222 @@ run directory.
   it needs.
 * Submodules (use `inplace`), warm worktree pools, an org floor for `execution.isolation`,
   macOS.
+
+---
+
+# 48. The story
+
+Normative. A task that is not one change - it spans services, or is safe only as a sequence of
+steps that each leave the system working - is split into a specification and ordered tasks, and
+each task is an ordinary run (§47) in its own repository. The design record, the owner's
+decisions and the plan as built are `specs/story/` (`SPEC.md`, `tasks/`).
+
+**A model proposes; Go validates and orders; the operator approves.** The decomposition is
+written to files. Nothing runs until the operator runs `story run` on them, and no model ever
+picks what runs next, where, on which branch or with which stages. A story task is never a story.
+A spec is a list of tasks, not a workflow language (§30). Tasks run one at a time (§30).
+
+## 48.1 Vocabulary and configuration
+
+The **story home** is the repository where `story plan` / `story run` are invoked; it holds the
+spec (`<spec_dir>/<slug>/`) and the state (`.orchestrator/stories/<slug>/`). A **service** is a
+git checkout directly under one of `story.roots`, named by its directory; the home is a service
+under its own directory name.
+
+```yaml
+story:
+  roots: [..]                     # absolute, ~/-prefixed, or relative to the story home
+  max_services: 5                 # 1..20
+  spec_dir: specs                 # in the story home
+  max_tasks: 12                   # 2..30
+  max_cost_usd: 20                # optional; the whole story, every call and run
+  jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
+jira:
+  create:                         # absent: story run creates nothing in Jira
+    issue_type: Story
+    link: parent                  # parent | field
+    # field: customfield_10014    # required with link: field
+    labels: [orchestrator]
+    components: {billing: Billing}  # optional, by service name
+```
+
+Every key is in the strict schema; `jira.create` without `jira`, and `link: field` without
+`field`, are config errors. Each service keeps its own `orchestrator.yaml`: its test command,
+checks, policy, routes and limits apply to its tasks; the home's config contributes only `story`
+and `jira`. A service's story base is the branch checked out in it when the story first starts.
+
+## 48.2 `orchestrator story plan "<request>" [--jira KEY] [--repo NAME]...`
+
+1. The home config's fail-fast chain; with `--jira`, one GET of the issue (§39), rendered as the
+   request.
+2. **Services**, found by Go with no model call: the candidates are the immediate subdirectories
+   of the roots with a `.git` entry and a name matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`,
+   plus the home. A candidate is named when its name occurs in the request as a whole word
+   (case-insensitively), or equals a Jira component of the ticket; `--repo` names the services
+   instead. None named, more than `max_services`, a name found under two roots, or a directory
+   whose `git rev-parse --show-toplevel` is not itself, stops the plan before any call.
+   Printed as `Services: billing (<path>), gateway (<path>)`.
+3. **Survey**: one call per service, `read` authority, working directory = that checkout, in
+   place, with that repository's deny list, on its `actions.analyze` route. The answer (summary,
+   relevant files, interfaces, constraints) is strictly validated and bounded.
+4. **Specify**: one call with `none` authority on the home's `actions.plan` route, from the
+   request, the surveys (fenced) and the closed list of services. A task is a vertical slice
+   one run can implement, test and review, leaves its repository's tests passing, changes one
+   repository, and lists in `depends_on` what it needs. The answer is validated strictly: slug,
+   prefix `[A-Z]{2}`, task IDs `<prefix><NN>`, `repo` a found service, size S/M/L, at most
+   `max_tasks` tasks, bounded texts, the graph rules of §48.4. Any violation is an
+   `InvalidResponse`: nothing is written under `spec_dir` and the answer is kept in the story's
+   `artifacts/`.
+5. **One task is not a story**: nothing is written under `spec_dir`; the task and the command
+   that runs it are printed.
+6. Otherwise Go writes `<spec_dir>/<slug>/` (§48.3) and stops. A plan that reaches no spec keeps
+   its directory as `.orchestrator/stories/.plan-<id>`.
+
+Both calls are outside the workflow, like the translator: their authority is fixed in Go, they
+are not in the authority table (§38.1), and their prompts, answers and output are recorded under
+the story's `artifacts/` and `logs/`.
+
+## 48.3 The spec on disk
+
+```
+<spec_dir>/<slug>/
+  README.md        generated: title, status, the task table, how to run
+  SPEC.md          problem, approach, contracts, out of scope, risks
+  tasks/TASK-<ID>-<title-slug>.md
+```
+
+A task file has a front matter with the closed keys `id`, `repo`, `depends_on`, `jira` (a key
+written by Go, or `none` by the operator); anything else is an error and the file name must carry
+the ID. The body - goal, `## Acceptance` items, notes - is the task's text, as the operator left
+it; the task text is bounded to 16 KiB. `## As built` and everything after it is Go's, appended
+when the task is done. `README.md` is regenerated from the task files and the state whenever a
+status changes. A spec written by hand runs too.
+
+## 48.4 Order, bases, branches
+
+* **Order**: Kahn's algorithm over `depends_on`, the smallest ID first among the ready tasks. A
+  cycle, a missing dependency, or a `repo` that is not a service is a spec error naming the tasks.
+* **Base** of task T in repository R: of T's ancestors (transitively, across repositories) that
+  are in R, keep those no other such ancestor depends on. None: R's story base, the commit of the
+  branch checked out in R at the first start. One: that ancestor's commit, as recorded in
+  `story.json` when it was done, so T is stacked on it. More than one: a spec error (make one
+  depend on the other). A dependency in another repository gives order and context, not code.
+* **Branch**: `story/<slug>/<ID>`, a retry adds `.<n>`. A merge request targets the base's
+  branch. Rebasing a stack after review is the operator's, with git.
+
+## 48.5 The child run
+
+`orchestrator run --mode auto --story-task <file>` (hidden; excludes `--stage`, `--jira`,
+`--inplace` and positional text) runs a task. The file is the parent's, strictly validated:
+story, task, attempt, `branch` (`^story/[a-z0-9-]+/[A-Z]{2}[0-9]{2}(\.[0-9]+)?$`, must not
+exist), `base_ref` (a commit of this repository), `base_branch` (the repository's story base, for
+the conflict check of §47.5), `jira`, `acceptance`, `text`. The text (at most 32 KiB) is the
+story's title and the task's place in it, the task's body, the spec's approach and contracts as
+context, and the As built line of every done task it depends on; it becomes `Task.Description`.
+
+* Always a worktree run (§47), whatever `execution.isolation` says, on the given branch and base.
+* **Development is always on** (reason `story task` in `decision.json`); everything else is the
+  policy's.
+* The scope question is not asked (§48.9).
+* The task's `acceptance` items are review criteria ahead of the plan's own (§44.4), recorded in
+  `run.json: task.acceptance` so a resume uses the same ones; `task.source` (`kind: story`, story,
+  task, attempt, jira) and the branch, base and base branch are recorded there too.
+* The commit message starts with `<jira>: ` when the task has a key and gains the trailer
+  `Orchestrator-Story: <slug>/<ID>` (§42.2).
+
+## 48.6 `orchestrator story run <spec_dir>/<slug>` and `story status`
+
+`story run` both starts and continues a story. The directory decides the state, not the working
+directory; the state is flocked by the one `story run` that owns it.
+
+1. **Before anything runs**: the home config's fail-fast chain (with the Jira dependencies when
+   `jira.create` is set); every task file parsed and validated; on a continued story each
+   dispatched task's file (up to `## As built`) must match its recorded sha256; for every service
+   the pending tasks name - a git checkout with a commit and no `.gitmodules`, the story base
+   branch present, no unknown `story/<slug>/<ID>` branch, and `orchestrator validate` exiting 0
+   there; `story.max_cost_usd` not reached.
+2. **First start**: the bases are recorded and the plan (order, repository, base, branch, Jira
+   key) printed; at a terminal `Run 6 tasks in 2 repositories? [Y/n]` is asked once. `--mode
+   auto` and a non-terminal stdin go on. That answer and the command are the approval
+   (`approved_at`).
+3. **Children in Jira** (§48.7), then each task in Go's order: done → skipped; failed → its run
+   resumed (`orchestrator resume <id> --mode auto` in its repository); pending → the task input
+   is written to `tasks/<ID>.json`, the file's sha256 recorded (the task is frozen from now) and
+   `<orchestrator> run --mode auto --story-task <file>` run as a child process in the task's
+   repository, its output under `── RF02 · gateway · 2/6 ──`. The child's run is found by its
+   `task.source`; none found (the child failed its own fail-fast chain) means the task `failed`.
+4. A task is **done** when its run is `completed` and has a `commit`. `completed` without a commit
+   (a failing review, a secret warning, `approval: manual`) makes the task and the story
+   `blocked`: the operator commits in the kept worktree or drops the work, and runs `story run`
+   again, which counts the task done once its branch has a commit beyond its base. `failed` or
+   `stopped` stops the story. `story run --retry RF02` abandons a failed task's run (its branch
+   stays) and dispatches the task again on `story/<slug>/RF02.<n>`, re-reading its file: the one
+   way to edit a dispatched task.
+5. **After each task** Go appends `## As built (<date>)` to the task file - run, outcome, branch
+   and base, commit, cost, the run's `summary_short`, conflicts with the base branch - and
+   rewrites `README.md`. Nothing a model wrote goes there except `summary_short`, as data.
+6. **Budget**: before every dispatch `story.max_cost_usd` is checked against the recorded total
+   (the planning calls and every child's `outcome.usage`), failing closed; a finished run without
+   an outcome stops the story when a budget is set.
+7. Every task done: the story is `completed`; per task the repository, branch, the branch its
+   merge request targets, commit, Jira key and conflicts are printed. Pushing and merge requests
+   are TODO W2. A `story run` that dies between a child's end and the save of its result is
+   settled by the next one before anything is dispatched, from the run it finds.
+
+`orchestrator story status <spec_dir>/<slug>` prints the README and writes nothing.
+
+## 48.7 Child issues in Jira
+
+Only for a story planned from a Jira issue (`jira_parent`) and only with `jira.create`; a story
+without a parent creates nothing and says so. After the approval and before the first dispatch,
+`story run` sends one `POST /rest/api/2/issue` per task without a key, in the story's order:
+project from the parent's key, `issue_type` and `labels` from config, `summary` `<ID> · <title>`,
+a wiki-markup description rendered by Go from the task's sections (every character wiki would
+read as markup is escaped), the parent in `parent` or in the configured `field`, components by
+service name. Requests go to `jira.base_url` only, with no redirects, credentials from the
+environment, redacted from errors and scrubbed from children (§39.8).
+
+**Idempotent.** An intent is saved in `story.json` before each POST; after a 201 whose `key` is
+`<project>-<n>` the key is saved in `story.json` and written into the task file's front matter,
+and the intent cleared. A request is never retried after it may have reached Jira (a transport
+error after sending, a timeout, a 5xx other than 503); only a 429 or 503 with `Retry-After` is.
+An intent without a key on the next start stops the story: `RF02: a Jira issue may already
+exist; set jira: <KEY> or jira: none in its front matter`. A failure stops the story before any
+dispatch. Issue links between children, transitions and comments are not created.
+
+## 48.8 Persistence and security
+
+`.orchestrator/stories/<slug>/`: `story.json` (slug, spec dir, `jira_parent`, `approved_at`,
+`services`, `bases`, `status`, per task: status, `file_sha256`, attempt, `run_id`, repo, branch,
+`base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`, `abandoned_cost_usd`; the planning
+calls' usage), `ticket.json`, `artifacts/`, `logs/`, `tasks/<ID>.json`. All of it is validated
+strictly on load: paths are derived, never read; run IDs and SHAs by format; a task's `run_id`
+only from its repository's runs directory; a dispatched task needs `approved_at`.
+
+* Authorities stay fixed in Go: survey `read` in one repository, specify `none`, a child run as
+  any run. No call reads two repositories.
+* The spec is model-written data that becomes a task only after the operator's approval. It
+  reaches a child as `Task.Description` through the task block, like a ticket (§39.8); it cannot
+  name a stage, a model, a tool, an authority or a command, and `repo` must be a found service.
+* Slug, prefix, IDs and branch names are checked by pattern before they reach git; the base by
+  SHA. Child processes are the orchestrator binary itself (`os.Executable`, symlinks resolved)
+  with argv only, each running its own fail-fast chain, guard and sandbox.
+* The operator's checkouts are never touched: every task runs in a worktree.
+
+## 48.9 The scope question (shadow)
+
+The classification call (§8.2) asks a fourth yes/no question, `scope_story`, from Jev and the
+LLM provider alike. Its probability is recorded as `scope.story` in `decision.json` and decides
+nothing. It is data for a later calibration against the runs that turned out too large (failed
+on `max_fix_iterations`, budget, a large diff). It changes `questions_hash`, so `decisions
+calibrate` keeps old and new decisions apart, and the §9.1 cuts and thresholds are to be
+re-checked once enough new decisions exist.
+
+## 48.10 Not covered
+
+* Pushing and merge requests (TODO W2); Jira transitions, comments and issue links (W3).
+* Parallel tasks (§30); rebasing a stack after review; re-planning; a model editing the spec
+  after approval.
+* Nested stories; a story task without a code change; submodules (as for §47).
+* The benchmark: story tasks are not in `bench/`.
+* Calibrating and using the scope probability (a later spec, on data).

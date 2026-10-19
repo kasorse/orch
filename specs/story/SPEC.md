@@ -1,9 +1,9 @@
 # Spec: Story — a task split into a specification and ordered subtasks
 
-Status: **specified** (2026-10-17), in progress (ST01 done, see `README.md`). The owner's decisions are in §19 (taken
-2026-10-17 while scoping), the author's defaults in §20. Depends on `specs/worktree/` (WT04,
-WT06, WT07). Once ST10 is done, MVP.md §48 becomes the normative home and this file stays the
-design record.
+Status: **built** (specified 2026-10-17, ST01–ST10 done 2026-10-19, see `README.md`). The owner's
+decisions are in §19 (taken 2026-10-17 while scoping), the author's defaults in §20. Depends on
+`specs/worktree/` (WT04, WT06, WT07). MVP.md §48 is the normative home; this file is the design
+record.
 
 The spec touches these MVP.md sections:
 - §8–§9: one more classification question, recorded and never used (§13);

@@ -1,6 +1,9 @@
 # Story — a task split into a specification and ordered subtasks
 
-Status: **in progress** (specified 2026-10-17; 2026-10-19): ST01 done (`internal/story`), ST02
+Status: **done** (specified 2026-10-17; built 2026-10-19; MVP.md §48 is now the normative home and
+`SPEC.md` the design record). `scripts/check.sh` outside the sandbox (root and `bench/`, the
+`bench/` tests that skip under bwrap included) is left to the operator, once before the branch
+merges. Per task: ST01 done (`internal/story`), ST02
 done (`story` and `jira.create` config, the service finder), ST03 done (the survey and specify
 calls, strict answers), ST04 done (`orchestrator story plan`: the spec on disk, the one-task
 case, `.orchestrator/stories/`, `story.json`), ST05 done (`run --story-task`: the task input, the
@@ -8,7 +11,9 @@ worktree on its branch and base, development forced, the task's criteria, the co
 `scripts/check.sh` is the run's test step), ST06 done (`orchestrator story run` and `story status`:
 the lock, the checks, the ordered children, resume, retry, As built, the budget), ST07 done (the
 Jira children: `jira.Create`, the wiki rendering, the intents, the key written back into
-`story.json` and the task file); the rest not started. Owner's
+`story.json` and the task file), ST08 done (`run --jira` refuses a story issue type), ST09 done
+(the shadow scope question), ST10 done (the Jira-children scenario, MVP.md §48, CLAUDE.md, README,
+TODO.md). Owner's
 decisions D1–D7 and author's defaults A1–A11 in `SPEC.md` §19–§20. Builds on
 [`specs/worktree/`](../worktree/README.md), which comes first.
 
@@ -46,7 +51,7 @@ every ordinary run looks, for a later calibration, and decides nothing.
 | [ST07](tasks/TASK-ST07-jira-children.md) | Jira children: create, wiki rendering, intents, front matter write-back ✓ | M | ST06 |
 | [ST08](tasks/TASK-ST08-jira-story-type.md) | `run --jira` refuses a story issue type ✓ | S | ST02 |
 | [ST09](tasks/TASK-ST09-scope-question.md) | the scope question (shadow) ✓ | M | — |
-| [ST10](tasks/TASK-ST10-integration-docs.md) | scenarios, MVP.md §48, CLAUDE.md, README, example, TODO.md | M | all |
+| [ST10](tasks/TASK-ST10-integration-docs.md) | scenarios, MVP.md §48, CLAUDE.md, README, example, TODO.md ✓ | M | all |
 
 ```
 ST01 ─┬─ ST02 ─┬─ ST03 ─ ST04 ──────┐

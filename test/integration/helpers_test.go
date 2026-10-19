@@ -193,6 +193,9 @@ func (o configOptions) tailYAML() string {
 type jiraOptions struct {
 	baseURL string
 	fields  [][2]string
+	// create is the jira.create lines verbatim (two spaces of indent, starting "  create:"), or
+	// nothing.
+	create string
 }
 
 func (j *jiraOptions) yaml() string {
@@ -206,7 +209,7 @@ func (j *jiraOptions) yaml() string {
 			s += fmt.Sprintf("    - id: %s\n      label: %s\n", f[0], f[1])
 		}
 	}
-	return s
+	return s + j.create
 }
 
 func defaultConfigOptions() configOptions {

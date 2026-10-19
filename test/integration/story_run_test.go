@@ -66,6 +66,8 @@ const storyReviewMalformed = `{"status":"pass","summary":"ok","issues":[],"crite
 
 type storyRunFixtureOpts struct {
 	maxCostUSD float64
+	// jira, when set, is the home's jira section (with jira.create) at a fake Jira.
+	jira *jiraOptions
 }
 
 type storyRunFixture struct {
@@ -126,6 +128,7 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		t.Fatal(err)
 	}
 	homeOpts := opts
+	homeOpts.jira = o.jira
 	homeOpts.extraYAML = "\nstory:\n  roots: [" + yamlQuote(src) + "]\n  max_tasks: 12\n"
 	if o.maxCostUSD > 0 {
 		homeOpts.extraYAML += fmt.Sprintf("  max_cost_usd: %v\n", o.maxCostUSD)
@@ -182,14 +185,21 @@ func (f *storyRunFixture) taskPath(id string) string {
 // planning calls, and nothing of a run.
 func (f *storyRunFixture) writePlanRecord(t *testing.T) {
 	t.Helper()
+	f.writePlanRecordFrom(t, "")
+}
+
+// writePlanRecordFrom is writePlanRecord for a story planned from the Jira issue parent.
+func (f *storyRunFixture) writePlanRecordFrom(t *testing.T, parent string) {
+	t.Helper()
 	if err := os.MkdirAll(f.storyDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	rec := persistence.StoryRecord{
 		Slug: storyRunSlug, SpecDir: "specs/" + storyRunSlug, CreatedAt: time.Now().UTC(),
-		Services: map[string]string{"billing": f.repos["billing"], "gateway": f.repos["gateway"]},
-		Status:   story.StatusPlanned,
-		Calls:    map[string]*domain.Usage{"specify": {CostUSD: 0.05}},
+		Services:   map[string]string{"billing": f.repos["billing"], "gateway": f.repos["gateway"]},
+		Status:     story.StatusPlanned,
+		JiraParent: parent,
+		Calls:      map[string]*domain.Usage{"specify": {CostUSD: 0.05}},
 	}
 	if err := persistence.SaveStoryRecord(f.storyDir, rec); err != nil {
 		t.Fatal(err)

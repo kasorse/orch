@@ -537,8 +537,10 @@ is mostly Russian, to the translator, exactly as typed text would.
 
 Only with `run --jira`, and only one read: `GET <jira.base_url>/rest/api/2/issue/<KEY>`
 asking for the summary, description, issue type, parent and your configured `fields`, with
-your credentials in the `Authorization` header. Nothing is ever written to Jira. The
-request goes to `jira.base_url` only — never to a URL you pasted, and never through a
+your credentials in the `Authorization` header. Nothing is written to Jira by `run`,
+`resume` or `story plan`; the only write is `story run` creating a story's child issues, and
+only with `jira.create` configured (see [Planning and running a story](#planning-and-running-a-story)).
+The request goes to `jira.base_url` only — never to a URL you pasted, and never through a
 redirect — over `https` (plain `http` is accepted only for `localhost`/`127.0.0.1`/`::1`).
 
 ## Running claude on an API key
@@ -601,6 +603,9 @@ orchestrator [--config path] [--claude-auth m] validate
 orchestrator [--config path] [--claude-auth m] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
+orchestrator [--config path] story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
+orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID>]
+orchestrator [--config path] story status <spec_dir>/<slug>
 orchestrator [--config path] [--mode m] [--claude-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator runs clean [--older-than <N>d] [--dry-run]
@@ -624,6 +629,8 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
 - `run --stage <name> [--stage <name> ...] "<task>"` — runs exactly the stages you name and
   skips the decision layer (no translation, Jev or LLM call, project context). See
   [Choosing the stages yourself](#choosing-the-stages-yourself).
+- `story plan`, `story run`, `story status` — split a task that spans services into a spec and
+  ordered tasks, and run them. See [Planning and running a story](#planning-and-running-a-story).
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
   (`--mode plan`) or whose process died, from where it stopped. See
   [Resuming a run](#resuming-a-run).
@@ -920,6 +927,50 @@ When the ticket cannot be read, nothing is created and no AI is called: bad cred
 a missing or invisible issue, or a redirect exit 2; Jira being down or answering
 unexpectedly exits 3. Details: `MVP.md` §39 and `specs/jira/`.
 
+### Planning and running a story
+
+Some tasks are not one change: they span several services, or are safe only as a sequence of
+steps that each leave the system working. A *story* splits such a task into a specification
+and ordered tasks; each task is an ordinary run in its own repository.
+
+```yaml
+story:
+  roots: [..]               # where the service checkouts live, side by side
+  max_services: 5
+  spec_dir: specs           # in the repository you run the commands in (the story home)
+  max_tasks: 12
+  max_cost_usd: 20          # optional; the whole story
+  jira_issue_types: [Epic]  # run --jira on these refuses and points to story plan
+```
+
+1. **Plan.** Name the services in the task, e.g. `orchestrator story plan "Partial refunds:
+   billing stores the amount, gateway accepts it"`, or take the task from a ticket with
+   `story plan --jira PAY-1` (the ticket's components name services too); `--repo NAME` names
+   them explicitly. Go finds the checkouts under `story.roots` (no model call), one read-only
+   call surveys each of them, and one tool-less call proposes the tasks. Go checks the answer
+   and writes `specs/<slug>/` (`README.md`, `SPEC.md`, `tasks/TASK-<ID>-….md`). If the answer
+   is a single task, nothing is written and the command that runs it is printed.
+2. **Review.** The spec is yours: read it, edit the tasks (their `## Acceptance` items become
+   review criteria), commit it. Each service keeps its own `orchestrator.yaml`, which governs
+   its tasks.
+3. **Run.** `orchestrator story run specs/<slug>` is the approval. Go orders the tasks from
+   their `depends_on`, shows the plan and asks once at a terminal; then each task runs as
+   `orchestrator run` in its repository, in a worktree on `story/<slug>/<ID>`, stacked on the
+   branch of the same-repository task it needs. Your checkouts are not touched. When a task is
+   done Go appends `## As built` to its file and updates the spec's `README.md`. A failure
+   stops the story; run `story run` again to resume it, or `--retry <ID>` to start a failed
+   task over on a new branch. A task whose run completed without a commit (a failing review,
+   a secret warning) blocks the story until you commit in its worktree or drop the work.
+   `story status specs/<slug>` prints the table.
+4. **Merge.** Each branch is the result; merge them in order, rebasing the stack yourself after
+   a review. Pushing and merge requests are not done by the orchestrator.
+
+With `jira.create` (`issue_type`, `link: parent|field`, `labels`, `components`) and a story
+planned from a Jira issue, `story run` creates one child issue per task after you approve,
+once: a request that may have reached Jira is never repeated, and an interrupted creation
+stops the next start until you set `jira: <KEY>` (or `none`) in the task file. Details:
+`MVP.md` §48 and `specs/story/`.
+
 ## Run artifacts
 
 Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target repository:
@@ -1085,8 +1136,8 @@ This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). 
 - No parallel or multi-agent workflows — one task, one sequential workflow, one run at a time.
 - No web UI, REST API, or IDE plugin — CLI only.
 - No GitHub/GitLab integration or remote repository execution — operates on the local working
-  directory only. Jira is read-only and limited to one issue: no comments, transitions,
-  linked issues, attachments or JQL.
+  directory only. Jira is read-only and limited to one issue, plus the child issues of an
+  approved story: no comments, transitions, linked issues, attachments or JQL.
 - No RAG, persistent conversational memory, or database — state is per-run JSON on disk.
 - No custom/dynamically-defined action types or user-defined workflow language — the stage
   set, their order and the policy rules are fixed in Go code; only thresholds are configured.

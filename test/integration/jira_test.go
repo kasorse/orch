@@ -3,6 +3,8 @@ package integration
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -22,6 +24,8 @@ const (
 // jiraRequest is what the fake Jira recorded of one request.
 type jiraRequest struct {
 	Path, Query, Auth string
+	// Method and Body are set for a creation (POST /rest/api/2/issue).
+	Method, Body string
 }
 
 // fakeJira serves canned REST v2 issues by key on a loopback httptest server
@@ -32,8 +36,9 @@ type fakeJira struct {
 	// fail lists statuses to answer the first requests with, before answering normally.
 	fail []int
 
-	mu   sync.Mutex
-	reqs []jiraRequest
+	mu      sync.Mutex
+	reqs    []jiraRequest
+	created int
 }
 
 // startJira runs a fake Jira serving issues (key -> JSON body) and sets the credential
@@ -58,9 +63,19 @@ func (j *fakeJira) Requests() []jiraRequest {
 }
 
 func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
+	req := jiraRequest{Path: r.URL.Path, Query: r.URL.RawQuery, Auth: r.Header.Get("Authorization")}
+	if r.Method == http.MethodPost {
+		body, _ := io.ReadAll(r.Body)
+		req.Method, req.Body = r.Method, string(body)
+	}
 	j.mu.Lock()
-	j.reqs = append(j.reqs, jiraRequest{Path: r.URL.Path, Query: r.URL.RawQuery, Auth: r.Header.Get("Authorization")})
+	j.reqs = append(j.reqs, req)
 	n := len(j.reqs)
+	created := 0
+	if req.Method == http.MethodPost {
+		j.created++
+		created = j.created
+	}
 	j.mu.Unlock()
 
 	want := "Basic " + base64.StdEncoding.EncodeToString([]byte(jiraEmail+":"+jiraToken))
@@ -70,6 +85,20 @@ func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	case n <= len(j.fail):
 		w.WriteHeader(j.fail[n-1])
+		return
+	case req.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue":
+		// A creation: the next key of the project the request names, 201 as Jira answers.
+		var in struct {
+			Fields struct {
+				Project struct {
+					Key string `json:"key"`
+				} `json:"project"`
+			} `json:"fields"`
+		}
+		_ = json.Unmarshal([]byte(req.Body), &in)
+		key := fmt.Sprintf("%s-%d", in.Fields.Project.Key, 100+created)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"id":"%d","key":%q,"self":"https://ignored"}`, 20000+created, key)
 		return
 	}
 	body, ok := j.issues[strings.TrimPrefix(r.URL.Path, "/rest/api/2/issue/")]

@@ -30,7 +30,9 @@ template, cut proposals in `decisions calibrate`, `actions.implement.escalate`: 
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
-`FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`.
+`FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
+the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
+Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -89,6 +91,8 @@ request → translate if ≥30% Cyrillic prose (internal/translate; failure → 
         → Context Manager builds ProjectContext        (internal/projectctx)
           failure → continue with context_limited
         → classification: complexity + 3 stage probs   (decision.Provider.Classify)
+          + the shadow scope question `scope_story`: recorded as `scope.story`, decides
+            nothing, not asked for --stage or --story-task (MVP.md §48.9)
         → policy → complexity, enabled stages          (internal/policy)
         → workflow.Build                                (internal/workflow)
   provider failure → manual choice (on_failure: ask, interactive only) or error
@@ -320,6 +324,23 @@ history, otherwise the state the history and the transition table give (MVP.md �
   `merge-tree` against `base_branch` in the operator's repository (`session.operator`, after
   its fingerprint matched the one taken at creation) and `git worktree remove` without
   `--force`; without a commit the worktree stays.
+- **A model proposes, Go orders, the operator approves** (MVP.md §48, `specs/story/`). `story
+  plan` writes a spec of tasks as files and runs nothing; `story run` is the approval. Go finds
+  the services the task names under `story.roots` (no model call), validates the model's
+  answer strictly, orders the tasks from `depends_on` (Kahn, smallest ID first) and computes
+  each task's base and branch (`story/<slug>/<ID>`, stacked on the same-repository task it
+  needs); no model output picks what runs next, where, or with which stages. A story task is an
+  ordinary worktree run started as a child process (`run --story-task`, hidden), with
+  development forced on, the task's acceptance items as review criteria and the
+  `Orchestrator-Story` commit trailer; stories do not nest and tasks run one at a time. A
+  dispatched task's file is frozen up to `## As built`, which only Go appends. The scope
+  question is shadow data: nothing reads `scope.story` to decide.
+- **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11). The one write is
+  `story run` creating the child issues (`jira.create`, a story planned from a Jira issue): after
+  the confirmation, before the first dispatch, an intent in `story.json` before each POST, the
+  key recorded after the 201, no retry once a request may have reached Jira (only 429/503 with
+  `Retry-After`), and an intent without a key stops the next start. `run`, `resume` and `story
+  plan` write nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 
@@ -329,8 +350,8 @@ No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations
 decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows, no Web UI/REST
-API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue (no
-comments, transitions or JQL), no remote repository execution, no RAG or persistent
+API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue and creating
+the child issues of an approved story (no comments, transitions or JQL), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
@@ -425,3 +446,13 @@ removed when a resume reads the artifact back), `logs/<NNN>-<action>.{stdout,std
 `checks:` adds `logs/<NNN>-test.<check>.*`, an implement with verify calls adds
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
 `logs/decide-{context,classify}.*`, `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.
+
+A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
+the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`
+reason on development and `scope.story` to `decision.json`. The story itself lives in the story
+home under `.orchestrator/stories/<slug>/` (MVP.md §48.8): `story.json` (the services, the bases,
+the status and, per task, the run, branch, commit, Jira key and intent, cost), `ticket.json` for
+`story plan --jira`, `artifacts/survey-<repo>.json` and `artifacts/specify.json` (the prompts as
+sent and the answers), `logs/survey-<repo>.*` and `logs/specify.*`, and `tasks/<ID>.json` (a
+child's task input); a plan that reaches no spec leaves `.plan-<id>`. The spec itself is in
+`<spec_dir>/<slug>/` (committed by the operator), with `## As built` appended to each task file by Go.
