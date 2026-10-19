@@ -717,7 +717,8 @@ simple — все стадии ниже порога, complex — все выш�
 уровня (`policy.stages.force`) и «testing вместе с development»; `decisions calibrate`
 показывает разброс size и избыточные стадии и предлагает cuts по долям и по исходам;
 `actions.implement.escalate` поднимает модель на уровень для исправления после упавшего
-test или review.
+test или review; запись `by_complexity.<level>` может задать свою `escalate: {model, effort}`
+(DS08, и для complex), а первый implement после плана начинает с его `affected_files`.
 **Открыто:** size распределяет задачи по моделям, но на этих данных не предсказывает, какой
 задаче понадобится исправление (≈45% на любом размере). Сравнить модели решений на одних и
 тех же задачах (конфиг B бенча с `decision.model: opus`).

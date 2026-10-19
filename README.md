@@ -234,7 +234,10 @@ limits:
 - **`by_complexity`** is a static table: Go reads the complexity the decision already made and
   picks the entry; nothing is chosen by a model, and the provider cannot be overridden. With
   **`escalate: true`** (implement only) a fix after a failed test or review runs on the entry
-  one level up (simple → medium → complex), recorded as `model_source: escalated.<level>`.
+  one level up (simple → medium → complex), recorded as `model_source: escalated.<level>`. An
+  entry can name its own fix route, `complex: {model: sonnet, effort: high, escalate: {model:
+  opus}}`, which wins for its level (complex included), needs no `escalate: true` and is
+  recorded as `model_source: by_complexity.<level>.escalate`.
 - **`review.fix_medium`** and **`actions.review.models`** make review stricter; the second
   costs one more call per extra model.
 - Nothing here changes what decides success: the `test` step's exit code and, for review,

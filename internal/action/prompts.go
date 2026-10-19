@@ -55,6 +55,12 @@ const reviewConventionsRule = `Also check the change against ` + conventionsFile
 // implementOperatorRule tells implement what it cannot do: its authority (edit) has no
 // shell, and the test command is the only thing the run executes (MVP.md §17, §38). A step
 // that needs anything else is the operator's, reported rather than claimed done.
+// implementPlanFilesRule points the first attempt at the plan's files: the plan already explored
+// the repository, and an implement session that surveys it again spends most of its turns there.
+const implementPlanFilesRule = `Start from the files listed under "Affected files (from plan)": read them first and make the change there. ` +
+	`The plan was made from this repository, so do not survey it again; open another file only for what those files ` +
+	`do not answer (a caller, a type, a test helper), and where the plan turns out to be wrong, follow the code.`
+
 const implementOperatorRule = `You can read and edit files; you cannot run commands, use installed tools or reach the network. ` +
 	`After you, the orchestrator runs the configured test command from the repository root, and nothing else. ` +
 	`A step the task or the repository's instructions require that needs running something else (a check against an ` +
@@ -268,6 +274,9 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		writeList(&b, "Risks (from plan)", in.Plan.Risks)
 		writeList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
 		b.WriteString("\n")
+		if len(in.Plan.AffectedFiles) > 0 && in.PreviousImplementation == nil {
+			b.WriteString(implementPlanFilesRule + "\n\n")
+		}
 	}
 	if in.PreviousImplementation != nil {
 		fmt.Fprintf(&b, "Previous implementation attempt:\n%s\n\n", in.PreviousImplementation.Summary)

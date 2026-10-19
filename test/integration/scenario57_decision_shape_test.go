@@ -188,6 +188,36 @@ func TestScenario61_EscalateAFixAcrossAResume(t *testing.T) {
 	}
 }
 
+// 63. A level's own escalate: the simple entry names the model of its fix, without escalate:
+// true, so the run fixes the failed test on it and records by_complexity.simple.escalate.
+func TestScenario63_EscalateWithinTheLevel(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	decisionEnv(t, repoDir)
+	t.Setenv("FAKE_IMPLEMENT_FIX_ON_CALL", "2")
+	argsDir := t.TempDir()
+	t.Setenv("FAKE_ARGS_DIR", argsDir)
+	j := startJev(t, scriptBugfixLow())
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j, func(o *configOptions) {
+		o.byComplexity = map[string]map[string]string{"implement": {"simple": "simple-fake"}}
+		o.escalateTo = map[string]string{"simple": "strong-fake"}
+	}), "run", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	assertContains(t, "the fix's argv", readFile(t, argsDir+"/implement.args"), "--model\nstrong-fake\n")
+	run := loadQL(t, repoDir)
+	impl := run.ofAction("implement")
+	if len(impl) != 2 || run.Status != "completed" {
+		t.Fatalf("status %s, %d implements", run.Status, len(impl))
+	}
+	if p := impl[0].Provider; p == nil || p.Model != "simple-fake" || p.ModelSource != "by_complexity.simple" {
+		t.Errorf("first implement = %+v", p)
+	}
+	if p := impl[1].Provider; p == nil || p.Model != "strong-fake" || p.ModelSource != "by_complexity.simple.escalate" {
+		t.Errorf("the fix = %+v", p)
+	}
+}
+
 // 62. decisions calibrate over three answered runs prints the shape and proposes the cuts for
 // the target, as a diff from the cuts the runs were decided with.
 func TestScenario62_CalibrateProposesCuts(t *testing.T) {

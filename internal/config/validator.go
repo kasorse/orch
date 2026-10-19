@@ -214,6 +214,8 @@ func checkProblems(cfg Config) []string {
 // byComplexityProblems validates every action's by_complexity (specs/quality/SPEC.md §9.1):
 // the keys are complexities, each entry names a model or an effort, and an effort follows
 // the rules of the action's own effort - a level the CLI knows, on a provider that accepts it.
+// An entry's escalate (specs/decision-shape/SPEC.md §8.1) follows the same rules, on implement
+// only.
 func byComplexityProblems(cfg Config) []string {
 	var problems []string
 	for _, a := range []struct {
@@ -238,20 +240,33 @@ func byComplexityProblems(cfg Config) []string {
 				continue
 			}
 			entry := a.action.ByComplexity[domain.Complexity(level)]
-			if strings.TrimSpace(entry.Model) == "" && entry.Effort == "" {
-				problems = append(problems, key+" needs a model or an effort")
-				continue
-			}
+			problems = append(problems, modelEffortProblems(key, entry.Model, entry.Effort, a.action.Provider)...)
 			switch {
-			case entry.Effort == "":
-			case !slices.Contains(EffortLevels, entry.Effort):
-				problems = append(problems, fmt.Sprintf("%s.effort %q must be one of: %s", key, entry.Effort, strings.Join(EffortLevels, ", ")))
-			case a.action.Provider != string(provider.Claude):
-				problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, a.action.Provider))
+			case entry.Escalate == nil:
+			case a.name != "implement":
+				problems = append(problems, fmt.Sprintf("%s.escalate: unknown key (escalate is accepted only on actions.implement)", key))
+			default:
+				problems = append(problems, modelEffortProblems(key+".escalate", entry.Escalate.Model, entry.Escalate.Effort, a.action.Provider)...)
 			}
 		}
 	}
 	return problems
+}
+
+// modelEffortProblems validates one by_complexity entry or its escalate at key: it names a model
+// or an effort, and an effort is a level the CLI knows, on a provider that accepts it.
+func modelEffortProblems(key, model, effort, prov string) []string {
+	switch {
+	case strings.TrimSpace(model) == "" && effort == "":
+		return []string{key + " needs a model or an effort"}
+	case effort == "":
+		return nil
+	case !slices.Contains(EffortLevels, effort):
+		return []string{fmt.Sprintf("%s.effort %q must be one of: %s", key, effort, strings.Join(EffortLevels, ", "))}
+	case prov != string(provider.Claude):
+		return []string{fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, prov)}
+	}
+	return nil
 }
 
 // extraReviewerProblems validates actions.review.models (specs/quality/SPEC.md §7.5): at most
@@ -332,8 +347,12 @@ func allowedModelProblems(cfg Config) []string {
 		}
 		slices.Sort(levels)
 		for _, level := range levels {
-			if m := a.action.ByComplexity[domain.Complexity(level)].Model; strings.TrimSpace(m) != "" {
-				check(key+".by_complexity."+level, m)
+			entry := a.action.ByComplexity[domain.Complexity(level)]
+			if strings.TrimSpace(entry.Model) != "" {
+				check(key+".by_complexity."+level, entry.Model)
+			}
+			if entry.Escalate != nil && strings.TrimSpace(entry.Escalate.Model) != "" {
+				check(key+".by_complexity."+level+".escalate", entry.Escalate.Model)
 			}
 		}
 		for i, m := range a.action.Models {
