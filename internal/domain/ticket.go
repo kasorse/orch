@@ -26,6 +26,10 @@ type Ticket struct {
 	// Description is the wiki markup, verbatim; "" when the issue has none.
 	Description string        `json:"description"`
 	Parent      *TicketParent `json:"parent,omitempty"`
+	// Components are the names of the issue's components, in Jira's order and without
+	// duplicates; story plan finds the services a ticket names among them
+	// (specs/story/SPEC.md §7.1). They are not part of the rendered task text.
+	Components []string `json:"components,omitempty"`
 	// Fields are the configured jira.fields with a non-empty value, in config order.
 	Fields    []TicketField `json:"fields,omitempty"`
 	FetchedAt time.Time     `json:"fetched_at"`

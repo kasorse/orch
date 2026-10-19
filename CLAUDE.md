@@ -140,8 +140,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   registry is built first; constructing it calls nothing). `Validate` covers the decision
   surface too; `ValidateDependencies` checks every action's, the translator's and an LLM
   decision provider's executable, and the Jev API key, and — only with
-  `DependencyOptions{Jira: true}` (`run --jira`, and `validate` when the section is
-  present) — the Jira section and its variables; `ValidateAuthorities` checks that each
+  `DependencyOptions{Jira: true}` (`run --jira`, `story plan --jira`, and `validate` when the
+  section is present) — the Jira section and its variables; `ValidateAuthorities` checks that each
   route's provider can enforce its authority; right after it, every routed provider CLI's
   `--version` must be inside the range its adapter verified (`provider.VersionVerifier`;
   outside it only `security.allow_unverified_cli: true` lets a run go on, recorded and

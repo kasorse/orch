@@ -3201,7 +3201,7 @@ section is present, and `run` without `--jira` and `resume` never ask.
 ## 39.3 The request
 
 ```text
-GET {base_url}/rest/api/2/issue/{KEY}?fields=summary,description,issuetype,parent,<fields[].id...>
+GET {base_url}/rest/api/2/issue/{KEY}?fields=summary,description,issuetype,parent,components,<fields[].id...>
 Accept: application/json
 User-Agent: orchestrator/<version>
 Authorization: Basic … | Bearer …
@@ -3231,6 +3231,7 @@ ignored.
 | `fields.description` | string, `null` or absent |
 | `fields.issuetype.name` | non-empty string |
 | `fields.parent` | absent/`null`, or `{key, fields.summary}` with a valid key and a string summary |
+| `fields.components` | absent, `null` or an array of at most 50 objects with a non-empty one-line `name` (at most 255 bytes); only the names are kept, in `ticket.json`, for `story plan` to find services by; never part of the task text |
 | `fields.<customfield_N>` | absent, `null` or string; any other type: `not a text field; remove it from jira.fields` |
 
 `\r\n` becomes `\n` in every text value. A blank custom field is left out.

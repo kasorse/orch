@@ -155,7 +155,7 @@ func TestFetch_Request(t *testing.T) {
 			if r.Method != http.MethodGet || r.URL.Path != "/jira/rest/api/2/issue/PMC-2789" {
 				t.Errorf("got %s %s", r.Method, r.URL.Path)
 			}
-			if got, want := r.URL.RawQuery, "fields=summary,description,issuetype,parent,customfield_10035,customfield_10036"; got != want {
+			if got, want := r.URL.RawQuery, "fields=summary,description,issuetype,parent,components,customfield_10035,customfield_10036"; got != want {
 				t.Errorf("query = %q, want %q", got, want)
 			}
 			if got := r.Header.Get("Authorization"); got != tc.want {
@@ -245,6 +245,27 @@ func TestFetch_ResponseShapes(t *testing.T) {
 				t.Errorf("RequestedKey = %q, want empty", tk.RequestedKey)
 			}
 		}},
+		{"components absent", minimal(``), func(t *testing.T, tk domain.Ticket) {
+			if tk.Components != nil {
+				t.Errorf("Components = %q, want none", tk.Components)
+			}
+		}},
+		{"components null", minimal(`,"components":null`), func(t *testing.T, tk domain.Ticket) {
+			if tk.Components != nil {
+				t.Errorf("Components = %q, want none", tk.Components)
+			}
+		}},
+		{"components empty", minimal(`,"components":[]`), func(t *testing.T, tk domain.Ticket) {
+			if tk.Components != nil {
+				t.Errorf("Components = %q, want none", tk.Components)
+			}
+		}},
+		{"components", minimal(`,"components":[{"id":"1","name":"gateway","self":"x"},{"name":"billing"},{"name":"gateway"}]`),
+			func(t *testing.T, tk domain.Ticket) {
+				if want := []string{"gateway", "billing"}; !reflect.DeepEqual(tk.Components, want) {
+					t.Errorf("Components = %q, want %q", tk.Components, want)
+				}
+			}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -288,6 +309,18 @@ func TestFetch_InvalidResponse(t *testing.T) {
 			"fields.customfield_10036: not a text field"},
 		{"custom field array", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"customfield_10036":["a"]}}`,
 			"fields.customfield_10036: not a text field"},
+		{"components object", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":{"name":"a"}}}`,
+			"fields.components: not an array"},
+		{"component string", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":["gateway"]}}`,
+			"fields.components[0]: not an object"},
+		{"component no name", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":[{"name":"a"},{"id":"2"}]}}`,
+			"fields.components[1].name: missing or empty"},
+		{"component empty name", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":[{"name":" "}]}}`,
+			"fields.components[0].name: missing or empty"},
+		{"component name number", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":[{"name":7}]}}`,
+			"fields.components[0].name: missing or empty"},
+		{"component name two lines", `{"key":"PMC-1","fields":{"summary":"S","issuetype":{"name":"Bug"},"components":[{"name":"a\nb"}]}}`,
+			"fields.components[0].name: not one line"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

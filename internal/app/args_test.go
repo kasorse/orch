@@ -57,6 +57,14 @@ func TestParseArgs(t *testing.T) {
 		{"claude-auth twice", []string{"run", "--claude-auth", "api", "--claude-auth=login"}, cliArgs{}, "--claude-auth given twice"},
 		{"claude-auth bad value", []string{"--claude-auth", "sub", "run"}, cliArgs{}, "--claude-auth must be auto, api or login"},
 		{"claude-auth missing value", []string{"run", "--claude-auth"}, cliArgs{}, "--claude-auth requires a value"},
+		{"repo separate, equals, repeated, any position", []string{"--repo", "gateway", "story", "plan", "x", "--repo=billing"},
+			cliArgs{configPath: defaultConfigPath, repos: []string{"gateway", "billing"}, rest: []string{"story", "plan", "x"}}, ""},
+		{"repo duplicate collapsed", []string{"story", "plan", "--repo", "billing", "--repo= billing ", "x"},
+			cliArgs{configPath: defaultConfigPath, repos: []string{"billing"}, rest: []string{"story", "plan", "x"}}, ""},
+		{"repo with jira", []string{"story", "plan", "--jira", "PAY-1", "--repo", "billing"},
+			cliArgs{configPath: defaultConfigPath, jiraRef: "PAY-1", repos: []string{"billing"}, rest: []string{"story", "plan"}}, ""},
+		{"repo empty", []string{"story", "plan", "--repo=", "x"}, cliArgs{}, "--repo requires a service name"},
+		{"repo missing value", []string{"story", "plan", "x", "--repo"}, cliArgs{}, "--repo requires a value"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,7 +79,7 @@ func TestParseArgs(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got.configPath != tc.want.configPath || got.mode != tc.want.mode || got.verbose != tc.want.verbose ||
-				got.claudeAuth != tc.want.claudeAuth ||
+				got.claudeAuth != tc.want.claudeAuth || !slices.Equal(got.repos, tc.want.repos) ||
 				got.jiraRef != tc.want.jiraRef || !slices.Equal(got.stages, tc.want.stages) || !slices.Equal(got.rest, tc.want.rest) {
 				t.Errorf("parseArgs(%q) = %+v, want %+v", tc.args, got, tc.want)
 			}
@@ -79,16 +87,16 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-// --jira belongs to run alone; with any other command it is a usage error before
+// --jira belongs to run and story plan; with any other command it is a usage error before
 // anything else happens - no config is read.
 func TestRun_JiraOnlyWithRun(t *testing.T) {
-	for _, command := range [][]string{{"version"}, {"validate"}, {"resume", "3f2a9c1e"}} {
-		t.Run(command[0], func(t *testing.T) {
+	for _, command := range [][]string{{"version"}, {"validate"}, {"resume", "3f2a9c1e"}, {"story"}, {"story", "run", "specs/x"}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			var out bytes.Buffer
 			args := append([]string{"--config", "/nonexistent.yaml", "--jira", "PMC-1"}, command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != "--jira is only valid with run" {
+			if !errors.As(err, &cerr) || err.Error() != "--jira is only valid with run and story plan" {
 				t.Fatalf("got %v, want the --jira usage error", err)
 			}
 			if out.Len() != 0 {
@@ -122,6 +130,47 @@ func TestRun_RunUsage(t *testing.T) {
 	err = Run(context.Background(), nil, strings.NewReader(""), &out, &out)
 	if err == nil || !strings.Contains(err.Error(), `run --jira <KEY|URL> ["notes"]`) {
 		t.Fatalf("got %v, want the general usage", err)
+	}
+}
+
+// --repo belongs to story plan alone: a usage error before any config is read.
+func TestRun_RepoOnlyWithStoryPlan(t *testing.T) {
+	for _, command := range [][]string{{"run", "x"}, {"validate"}, {"story", "run", "specs/x"}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml", "--repo", "billing"}, command...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || err.Error() != "--repo is only valid with story plan" {
+				t.Fatalf("got %v, want the --repo usage error", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed %q", out.String())
+			}
+		})
+	}
+}
+
+// story takes the plan subcommand and, without --jira, a task: anything else is its usage,
+// before any config is read.
+func TestRun_StoryUsage(t *testing.T) {
+	for _, command := range [][]string{{"story"}, {"story", "frobnicate"}, {"story", "plan"}, {"story", "plan", "  "}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml"}, command...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || err.Error() != storyPlanUsage {
+				t.Fatalf("got %v, want the story plan usage", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed %q", out.String())
+			}
+		})
+	}
+	err := Run(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), `story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"`) {
+		t.Errorf("the general usage lacks story plan: %v", err)
 	}
 }
 

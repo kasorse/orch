@@ -1,0 +1,26 @@
+# Partial refunds
+
+## Problem
+
+Refunds are all or nothing.
+A partial one needs a manual fix.
+
+## Approach
+
+Billing stores the amount; the gateway exposes it.
+
+### Billing
+
+- `amount` on refund
+
+## Contracts
+
+—
+
+## Out of scope
+
+Reports.
+
+## Risks
+
+—

@@ -40,7 +40,7 @@ const (
 )
 
 // systemFields are always requested; configured custom fields follow, in config order.
-var systemFields = []string{"summary", "description", "issuetype", "parent"}
+var systemFields = []string{"summary", "description", "issuetype", "parent", "components"}
 
 // Credentials authenticate the request. It prints as [REDACTED], and the values sit
 // behind a pointer: fmt cannot call String on an unexported field (Client.creds), and a

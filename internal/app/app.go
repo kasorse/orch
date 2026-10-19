@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, decisions report|calibrate, runs report). This is the composition root - no other package
+// (version, validate, run, resume, story plan, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -50,7 +50,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -64,8 +64,12 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if len(rest) == 0 {
 		return &apperr.ConfigError{Msg: usage}
 	}
-	if cli.jiraRef != "" && rest[0] != "run" {
-		return &apperr.ConfigError{Msg: "--jira is only valid with run"}
+	storyPlanCmd := rest[0] == "story" && len(rest) > 1 && rest[1] == "plan"
+	if cli.jiraRef != "" && rest[0] != "run" && !storyPlanCmd {
+		return &apperr.ConfigError{Msg: "--jira is only valid with run and story plan"}
+	}
+	if len(cli.repos) > 0 && !storyPlanCmd {
+		return &apperr.ConfigError{Msg: "--repo is only valid with story plan"}
 	}
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
@@ -97,6 +101,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
+	case "story":
+		if !storyPlanCmd {
+			return &apperr.ConfigError{Msg: storyPlanUsage}
+		}
+		// With --jira the ticket is the task, and any text is the operator's notes on it.
+		request := strings.Join(rest[2:], " ")
+		if cli.jiraRef == "" && strings.TrimSpace(request) == "" {
+			return &apperr.ConfigError{Msg: storyPlanUsage}
+		}
+		return storyPlan(ctx, cli.configPath, request, cli.jiraRef, cli.repos, cli.verbose, stdout)
 	case "decisions":
 		if len(rest) == 2 && rest[1] == "report" {
 			return decisionsReport(stdout)
@@ -156,13 +170,16 @@ type cliArgs struct {
 	// claudeAuth is --claude-auth (auto, api or login); empty if not given
 	// (specs/claude-auth/SPEC.md §6).
 	claudeAuth string
+	// repos are the --repo values, in the order given and without duplicates: the services of
+	// story plan, instead of those the task names (specs/story/SPEC.md §7.1).
+	repos []string
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the repeatable
-// --stage/--stage=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them with the remaining
-// positional arguments.
+// --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
+// with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
 	cli := cliArgs{configPath: defaultConfigPath}
 	// value returns the flag's value from "--flag=X" or the next argument.
@@ -226,6 +243,17 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 			if !slices.Contains(cli.stages, parsed[0]) {
 				cli.stages = append(cli.stages, parsed[0])
+			}
+		case arg == "--repo" || strings.HasPrefix(arg, "--repo="):
+			v, err := value(&i, "--repo")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if v = strings.TrimSpace(v); v == "" {
+				return cliArgs{}, fmt.Errorf("--repo requires a service name")
+			}
+			if !slices.Contains(cli.repos, v) {
+				cli.repos = append(cli.repos, v)
 			}
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
