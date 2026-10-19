@@ -127,6 +127,12 @@ actions:
     # medium -> complex; complex, a level above without an entry and --stage keep their route).
     # run.json records model_source escalated.<level> (specs/decision-shape/SPEC.md §8).
     # escalate: true
+    # An entry can instead name its own fix route (implement only, needs no escalate: true, works
+    # for complex too): a fix at that level runs on the entry with these fields over it, recorded
+    # as model_source by_complexity.<level>.escalate (SPEC.md §8.1). With a plan to follow, the
+    # first attempt can run on the cheaper model:
+    # by_complexity:
+    #   complex: {model: sonnet, effort: high, escalate: {model: opus}}
 
   review:
     provider: claude

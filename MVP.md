@@ -1143,7 +1143,10 @@ and cannot know their result, so sending it back would loop until `max_fix_itera
 Each stage's prompt carries what the earlier stages found that it can use
 (`specs/quality/SPEC.md` §4): plan gets the analysis `affected_files` and `risks`; implement
 gets those of the analysis and the plan, and the plan's steps and `acceptance_criteria`;
-review gets the plan's steps, `risks` and criteria (numbered). Empty lists are left out. A
+review gets the plan's steps, `risks` and criteria (numbered). Empty lists are left out. The
+first implement after a plan with `affected_files` is told to start from those files and not
+to survey the repository again, opening another file only for what they do not answer, and to
+follow the code where the plan is wrong (a retry is not: it starts from the failure). A
 retried implement also gets the git diff --stat of what the run has changed so far (against
 `pre_run_ref`), fenced and bounded by `limits.prompt.max_diff_bytes`; if git cannot tell, the
 step goes on without it and a warning is shown. The plan's optional `acceptance_criteria`
@@ -2434,6 +2437,10 @@ runs on the `by_complexity` entry one level above the decided complexity, record
 as the level: the failure is the test command's exit code or the review verdict, never a
 model's opinion, the provider never changes, and a resume derives the same route from the
 same history. Complex, a level above without an entry and `--stage` keep their route.
+A `by_complexity` entry of implement can name its own fix route instead, `escalate: {model,
+effort}` (`specs/decision-shape/SPEC.md` §8.1): a fix at that level runs on the entry with the
+escalate's fields over it, recorded as `model_source: by_complexity.<level>.escalate`, without
+`escalate: true` and for complex too. It is the same table with one more column.
 
 ### 31.2 Deterministic workflows
 
@@ -4084,7 +4091,11 @@ actions:
   decided complexity (simple → medium → complex; complex, a level above without an entry and
   `--stage` keep their route), recorded as `model_source: escalated.<level>`. One level,
   however many fix iterations follow. A resume derives the same route from the history.
-  `decision.json: models` does not list it.
+  `decision.json: models` does not list it. An entry's own `escalate: {model, effort}` (implement
+  only, needs no `escalate: true`) takes precedence for its level, complex included: the fix
+  runs on the entry with the escalate's non-empty fields over it, recorded as
+  `model_source: by_complexity.<level>.escalate`. With a plan to follow, the first implement can
+  run on a cheaper model and a failed check moves the fix to the strong one.
 * **Record.** `executions[].provider.model_source` is `base` or `by_complexity.<level>`, and
   `decision.json: models` lists, for every action of the workflow that makes a call, the
   provider, model, effort and source the decision implies, written when the decision is made.
@@ -4105,7 +4116,7 @@ actions:
 | `failed_tests`, `report_format` | `test_result`, `pre_run_test` | §44.7; a failed result only, a known format, at most 200 names of 1 to 300 bytes without control characters |
 | `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused}`; `tool` is `run_tests` or `run_check`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 50 |
 | `tree_after` | implement executions | the git tree of the working tree after the step; 40 or 64 hex characters |
-| `provider.model_source` | executions | `base`, `by_complexity.{simple,medium,complex}` or `escalated.{medium,complex}` (§44.8) |
+| `provider.model_source` | executions | `base`, `by_complexity.{simple,medium,complex}`, `by_complexity.<level>.escalate` or `escalated.{medium,complex}` (§44.8) |
 | `review_result.criteria[]` | review executions | `{index, criterion, met, evidence}`; indexes `1…N` unique; evidence at most 500 bytes |
 | `review_result.reviewers[]` | review executions | `[{model, result}]`, the base model first, absent for a single reviewer; a reviewer has no reviewers of its own |
 | `call.extra_calls[]` | review executions | `{model, api_ms, input_tokens, …}` per extra reviewer; at most 4 |
