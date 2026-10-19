@@ -36,7 +36,8 @@ func PrependPath(t *testing.T, dir string) {
 //     which kind), including "no further AI call happened after X".
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
 //     action ("translate.json", "decide-context.json", "decide-classify.json",
-//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json").
+//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json", and
+//     a story's planning calls, "survey.json" and "specify.json").
 //     For "review" and "implement", a numbered override
 //     "review_<N>.json" / "implement_<N>.json" (N = 1-based call count of that
 //     action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
@@ -64,6 +65,8 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_ENV_DIR: if set, the environment of each call is saved to
 //     <dir>/<action>.env (the output of env), so tests can assert what a provider CLI
 //     inherits.
+//   - FAKE_CWD_DIR: if set, the working directory of each call (pwd -P) is saved to
+//     <dir>/<action>.cwd, so tests can assert which tree a step ran in.
 //   - FAKE_API_KEY_SOURCE / FAKE_API_RETRY_ERROR / FAKE_API_RETRY_ACTION: stream-json mode.
 //     When FAKE_API_KEY_SOURCE or FAKE_API_RETRY_ERROR is set, the canned response is printed
 //     as a claude --output-format stream-json transcript: a system/init event whose
@@ -133,6 +136,8 @@ for arg in "$prompt" "$@"; do
     "ACTION: plan"*)            action="plan" ;;
     "ACTION: implement"*)       action="implement" ;;
     "ACTION: review"*)          action="review" ;;
+    "ACTION: survey"*)          action="survey" ;;
+    "ACTION: specify"*)         action="specify" ;;
   esac
   if [ -n "$action" ]; then
     action_arg="$arg"
@@ -168,6 +173,9 @@ if [ -n "${FAKE_ARGS_DIR:-}" ]; then
 fi
 if [ -n "${FAKE_ENV_DIR:-}" ]; then
   env > "$FAKE_ENV_DIR/$action.env"
+fi
+if [ -n "${FAKE_CWD_DIR:-}" ]; then
+  pwd -P > "$FAKE_CWD_DIR/$action.cwd"
 fi
 if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
   sleep "${FAKE_SLEEP_SECONDS:-1}"

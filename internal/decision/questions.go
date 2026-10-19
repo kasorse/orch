@@ -19,6 +19,7 @@ const (
 	QuestionContextDepth    = "context_depth"
 	QuestionComplexity      = "complexity"
 	QuestionComplexityScore = "complexity_score"
+	QuestionScopeStory      = "scope_story"
 	stageQuestionPrefix     = "stage_"
 )
 
@@ -132,16 +133,32 @@ func StageQuestions() []YesNoQuestion {
 	return out
 }
 
+// ScopeQuestion is the shadow question of specs/story/SPEC.md §13: how story-like the task
+// looks. Its answer is recorded and decides nothing. It is not a stage question: Stage is
+// empty, and StageQuestions does not return it.
+func ScopeQuestion() YesNoQuestion {
+	return YesNoQuestion{
+		ID:           QuestionScopeStory,
+		Instructions: "Does fulfilling `request` need several changes that are each worth reviewing and merging on their own - in different services or repositories, or as steps that each leave the system working?",
+		True:         "The work splits into several independent changes, each of which could be reviewed and merged by itself: it touches more than one service or repository, or it is a sequence of steps after each of which the system still works.",
+		False:        "The work is one change that is reviewed and merged as a whole, in one service or repository.",
+	}
+}
+
 // QuestionsHash is the lowercase hex sha256 of every shared question as asked, in a fixed
 // order. decision.json records it, and calibration groups by it: an answer to a reworded
-// question is on another scale (specs/decision-shape/SPEC.md §5.3).
+// question is on another scale (specs/decision-shape/SPEC.md §5.3). It is one constant for
+// every provider-decided run, scope question included even where a run does not ask it
+// (a story task, specs/story/SPEC.md §11.2): the stage answers of such a run come from the
+// same questions, and the hash names the question set, not what one run skipped.
 func QuestionsHash() string {
 	data, err := json.Marshal(struct {
 		ContextDepth     ChoiceQuestion
 		ComplexityChoice ChoiceQuestion
 		ComplexityScore  ScoreQuestion
 		Stages           []YesNoQuestion
-	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions()})
+		Scope            YesNoQuestion
+	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions(), ScopeQuestion()})
 	if err != nil {
 		panic(err) // plain strings and slices always encode
 	}

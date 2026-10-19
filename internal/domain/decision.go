@@ -239,6 +239,17 @@ func (s StageDecisions) Validate() error {
 	return nil
 }
 
+// ScopeDecision is a provider's answer to the shadow scope question (specs/story/SPEC.md
+// §13): the probability that the task needs several changes each worth merging on its own.
+// It is recorded and decides nothing - the policy, the workflow and the routes never read it.
+type ScopeDecision struct {
+	Story float64 `json:"story"`
+}
+
+func (d ScopeDecision) Validate() error {
+	return validateUnit("scope story probability", d.Story)
+}
+
 // ClassificationInput is what the final classification sees. Project is nil when the
 // depth is none, or when it is project but context collection failed - ContextLimited
 // tells those two apart. The depth and limitation are the orchestrator's facts; a
@@ -250,6 +261,10 @@ type ClassificationInput struct {
 	ContextDepth   ContextDepth
 	ContextLimited bool
 	Project        *ProjectContext
+	// SkipScope leaves the scope question out of the call: a story task is never a story
+	// (specs/story/SPEC.md §13). The zero value asks it. It is not part of the state sent to
+	// the provider.
+	SkipScope bool
 }
 
 // TaskClassification is a decision provider's raw result: probability distributions
@@ -260,6 +275,8 @@ type TaskClassification struct {
 	// Complexity holds one distribution per question type asked (TASKS.md В1).
 	Complexity map[ComplexitySource]ComplexityDecision `json:"complexity"`
 	Stages     StageDecisions                          `json:"stages"`
+	// Scope is the shadow scope answer; nil when the question was not asked.
+	Scope *ScopeDecision `json:"scope,omitempty"`
 	// Provider names the decision provider that answered, e.g. "jev".
 	Provider string `json:"provider"`
 	// Model is the exact model version that answered, as reported by the provider.
@@ -292,6 +309,11 @@ func (c TaskClassification) Validate() error {
 		}
 		if src != ComplexitySourceScore && d.Score != nil {
 			return fmt.Errorf("%s complexity must not carry a score", src)
+		}
+	}
+	if c.Scope != nil {
+		if err := c.Scope.Validate(); err != nil {
+			return err
 		}
 	}
 	return c.Stages.Validate()

@@ -131,6 +131,7 @@ func (s *Spec) validateSandbox() error {
 		return errors.New("sandbox is missing: verify never runs unsandboxed")
 	}
 	paths := append([]string{sb.Home, sb.RepoRoot}, sb.GitDirs...)
+	paths = append(paths, sb.ReadOnlyFiles...)
 	paths = append(paths, sb.ReadOnly...)
 	paths = append(paths, sb.ReadWrite...)
 	for _, p := range paths {

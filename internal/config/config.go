@@ -40,8 +40,9 @@ type ActionConfig struct {
 	// written, so Validate can name it; read the table through Route.
 	ByComplexity map[domain.Complexity]ModelEffort
 	// Escalate routes an implement that fixes a failed test or review as the next complexity
-	// up (specs/decision-shape/SPEC.md §8). Only actions.implement accepts it, and only with
-	// ByComplexity; read it through ActionsConfig.EscalatedRoute.
+	// up (specs/decision-shape/SPEC.md §8), for a level whose entry names no escalate of its
+	// own. Only actions.implement accepts it, and only with ByComplexity; read it through
+	// ActionsConfig.EscalatedRoute.
 	Escalate bool
 	// Models are the extra reviewers of actions.review: model names on the action's provider,
 	// called one after another after the base model with the same prompt (specs/quality/SPEC.md
@@ -61,6 +62,16 @@ const MaxExtraReviewers = 4
 // ModelEffort is one by_complexity entry. A field left empty falls back to the action's
 // base value. There is no provider: the strict parser rejects the key.
 type ModelEffort struct {
+	Model  string `yaml:"model"`
+	Effort string `yaml:"effort"`
+	// Escalate is the route of an implement at this level that fixes a failed test or review
+	// (specs/decision-shape/SPEC.md §8.1): its non-empty fields override the entry's. Only
+	// actions.implement accepts it.
+	Escalate *Escalation `yaml:"escalate"`
+}
+
+// Escalation is a by_complexity entry's escalate: a model and/or an effort, nothing nested.
+type Escalation struct {
 	Model  string `yaml:"model"`
 	Effort string `yaml:"effort"`
 }
@@ -87,10 +98,23 @@ func (a ActionConfig) Route(c domain.Complexity, manual bool) (ProviderModel, st
 	return pm, domain.ModelSourceByComplexity + string(c)
 }
 
-// escalatedRoute is the route one complexity above c, with the source escalated.<level>; ok is
-// false without Escalate, for complex (nothing above it), and when the level above has no
-// by_complexity entry, so a fix never runs on something other than a configured route.
+// escalatedRoute is the route of a fix at complexity c. The entry of c with its own escalate
+// gives its route overridden by the escalate, with the source by_complexity.<c>.escalate.
+// Otherwise Escalate gives the route one complexity above c, with the source
+// escalated.<level>; ok is false without Escalate, for complex (nothing above it), and when the
+// level above has no by_complexity entry, so a fix never runs on something other than a
+// configured route.
 func (a ActionConfig) escalatedRoute(c domain.Complexity) (ProviderModel, string, bool) {
+	if entry, ok := a.ByComplexity[c]; ok && entry.Escalate != nil {
+		pm, _ := a.Route(c, false)
+		if entry.Escalate.Model != "" {
+			pm.Model = entry.Escalate.Model
+		}
+		if entry.Escalate.Effort != "" {
+			pm.Effort = entry.Escalate.Effort
+		}
+		return pm, domain.ModelSourceByComplexity + string(c) + domain.ModelSourceEscalateSuffix, true
+	}
 	if !a.Escalate {
 		return ProviderModel{}, "", false
 	}
@@ -221,8 +245,8 @@ func (a ActionsConfig) Route(t domain.ActionType, d *domain.Decision) (pm Provid
 }
 
 // EscalatedRoute is the route of an implement that fixes a failed test or review, when
-// actions.implement.escalate gives one: the by_complexity entry one level above the decided
-// complexity. ok is false for every other action, a manual decision (run --stage) and when
+// one is configured: the decided level's by_complexity escalate, or under
+// actions.implement.escalate the by_complexity entry one level above the decided complexity. ok is false for every other action, a manual decision (run --stage) and when
 // there is no level above with an entry; the caller then keeps Route.
 func (a ActionsConfig) EscalatedRoute(t domain.ActionType, d *domain.Decision) (pm ProviderModel, source string, ok bool) {
 	if t != domain.ActionImplement || d == nil || d.Source == domain.DecisionSourceManual {
@@ -413,11 +437,39 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
+	// Isolation is where a workflow with implement runs: inplace (the default) or worktree
+	// (specs/worktree/SPEC.md §6); run --inplace and run --worktree override it for one run.
+	// Empty when absent, so Validate can tell a written inplace; read it through
+	// IsolationMode.
+	Isolation string `yaml:"isolation"`
+	// RateLimitWait turns on waiting for a step the account's usage limit refused: the run
+	// sleeps until the reset time the CLI reported, or this long when it reported none, and
+	// retries the step. 0 fails the run at once; absent means DefaultRateLimitWait.
+	RateLimitWait time.Duration `yaml:"rate_limit_wait"`
 }
+
+// execution.isolation values.
+const (
+	IsolationWorktree = "worktree"
+	IsolationInplace  = "inplace"
+)
+
+// IsolationMode is execution.isolation, inplace when absent.
+func (e ExecutionConfig) IsolationMode() string {
+	if e.Isolation == "" {
+		return IsolationInplace
+	}
+	return e.Isolation
+}
+
+// DefaultRateLimitWait is execution.rate_limit_wait when the key is absent.
+const DefaultRateLimitWait = 5 * time.Minute
 
 func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Timeout string `yaml:"timeout"`
+		Timeout       string `yaml:"timeout"`
+		Isolation     string `yaml:"isolation"`
+		RateLimitWait string `yaml:"rate_limit_wait"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -427,7 +479,29 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 		return err
 	}
 	e.Timeout = d
+	e.Isolation = raw.Isolation
+	e.RateLimitWait = DefaultRateLimitWait
+	if raw.RateLimitWait != "" {
+		if e.RateLimitWait, err = parseDurationField("execution.rate_limit_wait", raw.RateLimitWait); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// WorktreeConfig is the top-level worktree section (specs/worktree/SPEC.md §6).
+type WorktreeConfig struct {
+	// Setup is a trusted operator command run once in a new worktree before any model step,
+	// like test.command. It only applies to a worktree run (execution.isolation: worktree or
+	// run --worktree).
+	Setup string `yaml:"setup"`
+}
+
+// WorktreeRun reports whether a run of wf happens in its own git worktree: isolation is
+// worktree and the workflow contains implement. A workflow without implement runs in place
+// (specs/worktree/SPEC.md §6, O3).
+func (c Config) WorktreeRun(wf domain.Workflow) bool {
+	return c.Execution.IsolationMode() == IsolationWorktree && wf.Contains(domain.ActionImplement)
 }
 
 // CurrentVersion is the only config version this build accepts.
@@ -439,6 +513,9 @@ type Config struct {
 	Test      TestConfig      `yaml:"test"`
 	Limits    LimitsConfig    `yaml:"limits"`
 	Execution ExecutionConfig `yaml:"execution"`
+
+	// Worktree configures the worktree isolation of a run (specs/worktree/SPEC.md §6).
+	Worktree WorktreeConfig `yaml:"worktree"`
 
 	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
 	Review ReviewConfig `yaml:"review"`
@@ -461,6 +538,10 @@ type Config struct {
 	// Jira is where run --jira fetches the task from (specs/jira/SPEC.md §7); nil when the
 	// section is absent, which is valid - only run --jira needs it.
 	Jira *JiraConfig `yaml:"jira"`
+
+	// Story configures story plan and story run (specs/story/SPEC.md §5); nil when the section
+	// is absent, which is valid.
+	Story *StoryConfig `yaml:"story"`
 
 	// Extensions opts provider calls into the operator's MCP servers and Claude user
 	// settings (extensions.go). Absent means none, as before.

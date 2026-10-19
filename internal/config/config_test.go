@@ -73,14 +73,22 @@ func TestLoad_ByComplexityRejects(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "unknown configuration keys") || !strings.Contains(err.Error(), "provider") {
 		t.Errorf("a provider in an entry must be an unknown key, got %v", err)
 	}
+	// An escalate names a model and an effort only: no provider, no escalate of its own.
+	for _, table := range []string{"{complex: {escalate: {provider: codex}}}", "{complex: {escalate: {model: opus, escalate: {model: x}}}}"} {
+		if _, err := Load(writeTempConfig(t, byComplexityYAML(table))); err == nil || !strings.Contains(err.Error(), "unknown configuration keys") {
+			t.Errorf("%s must be an unknown key, got %v", table, err)
+		}
+	}
 
 	for name, tc := range map[string]struct {
 		table string
 		want  string
 	}{
-		"invalid complexity": {"{trivial: {model: haiku}}", `actions.implement.by_complexity.trivial: "trivial" is not a complexity`},
-		"empty entry":        {"{simple: {}}", "actions.implement.by_complexity.simple needs a model or an effort"},
-		"bad effort":         {"{simple: {effort: turbo}}", "by_complexity.simple.effort"},
+		"invalid complexity":  {"{trivial: {model: haiku}}", `actions.implement.by_complexity.trivial: "trivial" is not a complexity`},
+		"empty entry":         {"{simple: {}}", "actions.implement.by_complexity.simple needs a model or an effort"},
+		"bad effort":          {"{simple: {effort: turbo}}", "by_complexity.simple.effort"},
+		"empty escalate":      {"{complex: {model: sonnet, escalate: {}}}", "actions.implement.by_complexity.complex.escalate needs a model or an effort"},
+		"bad escalate effort": {"{complex: {model: sonnet, escalate: {effort: turbo}}}", "by_complexity.complex.escalate.effort"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, err := Load(writeTempConfig(t, byComplexityYAML(tc.table)))
@@ -232,6 +240,11 @@ func TestActionsConfig_EscalatedRoute(t *testing.T) {
 	}
 	on := ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: table, Escalate: true}}
 	off := ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: table}}
+	ownTable := map[domain.Complexity]ModelEffort{
+		domain.ComplexityMedium:  {Effort: "medium", Escalate: &Escalation{Model: "opus"}},
+		domain.ComplexityComplex: {Effort: "high", Escalate: &Escalation{Model: "opus"}},
+	}
+	own := ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: ownTable, Escalate: true}}
 	for _, tc := range []struct {
 		name    string
 		actions ActionsConfig
@@ -251,6 +264,15 @@ func TestActionsConfig_EscalatedRoute(t *testing.T) {
 		{"level above without an entry", ActionsConfig{Implement: ActionConfig{ProviderModel: base, Escalate: true,
 			ByComplexity: map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "opus"}}}},
 			domain.ActionImplement, decided(domain.ComplexitySimple), ProviderModel{}, "", false},
+		{"complex with its own escalate", own, domain.ActionImplement, decided(domain.ComplexityComplex),
+			ProviderModel{Provider: "claude", Model: "opus", Effort: "high"}, "by_complexity.complex.escalate", true},
+		{"own escalate keeps the entry's effort", own, domain.ActionImplement, decided(domain.ComplexityMedium),
+			ProviderModel{Provider: "claude", Model: "opus", Effort: "medium"}, "by_complexity.medium.escalate", true},
+		{"a level without its own escalate climbs", own, domain.ActionImplement, decided(domain.ComplexitySimple),
+			ProviderModel{Provider: "claude", Model: "sonnet", Effort: "medium"}, "escalated.medium", true},
+		{"own escalate without escalate: true", ActionsConfig{Implement: ActionConfig{ProviderModel: base, ByComplexity: ownTable}},
+			domain.ActionImplement, decided(domain.ComplexityComplex), ProviderModel{Provider: "claude", Model: "opus", Effort: "high"}, "by_complexity.complex.escalate", true},
+		{"own escalate, manual", own, domain.ActionImplement, &domain.Decision{Source: domain.DecisionSourceManual}, ProviderModel{}, "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, source, ok := tc.actions.EscalatedRoute(tc.action, tc.d)
@@ -269,11 +291,25 @@ func TestLoad_Escalate(t *testing.T) {
 	if err := Validate(cfg); err != nil || !cfg.Actions.Implement.Escalate {
 		t.Fatalf("escalate with by_complexity: Validate = %v, Escalate = %v", err, cfg.Actions.Implement.Escalate)
 	}
+	// An entry's own escalate needs no escalate: true.
+	cfg, err = Load(writeTempConfig(t, byComplexityYAML("{complex: {model: sonnet, effort: high, escalate: {model: big}}}")))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("an entry's escalate: Validate = %v", err)
+	}
+	if e := cfg.Actions.Implement.ByComplexity[domain.ComplexityComplex].Escalate; e == nil || e.Model != "big" || e.Effort != "" {
+		t.Errorf("complex escalate = %+v, want {Model: big}", e)
+	}
 	for name, tc := range map[string]struct{ yaml, want string }{
 		"without by_complexity": {strings.Replace(validV2(""), "implement: {provider: claude, model: opus}",
 			"implement: {provider: claude, model: opus, escalate: true}", 1), "actions.implement.escalate needs actions.implement.by_complexity"},
 		"on review": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
 			"review: {provider: claude, model: sonnet, escalate: false}", 1), "actions.review.escalate: unknown key"},
+		"in a review entry": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
+			"review: {provider: claude, model: sonnet, by_complexity: {complex: {model: opus, escalate: {effort: high}}}}", 1),
+			"actions.review.by_complexity.complex.escalate: unknown key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, err := Load(writeTempConfig(t, tc.yaml))

@@ -23,6 +23,8 @@ type jevScript struct {
 	Choice [3]float64
 	Score  *[3]float64
 	Stages map[string]float64
+	// Scope is the scope_story probability (specs/story/SPEC.md §13); nil answers 0.15.
+	Scope *float64
 	// Fail lists statuses to answer the first requests with, before answering normally.
 	Fail []int
 	// Models is what GET /v1/models lists (TASKS.md T14); ModelsStatus, when set, is the
@@ -142,6 +144,12 @@ func (j *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 			p, ok := j.script.Stages[strings.TrimPrefix(id, "stage_")]
 			if !ok {
 				p = 0.05
+			}
+			answers[id] = map[string]any{"type": "noul", "noul": p}
+		case id == "scope_story":
+			p := 0.15
+			if j.script.Scope != nil {
+				p = *j.script.Scope
 			}
 			answers[id] = map[string]any{"type": "noul", "noul": p}
 		default:

@@ -51,6 +51,64 @@ func TestSandboxArgs(t *testing.T) {
 	}
 }
 
+// TestSandboxArgs_Network: worktree.setup's sandbox is the test sandbox with the network
+// namespace left out and nothing else changed.
+func TestSandboxArgs_Network(t *testing.T) {
+	sb := testSandbox()
+	sb.ReadOnlyFiles = []string{"/home/u/repo/.git"}
+	def := sb.args("/home/u/repo", "npm ci", nil)
+	sb.Network = true
+	net := sb.args("/home/u/repo", "npm ci", nil)
+
+	if slices.Contains(net, "--unshare-net") {
+		t.Errorf("a sandbox with the network must not unshare it: %q", net)
+	}
+	want := slices.DeleteFunc(slices.Clone(def), func(f string) bool { return f == "--unshare-net" })
+	if !slices.Equal(net, want) {
+		t.Errorf("got %q\nwant the default argv without --unshare-net: %q", net, want)
+	}
+	if !slices.Contains(def, "--unshare-net") {
+		t.Errorf("the default sandbox must unshare the network: %q", def)
+	}
+	if probe := ProbeArgs(); !slices.Contains(probe, "--unshare-net") {
+		t.Errorf("ProbeArgs must keep --unshare-net: %q", probe)
+	}
+}
+
+// TestSandboxArgs_WorktreePointer: in a linked worktree the .git file is bound read-only
+// after the worktree's writable bind and the git directories; before it, the repository bind
+// would make it writable again (specs/worktree/SPEC.md §12).
+func TestSandboxArgs_WorktreePointer(t *testing.T) {
+	sb := &Sandbox{
+		Home:          "/home/u",
+		RepoRoot:      "/state/wt/run",
+		GitDirs:       []string{"/home/u/repo/.git/worktrees/run", "/home/u/repo/.git"},
+		ReadOnlyFiles: []string{"/state/wt/run/.git"},
+	}
+	args := sb.args("/state/wt/run", "go test ./...", nil)
+	bindAt := func(flag, path string) int {
+		for i := 0; i+2 < len(args); i++ {
+			if args[i] == flag && args[i+1] == path && args[i+2] == path {
+				return i
+			}
+		}
+		t.Fatalf("argv lacks %s %s %s: %q", flag, path, path, args)
+		return -1
+	}
+	file := bindAt("--ro-bind", "/state/wt/run/.git")
+	if repo := bindAt("--bind", "/state/wt/run"); file < repo {
+		t.Errorf("the .git file bind (%d) comes before the worktree bind (%d): %q", file, repo, args)
+	}
+	for _, d := range sb.GitDirs {
+		if at := bindAt("--ro-bind", d); file < at {
+			t.Errorf("the .git file bind (%d) comes before the git directory %s (%d)", file, d, at)
+		}
+	}
+	if iso := slices.Index(args, "--unshare-user"); file > iso {
+		t.Errorf("the .git file bind (%d) comes after the isolation flags (%d)", file, iso)
+	}
+}
+
 func TestSandboxEnv(t *testing.T) {
 	t.Setenv("TMPDIR", "/tmp/claude-1000")
 	t.Setenv("CLAUDE_CODE_MESSAGING_TOKEN", "planted")

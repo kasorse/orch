@@ -73,7 +73,8 @@ const contextOut = "Here you go:\n```json\n{\"context_depth\": {\"none\": 0.2, \
 const classifyOut = `{
   "complexity": {"simple": 0.33, "medium": 0.33, "complex": 0.33},
   "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3},
-  "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}
+  "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95},
+  "scope": 0.3
 }`
 
 func projectInput() domain.ClassificationInput {
@@ -139,6 +140,9 @@ func TestClassify(t *testing.T) {
 	if logs.logs["decide-classify.stdout"] == "" {
 		t.Error("classify call not logged")
 	}
+	if tc.Scope == nil || tc.Scope.Story != 0.3 {
+		t.Errorf("Scope = %+v, want story 0.3", tc.Scope)
+	}
 
 	// The prompt carries the same questions and state as Jev's request.
 	prompt := client.calls[0].Prompt
@@ -153,10 +157,53 @@ func TestClassify(t *testing.T) {
 			t.Errorf("prompt lacks the %s question", q.Stage)
 		}
 	}
+	scope := decision.ScopeQuestion()
+	for _, want := range []string{scope.ID, scope.Instructions, scope.True, scope.False, `"scope": <p>`} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks the scope question part %q", want)
+		}
+	}
+}
+
+// The scope answer is required exactly when the question was asked, and a story task
+// (SkipScope) neither shows the question nor accepts an answer to it.
+func TestClassify_ScopeOnlyWhenAsked(t *testing.T) {
+	skipped := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone, SkipScope: true}
+	asked := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone}
+	const withoutScope = `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}}`
+
+	client := &fakeClient{outputs: []string{withoutScope}}
+	p, _ := newProvider(client, both)
+	tc, err := p.Classify(context.Background(), skipped)
+	if err != nil {
+		t.Fatalf("skipped scope, no scope answer: %v", err)
+	}
+	if tc.Scope != nil {
+		t.Errorf("Scope = %+v, want nil when not asked", tc.Scope)
+	}
+	if strings.Contains(client.calls[0].Prompt, decision.QuestionScopeStory) || strings.Contains(client.calls[0].Prompt, `"scope"`) {
+		t.Error("a skipped scope question must not be in the prompt")
+	}
+
+	for name, tc := range map[string]struct {
+		in  domain.ClassificationInput
+		out string
+	}{
+		"asked, missing":      {asked, withoutScope},
+		"asked, above one":    {asked, strings.Replace(classifyOut, `"scope": 0.3`, `"scope": 1.5`, 1)},
+		"asked, below zero":   {asked, strings.Replace(classifyOut, `"scope": 0.3`, `"scope": -0.1`, 1)},
+		"skipped, but answer": {skipped, classifyOut},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, _ := newProvider(&fakeClient{outputs: []string{tc.out}}, both)
+			_, err := p.Classify(context.Background(), tc.in)
+			assertKind(t, err, apperr.DecisionInvalidResponse)
+		})
+	}
 }
 
 func TestClassify_ChoiceOnly(t *testing.T) {
-	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "analysis": 1, "development": 1}}`
+	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "analysis": 1, "development": 1}, "scope": 0.1}`
 	client := &fakeClient{outputs: []string{out}}
 	p, _ := newProvider(client, []domain.ComplexitySource{domain.ComplexitySourceChoice})
 	tc, err := p.Classify(context.Background(), domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone})

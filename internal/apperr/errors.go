@@ -48,11 +48,12 @@ func NewDependencyError(msg string, cause error) *DependencyError {
 type FailureKind string
 
 const (
-	FailureSpawn     FailureKind = "spawn"     // executable not found / not executable
-	FailureExit      FailureKind = "exit"      // ran, exited non-zero
-	FailureTimeout   FailureKind = "timeout"   // execution.timeout exceeded
-	FailureCancelled FailureKind = "cancelled" // SIGINT/SIGTERM
-	FailureAuth      FailureKind = "auth"      // the CLI did not use the run's credential, or it was refused
+	FailureSpawn     FailureKind = "spawn"      // executable not found / not executable
+	FailureExit      FailureKind = "exit"       // ran, exited non-zero
+	FailureTimeout   FailureKind = "timeout"    // execution.timeout exceeded
+	FailureCancelled FailureKind = "cancelled"  // SIGINT/SIGTERM
+	FailureAuth      FailureKind = "auth"       // the CLI did not use the run's credential, or it was refused
+	FailureRateLimit FailureKind = "rate_limit" // the subscription's usage limit refused the call
 )
 
 var failureDescriptions = map[FailureKind]string{
@@ -61,6 +62,7 @@ var failureDescriptions = map[FailureKind]string{
 	FailureTimeout:   "timeout (exceeded execution.timeout)",
 	FailureCancelled: "cancelled (interrupted)",
 	FailureAuth:      "auth (the CLI did not use the run's credential, or the credential was refused)",
+	FailureRateLimit: "rate_limit (the account's usage limit was reached)",
 }
 
 // ProviderError carries the actionable context spelled out in the spec: provider,
@@ -91,6 +93,9 @@ type ProviderError struct {
 	// APIStatus is the HTTP status of the API error the CLI reported as its answer (for
 	// claude, "API Error: 400 ..."); 0 when it reported none.
 	APIStatus int
+	// ResetsAt is when the usage limit of a FailureRateLimit resets, as the CLI reported it;
+	// zero when it did not say.
+	ResetsAt time.Time
 
 	// ConfiguredTimeout is set only when Kind == FailureTimeout and a limit tighter than
 	// the run-wide execution.timeout was the one that fired: an action's own
@@ -228,6 +233,33 @@ func (e *ExecutionError) Error() string {
 	return e.Msg
 }
 func (e *ExecutionError) Unwrap() error { return e.Err }
+
+// InvalidResponseError is the answer of a planning call of a story (specs/story/SPEC.md §7: a
+// survey or specify) that holds no JSON object or breaks one of the answer's rules. Field names
+// the offending field as the answer spells it (tasks[1].repo), "" for the answer as a whole.
+// Like an invalid decision answer it is the provider failing, so it maps to exit code 3.
+type InvalidResponseError struct {
+	Call  string // survey, specify
+	Repo  string // the repository a survey was of; "" for specify
+	Field string
+	Msg   string
+	Err   error
+}
+
+func (e *InvalidResponseError) Error() string {
+	var b strings.Builder
+	b.WriteString(e.Call)
+	if e.Repo != "" {
+		b.WriteString(" of " + e.Repo)
+	}
+	b.WriteString(": invalid response: ")
+	if e.Field != "" {
+		b.WriteString(e.Field + ": ")
+	}
+	b.WriteString(e.Msg)
+	return b.String()
+}
+func (e *InvalidResponseError) Unwrap() error { return e.Err }
 
 // LimitExceededError signals that a workflow limit (max steps / max fix iterations) was
 // reached. Reason is pre-formatted for direct CLI display.

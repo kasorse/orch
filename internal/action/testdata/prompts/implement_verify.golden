@@ -46,3 +46,5 @@ Acceptance criteria:
 - Put on a store from NewStore does not panic
 - a test covers Put on a fresh store
 
+Start from the files listed under "Affected files (from plan)": read them first and make the change there. The plan was made from this repository, so do not survey it again; open another file only for what those files do not answer (a caller, a type, a test helper), and where the plan turns out to be wrong, follow the code.
+

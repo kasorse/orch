@@ -63,7 +63,10 @@ func runMCPVerify(ctx context.Context, dir string, stdin io.Reader, stdout, stde
 		env = []string{}
 	}
 	runner := &testexec.Runner{Executor: executor, Sandbox: spec.Sandbox, BaseEnv: env}
-	tools, err := verify.NewTools(spec, dir, runner, &guard.RepoGuard{Repo: repo, Patterns: spec.Before.Patterns()})
+	// In a worktree run the before-state names the .git pointer, so every verify call checks
+	// it before anything runs git (specs/worktree/SPEC.md §8.3).
+	g := &guard.RepoGuard{Repo: repo, Patterns: spec.Before.Patterns(), GitPointer: spec.Before.GitPointer()}
+	tools, err := verify.NewTools(spec, dir, runner, g)
 	if err != nil {
 		return &apperr.ConfigError{Msg: "mcp-verify", Err: err}
 	}

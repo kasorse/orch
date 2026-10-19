@@ -1,13 +1,13 @@
 # Decision shape — size, templates, escalation
 
-Status: **done** (2026-10-14): DS01–DS07 done; `scripts/check.sh` passed over all of them. The owner decided O1–O3 (`SPEC.md` §11):
+Status: **done** (2026-10-19): DS01–DS08 done; `scripts/check.sh` passed over all of them. The owner decided O1–O3 (`SPEC.md` §11):
 escalation yes, target shares 50/35/15, and the gate passed on the measured data (`SPEC.md`
 §1.1). TODO.md G6 is ticked.
 
 | document | role |
 |---|---|
 | [`SPEC.md`](SPEC.md) | the specification |
-| [`tasks/`](tasks/) | 7 implementation tasks |
+| [`tasks/`](tasks/) | 8 implementation tasks |
 
 ## The problem in one paragraph
 
@@ -32,6 +32,7 @@ high, `force[complex]` overrides the rest, and the first benchmark round called 
 | [DS05](tasks/TASK-DS05-calibrate-cuts.md) | cut proposals by share and by outcome, refusal on no spread ✓ | M | DS01, DS02 |
 | [DS06](tasks/TASK-DS06-escalate.md) | `actions.implement.escalate` ✓ | S | DS02 |
 | [DS07](tasks/TASK-DS07-integration-docs.md) | scenarios, MVP.md, CLAUDE.md, README, example, bench configs, TODO.md ✓ | M | DS02–DS06 |
+| [DS08](tasks/TASK-DS08-escalate-per-level.md) | a level's own `escalate`; implement starts from the plan's files ✓ | S | DS06 |
 
 ```
 DS01 ────────→ DS05 ─┐

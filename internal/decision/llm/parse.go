@@ -24,6 +24,7 @@ type classifyAnswer struct {
 	Complexity      map[string]float64 `json:"complexity"`
 	ComplexityScore map[string]float64 `json:"complexity_score"`
 	Stages          map[string]float64 `json:"stages"`
+	Scope           *float64           `json:"scope"`
 }
 
 func parseContextDepth(output string) (domain.ContextDepthDecision, error) {
@@ -123,6 +124,18 @@ func parseClassification(output string, input domain.ClassificationInput, source
 			return domain.TaskClassification{}, fmt.Errorf("stage %s probability %v outside [0, 1]", q.Stage, p)
 		}
 		tc.Stages.Set(q.Stage, domain.ProbabilityDecision{Probability: p})
+	}
+
+	switch {
+	case input.SkipScope && ans.Scope != nil:
+		return domain.TaskClassification{}, errors.New(`answer has "scope", which was not asked`)
+	case !input.SkipScope && ans.Scope == nil:
+		return domain.TaskClassification{}, errors.New(`answer "scope" is missing`)
+	case !input.SkipScope:
+		if p := *ans.Scope; math.IsNaN(p) || p < 0 || p > 1 {
+			return domain.TaskClassification{}, fmt.Errorf("scope probability %v outside [0, 1]", p)
+		}
+		tc.Scope = &domain.ScopeDecision{Story: *ans.Scope}
 	}
 
 	return tc, tc.Validate()

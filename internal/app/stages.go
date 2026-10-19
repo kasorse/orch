@@ -76,10 +76,11 @@ func decideManual(stages []domain.Stage, task string, reporter *logging.ConsoleR
 }
 
 // decideWithProvider is the decision layer: translation, pre-check, project context and
-// classification (MVP.md §8-§9).
+// classification (MVP.md §8-§9). storyTask is run --story-task: development is then forced on
+// after the policy.
 func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registry *provider.Registry, store *persistence.Store,
 	repo *repository.Repository, cwd string, run *domain.Run, text string, reporter *logging.ConsoleReporter,
-	prompter interaction.Prompter, interactive bool, stream, stderr io.Writer) (decisionOutcome, error) {
+	prompter interaction.Prompter, interactive, storyTask bool, stream, stderr io.Writer) (decisionOutcome, error) {
 	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)
 	if err != nil {
 		return decisionOutcome{}, err
@@ -107,7 +108,7 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 
 	reporter.Deciding()
 	// The manual choice waits on userCtx: Ctrl-C still cancels it, execution.timeout does not.
-	res, err := svc.Classify(ctx, classification.Request{RunID: run.ID, Text: text, UserCtx: userCtx})
+	res, err := svc.Classify(ctx, classification.Request{RunID: run.ID, Text: text, UserCtx: userCtx, StoryTask: storyTask})
 	if err != nil {
 		return decisionOutcome{}, err
 	}
@@ -116,6 +117,11 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 	// same decision. Only here: a --stage run never reaches this function and a resume reads
 	// the persisted workflow.
 	res.Decision = policy.Explore(res.Decision, svc.Policy, run.ID)
+	// A story task is a code change by construction (specs/story/SPEC.md §11.2): development,
+	// and testing with it, is on whatever the probabilities said, and decision.json says why.
+	if storyTask {
+		res.Decision = policy.ForceDevelopment(res.Decision, storyTaskReason)
+	}
 	return decisionOutcome{
 		decision:     res.Decision,
 		trace:        res.Trace,

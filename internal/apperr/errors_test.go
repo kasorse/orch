@@ -170,6 +170,21 @@ func TestAuthorityError_WithoutRoute(t *testing.T) {
 	}
 }
 
+func TestInvalidResponseError(t *testing.T) {
+	cause := errors.New("tasks[1].repo: \"ledger\" is not a service of the story")
+	err := &InvalidResponseError{Call: "specify", Field: "tasks[1].repo", Msg: `"ledger" is not a service of the story`, Err: cause}
+	if got, want := err.Error(), `specify: invalid response: tasks[1].repo: "ledger" is not a service of the story`; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if !errors.Is(err, cause) {
+		t.Error("expected errors.Is to find the wrapped cause")
+	}
+	survey := &InvalidResponseError{Call: "survey", Repo: "billing", Msg: "the answer holds no JSON object"}
+	if got, want := survey.Error(), "survey of billing: invalid response: the answer holds no JSON object"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
+
 func TestCommandLine_QuotesWhatAShellWouldSplit(t *testing.T) {
 	got := commandLine("claude", []string{
 		"--setting-sources", "", "--settings", `{"permissions":{"deny":["Read(**/.env)"]}}`,

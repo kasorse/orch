@@ -53,6 +53,10 @@ func mapClassification(resp systemOneResponse, input domain.ClassificationInput,
 	for _, q := range stageQs {
 		ids = append(ids, q.ID)
 	}
+	scopeQ := decision.ScopeQuestion()
+	if !input.SkipScope {
+		ids = append(ids, scopeQ.ID)
+	}
 	if err := checkEnvelope(resp, ids); err != nil {
 		return domain.TaskClassification{}, err
 	}
@@ -88,6 +92,14 @@ func mapClassification(resp systemOneResponse, input domain.ClassificationInput,
 			return domain.TaskClassification{}, invalid(err)
 		}
 		tc.Stages.Set(q.Stage, domain.ProbabilityDecision{Probability: p})
+	}
+
+	if !input.SkipScope {
+		p, err := noulProbability(resp.Answers[scopeQ.ID], scopeQ.ID)
+		if err != nil {
+			return domain.TaskClassification{}, invalid(err)
+		}
+		tc.Scope = &domain.ScopeDecision{Story: p}
 	}
 
 	if err := tc.Validate(); err != nil {

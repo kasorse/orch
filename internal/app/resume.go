@@ -22,8 +22,9 @@ import (
 // §6.1). It never decides again: no translator, decision provider or project-context
 // manager exists here. Everything read back from the run directory is validated first,
 // and on a run that has executed a step, the protected state is compared with the run's
-// start - git fingerprint first - before anything runs git status. Until the operator
-// approves, the persisted run is left exactly as it was found.
+// start - git fingerprint first - before anything runs git status. A worktree run resumes in
+// its worktree, verified before any git command runs there (specs/worktree/SPEC.md §11). Until
+// the operator approves, the persisted run is left exactly as it was found.
 func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
@@ -79,6 +80,19 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if run.Status == domain.RunCompleted {
 		return reportCompleted(s)
 	}
+	// A run that has its worktree continues there, once the worktree is shown to be the one the
+	// run created (specs/worktree/SPEC.md §11); from here on s.repo is the worktree, and the
+	// operator's tree, dirty or on another branch, plays no part. A worktree run gets its
+	// worktree before its first step, so one that executed a step without it is not continued
+	// in the operator's tree.
+	if run.Worktree != nil {
+		if err := resumeInWorktree(ctx, s); err != nil {
+			return err
+		}
+	} else if len(run.Executions) > 0 && worktreeRun(run) {
+		return &apperr.RunStateError{Kind: apperr.RunCorrupt, RunID: run.ID,
+			Msg: "run.json: options.isolation is worktree and the workflow implements, but no worktree is recorded for a run that executed a step"}
+	}
 	if err := checkBaselineRecorded(run); err != nil {
 		return err
 	}
@@ -99,17 +113,31 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	var treeSummary string
 	var treeErr error
 	if len(run.Executions) == 0 {
-		// No step ran, so no model touched the tree and there is no baseline yet: this is
-		// the tail of a fresh run (plan mode, cancelled at approval, refused for a dirty
-		// tree, or crashed before the first step).
-		dirty, err := repo.IsDirty(ctx)
-		if err != nil {
-			return err
+		// No step was recorded: this is the tail of a fresh run (plan mode, cancelled at
+		// approval, refused for a dirty tree, or crashed before the first step).
+		if s.worktree == nil {
+			dirty, err := repo.IsDirty(ctx)
+			if err != nil {
+				return err
+			}
+			// The clean-start rule follows the isolation the run recorded, never the current
+			// config (specs/worktree/SPEC.md §11), as executeWorkflow does: a worktree run
+			// without its worktree yet creates it after approval (enterWorktree), and the
+			// operator's dirty tree only gets the warning.
+			modeCfg := cfg
+			modeCfg.Execution.Isolation = run.Options.IsolationMode()
+			if err := checkWorktreeFor(ctx, repo, modeCfg, *run.Workflow, dirty, run.Task.Source, stderr); err != nil {
+				return err
+			}
+			opts.dirty = dirty
+		} else if len(run.ResumeBaseline) > 0 {
+			// The worktree exists and starts from its base_ref. A baseline means the process
+			// got as far as the first step, which may have run before it died: the protected
+			// state is compared before anything else runs there, as for a run with executions.
+			if err := checkProtectedState(ctx, s.repo, run); err != nil {
+				return err
+			}
 		}
-		if err := checkWorktree(cfg, *run.Workflow, dirty, stderr); err != nil {
-			return err
-		}
-		opts.dirty = dirty
 		opts.resume.Entry, opts.resume.Why = run.Workflow.Steps[0].Action, "start"
 	} else {
 		entry, why, err := workflow.Entry(run, limitsView(cfg))
@@ -123,9 +151,16 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 			if err := writeOutcome(store, run); err != nil {
 				return err
 			}
-			return reportCompleted(s)
+			if err := reportCompleted(s); err != nil {
+				return err
+			}
+			// No commit is made here: the result stays in the worktree, which is kept.
+			if s.worktree != nil {
+				reporter.WorktreeKept(s.worktree.Path, "")
+			}
+			return nil
 		}
-		if err := checkProtectedState(ctx, repo, run); err != nil {
+		if err := checkProtectedState(ctx, s.repo, run); err != nil {
 			return err
 		}
 		if err := workflow.CheckLimits(run, limitsView(cfg), entry); err != nil {
@@ -135,11 +170,14 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 			return err
 		}
 		opts.resume.Entry, opts.resume.Why = domain.ActionType(entry), why
-		treeSummary, treeErr = repo.StatusSummary(ctx)
+		treeSummary, treeErr = s.repo.StatusSummary(ctx)
 	}
 
 	reporter.ResumeHeader(run, store.RunDir(run.ID))
 	reporter.History(run)
+	if w := s.worktree; w != nil {
+		reporter.Worktree(w.Path, w.Branch, w.BaseBranch, w.BaseRef)
+	}
 	reporter.WorkingTree(treeSummary, treeErr)
 	remaining := remainingSteps(*run.Workflow, opts.resume.Entry)
 	reporter.NextStep(opts.resume.Entry, opts.resume.Why, remaining)
@@ -161,7 +199,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	}
 	// The overview above is read in full width; the sidebar opens for the steps.
 	if reporter.Pretty {
-		reporter.SetRepoInfo(repoInfo(ctx, repo))
+		reporter.SetRepoInfo(repoInfo(ctx, s.repo))
 		reporter.OpenDock()
 		reporter.SetRun(run)
 	}

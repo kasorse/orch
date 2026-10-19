@@ -1,0 +1,83 @@
+# H: B plus actions.implement.by_complexity.complex: {effort: high, escalate: {model: opus,
+# effort: high}} (specs/decision-shape/tasks/TASK-DS08-escalate-per-level.md). A task decided
+# `complex` is implemented by the common model at high effort, following the plan, and only a
+# fix after a failed test or review runs on the strong model. H against G measures whether
+# that holds the pass rate at a lower cost. Everything but implement.by_complexity is B's
+# template.
+kind: orchestrator
+config: |
+  version: 2
+
+  decision:
+    provider: claude
+    model: haiku
+    timeout: 60s
+    complexity:
+      primary: choice
+      shadow: true
+    on_failure: fail
+    jev:
+      base_url: https://api.typesafe.ai
+      api_key_env: JEV_API_KEY
+      max_retries: 1
+      mock: false
+
+  translation:
+    provider: claude
+    model: haiku
+    timeout: 60s
+
+  policy:
+    context_depth:
+      project_threshold: 0.5
+    complexity:
+      cuts: {medium: 1.24, complex: 1.48}
+    stages:
+      thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+      force:
+        medium: [analysis, review]
+        complex: [analysis, planning, review]
+
+  context:
+    max_files: 20
+    max_bytes: 24576
+    extra_deny: []
+
+  actions:
+    research:
+      provider: claude
+      model: sonnet
+      effort: medium
+    analyze:
+      provider: claude
+      model: sonnet
+    plan:
+      provider: claude
+      model: sonnet
+    implement:
+      provider: claude
+      model: "{{.Model}}"
+      by_complexity:
+        complex: {effort: high, escalate: {model: opus, effort: high}}
+    review:
+      provider: claude
+      model: sonnet
+      timeout: 20m
+
+  test:
+    command: "{{.TestCommand}}"
+    sandbox: bwrap
+    ro_binds: {{.RoBinds}}
+    rw_binds: {{.RwBinds}}
+
+  limits:
+    max_steps: 12
+    max_fix_iterations: 2
+
+  execution:
+    timeout: "{{.Timeout}}"
+    isolation: inplace   # the bench's final check reads the workspace tree
+
+  security:
+    require_clean_worktree: true
+    protected_paths: []

@@ -3,6 +3,7 @@ package testexec
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -23,9 +24,18 @@ type Sandbox struct {
 	// core.fsmonitor into .git would run code outside the sandbox on the orchestrator's
 	// next git call.
 	GitDirs []string `json:"git_dirs"`
+	// ReadOnlyFiles are files inside RepoRoot re-bound read-only over it: a linked
+	// worktree's .git file, which decides which git directory the orchestrator's next git
+	// call reads (specs/worktree/SPEC.md §12). Each must exist.
+	ReadOnlyFiles []string `json:"ro_files,omitempty"`
 	// ReadOnly and ReadWrite are test.ro_binds / test.rw_binds (caches, module stores).
 	ReadOnly  []string `json:"ro_binds"`
 	ReadWrite []string `json:"rw_binds"`
+	// Network leaves the network namespace out and keeps everything else: only worktree.setup
+	// (specs/worktree/SPEC.md §9) sets it, in Go, on a copy of the test sandbox. The test
+	// steps and the verify server never do: it is not serialised, so verify.json cannot carry
+	// it (verify.ReadSpec rejects "network" as an unknown field).
+	Network bool `json:"-"`
 }
 
 // baseMounts is what every sandboxed process sees before any bind: the whole filesystem
@@ -39,15 +49,27 @@ var isolation = []string{
 	"--die-with-parent", "--new-session",
 }
 
+// isolationFlags is isolation, without --unshare-net when the sandbox has the network.
+func (s *Sandbox) isolationFlags() []string {
+	if !s.Network {
+		return isolation
+	}
+	return slices.DeleteFunc(slices.Clone(isolation), func(f string) bool { return f == "--unshare-net" })
+}
+
 // args builds the bwrap argv. Mount order is load-bearing - bwrap applies mounts in
 // order, later ones over earlier ones: the $HOME tmpfs must come before the repository
 // and cache binds (a repository under $HOME would otherwise be hidden), and the git
-// directories after the repository bind (or they would be writable again).
+// directories and read-only files after the repository bind (or the repository bind would
+// make them writable again).
 func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	argv := append([]string(nil), baseMounts...)
 	argv = append(argv, "--tmpfs", s.Home, "--bind", s.RepoRoot, s.RepoRoot)
 	for _, d := range s.GitDirs {
 		argv = append(argv, "--ro-bind", d, d)
+	}
+	for _, f := range s.ReadOnlyFiles {
+		argv = append(argv, "--ro-bind", f, f)
 	}
 	for _, d := range s.ReadOnly {
 		argv = append(argv, "--ro-bind", d, d)
@@ -55,7 +77,7 @@ func (s *Sandbox) args(workingDir, command string, extraEnv []string) []string {
 	for _, d := range s.ReadWrite {
 		argv = append(argv, "--bind", d, d)
 	}
-	argv = append(argv, isolation...)
+	argv = append(argv, s.isolationFlags()...)
 	// extraEnv (Runner.Run has checked the names) reaches the command through --setenv, after
 	// every mount and before the command: bwrap would read a later option as part of it.
 	for _, kv := range extraEnv {

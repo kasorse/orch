@@ -124,6 +124,10 @@ func (p *Provider) classificationRequest(input domain.ClassificationInput) syste
 	for _, q := range decision.StageQuestions() {
 		questions[q.ID] = yesNoQuestion(q)
 	}
+	if !input.SkipScope {
+		q := decision.ScopeQuestion()
+		questions[q.ID] = yesNoQuestion(q)
+	}
 
 	return systemOneRequest{Model: p.model, State: decision.NewClassificationState(input), Questions: questions}
 }

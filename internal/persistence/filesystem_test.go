@@ -300,9 +300,10 @@ func TestSaveTicket(t *testing.T) {
 	want := domain.Ticket{
 		Key: "NEW-9", RequestedKey: "PMC-1", URL: "https://example.atlassian.net/browse/NEW-9",
 		Type: "Bug", Summary: "Hover shows nothing", Description: "Steps:\n# open {{Tags}}",
-		Parent:    &domain.TicketParent{Key: "PMC-2663", Summary: "Tags & Labels"},
-		Fields:    []domain.TicketField{{ID: "customfield_10035", Label: "Acceptance criteria", Value: "shown"}},
-		FetchedAt: time.Date(2026, 9, 30, 10, 12, 0, 0, time.UTC),
+		Parent:     &domain.TicketParent{Key: "PMC-2663", Summary: "Tags & Labels"},
+		Components: []string{"gateway", "billing"},
+		Fields:     []domain.TicketField{{ID: "customfield_10035", Label: "Acceptance criteria", Value: "shown"}},
+		FetchedAt:  time.Date(2026, 9, 30, 10, 12, 0, 0, time.UTC),
 	}
 	if err := store.SaveTicket(run.ID, want); err != nil {
 		t.Fatal(err)

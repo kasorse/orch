@@ -1,11 +1,18 @@
 package domain
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 type Task struct {
 	// Description is the complete task text every prompt and the decision read - for a
 	// Jira task, the rendered ticket plus any operator notes.
 	Description string `json:"description"`
+	// Acceptance are the criteria of a story task (specs/story/SPEC.md §11.1): review
+	// criteria ahead of the plan's own, kept here so a resume uses the same ones. Empty for
+	// every other task.
+	Acceptance []string `json:"acceptance,omitempty"`
 	// Source records where the task came from; nil for a task typed on the command line.
 	Source    *TaskSource `json:"source,omitempty"`
 	CreatedAt time.Time   `json:"created_at"`
@@ -14,15 +21,47 @@ type Task struct {
 // TaskSourceJira is TaskSource.Kind for a task rendered from a Jira issue.
 const TaskSourceJira = "jira"
 
-// TaskSource says which ticket a task was rendered from (specs/jira/SPEC.md §11.1). It is
-// only displayed, never used to make a request: resume never re-fetches (J3).
+// TaskSourceStory is TaskSource.Kind for a task of a story (run --story-task).
+const TaskSourceStory = "story"
+
+// TaskSource says where a task came from. For a Jira task (specs/jira/SPEC.md §11.1) it says
+// which ticket it was rendered from; it is only displayed, never used to make a request:
+// resume never re-fetches (J3). For a story task (specs/story/SPEC.md §11.1) it names the
+// story and the task, and records the branch and base the run was asked for, so that a
+// resume needs no story file.
 type TaskSource struct {
 	Kind string `json:"kind"`
-	Key  string `json:"key"`
+	// Key and URL are the Jira issue's; empty for a story task.
+	Key string `json:"key,omitempty"`
 	// RequestedKey is set only when the issue has moved and answered under Key.
 	RequestedKey string    `json:"requested_key,omitempty"`
-	URL          string    `json:"url"`
+	URL          string    `json:"url,omitempty"`
 	FetchedAt    time.Time `json:"fetched_at"`
 	// Notes reports whether operator notes were appended to the rendered ticket.
 	Notes bool `json:"notes"`
+
+	// Story, Task, Attempt and Jira identify a story task: the story's slug, the task's ID,
+	// the attempt (1 for the first, n for the retry on <ID>.<n>) and the task's Jira key,
+	// "" when it has none.
+	Story   string `json:"story,omitempty"`
+	Task    string `json:"task,omitempty"`
+	Attempt int    `json:"attempt,omitempty"`
+	Jira    string `json:"jira,omitempty"`
+	// Branch, BaseRef and BaseBranch are what the story task's worktree is created on and
+	// from, and the branch its change finally goes to (the conflict check's).
+	Branch     string `json:"branch,omitempty"`
+	BaseRef    string `json:"base_ref,omitempty"`
+	BaseBranch string `json:"base_branch,omitempty"`
+}
+
+// StoryRef is <story>/<task>, how a story task is named in a commit trailer and on screen.
+func (s TaskSource) StoryRef() string { return s.Story + "/" + s.Task }
+
+// StoryDetail is "attempt n" for a story task, with its Jira key after a comma when it has one.
+func (s TaskSource) StoryDetail() string {
+	detail := "attempt " + strconv.Itoa(s.Attempt)
+	if s.Jira != "" {
+		detail += ", " + s.Jira
+	}
+	return detail
 }

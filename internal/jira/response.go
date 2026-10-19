@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -89,6 +90,11 @@ func toTicket(raw []byte, requestedKey string, opts Options, now time.Time) (dom
 		parent = &domain.TicketParent{Key: *p.Key, Summary: normalize(*p.Fields.Summary)}
 	}
 
+	components, detail := toComponents(resp.Fields["components"])
+	if detail != "" {
+		return domain.Ticket{}, detail
+	}
+
 	var fields []domain.TicketField
 	for _, f := range opts.Fields {
 		value, _, err := optionalString(resp.Fields[f.ID])
@@ -108,6 +114,7 @@ func toTicket(raw []byte, requestedKey string, opts Options, now time.Time) (dom
 		Summary:     normalize(summary),
 		Description: normalize(description),
 		Parent:      parent,
+		Components:  components,
 		Fields:      fields,
 		FetchedAt:   now,
 	}
@@ -116,6 +123,50 @@ func toTicket(raw []byte, requestedKey string, opts Options, now time.Time) (dom
 		t.RequestedKey = requestedKey
 	}
 	return t, ""
+}
+
+const (
+	// maxComponents and maxComponentBytes bound fields.components: a story names its
+	// services from them (specs/story/SPEC.md §7.1), and Jira's own limit on a name is 255.
+	maxComponents     = 50
+	maxComponentBytes = 255
+)
+
+// toComponents reads fields.components into the components' names, in Jira's order and
+// without exact duplicates. Absent, null and [] give none; only "name" is read from an
+// entry, and every other key is ignored. On a violation it returns the JSON path and the
+// problem as detail.
+func toComponents(raw json.RawMessage) ([]string, string) {
+	if isNull(raw) {
+		return nil, ""
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, "fields.components: not an array"
+	}
+	if len(entries) > maxComponents {
+		return nil, fmt.Sprintf("fields.components: more than %d entries", maxComponents)
+	}
+	var names []string
+	for i, e := range entries {
+		var c map[string]json.RawMessage
+		if err := json.Unmarshal(e, &c); err != nil || c == nil {
+			return nil, fmt.Sprintf("fields.components[%d]: not an object", i)
+		}
+		name, ok, err := optionalString(c["name"])
+		switch {
+		case err != nil || !ok || strings.TrimSpace(name) == "":
+			return nil, fmt.Sprintf("fields.components[%d].name: missing or empty", i)
+		case strings.ContainsAny(name, "\r\n"):
+			return nil, fmt.Sprintf("fields.components[%d].name: not one line", i)
+		case len(name) > maxComponentBytes:
+			return nil, fmt.Sprintf("fields.components[%d].name: longer than %d bytes", i, maxComponentBytes)
+		}
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names, ""
 }
 
 // optionalString decodes a JSON string, reporting ok=false for an absent field or null

@@ -127,6 +127,12 @@ actions:
     # medium -> complex; complex, a level above without an entry and --stage keep their route).
     # run.json records model_source escalated.<level> (specs/decision-shape/SPEC.md §8).
     # escalate: true
+    # An entry can instead name its own fix route (implement only, needs no escalate: true, works
+    # for complex too): a fix at that level runs on the entry with these fields over it, recorded
+    # as model_source by_complexity.<level>.escalate (SPEC.md §8.1). With a plan to follow, the
+    # first attempt can run on the cheaper model:
+    # by_complexity:
+    #   complex: {model: sonnet, effort: high, escalate: {model: opus}}
 
   review:
     provider: claude
@@ -210,6 +216,21 @@ limits:
 
 execution:
   timeout: 15m
+  # Where a workflow with implement runs (MVP.md §47): inplace (default) is your working
+  # tree, which must be clean (security.require_clean_worktree), and the commit lands on your
+  # branch; worktree is its own git worktree on a branch of its own, so your working tree is
+  # never touched. `run --worktree` / `run --inplace` choose for one run. Workflows without
+  # implement always run in your tree.
+  # isolation: inplace
+
+  # A step the claude usage limit refused waits for the reset the CLI reported, then is
+  # retried (MVP.md §25.2); this is the wait when no reset time was given. 0 fails at once.
+  rate_limit_wait: 5m
+
+# worktree:
+#   # Run once in a new worktree before any model step, with the network; trusted operator
+#   # config like test.command. Only in a worktree run; a config error with isolation: inplace.
+#   setup: "npm ci"
 
 # What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement
 # writes, and only inside the repository. These keys only tighten the guards around
@@ -267,3 +288,20 @@ security:
 #   fields:                        # extra text custom fields, rendered in this order when non-empty
 #     - id: customfield_10035      # ids: GET <base_url>/rest/api/2/field
 #       label: Acceptance criteria
+#   create:                        # story run creates a story's child issues (specs/story/SPEC.md §12); absent: none
+#     issue_type: Story            # the children's type
+#     link: parent                 # parent | field
+#     # field: customfield_10014   # with link: field (Epic Link on Server/Data Center)
+#     labels: [orchestrator]
+#     components: {billing: Billing}   # optional, service name -> Jira component
+
+# Optional: a task split into a specification and ordered subtasks across services
+# (specs/story/SPEC.md §5). The task names the services it touches; they are the checkouts
+# directly under these roots. Nothing is listed per service.
+# story:
+#   roots: [..]                    # absolute, ~/-prefixed, or relative to the story home
+#   max_services: 5                # services one story may touch; 1..20
+#   spec_dir: specs                # in the story home
+#   max_tasks: 12                  # 2..30
+#   max_cost_usd: 20               # optional; the whole story - needs cost-reporting providers
+#   jira_issue_types: [Epic]       # run --jira on these refuses; default none

@@ -55,6 +55,12 @@ const reviewConventionsRule = `Also check the change against ` + conventionsFile
 // implementOperatorRule tells implement what it cannot do: its authority (edit) has no
 // shell, and the test command is the only thing the run executes (MVP.md §17, §38). A step
 // that needs anything else is the operator's, reported rather than claimed done.
+// implementPlanFilesRule points the first attempt at the plan's files: the plan already explored
+// the repository, and an implement session that surveys it again spends most of its turns there.
+const implementPlanFilesRule = `Start from the files listed under "Affected files (from plan)": read them first and make the change there. ` +
+	`The plan was made from this repository, so do not survey it again; open another file only for what those files ` +
+	`do not answer (a caller, a type, a test helper), and where the plan turns out to be wrong, follow the code.`
+
 const implementOperatorRule = `You can read and edit files; you cannot run commands, use installed tools or reach the network. ` +
 	`After you, the orchestrator runs the configured test command from the repository root, and nothing else. ` +
 	`A step the task or the repository's instructions require that needs running something else (a check against an ` +
@@ -268,6 +274,9 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 		writeList(&b, "Risks (from plan)", in.Plan.Risks)
 		writeList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
 		b.WriteString("\n")
+		if len(in.Plan.AffectedFiles) > 0 && in.PreviousImplementation == nil {
+			b.WriteString(implementPlanFilesRule + "\n\n")
+		}
 	}
 	if in.PreviousImplementation != nil {
 		fmt.Fprintf(&b, "Previous implementation attempt:\n%s\n\n", in.PreviousImplementation.Summary)
@@ -451,7 +460,10 @@ func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owne
 }
 
 type ReviewPromptInput struct {
-	Task           string
+	Task string
+	// Acceptance are the task's own acceptance criteria (domain.Task.Acceptance, a story
+	// task's): they come first in the numbered list, ahead of the plan's.
+	Acceptance     []string
 	Analysis       *domain.AnalysisArtifact
 	Plan           *domain.PlanArtifact
 	Implementation *domain.ImplementationArtifact
@@ -507,8 +519,22 @@ func planCriteria(p *domain.PlanArtifact) []string {
 	return out
 }
 
+// reviewCriteria are the criteria a review answers, in the order the prompt numbers them: the
+// task's acceptance items first, then the plan's, the blank ones skipped. The prompt, the
+// parser (parseReviewStrict) and the stored verdicts all count this one list.
+func reviewCriteria(acceptance []string, p *domain.PlanArtifact) []string {
+	var out []string
+	for _, c := range acceptance {
+		if strings.TrimSpace(c) != "" {
+			out = append(out, c)
+		}
+	}
+	return append(out, planCriteria(p)...)
+}
+
 func BuildReviewPrompt(in ReviewPromptInput) string {
-	hasCriteria := len(planCriteria(in.Plan)) > 0
+	criteria := reviewCriteria(in.Acceptance, in.Plan)
+	hasCriteria := len(criteria) > 0
 	var b strings.Builder
 	b.WriteString("ACTION: review\n\n")
 	b.WriteString("Review the current repository changes against the original task. Inspect the Git diff below - it is the actual repository state, not a summary. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
@@ -536,7 +562,15 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
 		writeList(&b, "Steps", in.Plan.Steps)
 		writeList(&b, "Risks (from plan)", in.Plan.Risks)
-		writeNumberedList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		if len(criteria) == len(planCriteria(in.Plan)) {
+			writeNumberedList(&b, "Acceptance criteria", in.Plan.AcceptanceCriteria)
+		}
+		b.WriteString("\n")
+	}
+	// With the task's own criteria the one list is written once, task first, so the numbers
+	// are the ones the verdicts use whether or not a plan stage ran.
+	if len(criteria) > len(planCriteria(in.Plan)) {
+		writeNumberedList(&b, "Acceptance criteria (the task's own, then the plan's)", criteria)
 		b.WriteString("\n")
 	}
 	if in.Implementation != nil {

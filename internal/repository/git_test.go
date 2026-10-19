@@ -122,6 +122,94 @@ func TestBranch_DetachedIsEmpty(t *testing.T) {
 	}
 }
 
+func TestHasCommit(t *testing.T) {
+	for exit, want := range map[int]bool{0: true, 1: false} {
+		exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{ExitCode: exit}}}
+		repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+		got, err := repo.HasCommit(context.Background())
+		if err != nil || got != want {
+			t.Errorf("exit %d: HasCommit = %v, %v; want %v", exit, got, err, want)
+		}
+		if a := strings.Join(exec.Calls[0].Args, " "); a != "rev-parse --verify --quiet HEAD^{commit}" {
+			t.Errorf("args = %q", a)
+		}
+	}
+}
+
+func TestBranchTip(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: sha + "\n"}, {ExitCode: 1}}}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	tip, ok, err := repo.BranchTip(context.Background(), "story/refunds/RF01")
+	if err != nil || !ok || tip != sha {
+		t.Errorf("BranchTip = %q, %v, %v", tip, ok, err)
+	}
+	if a := strings.Join(exec.Calls[0].Args, " "); a != "rev-parse --verify --quiet refs/heads/story/refunds/RF01^{commit}" {
+		t.Errorf("args = %q", a)
+	}
+	if _, ok, err := repo.BranchTip(context.Background(), "story/refunds/RF02"); ok || err != nil {
+		t.Errorf("a missing branch: %v, %v", ok, err)
+	}
+
+	// A name that is not a plain branch never reaches git.
+	for _, name := range []string{"", "-D", "a b", "main^{tree}", "a..b", "x:y", "refs/*", "a\nb"} {
+		if _, _, err := repo.BranchTip(context.Background(), name); err == nil {
+			t.Errorf("BranchTip accepted %q", name)
+		}
+	}
+	if len(exec.Calls) != 2 {
+		t.Errorf("git was run %d times, want 2", len(exec.Calls))
+	}
+}
+
+func TestBranches(t *testing.T) {
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{
+		{Stdout: "refs/heads/story/refunds/RF01\nrefs/heads/story/refunds/RF02.2\n"}, {Stdout: ""},
+	}}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	got, err := repo.Branches(context.Background(), "story/refunds")
+	if err != nil || strings.Join(got, "|") != "story/refunds/RF01|story/refunds/RF02.2" {
+		t.Errorf("Branches = %q, %v", got, err)
+	}
+	if a := strings.Join(exec.Calls[0].Args, " "); a != "for-each-ref --format=%(refname) --sort=refname refs/heads/story/refunds/" {
+		t.Errorf("args = %q", a)
+	}
+	if got, err := repo.Branches(context.Background(), "story/none"); err != nil || len(got) != 0 {
+		t.Errorf("no branches: %q, %v", got, err)
+	}
+	if _, err := repo.Branches(context.Background(), "-x"); err == nil {
+		t.Error("Branches accepted an option")
+	}
+}
+
+func TestCommitsBeyond(t *testing.T) {
+	base := strings.Repeat("b", 40)
+	exec := &execution.FakeProcessExecutor{Results: []execution.ProcessResult{{Stdout: "3\n"}, {Stdout: "no\n"}}}
+	repo := &Repository{Dir: "/tmp/repo", Executor: exec}
+
+	n, err := repo.CommitsBeyond(context.Background(), base, "story/refunds/RF01")
+	if err != nil || n != 3 {
+		t.Errorf("CommitsBeyond = %d, %v", n, err)
+	}
+	if a := strings.Join(exec.Calls[0].Args, " "); a != "rev-list --count "+base+"..refs/heads/story/refunds/RF01" {
+		t.Errorf("args = %q", a)
+	}
+	if _, err := repo.CommitsBeyond(context.Background(), base, "story/refunds/RF01"); err == nil {
+		t.Error("a count that is not a number was accepted")
+	}
+	if _, err := repo.CommitsBeyond(context.Background(), "main", "story/refunds/RF01"); err == nil {
+		t.Error("a base that is not a full SHA was accepted")
+	}
+	if _, err := repo.CommitsBeyond(context.Background(), base, "--all"); err == nil {
+		t.Error("a branch that is an option was accepted")
+	}
+	if len(exec.Calls) != 2 {
+		t.Errorf("git was run %d times, want 2", len(exec.Calls))
+	}
+}
+
 func TestChangedFiles_ParsesPorcelainZ(t *testing.T) {
 	out := " M internal/a.go\x00R  new.go\x00old.go\x00?? notes/todo.md\x00"
 	exec := &execution.FakeProcessExecutor{

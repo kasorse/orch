@@ -178,7 +178,7 @@ exports `Client`, `NewHTTPClient(Options, Credentials)`, `ParseRef`, `Render` an
 ### 8.1 Request
 
 ```
-GET {base_url}/rest/api/2/issue/{KEY}?fields=summary,description,issuetype,parent,<fields[].id...>
+GET {base_url}/rest/api/2/issue/{KEY}?fields=summary,description,issuetype,parent,components,<fields[].id...>
 Accept: application/json
 User-Agent: orchestrator/<version>
 Authorization: Basic base64(email:token)     # auth: basic
@@ -212,6 +212,7 @@ path of the offending field:
 | `fields.description` | string or `null` (an issue can have no description) |
 | `fields.issuetype.name` | non-empty string |
 | `fields.parent` | absent/`null`, or `{key, fields.summary}` with a valid key and a string summary |
+| `fields.components` | absent, `null` or an array of at most 50 objects, each with a non-empty one-line string `name` of at most 255 bytes (`fields.components[<i>].name: missing or empty`); only `name` is read, exact duplicates are dropped. Recorded in `Ticket.Components` and `ticket.json` for `story plan` (`specs/story/SPEC.md` §7.1), never rendered into the task text |
 | `fields.<customfield_N>` | absent, `null` or string. Any other JSON type (select, user, number, array) is `invalid_response`: `jira field customfield_10035 is not a text field; remove it from jira.fields` |
 
 Unknown extra fields in the JSON are ignored (Jira always adds `self`, `id`, `expand`).
@@ -228,6 +229,7 @@ type Ticket struct {
     Summary      string
     Description  string        // wiki markup, verbatim; "" when null
     Parent       *TicketParent // Key, Summary
+    Components   []string      // component names, for story plan; not rendered
     Fields       []TicketField // Label, ID, Value, in jira.fields order; only non-empty ones
     FetchedAt    time.Time
 }

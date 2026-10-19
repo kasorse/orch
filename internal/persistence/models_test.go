@@ -149,6 +149,58 @@ func TestLoadDecision_PolicyHash(t *testing.T) {
 	}
 }
 
+// specs/story/SPEC.md §13: scope.story is a probability, optional; a trace without it loads.
+func TestLoadDecision_Scope(t *testing.T) {
+	store := NewStore(t.TempDir())
+	run, err := store.NewRun(domain.Task{Description: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev",
+		Scope: &domain.ScopeDecision{Story: 0.35}}
+	if err := store.SaveDecision(run.ID, trace); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := store.LoadDecision(run.ID); err != nil || !reflect.DeepEqual(got.Scope, trace.Scope) {
+		t.Errorf("LoadDecision scope = %+v, %v; want %+v", got.Scope, err, trace.Scope)
+	}
+
+	path := filepath.Join(store.runDir(run.ID), "decision.json")
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), `"scope": {`) || !strings.Contains(string(raw), `"story": 0.35`) {
+		t.Errorf("decision.json = %s, %v; want scope.story recorded", raw, err)
+	}
+
+	// Absent for --stage, --story-task and a trace written before the question.
+	if err := os.WriteFile(path, []byte(`{"request":"fix"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := store.LoadDecision(run.ID); err != nil || got.Scope != nil {
+		t.Errorf("a decision.json without scope = %+v, %v; want it to load with none", got.Scope, err)
+	}
+	if err := store.SaveDecision(run.ID, domain.DecisionTrace{Request: "fix"}); err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := os.ReadFile(path); strings.Contains(string(raw), "scope") {
+		t.Errorf("a trace without a scope answer must not write one: %s", raw)
+	}
+
+	for name, bad := range map[string]string{
+		"above one":     `{"request":"fix","scope":{"story":1.5}}`,
+		"negative":      `{"request":"fix","scope":{"story":-0.1}}`,
+		"unknown field": `{"request":"fix","scope":{"story":0.5,"epic":0.5}}`,
+	} {
+		if err := os.WriteFile(path, []byte(bad), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err := store.LoadDecision(run.ID)
+		var rse *apperr.RunStateError
+		if !errors.As(err, &rse) || rse.Kind != apperr.RunCorrupt {
+			t.Errorf("%s: a bad scope must be RunCorrupt, got %v", name, err)
+		}
+	}
+}
+
 // specs/decision-shape §10: size in [0, 2], 0 < cuts.medium < cuts.complex <= 2,
 // questions_hash 64 hex; a trace without any of them still loads.
 func TestLoadDecision_SizeCutsQuestionsHash(t *testing.T) {

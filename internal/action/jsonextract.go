@@ -25,3 +25,21 @@ func extractJSONObject(s string) string {
 	}
 	return ""
 }
+
+// recoverField decodes the JSON value after the last "key": in s into dst, and leaves dst as
+// it is when there is none or it does not decode. The last one, because the answer's own
+// fields follow the summary that may quote the key.
+func recoverField[T any](s, key string, dst *T) {
+	i := strings.LastIndex(s, `"`+key+`"`)
+	if i == -1 {
+		return
+	}
+	rest := strings.TrimLeft(s[i+len(key)+2:], " \t\r\n")
+	if !strings.HasPrefix(rest, ":") {
+		return
+	}
+	var v T
+	if json.NewDecoder(strings.NewReader(rest[1:])).Decode(&v) == nil {
+		*dst = v
+	}
+}

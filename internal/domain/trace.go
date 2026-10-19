@@ -54,8 +54,12 @@ type DecisionTrace struct {
 
 	Complexity ComplexityOutcome `json:"complexity"`
 	Stages     []StageOutcome    `json:"stages"`
-	Workflow   []ActionType      `json:"workflow"`
-	Latency    DecisionLatency   `json:"latency"`
+	// Scope is the provider's answer to the shadow scope question (specs/story/SPEC.md §13):
+	// recorded for a later calibration, read by nothing. Absent for a manual decision, a
+	// story task, a failed classification and in a trace written before the question existed.
+	Scope    *ScopeDecision  `json:"scope,omitempty"`
+	Workflow []ActionType    `json:"workflow"`
+	Latency  DecisionLatency `json:"latency"`
 	// Usage is what each decision call cost; nil when no call reported any (Jev's mock,
 	// --stage, a provider that reports nothing).
 	Usage *DecisionUsage `json:"usage,omitempty"`

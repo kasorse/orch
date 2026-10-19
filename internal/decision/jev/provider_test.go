@@ -200,6 +200,52 @@ func TestProvider_ClassifyMapsFixture(t *testing.T) {
 			t.Errorf("stage %s has a probability, but is not asked", st)
 		}
 	}
+	if tc.Scope == nil || tc.Scope.Story != 0.35 {
+		t.Errorf("Scope = %+v, want story 0.35", tc.Scope)
+	}
+}
+
+func TestProvider_ScopeIsAskedUnlessSkipped(t *testing.T) {
+	in := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone}
+
+	stub := &stubClient{err: errors.New("not needed")}
+	_, _ = newTestProvider(t, stub, bothSources).Classify(context.Background(), in)
+	if q, ok := stub.got.Questions[decision.QuestionScopeStory]; !ok || q.Type != questionNoul {
+		t.Errorf("scope question = %+v (asked: %v), want a noul question", q, ok)
+	}
+
+	in.SkipScope = true
+	stub = &stubClient{err: errors.New("not needed")}
+	_, _ = newTestProvider(t, stub, bothSources).Classify(context.Background(), in)
+	if _, ok := stub.got.Questions[decision.QuestionScopeStory]; ok {
+		t.Error("the scope question was sent although it is skipped")
+	}
+	if len(stub.got.Questions) != 5 {
+		t.Errorf("got %d questions, want the 5 others", len(stub.got.Questions))
+	}
+}
+
+// A scope answer is required exactly when the question was asked: missing is an
+// InvalidResponse only then, and an answer nobody asked for is an unexpected one.
+func TestProvider_ScopeAnswerIsRequiredOnlyWhenAsked(t *testing.T) {
+	asked := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone}
+	skipped := asked
+	skipped.SkipScope = true
+
+	resp := loadResponse(t, "classification_response.json")
+	delete(resp.Answers, decision.QuestionScopeStory)
+	_, err := newTestProvider(t, &stubClient{resp: resp}, bothSources).Classify(context.Background(), asked)
+	assertInvalidResponse(t, err)
+	tc, err := newTestProvider(t, &stubClient{resp: resp}, bothSources).Classify(context.Background(), skipped)
+	if err != nil {
+		t.Fatalf("Classify without a scope answer, skipped: %v", err)
+	}
+	if tc.Scope != nil {
+		t.Errorf("Scope = %+v, want nil when not asked", tc.Scope)
+	}
+
+	_, err = newTestProvider(t, &stubClient{resp: loadResponse(t, "classification_response.json")}, bothSources).Classify(context.Background(), skipped)
+	assertInvalidResponse(t, err)
 }
 
 func TestProvider_ChoiceOnlyDoesNotExpectScore(t *testing.T) {
@@ -267,8 +313,15 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 			a.Type = questionChoice
 			r.Answers["stage_development"] = a
 		},
-		"noul missing value": func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul} },
-		"noul above one":     func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul, Noul: f(1.01)} },
+		"scope wrong type": func(r *systemOneResponse) {
+			a := r.Answers["scope_story"]
+			a.Type = questionChoice
+			r.Answers["scope_story"] = a
+		},
+		"scope missing value": func(r *systemOneResponse) { r.Answers["scope_story"] = answer{Type: questionNoul} },
+		"scope above one":     func(r *systemOneResponse) { r.Answers["scope_story"] = answer{Type: questionNoul, Noul: f(1.01)} },
+		"noul missing value":  func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul} },
+		"noul above one":      func(r *systemOneResponse) { r.Answers["stage_development"] = answer{Type: questionNoul, Noul: f(1.01)} },
 		"noul below zero": func(r *systemOneResponse) {
 			r.Answers["stage_development"] = answer{Type: questionNoul, Noul: f(-0.01)}
 		},

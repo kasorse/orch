@@ -50,6 +50,12 @@ func CheckBaseline(ctx context.Context, repo *repository.Repository, baseline js
 	return guard.CheckBaseline(ctx, repo, baseline)
 }
 
+// SetupViolation is the error a run stops with when worktree.setup changed protected state
+// (specs/worktree/SPEC.md §9); restoreRef is the run's restore point.
+func SetupViolation(changed []string, restoreRef string) error {
+	return &apperr.WorkflowError{Msg: violationMessage("worktree.setup changed protected paths; the run stops before any step:\n", changed, restoreRef)}
+}
+
 // BaselineViolation is the error a resume stops with when protected state changed since
 // the run started.
 func BaselineViolation(changed []string, restoreRef string) error {

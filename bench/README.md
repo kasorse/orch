@@ -255,6 +255,8 @@ A config is a file named after it in `bench/configs/`; `common.yaml` is shared b
 | `D` | the orchestrator, `development` and `testing` only | `D.yaml` |
 | `E` | D plus `actions.implement.verify: true`: the implement session can run the task's test command through the `run_tests` tool; no `checks:`; not in the default `--configs`: `--configs D,E` | `E.yaml` |
 | `F` | B plus `actions.implement.by_complexity.simple: {model: haiku, effort: low}`: a simple task is implemented by a cheaper model; not in the default `--configs`: `--configs B,F` | `F.yaml` |
+| `G` | B plus `actions.implement.by_complexity.complex: {model: opus, effort: high}`: a complex task is implemented by the strong model from the first attempt; the baseline of H; not in the default `--configs`: `--configs G,H` | `G.yaml` |
+| `H` | B plus `actions.implement.by_complexity.complex: {effort: high, escalate: {model: opus, effort: high}}`: a complex task is implemented by the common model following the plan, and only a fix after a failed test or review runs on the strong model; not in the default `--configs`: `--configs G,H` | `H.yaml` |
 | `Bmock` | B with the offline keyword heuristic as the decision provider (`decision.jev.mock: true`); not in the default `--configs`, name it: `--configs A,B,Bmock` | `Bmock.yaml` |
 
 ```yaml
@@ -285,6 +287,14 @@ lower the cost at an equal pass rate (F against B). Each differs from its base i
 with the baseline set to the base: `orchbench summarize --out <out> --baseline D` for E,
 `--baseline B` for F. The number of `verify_calls` per task is in each cell's `run.json` in the
 run directory, and `model_source` in each step's provider; `orchbench` does not summarise them.
+
+G and H answer one question of the decision shape (`specs/decision-shape/SPEC.md` §8.1): with a
+plan to follow, does a complex task keep its pass rate when the first implement runs on the
+common model and only the fix escalates to the strong one, at a lower cost (H against G,
+`--baseline G`). Both differ from B in `actions.implement.by_complexity` alone, so they differ
+from each other only on tasks the decision calls `complex` (about 15% at the shipped cuts):
+pick tasks that are, and read the cost and the pass rate on those. A fix that escalated shows
+`model_source: by_complexity.complex.escalate` in its step.
 
 ## Task files
 

@@ -169,6 +169,71 @@ func TestExecuteReview_Criteria(t *testing.T) {
 	})
 }
 
+func TestExecuteReview_TaskAcceptanceComesFirst(t *testing.T) {
+	task := domain.Task{Description: "t", Acceptance: []string{"task one", " ", "task two"}}
+	run := func(t *testing.T, plan *domain.PlanArtifact, output string) (*fakeClient, workflow.StepOutcome, error) {
+		repo, dir := guardRepo(t)
+		put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
+		client := &fakeClient{output: output}
+		registry := provider.NewRegistry()
+		registry.Register(provider.Claude, client)
+		d := New(testConfig(), registry, repo, nil)
+		d.lastPlan = plan
+		outcome, err := d.Execute(context.Background(), domain.ActionReview, &domain.Run{ID: "r", Task: task})
+		return client, outcome, err
+	}
+	verdicts := func(n int) string {
+		var vs []string
+		for i := 1; i <= n; i++ {
+			vs = append(vs, `{"index":`+strconv.Itoa(i)+`,"met":true,"evidence":"main.go:3"}`)
+		}
+		return `{"status":"pass","summary":"ok","issues":[],"criteria":[` + strings.Join(vs, ",") + `]}`
+	}
+
+	t.Run("then the plan's", func(t *testing.T) {
+		plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
+		client, outcome, err := run(t, plan, verdicts(3))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(client.lastReq.Prompt, "1. task one\n2. task two\n3. plan one\n") {
+			t.Errorf("the review prompt does not list the task's criteria first:\n%s", client.lastReq.Prompt)
+		}
+		if strings.Count(client.lastReq.Prompt, "plan one") != 1 {
+			t.Errorf("the plan's criterion is listed more than once:\n%s", client.lastReq.Prompt)
+		}
+		var got []string
+		for _, c := range outcome.ReviewResult.Criteria {
+			got = append(got, c.Criterion)
+		}
+		if strings.Join(got, "|") != "task one|task two|plan one" {
+			t.Errorf("criteria = %q", got)
+		}
+	})
+
+	t.Run("without a plan", func(t *testing.T) {
+		client, outcome, err := run(t, nil, verdicts(2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(client.lastReq.Prompt, "1. task one\n2. task two\n") || !strings.Contains(client.lastReq.Prompt, `"criteria": [`) {
+			t.Errorf("the review prompt does not ask for the task's criteria:\n%s", client.lastReq.Prompt)
+		}
+		if n := len(outcome.ReviewResult.Criteria); n != 2 {
+			t.Errorf("%d verdicts, want 2", n)
+		}
+	})
+
+	t.Run("a verdict count of the plan alone is malformed", func(t *testing.T) {
+		plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
+		_, _, err := run(t, plan, verdicts(1))
+		var we *apperr.WorkflowError
+		if !errors.As(err, &we) || we.Msg != "malformed review output" {
+			t.Fatalf("err = %v, want a WorkflowError \"malformed review output\"", err)
+		}
+	})
+}
+
 func TestReviewResultValidate_DiffCounts(t *testing.T) {
 	r := domain.ReviewResult{Status: domain.ReviewPass, Diff: &domain.ReviewDiffSummary{Files: 1, Shown: 2}}
 	if r.Validate() == nil {

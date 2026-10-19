@@ -1,0 +1,156 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"orchestrator/internal/apperr"
+	"orchestrator/internal/execution"
+	"orchestrator/internal/persistence"
+	"orchestrator/internal/repository"
+)
+
+const runsCleanUsage = "usage: orchestrator runs clean [--older-than <N>d|<duration>] [--dry-run]"
+
+// defaultCleanAge is how old a run must be for `runs clean` to touch its worktree.
+const defaultCleanAge = 7 * 24 * time.Hour
+
+type cleanArgs struct {
+	olderThan time.Duration
+	dryRun    bool
+}
+
+// parseAge reads "7d" (whole days) or any time.ParseDuration value; it must be positive.
+func parseAge(v string) (time.Duration, bool) {
+	if days, ok := strings.CutSuffix(v, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil || n < 1 || n > 36500 {
+			return 0, false
+		}
+		return time.Duration(n) * 24 * time.Hour, true
+	}
+	d, err := time.ParseDuration(v)
+	return d, err == nil && d > 0
+}
+
+// runsCleanArgs parses what follows `runs clean`: --older-than <age> (or =<age>), default 7d,
+// and --dry-run, each at most once.
+func runsCleanArgs(args []string) (cleanArgs, error) {
+	bad := &apperr.ConfigError{Msg: runsCleanUsage}
+	out := cleanArgs{olderThan: defaultCleanAge}
+	givenAge := false
+	for i := 0; i < len(args); i++ {
+		switch v, ok := strings.CutPrefix(args[i], "--older-than="); {
+		case args[i] == "--dry-run" && !out.dryRun:
+			out.dryRun = true
+		case ok || args[i] == "--older-than" && i+1 < len(args):
+			if !ok {
+				i++
+				v = args[i]
+			}
+			age, valid := parseAge(v)
+			if givenAge || !valid {
+				return cleanArgs{}, bad
+			}
+			out.olderThan, givenAge = age, true
+		default:
+			return cleanArgs{}, bad
+		}
+	}
+	return out, nil
+}
+
+// runsClean removes the worktrees of old runs of the current repository (specs/worktree/SPEC.md
+// §14).
+func runsClean(ctx context.Context, stdout io.Writer, args cleanArgs) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
+	}
+	repo, err := repository.Open(ctx, cwd, execution.NewOSProcessExecutor())
+	if err != nil {
+		return err
+	}
+	return cleanWorktrees(ctx, stdout, persistence.NewStore(runsBaseDir), repo, args, time.Now())
+}
+
+// cleanWorktrees visits every run of the store with a worktree not yet removed that is older
+// than args.olderThan (by created_at) and whose lock can be taken, and removes the worktree
+// with RemoveWorktree, never --force: git refusing it (uncommitted files) lists the worktree as
+// kept with git's reason. A removal is recorded in run.json; the branch is never deleted. Then
+// the worktrees git no longer finds are pruned, once. With dryRun nothing is changed.
+func cleanWorktrees(ctx context.Context, stdout io.Writer, store *persistence.Store, repo *repository.Repository, args cleanArgs, now time.Time) error {
+	ids, err := store.RunIDs()
+	if err != nil {
+		return err
+	}
+	removed, kept := 0, 0
+	for _, id := range ids {
+		run, err := store.LoadRun(id)
+		if err != nil {
+			fmt.Fprintf(stdout, "skipped %s: %v\n", id, err)
+			continue
+		}
+		w := run.Worktree
+		if w == nil || w.Removed || now.Sub(run.CreatedAt) < args.olderThan {
+			continue
+		}
+		unlock, err := store.Lock(id)
+		if err != nil {
+			var rse *apperr.RunStateError
+			if errors.As(err, &rse) && rse.Kind == apperr.RunInUse {
+				fmt.Fprintf(stdout, "skipped %s: the run is in use\n", id)
+				continue
+			}
+			return err
+		}
+		// The lock was free: reload what a run that just finished may have written.
+		run, err = store.LoadRun(id)
+		if err != nil || run.Worktree == nil || run.Worktree.Removed {
+			unlock()
+			continue
+		}
+		w = run.Worktree
+		if args.dryRun {
+			unlock()
+			fmt.Fprintf(stdout, "would remove %s (run %s, branch %s)\n", w.Path, id, w.Branch)
+			continue
+		}
+		gone := false
+		if _, statErr := os.Lstat(w.Path); errors.Is(statErr, fs.ErrNotExist) {
+			gone = true // only git's administrative data is left; the prune below drops it
+		}
+		if !gone {
+			if err := repo.RemoveWorktree(ctx, w.Path); err != nil {
+				unlock()
+				kept++
+				fmt.Fprintf(stdout, "kept %s (run %s, branch %s): %v\n", w.Path, id, w.Branch, err)
+				continue
+			}
+		}
+		w.Removed = true
+		saveErr := store.SaveRun(run)
+		unlock()
+		if saveErr != nil {
+			fmt.Fprintf(stdout, "removed %s, but run.json of %s could not record it: %v\n", w.Path, id, saveErr)
+		} else {
+			fmt.Fprintf(stdout, "removed %s (run %s, branch %s kept)\n", w.Path, id, w.Branch)
+		}
+		removed++
+	}
+	if args.dryRun {
+		return nil
+	}
+	if err := repo.PruneWorktrees(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "%d worktree(s) removed, %d kept\n", removed, kept)
+	return nil
+}

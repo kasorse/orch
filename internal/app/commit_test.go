@@ -46,6 +46,22 @@ func TestCommitOffer(t *testing.T) {
 			body:   "Orchestrator-Run: r1\n",
 		},
 		{
+			name: "story task with a Jira key: prefix and both trailers",
+			run: domain.Run{ID: "r1", Task: domain.Task{Description: "text", Source: &domain.TaskSource{
+				Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1, Jira: "PAY-124"}}},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Add partial refunds", Summary: "long"},
+			header: "PAY-124: Add partial refunds",
+			body:   "Orchestrator-Run: r1\nOrchestrator-Story: refunds/RF02\n",
+		},
+		{
+			name: "story task without a Jira key: no prefix, the story trailer",
+			run: domain.Run{ID: "r1", Task: domain.Task{Description: "text", Source: &domain.TaskSource{
+				Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 2}}},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Add partial refunds"},
+			header: "Add partial refunds",
+			body:   "Orchestrator-Run: r1\nOrchestrator-Story: refunds/RF02\n",
+		},
+		{
 			name:   "long summary_short is cut and kept in the body",
 			run:    domain.Run{ID: "r1"},
 			impl:   &domain.ImplementationArtifact{SummaryShort: long},

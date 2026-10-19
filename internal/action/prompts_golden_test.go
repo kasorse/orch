@@ -9,9 +9,32 @@ import (
 	"testing"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/story"
 )
 
-var update = flag.Bool("update", false, "rewrite testdata/prompts/*.golden from the current prompts")
+var update = flag.Bool("update", false, "rewrite the golden files in testdata/prompts from the current prompts")
+
+// goldenFile names the golden file of a case whose name is not <case>.golden: the planning
+// calls of a story, named as specs/story/tasks/TASK-ST03-survey-specify.md lists them.
+var goldenFile = map[string]string{"survey": "survey.txt", "specify": "specify.txt"}
+
+const goldenStoryRequest = "Partial refunds in billing and gateway: refund part of a payment, and accept an amount in the public API."
+
+func goldenSurveys() []SurveyInput {
+	return []SurveyInput{
+		{Repo: "gateway", Answer: story.SurveyAnswer{
+			Summary:       "The public API forwards refunds to billing.",
+			RelevantFiles: []string{"api/openapi.yaml"},
+			Interfaces:    []string{"POST /v1/refunds (api/openapi.yaml)"},
+		}},
+		{Repo: "billing", Answer: story.SurveyAnswer{
+			Summary:       "Refunds are created in internal/refund; a refund always returns the whole amount.\n",
+			RelevantFiles: []string{"internal/refund/service.go", "internal/refund/service_test.go"},
+			Interfaces:    []string{"event refund.created (events/refund.proto)"},
+			Constraints:   []string{"amounts are\ninteger cents"},
+		}},
+	}
+}
 
 // fixNonce makes every delimiter nonce predictable (NONCE0001, NONCE0002, ... in the order
 // the prompt draws them) for the test, and restores the random one afterwards.
@@ -169,6 +192,10 @@ func TestPrompts_Golden(t *testing.T) {
 				GitDiff: goldenDiff, DiffPartial: true,
 			})
 		}},
+		{"survey", func() string { return BuildSurveyPrompt(goldenStoryRequest, "billing") }},
+		{"specify", func() string {
+			return BuildSpecifyPrompt(goldenStoryRequest, goldenSurveys(), []string{"gateway", "billing"}, 12)
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,7 +205,11 @@ func TestPrompts_Golden(t *testing.T) {
 				t.Fatalf("the routing marker must stay the first line:\n%s", got)
 			}
 
-			path := filepath.Join("testdata", "prompts", tc.name+".golden")
+			name := tc.name + ".golden"
+			if file, ok := goldenFile[tc.name]; ok {
+				name = file
+			}
+			path := filepath.Join("testdata", "prompts", name)
 			if *update {
 				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 					t.Fatal(err)

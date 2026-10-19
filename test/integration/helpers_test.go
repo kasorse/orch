@@ -86,6 +86,9 @@ type configOptions struct {
 	byComplexity map[string]map[string]string
 	// escalate is actions.implement.escalate (specs/decision-shape/SPEC.md §8).
 	escalate bool
+	// escalateTo is the model of an implement by_complexity entry's own escalate, by level
+	// (specs/decision-shape/SPEC.md §8.1); the level needs an entry in byComplexity.
+	escalateTo map[string]string
 	// fixMedium is review.fix_medium.
 	fixMedium bool
 	// reviewModels is actions.review.models: the extra reviewers.
@@ -98,6 +101,10 @@ type configOptions struct {
 	explore string
 	// maxCostUSD is limits.max_cost_usd; 0 renders none.
 	maxCostUSD float64
+	// isolation is execution.isolation; "" pins inplace, which every scenario that checks the
+	// result in the working directory needs (specs/worktree/SPEC.md §14). The worktree
+	// scenarios set "worktree" and point XDG_STATE_HOME at a temporary directory.
+	isolation string
 }
 
 // pathRulesYAML is the policy.paths and policy.explore keys that follow policy.stages, or
@@ -134,6 +141,10 @@ func (o configOptions) actionsYAML() string {
 			}
 			sort.Strings(names)
 			for _, level := range names {
+				if up, ok := o.escalateTo[level]; ok && a.name == "implement" {
+					fmt.Fprintf(&b, "      %s: {model: %s, escalate: {model: %s}}\n", level, levels[level], up)
+					continue
+				}
 				fmt.Fprintf(&b, "      %s: {model: %s}\n", level, levels[level])
 			}
 		}
@@ -182,6 +193,9 @@ func (o configOptions) tailYAML() string {
 type jiraOptions struct {
 	baseURL string
 	fields  [][2]string
+	// create is the jira.create lines verbatim (two spaces of indent, starting "  create:"), or
+	// nothing.
+	create string
 }
 
 func (j *jiraOptions) yaml() string {
@@ -195,7 +209,7 @@ func (j *jiraOptions) yaml() string {
 			s += fmt.Sprintf("    - id: %s\n      label: %s\n", f[0], f[1])
 		}
 	}
-	return s
+	return s + j.create
 }
 
 func defaultConfigOptions() configOptions {
@@ -235,6 +249,10 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	sandbox := opts.testSandbox
 	if sandbox == "" {
 		sandbox = "none"
+	}
+	isolation := opts.isolation
+	if isolation == "" {
+		isolation = "inplace"
 	}
 	content := fmt.Sprintf(`version: 2
 
@@ -285,9 +303,10 @@ limits:
 %s
 execution:
   timeout: %s
+  isolation: %s
 %s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
 		opts.pathRulesYAML(), opts.actionsYAML(),
-		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, opts.extraYAML)
+		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, isolation, opts.extraYAML)
 	content += opts.tailYAML()
 	content += opts.jira.yaml()
 

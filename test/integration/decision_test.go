@@ -104,6 +104,9 @@ type decisionJSON struct {
 		Enabled bool   `json:"enabled"`
 		Reason  string `json:"reason"`
 	} `json:"stages"`
+	Scope *struct {
+		Story float64 `json:"story"`
+	} `json:"scope"`
 	Workflow []string `json:"workflow"`
 }
 
@@ -156,6 +159,10 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 		t.Errorf("invocations = %v", got)
 	}
 	d := readDecision(t, repoDir)
+	// The shadow scope question is asked and its probability recorded (specs/story/SPEC.md §13).
+	if d.Scope == nil || d.Scope.Story != 0.15 {
+		t.Errorf("decision.json scope = %+v, want story 0.15", d.Scope)
+	}
 	if !equalStrings(d.Workflow, []string{"analyze", "implement", "test", "review"}) || d.ContextDepth.Selected != "project" {
 		t.Errorf("decision = %+v", d)
 	}
@@ -432,7 +439,8 @@ func TestDecision_LLMProvider(t *testing.T) {
 	writeResponse(t, responsesDir, "decide-classify", `{
   "complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
   "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
-  "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95}
+  "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95},
+  "scope": 0.2
 }`)
 	t.Setenv("JEV_API_KEY", "")
 

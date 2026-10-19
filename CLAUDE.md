@@ -30,7 +30,9 @@ template, cut proposals in `decisions calibrate`, `actions.implement.escalate`: 
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
-`FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`.
+`FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
+the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
+Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -89,6 +91,8 @@ request → translate if ≥30% Cyrillic prose (internal/translate; failure → 
         → Context Manager builds ProjectContext        (internal/projectctx)
           failure → continue with context_limited
         → classification: complexity + 3 stage probs   (decision.Provider.Classify)
+          + the shadow scope question `scope_story`: recorded as `scope.story`, decides
+            nothing, not asked for --stage or --story-task (MVP.md §48.9)
         → policy → complexity, enabled stages          (internal/policy)
         → workflow.Build                                (internal/workflow)
   provider failure → manual choice (on_failure: ask, interactive only) or error
@@ -140,8 +144,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   registry is built first; constructing it calls nothing). `Validate` covers the decision
   surface too; `ValidateDependencies` checks every action's, the translator's and an LLM
   decision provider's executable, and the Jev API key, and — only with
-  `DependencyOptions{Jira: true}` (`run --jira`, and `validate` when the section is
-  present) — the Jira section and its variables; `ValidateAuthorities` checks that each
+  `DependencyOptions{Jira: true}` (`run --jira`, `story plan --jira`, and `validate` when the
+  section is present) — the Jira section and its variables; `ValidateAuthorities` checks that each
   route's provider can enforce its authority; right after it, every routed provider CLI's
   `--version` must be inside the range its adapter verified (`provider.VersionVerifier`;
   outside it only `security.allow_unverified_cli: true` lets a run go on, recorded and
@@ -160,14 +164,31 @@ history, otherwise the state the history and the transition table give (MVP.md �
   live check (`go test -tags security ./test/security/...`) has verified, and refuses
   anything else — a silent downgrade is the one unacceptable failure. Never pass
   `bypassPermissions` or any equivalent.
+- **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
+  `implement` under `execution.isolation: worktree` (or `run --worktree`; the default is `inplace`) runs every step, guard,
+  scan, review diff and commit in `<state>/orchestrator/worktrees/<repo-id>/<run-id>`; the
+  orchestrator writes git objects, `orchestrator/<run-id>`, the worktree and
+  `refs/orchestrator/` there and nothing in the operator's working tree, index or branch. The
+  worktree's path is derived from the run ID, never read from `run.json`; the mode comes from
+  `options.isolation`, not the current config. The `.git` pointer is checked in Go before
+  every fingerprint, `worktree.setup` runs only before any step, and a new test or scenario
+  that reads the result in the working tree pins `isolation: inplace`. New run artifacts:
+  `run.json: worktree` and `logs/setup.{stdout,stderr}.log`.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
   run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)
   compares protected paths (git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
-  before any `git status` — git status runs a planted `core.fsmonitor`. `Dispatcher.Guard` is
-  required — `implement` and `test` refuse without one. Provider CLIs run with
+  before any `git status` — git status runs a planted `core.fsmonitor`. In a worktree run
+  (`specs/worktree/`) the worktree's `.git` file is read in Go and compared with the recorded
+  `admin_dir` before the fingerprint (`RepoGuard.GitPointer`, violation
+  `.git (worktree pointer)`), and the sandbox binds it read-only. `worktree.setup` runs once
+  (`runSetup`, only for a run with no executions and `setup_done: false`) in the test sandbox
+  with `Sandbox.Network` (the one place the network is allowed; a copy, never `s.runner`'s;
+  `json:"-"`, so verify.json cannot carry it) between two guard snapshots, inside the engine's
+  share of `execution.timeout` (the second snapshot is taken even when setup was killed).
+  `Dispatcher.Guard` is required — `implement` and `test` refuse without one. Provider CLIs run with
   `execution.ScrubbedEnv()`, which also drops the credential variables the config names
   (`Config.CredentialEnvNames`, registered right after `Validate`); every process that runs
   `test.command` gets the narrower `execution.TestEnv()` allowlist (plus `test.env_pass`,
@@ -243,7 +264,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   complexity, model and effort only (never the provider), so the same decision always gives the
   same models; `run --stage` has no complexity and uses the base. `actions.implement.escalate`
   is the one model a failure changes: an implement that fixes a failed test or review (read
-  from `run.Executions`) runs on the `by_complexity` entry one level up, derivable on resume.
+  from `run.Executions`) runs on the `by_complexity` entry one level up, or on the decided
+  level's own `by_complexity.<level>.escalate` when it has one, derivable on resume.
 - **Secrets never leave the machine**: the Context Manager applies its deny list (`.env*`,
   `*.pem`, `*.key`, `credentials*`, `secrets*`, `context.extra_deny`, to every path segment)
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads
@@ -277,7 +299,12 @@ history, otherwise the state the history and the transition table give (MVP.md �
   strictly (paths derived, never read; `workflow.Verify`), refusing rather than
   repairing. On a run that has executed a step, the git fingerprint is compared with
   `resume_baseline` before any `git status`, then the protected paths, then HEAD against
-  `head_ref`. The run directory is `flock`ed by the one `run`/`resume` that owns it.
+  `head_ref`. A worktree run (`specs/worktree/` §11) resumes in its worktree only after
+  `verifyRunWorktree` accepted it, with nothing but git in the operator's repository run
+  before: the derived path equals the record, the directory exists, its `.git` file (read
+  in Go) names the recorded `admin_dir` under `<common>/worktrees/`, and `git worktree list`
+  shows it on `orchestrator/<id>`; the operator's tree plays no part. The run directory is
+  `flock`ed by the one `run`/`resume` that owns it.
   Until the operator approves, a resume changes nothing on disk. `run` and `resume` share
   one tail after the decision (`executeWorkflow` in `internal/app/app.go`); keep it that
   way.
@@ -291,6 +318,29 @@ history, otherwise the state the history and the transition table give (MVP.md �
   hooks. The message is the implementation's `summary_short` (without one, the operator
   types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
   `Repository.CommitAll` is the one call that writes the user's index and a branch. Nothing in the offer changes the run's status or exit code.
+  A worktree run (`specs/worktree/` §10) commits in its worktree on `orchestrator/<run-id>`
+  as under `auto_commit: true`, whatever the config and `--mode` say; only where §42.6 would
+  not commit is an operator at the terminal asked (default no). `finishWorktree` then runs
+  `merge-tree` against `base_branch` in the operator's repository (`session.operator`, after
+  its fingerprint matched the one taken at creation) and `git worktree remove` without
+  `--force`; without a commit the worktree stays.
+- **A model proposes, Go orders, the operator approves** (MVP.md §48, `specs/story/`). `story
+  plan` writes a spec of tasks as files and runs nothing; `story run` is the approval. Go finds
+  the services the task names under `story.roots` (no model call), validates the model's
+  answer strictly, orders the tasks from `depends_on` (Kahn, smallest ID first) and computes
+  each task's base and branch (`story/<slug>/<ID>`, stacked on the same-repository task it
+  needs); no model output picks what runs next, where, or with which stages. A story task is an
+  ordinary worktree run started as a child process (`run --story-task`, hidden), with
+  development forced on, the task's acceptance items as review criteria and the
+  `Orchestrator-Story` commit trailer; stories do not nest and tasks run one at a time. A
+  dispatched task's file is frozen up to `## As built`, which only Go appends. The scope
+  question is shadow data: nothing reads `scope.story` to decide.
+- **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11). The one write is
+  `story run` creating the child issues (`jira.create`, a story planned from a Jira issue): after
+  the confirmation, before the first dispatch, an intent in `story.json` before each POST, the
+  key recorded after the 201, no retry once a request may have reached Jira (only 429/503 with
+  `Retry-After`), and an intent without a key stops the next start. `run`, `resume` and `story
+  plan` write nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
 - Stages always get the user's original request; the translation is only for the decision
   provider and relevant-file search.
 
@@ -300,8 +350,8 @@ No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations
 decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows, no Web UI/REST
-API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue (no
-comments, transitions or JQL), no remote repository execution, no RAG or persistent
+API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue and creating
+the child issues of an approved story (no comments, transitions or JQL), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
@@ -313,6 +363,15 @@ README's `Status:` line up to date, and add an `## As built` section to the task
 the date and what was built differently from the plan, and why. A task under `bench/` also
 runs the four gates in `bench/`: it is a separate module, and the root `go test ./...` does
 not test it.
+
+Inside an orchestrator run, do all of this in the same change as the code; do not leave it to the
+operator. The run's `test` step (`scripts/check.sh`) is the task's gate, and the run only
+commits after that step passes, so a task that fails its gate never reaches the branch. The one
+exception is a gate the test step cannot run, such as `go test -tags security
+./test/security/...`, which makes live calls: leave a task with such a gate unticked, and say
+in its As built which gate is left to the operator. The four `bench/` tests that skip under
+bwrap are run outside the sandbox once per specification, before its branch merges, and
+recorded in the README's `Status:` line; they are not a gate for each task.
 
 ## Build & test
 
@@ -328,7 +387,8 @@ cd bench && go test ./...   # bench/ is a separate module; the root go test does
 first failure; it is also the orchestrator's `test.command` for this repository, so a run's
 test step covers both modules. Under the bwrap sandbox four `bench/` tests skip (nested
 bwrap, `orchestrator validate`, the end-to-end `TestPipeline` of `bench/test` among them); run
-the script outside the sandbox before closing a task.
+the script outside the sandbox once per specification, before its branch merges (rebuild
+`bin/orchestrator` first, since the `orchestrator validate` test uses it).
 
 Tests need no network, no Jev key and no real provider CLIs: `test/integration` uses fake
 executables (`internal/testutil/fakeexec`, routed by the `ACTION: <name>` first line of every
@@ -337,7 +397,7 @@ Jev (`test/integration/jev_test.go`) and a fake Jira (`test/integration/jira_tes
 live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
 `go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
-`go test ./internal/jira -update`, and the six stage prompts
+`go test ./internal/jira -update`, and the stage prompts with a story's survey and specify prompts
 `go test ./internal/action -update` (`internal/action/testdata/prompts/`; the test fixes
 `action.nonce`, so read the diff of a rewritten file before committing it). Never commit a token-shaped literal (an `AKIA…` key, a
 `ghp_…` token): secret scanners and push protection would flag the repository itself;
@@ -386,3 +446,13 @@ removed when a resume reads the artifact back), `logs/<NNN>-<action>.{stdout,std
 `checks:` adds `logs/<NNN>-test.<check>.*`, an implement with verify calls adds
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
 `logs/decide-{context,classify}.*`, `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.
+
+A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
+the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`
+reason on development and `scope.story` to `decision.json`. The story itself lives in the story
+home under `.orchestrator/stories/<slug>/` (MVP.md §48.8): `story.json` (the services, the bases,
+the status and, per task, the run, branch, commit, Jira key and intent, cost), `ticket.json` for
+`story plan --jira`, `artifacts/survey-<repo>.json` and `artifacts/specify.json` (the prompts as
+sent and the answers), `logs/survey-<repo>.*` and `logs/specify.*`, and `tasks/<ID>.json` (a
+child's task input); a plan that reaches no spec leaves `.plan-<id>`. The spec itself is in
+`<spec_dir>/<slug>/` (committed by the operator), with `## As built` appended to each task file by Go.

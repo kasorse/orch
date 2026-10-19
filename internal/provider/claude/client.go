@@ -74,8 +74,10 @@ func buildArgs(a domain.Authority, denyRead []string, model, effort string, ext 
 	// is kept by the rest of the argv: --tools still lists the only built-in tools there
 	// are (no shell), dontAsk denies anything not pre-approved, and the file tools stay
 	// confined to the working directory (verified against claude 2.1.287: a Read of
-	// /etc/hosts is denied either way). Only user settings are loaded, never the
-	// repository's own .claude/ settings or hooks.
+	// /etc/hosts is denied either way). In a linked worktree this confinement is what keeps a
+	// step out of the operator's tree and runs directory; test/security/worktree_test.go
+	// (V-wt-1…3, specs/worktree/SPEC.md §12) checks it; verified against claude 2.1.302.
+	// Only user settings are loaded, never the repository's own .claude/ settings or hooks.
 	sources, restricted := "", true
 	if ext.UserSettings {
 		sources, restricted = "user", false
@@ -316,6 +318,29 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			Stdout:      stdout,
 			Stderr:      res.Stderr,
 			Err:         err,
+		}
+	}
+
+	// The account's usage limit refused the call: a reset clears it, so the run can wait for one.
+	if rep.usageLimit && (res.ExitCode != 0 || rep.isError) {
+		detail := "the claude usage limit was reached"
+		if !rep.limitResets.IsZero() {
+			detail += "; it resets at " + rep.limitResets.Local().Format("2006-01-02 15:04 MST")
+		}
+		return result, &apperr.ProviderError{
+			Provider:    string(provider.Claude),
+			Model:       req.Model,
+			Kind:        apperr.FailureRateLimit,
+			Executable:  executable,
+			Args:        argv,
+			PromptBytes: len(req.Prompt),
+			WorkingDir:  req.WorkingDir,
+			ExitCode:    res.ExitCode,
+			Duration:    res.Duration,
+			Stdout:      stdout,
+			Stderr:      res.Stderr,
+			Detail:      detail,
+			ResetsAt:    rep.limitResets,
 		}
 	}
 

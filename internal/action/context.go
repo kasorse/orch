@@ -308,9 +308,15 @@ func (s *stepCalls) report() *domain.CallReport {
 // Manager applies (specs/permissions/SPEC.md §6.3), plus the runs directory. In claude a
 // Read deny rule also blocks Edit and Write on the same path.
 func (d *Dispatcher) denyRead() []string {
-	deny := projectctx.DenyPatterns(d.Config.Context.ExtraDeny)
-	if d.RunsDir != "" {
-		deny = append(deny, d.RunsDir)
+	return denyList(d.Config.Context.ExtraDeny, d.RunsDir)
+}
+
+// denyList is a repository's file-tool deny list: projectctx's patterns with its
+// context.extra_deny, and its runs directory (relative to its root, "" when outside it).
+func denyList(extraDeny []string, runsDir string) []string {
+	deny := projectctx.DenyPatterns(extraDeny)
+	if runsDir != "" {
+		deny = append(deny, runsDir)
 	}
 	return deny
 }
@@ -319,7 +325,13 @@ func (d *Dispatcher) denyRead() []string {
 // flight, until the returned stop func is called. A nil Observer is a no-op (no goroutine
 // spawned).
 func (d *Dispatcher) startHeartbeat() func() {
-	if d.Observer == nil {
+	return startHeartbeat(d.Observer)
+}
+
+// startHeartbeat is Dispatcher.startHeartbeat for any observer, for the calls outside a run's
+// steps (story.go).
+func startHeartbeat(observer CallObserver) func() {
+	if observer == nil {
 		return func() {}
 	}
 	done := make(chan struct{})
@@ -332,7 +344,7 @@ func (d *Dispatcher) startHeartbeat() func() {
 			case <-done:
 				return
 			case <-ticker.C:
-				d.Observer.ProviderCallHeartbeat(time.Since(start))
+				observer.ProviderCallHeartbeat(time.Since(start))
 			}
 		}
 	}()

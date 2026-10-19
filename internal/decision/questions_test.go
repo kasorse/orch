@@ -1,6 +1,9 @@
 package decision
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"regexp"
 	"strings"
 	"testing"
@@ -66,6 +69,41 @@ func TestStageQuestions_OnePerAskedStageInOrder(t *testing.T) {
 		if !strings.Contains(q.Instructions, "`request`") {
 			t.Errorf("stage %s instructions must refer to the `request` state field", st)
 		}
+	}
+}
+
+func TestScopeQuestion_IsNotAStageQuestion(t *testing.T) {
+	q := ScopeQuestion()
+	if q.ID != "scope_story" || q.Stage != "" {
+		t.Errorf("ScopeQuestion = %s/%q, want scope_story with no stage", q.ID, q.Stage)
+	}
+	if q.Instructions == "" || q.True == "" || q.False == "" {
+		t.Errorf("scope question is incomplete: %+v", q)
+	}
+	if !strings.Contains(q.Instructions, "`request`") {
+		t.Error("scope instructions must refer to the `request` state field")
+	}
+	for _, sq := range StageQuestions() {
+		if sq.ID == q.ID {
+			t.Errorf("StageQuestions returns the scope question %q", sq.ID)
+		}
+	}
+}
+
+func TestQuestionsHash_CoversTheScopeQuestion(t *testing.T) {
+	// The hash as it was before the scope question joined it: the shared questions alone.
+	data, err := json.Marshal(struct {
+		ContextDepth     ChoiceQuestion
+		ComplexityChoice ChoiceQuestion
+		ComplexityScore  ScoreQuestion
+		Stages           []YesNoQuestion
+	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	if QuestionsHash() == hex.EncodeToString(sum[:]) {
+		t.Error("the scope question is not part of QuestionsHash")
 	}
 }
 

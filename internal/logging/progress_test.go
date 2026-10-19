@@ -3,6 +3,8 @@ package logging
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -154,6 +156,72 @@ func TestRunHeader_PrintsIDAndDir(t *testing.T) {
 	}
 }
 
+func TestWorktree_PrintsPathBranchAndBase(t *testing.T) {
+	const sha = "8d0e4b2a1b2c3d4e5f60718293a4b5c6d7e8f901"
+	for _, tc := range []struct{ baseBranch, want string }{
+		{"master", "Worktree: /state/wt/r1 (orchestrator/r1 from master@8d0e4b2)\n"},
+		{"", "Worktree: /state/wt/r1 (orchestrator/r1 from 8d0e4b2)\n"},
+	} {
+		var buf bytes.Buffer
+		NewConsoleReporter(&buf).Worktree("/state/wt/r1", "orchestrator/r1", tc.baseBranch, sha)
+		if buf.String() != tc.want {
+			t.Errorf("got %q, want %q", buf.String(), tc.want)
+		}
+	}
+}
+
+func TestWorktreeCommitted_PrintsBaseAndMerge(t *testing.T) {
+	const sha = "8d0e4b2a1b2c3d4e5f60718293a4b5c6d7e8f901"
+	for _, tc := range []struct{ baseBranch, want string }{
+		{"master", "Based on master@8d0e4b2. To take it:\n  git merge orchestrator/r1\n"},
+		{"", "Based on 8d0e4b2. To take it:\n  git merge orchestrator/r1\n"},
+	} {
+		var buf bytes.Buffer
+		NewConsoleReporter(&buf).WorktreeCommitted("orchestrator/r1", tc.baseBranch, sha)
+		if buf.String() != tc.want {
+			t.Errorf("got %q, want %q", buf.String(), tc.want)
+		}
+	}
+}
+
+func TestWorktreeConflicts_ListsAtMostTwentyFiles(t *testing.T) {
+	var buf bytes.Buffer
+	NewConsoleReporter(&buf).WorktreeConflicts("orchestrator/r1", "master", []string{"a.go"})
+	if want := "Warning: merging orchestrator/r1 into master will conflict in 1 file:\n  a.go\n"; buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+
+	var files []string
+	for i := range 23 {
+		files = append(files, fmt.Sprintf("f%02d.go", i))
+	}
+	buf.Reset()
+	NewConsoleReporter(&buf).WorktreeConflicts("orchestrator/r1", "master", files)
+	got := buf.String()
+	if !strings.HasPrefix(got, "Warning: merging orchestrator/r1 into master will conflict in 23 files:\n  f00.go\n") {
+		t.Errorf("got %q", got)
+	}
+	if !strings.Contains(got, "  f19.go\n  ... and 3 more\n") || strings.Contains(got, "f20.go") {
+		t.Errorf("want 20 files and the rest counted, got %q", got)
+	}
+}
+
+func TestWorktreeKept_AndNotes(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+	r.WorktreeKept("/state/wt/r1", "")
+	r.WorktreeKept("/state/wt/r1", "git worktree remove failed: untracked files\nmore")
+	r.MergeTreeUnsupported("master")
+	r.ConflictCheckSkipped("master", "the git config changed")
+	want := "The worktree stays at /state/wt/r1\n" +
+		"The worktree stays at /state/wt/r1 (git worktree remove failed: untracked files)\n" +
+		"Note: git older than 2.38 cannot check for conflicts with master (merge-tree --write-tree); the check was skipped\n" +
+		"Warning: no conflict check against master: the git config changed\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
 func TestCallReporter_ProviderCallStarted_PrintsShortLine(t *testing.T) {
 	var buf bytes.Buffer
 	c := CallReporter{ConsoleReporter: NewConsoleReporter(&buf)}
@@ -286,6 +354,18 @@ func TestRunFinished_Stopped(t *testing.T) {
 	r.RunFinished(&domain.Run{Status: domain.RunStopped, FailureReason: "maximum steps exceeded"})
 
 	want := "\nRun stopped.\nReason: maximum steps exceeded\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
+
+func TestRunFinished_PrintsRunID(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+
+	r.RunFinished(&domain.Run{ID: "run-123", Status: domain.RunFailed, FailureReason: "boom"})
+
+	want := "\nRun failed.\nReason: boom\nRun ID: run-123\n"
 	if buf.String() != want {
 		t.Errorf("got %q, want %q", buf.String(), want)
 	}

@@ -20,7 +20,11 @@ const (
 	JiraUnavailable     JiraFailureKind = "unavailable"      // HTTP 500, 502, 503, 504
 	JiraInvalidResponse JiraFailureKind = "invalid_response" // unexpected status or body
 	JiraCancelled       JiraFailureKind = "cancelled"        // SIGINT/SIGTERM
+	JiraRejected        JiraFailureKind = "rejected"         // HTTP 400 to a creation: Jira says what is wrong with it
 )
+
+// JiraOpCreate is JiraError.Op of a failed creation of a child issue.
+const JiraOpCreate = "create"
 
 var transientJiraFailures = map[JiraFailureKind]bool{
 	JiraTimeout:     true,
@@ -32,14 +36,20 @@ var transientJiraFailures = map[JiraFailureKind]bool{
 // Transient reports whether retrying the same request may succeed.
 func (k JiraFailureKind) Transient() bool { return transientJiraFailures[k] }
 
-// JiraError is a failed fetch of one Jira issue. Body and Err are already truncated and
-// redacted by the client: this type only renders what it is given and never sees a
-// credential.
+// JiraError is a failed fetch of one Jira issue, or a failed creation of a child of it. Body
+// and Err are already truncated and redacted by the client: this type only renders what it is
+// given and never sees a credential.
 type JiraError struct {
-	Key        string
+	// Key is the issue fetched; for a creation, the parent of the child.
+	Key string
+	// Op is "" for a fetch and JiraOpCreate for a creation.
+	Op         string
 	Kind       JiraFailureKind
 	StatusCode int // 0 when no HTTP response was received
 	Attempts   int // total HTTP attempts made, including retries
+	// NotSent is set when the request was never handed to the transport, so nothing can have
+	// reached Jira.
+	NotSent bool
 	// Detail completes the message for the kind: the credential variable names (auth,
 	// not_found), the redirect's host (redirect), the attempt timeout (timeout), or the
 	// JSON path and the problem (invalid_response).
@@ -77,6 +87,11 @@ func (e *JiraError) headline() string {
 	if key == "" {
 		key = "the issue"
 	}
+	if e.Op == JiraOpCreate {
+		if h, ok := e.createHeadline(key); ok {
+			return h
+		}
+	}
 	switch e.Kind {
 	case JiraAuth:
 		if e.Detail != "" {
@@ -113,4 +128,30 @@ func (e *JiraError) headline() string {
 		return fmt.Sprintf("fetching %s from Jira was cancelled", key)
 	}
 	return fmt.Sprintf("fetching %s from Jira failed: %s", key, e.Kind)
+}
+
+// createHeadline words the failures that mean something else for a creation than for a fetch;
+// the others read the same and fall through to headline.
+func (e *JiraError) createHeadline(parent string) (string, bool) {
+	switch e.Kind {
+	case JiraNotFound:
+		who := "this account"
+		if e.Detail != "" {
+			who = "the account behind " + e.Detail
+		}
+		return fmt.Sprintf("Jira did not let %s create a child of %s: the project, the issue type or the parent does not exist, or the account may not create issues there", who, parent), true
+	case JiraRejected:
+		if e.Detail != "" {
+			return fmt.Sprintf("Jira rejected the child issue of %s: %s", parent, e.Detail), true
+		}
+		return fmt.Sprintf("Jira rejected the child issue of %s", parent), true
+	case JiraInvalidResponse:
+		if e.Detail != "" {
+			return fmt.Sprintf("Jira answered the creation of a child of %s with an unexpected response: %s", parent, e.Detail), true
+		}
+		return fmt.Sprintf("Jira answered the creation of a child of %s with an unexpected response", parent), true
+	case JiraCancelled:
+		return fmt.Sprintf("creating a child issue of %s was cancelled", parent), true
+	}
+	return "", false
 }
