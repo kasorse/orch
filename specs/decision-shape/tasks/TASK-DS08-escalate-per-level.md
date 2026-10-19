@@ -51,5 +51,7 @@ Built as planned, except as listed. `scripts/check.sh` (root and `bench/`) passe
   nested one instead of the validator.
 - **The plan-files rule only on the first attempt.** A retry starts from the failure and the
   run's diff stat; pointing it back at the plan's files would compete with that.
-- **Not measured yet.** Whether sonnet with a plan holds the pass rate of opus on complex
-  tasks is for a bench config (next to `bench/configs/F.yaml`), not this task.
+- **Not measured yet.** Whether the common model with a plan holds the pass rate of opus on
+  complex tasks is for the bench: configs G (complex implement on opus/high) and H (complex on
+  the common model at high effort, its fix escalated to opus/high), compared with
+  `--baseline G` (`bench/README.md`). Both hold to B but for `actions.implement.by_complexity`.
