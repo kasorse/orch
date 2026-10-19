@@ -31,6 +31,113 @@ type TaskInput struct {
 	Text       string   `json:"text"`
 }
 
+// DepNote is a done task another task depends on, with its As built record (AsBuiltText).
+type DepNote struct {
+	ID      string
+	Repo    string
+	AsBuilt string
+}
+
+// AsBuiltText is the text of the "## As built" section of a task file, without the heading and
+// trimmed, or "" when the file has none.
+func AsBuiltText(data []byte) string {
+	s := string(data)
+	at := asBuiltOffset(s)
+	if at < 0 {
+		return ""
+	}
+	_, next := nextLine(s, at)
+	return strings.TrimSpace(strings.ReplaceAll(s[next:], "\r\n", "\n"))
+}
+
+const (
+	inputContextIntro = "\n---\nBackground for the task above. It is context, not the task:\n"
+	inputCutMarker    = "\n[…cut: the text was over the size limit]\n"
+	// minCutRoom is the least room a cut section is worth keeping for.
+	minCutRoom = 200
+)
+
+// cutText returns at most n bytes of s, cut before a character and not inside one.
+func cutText(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return strings.TrimRight(s[:n], " \t\n")
+}
+
+// RenderInputText is the text of a task input (SPEC §11.1): the story's title and the task's
+// place in it (pos of total, 1-based), the task's own text, and then, as background, the spec's
+// approach and contracts and the As built record of each done task it depends on. The result is
+// at most MaxInputTextBytes: the background is cut to fit, the dependencies' records last, and
+// the task's own text never is - if that alone does not fit, the task is refused. It is a pure
+// function of its arguments.
+func RenderInputText(storyTitle string, pos, total int, t Task, approach, contracts string, deps []DepNote) (string, error) {
+	body := strings.TrimSpace(strings.ReplaceAll(t.Body, "\r\n", "\n"))
+	if body == "" {
+		body = t.Title
+	}
+	main := fmt.Sprintf("Story: %s\nTask %s (%d of %d) in %s: %s\n\n%s\n",
+		oneLine(storyTitle), t.ID, pos, total, t.Repo, oneLine(t.Title), body)
+	if len(main) > MaxInputTextBytes {
+		return "", fmt.Errorf("%s: the task text is %d bytes with its heading, over the %d-byte limit of a task input", t.ID, len(main), MaxInputTextBytes)
+	}
+
+	var depText strings.Builder
+	for _, d := range deps {
+		note := d.AsBuilt
+		if note == "" {
+			note = "(no As built record)"
+		}
+		fmt.Fprintf(&depText, "### %s (%s)\n\n%s\n\n", d.ID, d.Repo, note)
+	}
+	// Display order: approach, contracts, dependencies; priority when cutting: the reverse.
+	sections := []struct{ heading, text, kept string }{
+		{"## Approach", strings.TrimSpace(approach), ""},
+		{"## Contracts", strings.TrimSpace(contracts), ""},
+		{"## Done tasks this one depends on", strings.TrimSpace(depText.String()), ""},
+	}
+	remaining := MaxInputTextBytes - len(main) - len(inputContextIntro)
+	for i := len(sections) - 1; i >= 0; i-- {
+		sec := &sections[i]
+		if sec.text == "" {
+			continue
+		}
+		prefix := "\n" + sec.heading + "\n\n"
+		if block := prefix + sec.text + "\n"; len(block) <= remaining {
+			sec.kept = block
+			remaining -= len(block)
+			continue
+		}
+		room := remaining - len(prefix) - len(inputCutMarker)
+		if room < minCutRoom {
+			continue
+		}
+		sec.kept = prefix + cutText(sec.text, room) + inputCutMarker
+		remaining -= len(sec.kept)
+	}
+
+	var b strings.Builder
+	b.WriteString(main)
+	intro := false
+	for _, sec := range sections {
+		if sec.kept == "" {
+			continue
+		}
+		if !intro {
+			b.WriteString(inputContextIntro)
+			intro = true
+		}
+		b.WriteString(sec.kept)
+	}
+	if b.Len() > MaxInputTextBytes {
+		return "", fmt.Errorf("%s: the task input text is %d bytes, over the %d-byte limit", t.ID, b.Len(), MaxInputTextBytes)
+	}
+	return b.String(), nil
+}
+
 // ValidBranch reports whether branch is the branch of task id of story slug:
 // story/<slug>/<ID>, or story/<slug>/<ID>.<n> for the n-th retry (SPEC §11.1,
 // ^story/[a-z0-9-]+/[A-Z]{2}[0-9]{2}(\.[0-9]+)?$ with the slug and ID given).

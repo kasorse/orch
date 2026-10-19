@@ -191,6 +191,87 @@ func (r *Repository) CommitExists(ctx context.Context, ref string) (bool, error)
 	return result.ExitCode == 0, nil
 }
 
+// HasCommit reports whether HEAD names a commit: false in a repository without one.
+func (r *Repository) HasCommit(ctx context.Context) (bool, error) {
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"rev-parse", "--verify", "--quiet", "HEAD^{commit}"}, WorkingDir: r.Dir})
+	if err != nil {
+		return false, &apperr.RepositoryError{Msg: "failed to run git rev-parse", Err: err}
+	}
+	return result.ExitCode == 0, nil
+}
+
+// safeBranchName reports whether name can be put after "refs/heads/" as one plain ref: it holds
+// none of the characters git reads as a revision expression, a pattern or an option, and no
+// "..". Callers pass names built from a slug and an ID or taken from git itself; this keeps a
+// wrong one from becoming anything else.
+func safeBranchName(name string) bool {
+	if name == "" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") ||
+		strings.Contains(name, "..") || strings.Contains(name, "@{") || strings.Contains(name, "//") {
+		return false
+	}
+	for _, c := range name {
+		if c < 0x21 || c == 0x7f || strings.ContainsRune("~^:?*[\\", c) {
+			return false
+		}
+	}
+	return true
+}
+
+// BranchTip returns the commit the local branch points at, and false when there is no such
+// branch.
+func (r *Repository) BranchTip(ctx context.Context, branch string) (string, bool, error) {
+	if !safeBranchName(branch) {
+		return "", false, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a branch name", branch)}
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"rev-parse", "--verify", "--quiet", "refs/heads/" + branch + "^{commit}"}, WorkingDir: r.Dir})
+	if err != nil {
+		return "", false, &apperr.RepositoryError{Msg: "failed to run git rev-parse", Err: err}
+	}
+	if result.ExitCode != 0 {
+		return "", false, nil
+	}
+	return strings.TrimSpace(result.Stdout), true, nil
+}
+
+// Branches lists the local branches under prefix (the branch names that start with
+// "prefix/"), sorted by name.
+func (r *Repository) Branches(ctx context.Context, prefix string) ([]string, error) {
+	if !safeBranchName(prefix) {
+		return nil, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a branch prefix", prefix)}
+	}
+	out, err := r.git(ctx, "for-each-ref", "--format=%(refname)", "--sort=refname", "refs/heads/"+prefix+"/")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "refs/heads/"); ok && strings.HasPrefix(name, prefix+"/") {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// CommitsBeyond counts the commits of the local branch that are not reachable from base, a
+// full commit SHA: how far the branch has gone past where it started.
+func (r *Repository) CommitsBeyond(ctx context.Context, base, branch string) (int, error) {
+	if !isFullSHA(base) {
+		return 0, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a full commit SHA", base)}
+	}
+	if !safeBranchName(branch) {
+		return 0, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a branch name", branch)}
+	}
+	out, err := r.git(ctx, "rev-list", "--count", base+"..refs/heads/"+branch)
+	if err != nil {
+		return 0, err
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || n < 0 {
+		return 0, &apperr.RepositoryError{Msg: fmt.Sprintf("git rev-list --count answered %q", strings.TrimSpace(out))}
+	}
+	return n, nil
+}
+
 // isFullSHA reports whether s is a full SHA-1 or SHA-256 object name in lowercase hex.
 func isFullSHA(s string) bool {
 	if len(s) != 40 && len(s) != 64 {

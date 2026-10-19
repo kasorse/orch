@@ -305,7 +305,10 @@ and keep the ones no other such ancestor depends on:
 
 - **none** → T is based on R's story base: the commit of the branch checked out in R at the
   story's first start, recorded with the branch's name in `story.json: bases.R`;
-- **one** (A) → T is based on A's commit: its branch tip, stacked;
+- **one** (A) → T is based on A's commit: its branch tip, stacked. The commit is the one
+  recorded in `story.json` when A was done (the commit As built names), not the branch's tip
+  at T's dispatch: a commit an operator added to A's branch afterwards is not in T's base, and
+  the operator rebases the stack with git (§9.3);
 - **more than one** → a spec error: `RF05 needs RF02 and RF03 in billing on different branches;
   make one depend on the other`. Git could merge them; deciding how is not the orchestrator's
   job.
@@ -366,7 +369,15 @@ a non-terminal stdin go on. That answer and the command itself are the approval.
     way to edit a dispatched task). Dependents then stack on the retry's branch.
 - Ctrl-C reaches the child; its run is `stopped`, the task too.
 - Before every dispatch, `story.max_cost_usd` against the recorded total (the planning calls and
-  every child's `outcome.usage`), fail closed.
+  every child's `outcome.usage`), fail closed. A task's `cost_usd` is its current run's
+  `outcome.usage.cost_usd`, replaced and not added when that run is resumed (its outcome is
+  computed over the whole history); the cost of the runs a `--retry` left behind moves to
+  `abandoned_cost_usd`. A finished run without an outcome has no known cost: with a budget set
+  the story stops rather than count it as 0. A call that reported no cost (a partial one) counts
+  what it reported, so the total is then a lower bound.
+- A `story run` that dies between a child's end and the save of its result leaves the task
+  `running`; the next one settles it before anything is dispatched, from the run it finds (the
+  same lookup as after a child), and does not write As built twice.
 
 ### 10.3 After each task
 
@@ -487,14 +498,17 @@ PAY-1`. `story plan --jira` accepts any type.
 
 | file | content |
 |---|---|
-| `story.json` | slug, spec dir, `jira_parent`, `created_at`, `approved_at`, `services` {name: path}, `bases` {name: {branch, sha}}, `status`, per task: `status`, `file_sha256`, `attempt`, `run_id`, `repo`, `branch`, `base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`; `calls` (survey, specify: usage, cost) |
+| `story.json` | slug, spec dir, `jira_parent`, `created_at`, `approved_at`, `services` {name: path}, `bases` {name: {branch, sha}}, `status`, per task: `status`, `file_sha256`, `attempt`, `run_id`, `repo`, `branch`, `base_ref`, `commit`, `jira`, `jira_intent` (a flag), `cost_usd`, `abandoned_cost_usd`; `calls` (survey, specify: usage, cost) |
 | `ticket.json` | the fetched issue (`--jira`), an audit record |
 | `artifacts/survey-<repo>.json`, `artifacts/specify.json` | the prompts as sent and the answers |
 | `logs/survey-<repo>.*`, `logs/specify.*` | the calls' output |
 | `tasks/<ID>.json` | the child's task input (§11.1) |
 
 `story.json` is validated strictly on load (paths derived, never read; run IDs and SHAs by
-format; a task's `run_id` is loaded only from its repository's runs directory). The story
+format; a task's `run_id` is loaded only from its repository's runs directory). Every field
+story run adds to what story plan wrote is optional, so a plan-time record loads; a task's
+`branch` must be `story/<slug>/<ID>` for attempt 1 and `story/<slug>/<ID>.<attempt>` after,
+and a task that was dispatched needs `approved_at`. The story
 directory is `flock`ed by the one `story run` that owns it. A `story plan` that does not reach a
 spec keeps its directory as `.plan-<id>` for the operator.
 

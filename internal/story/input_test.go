@@ -4,9 +4,87 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const goodSHA = "8d0e4b2c1f3a5b7d9e0f1a2b3c4d5e6f7a8b9c0d"
+
+func renderTask() Task {
+	return Task{ID: "RF02", Repo: "gateway", Title: "Expose partial refunds", DependsOn: []string{"RF01"},
+		Body: "\n## Goal\n\nThe gateway passes an amount.\n\n## Acceptance\n\n- the API takes an amount\n"}
+}
+
+func TestRenderInputText(t *testing.T) {
+	deps := []DepNote{{ID: "RF01", Repo: "billing", AsBuilt: "Run `3f2a` in billing: completed."}}
+	got, err := RenderInputText("Partial\nrefunds", 2, 6, renderTask(), "Billing stores it.", "POST /v1/refunds", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Story: Partial refunds\n" +
+		"Task RF02 (2 of 6) in gateway: Expose partial refunds\n\n" +
+		"## Goal\n\nThe gateway passes an amount.\n\n## Acceptance\n\n- the API takes an amount\n" +
+		"\n---\nBackground for the task above. It is context, not the task:\n" +
+		"\n## Approach\n\nBilling stores it.\n" +
+		"\n## Contracts\n\nPOST /v1/refunds\n" +
+		"\n## Done tasks this one depends on\n\n### RF01 (billing)\n\nRun `3f2a` in billing: completed.\n"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	again, _ := RenderInputText("Partial\nrefunds", 2, 6, renderTask(), "Billing stores it.", "POST /v1/refunds", deps)
+	if again != got {
+		t.Error("the text is not deterministic")
+	}
+
+	// No background at all: the task alone, with no intro.
+	alone, err := RenderInputText("S", 1, 2, renderTask(), "", " \n", nil)
+	if err != nil || strings.Contains(alone, "Background") {
+		t.Errorf("alone = %q, %v", alone, err)
+	}
+}
+
+func TestRenderInputText_Bounded(t *testing.T) {
+	task := renderTask()
+	task.Body = "\n" + strings.Repeat("x", MaxBodyBytes-2) + "\n"
+
+	// The background is cut to fit, the dependencies' records first to go, the task never.
+	big := strings.Repeat("é", 20<<10)
+	deps := []DepNote{{ID: "RF01", Repo: "billing", AsBuilt: big}}
+	got, err := RenderInputText("S", 1, 2, task, big, big, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > MaxInputTextBytes {
+		t.Fatalf("text is %d bytes, over %d", len(got), MaxInputTextBytes)
+	}
+	if !strings.Contains(got, strings.Repeat("x", MaxBodyBytes-2)) {
+		t.Error("the task's own text was cut")
+	}
+	if !strings.Contains(got, "[…cut") || !utf8.ValidString(got) {
+		t.Errorf("no cut marker, or a character was cut in two (valid UTF-8: %v)", utf8.ValidString(got))
+	}
+	if !strings.Contains(got, "### RF01 (billing)") {
+		t.Error("the dependency's record, first in priority, is missing")
+	}
+
+	// A task that does not fit alone is refused, naming it.
+	task.Body = strings.Repeat("y", MaxInputTextBytes)
+	if _, err := RenderInputText("S", 1, 2, task, "", "", nil); err == nil || !strings.Contains(err.Error(), "RF02") {
+		t.Errorf("an oversized task: %v", err)
+	}
+}
+
+func TestAsBuiltText(t *testing.T) {
+	file := []byte("---\nid: RF01\n---\n# RF01 — T\n\nbody\n\n## As built (2026-10-20)\n\nRun `x` in billing.\nBranch `b`.\n")
+	if got := AsBuiltText(file); got != "Run `x` in billing.\nBranch `b`." {
+		t.Errorf("AsBuiltText = %q", got)
+	}
+	if got := AsBuiltText([]byte("# RF01 — T\n\nbody\n")); got != "" {
+		t.Errorf("a file without the section gave %q", got)
+	}
+	if got := AsBuiltText([]byte("x\r\n## As built\r\n\r\nline\r\n")); got != "line" {
+		t.Errorf("CRLF: %q", got)
+	}
+}
 
 func goodInput() map[string]any {
 	return map[string]any{

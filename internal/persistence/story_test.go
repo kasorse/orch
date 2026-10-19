@@ -159,7 +159,7 @@ func TestLoadStoryRecord_Refuses(t *testing.T) {
 		change func(m map[string]any)
 		want   string
 	}{
-		{"unknown key", func(m map[string]any) { m["bases"] = map[string]any{} }, "unknown field"},
+		{"unknown key", func(m map[string]any) { m["extra"] = map[string]any{} }, "unknown field"},
 		{"bad slug", func(m map[string]any) { m["slug"] = "../x" }, "slug"},
 		{"absolute spec dir", func(m map[string]any) { m["spec_dir"] = "/specs/refunds" }, "spec_dir"},
 		{"spec dir outside", func(m map[string]any) { m["spec_dir"] = "../refunds" }, "spec_dir"},
@@ -198,6 +198,255 @@ func TestLoadStoryRecord_Refuses(t *testing.T) {
 				t.Errorf("got %v, want an error about %q", err, tc.want)
 			}
 		})
+	}
+}
+
+const (
+	testSHA  = "8d0e4b2a1c9f2e7d3f2a9c1e0b4d6a8c5e7f9a1b"
+	testSHA2 = "1c9f2e7d3f2a9c1e0b4d6a8c5e7f9a1b8d0e4b2a"
+	testRun  = "3f2a9c1e-0b4d-4a8c-9e7f-9a1b8d0e4b2a"
+)
+
+// runningRecord is a record of a story under way: RF01 done, RF02 failed on its first attempt.
+func runningRecord() StoryRecord {
+	r := validRecord()
+	approved := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	r.ApprovedAt = &approved
+	r.Status = story.StatusFailed
+	r.Bases = map[string]StoryBase{
+		"billing": {Branch: "main", SHA: testSHA},
+		"gateway": {Branch: "main", SHA: testSHA2},
+	}
+	hash := strings.Repeat("ab", 32)
+	r.Tasks = map[string]StoryTask{
+		"RF01": {Status: story.TaskDone, FileSHA256: hash, Attempt: 1, RunID: testRun, Repo: "billing",
+			Branch: "story/refunds/RF01", BaseRef: testSHA, Commit: testSHA2, Jira: "PAY-2", CostUSD: 0.42},
+		"RF02": {Status: story.TaskFailed, FileSHA256: hash, Attempt: 2, Repo: "gateway",
+			Branch: "story/refunds/RF02.2", BaseRef: testSHA2, CostUSD: 0.1, AbandonedCostUSD: 0.3},
+		"RF03": {Status: story.TaskPending},
+	}
+	return r
+}
+
+// A plan-time record (no approved_at, bases or tasks) still loads, and a full one round-trips.
+func TestStoryRecord_SaveLoadFull(t *testing.T) {
+	dir := t.TempDir()
+	plain := validRecord()
+	if err := SaveStoryRecord(dir, plain); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStoryRecord(filepath.Join(dir, "story.json"))
+	if err != nil || !reflect.DeepEqual(got, plain) {
+		t.Fatalf("plan-time record: %+v, %v", got, err)
+	}
+
+	want := runningRecord()
+	if err := SaveStoryRecord(dir, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = LoadStoryRecord(filepath.Join(dir, "story.json"))
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("loaded\n%+v, %v\nwant\n%+v", got, err, want)
+	}
+	// The planning calls (0.01), RF01 (0.42) and RF02's run (0.1) and abandoned run (0.3).
+	if cost := want.TotalCostUSD(); cost < 0.829 || cost > 0.831 {
+		t.Errorf("TotalCostUSD = %v, want 0.83", cost)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("SaveStoryRecord left %d entries in the directory, want story.json alone", len(entries))
+	}
+}
+
+func TestStoryRecord_Refuses(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(r *StoryRecord)
+		want   string
+	}{
+		{"base with a symbolic ref", func(r *StoryRecord) { r.Bases["billing"] = StoryBase{Branch: "main", SHA: "HEAD"} }, "bases.billing"},
+		{"base of another service", func(r *StoryRecord) { r.Bases["web"] = StoryBase{Branch: "main", SHA: testSHA} }, "bases"},
+		{"base branch as an option", func(r *StoryRecord) { r.Bases["billing"] = StoryBase{Branch: "-D", SHA: testSHA} }, "bases.billing"},
+		{"task ID", func(r *StoryRecord) { r.Tasks["rf01"] = StoryTask{Status: story.TaskPending} }, "tasks"},
+		{"task status", func(r *StoryRecord) { r.Tasks["RF03"] = StoryTask{Status: "queued"} }, "tasks.RF03"},
+		{"non-SHA base_ref", func(r *StoryRecord) {
+			t := r.Tasks["RF02"]
+			t.BaseRef = "main"
+			r.Tasks["RF02"] = t
+		}, "base_ref"},
+		{"branch of another task", func(r *StoryRecord) {
+			t := r.Tasks["RF02"]
+			t.Branch = "story/refunds/RF03"
+			r.Tasks["RF02"] = t
+		}, "branch"},
+		{"branch of another attempt", func(r *StoryRecord) {
+			t := r.Tasks["RF02"]
+			t.Branch = "story/refunds/RF02"
+			r.Tasks["RF02"] = t
+		}, "branch"},
+		{"branch of another story", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Branch = "story/other/RF01"
+			r.Tasks["RF01"] = t
+		}, "branch"},
+		{"bad run id", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.RunID = "../../x"
+			r.Tasks["RF01"] = t
+		}, "run_id"},
+		{"bad file hash", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.FileSHA256 = "abc"
+			r.Tasks["RF01"] = t
+		}, "file_sha256"},
+		{"repo that is no service", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Repo = "web"
+			r.Tasks["RF01"] = t
+		}, "repo"},
+		{"bad jira", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Jira = "pay-2"
+			r.Tasks["RF01"] = t
+		}, "jira"},
+		{"negative cost", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.CostUSD = -1
+			r.Tasks["RF01"] = t
+		}, "cost_usd"},
+		{"done without a commit", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Commit = ""
+			r.Tasks["RF01"] = t
+		}, "commit"},
+		{"dispatched without an attempt", func(r *StoryRecord) {
+			t := r.Tasks["RF02"]
+			t.Attempt = 0
+			t.Branch = ""
+			r.Tasks["RF02"] = t
+		}, "attempt"},
+		{"dispatched without approval", func(r *StoryRecord) { r.ApprovedAt = nil }, "approved_at"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := runningRecord()
+			tc.change(&r)
+			if err := r.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate() = %v, want an error about %q", err, tc.want)
+			}
+			if err := SaveStoryRecord(t.TempDir(), r); err == nil {
+				t.Error("SaveStoryRecord wrote a record Validate refuses")
+			}
+		})
+	}
+
+	// A key story run does not know is refused on load.
+	dir := t.TempDir()
+	if err := SaveStoryRecord(dir, runningRecord()); err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	readJSON(t, filepath.Join(dir, "story.json"), &m)
+	m["tasks"].(map[string]any)["RF01"].(map[string]any)["path"] = "/etc/passwd"
+	data, _ := json.Marshal(m)
+	if err := os.WriteFile(filepath.Join(dir, "story.json"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadStoryRecord(filepath.Join(dir, "story.json")); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("a task with an unknown key: %v", err)
+	}
+}
+
+func TestStoryTaskBranch(t *testing.T) {
+	for attempt, want := range map[int]string{0: "story/refunds/RF02", 1: "story/refunds/RF02", 2: "story/refunds/RF02.2", 11: "story/refunds/RF02.11"} {
+		if got := StoryTaskBranch("refunds", "RF02", attempt); got != want {
+			t.Errorf("StoryTaskBranch(%d) = %s, want %s", attempt, got, want)
+		}
+		if !story.ValidBranch(want, "refunds", "RF02") {
+			t.Errorf("%s is not a valid branch", want)
+		}
+	}
+}
+
+func TestStoryDir(t *testing.T) {
+	dir, err := StoryDir("/home/op/platform", "refunds")
+	if err != nil || dir != "/home/op/platform/.orchestrator/stories/refunds" {
+		t.Errorf("StoryDir = %q, %v", dir, err)
+	}
+	for _, slug := range []string{"", "..", "../x", "Refunds", "a/b", ".plan-x"} {
+		if _, err := StoryDir("/home", slug); err == nil {
+			t.Errorf("StoryDir accepted the slug %q", slug)
+		}
+	}
+}
+
+func TestLockStory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "stories", "refunds")
+	unlock, err := LockStory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("LockStory did not create the story directory: %v", err)
+	}
+	if _, err := LockStory(dir); err == nil || !strings.Contains(err.Error(), "being run by another orchestrator process") {
+		t.Fatalf("a second holder: %v", err)
+	}
+	// The lock is on the directory: the files in it can be rewritten while it is held.
+	if err := SaveStoryRecord(dir, validRecord()); err != nil {
+		t.Errorf("SaveStoryRecord under the lock: %v", err)
+	}
+	unlock()
+	unlock() // twice is harmless
+	again, err := LockStory(dir)
+	if err != nil {
+		t.Fatalf("after unlock: %v", err)
+	}
+	again()
+}
+
+func TestWriteStoryTaskInput(t *testing.T) {
+	dir := t.TempDir()
+	in := story.TaskInput{
+		Story: "refunds", Task: "RF02", Attempt: 1, Branch: "story/refunds/RF02", BaseRef: testSHA,
+		BaseBranch: "main", Acceptance: []string{"a"}, Text: "do it",
+	}
+	file, err := WriteStoryTaskInput(dir, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file != filepath.Join(dir, "tasks", "RF02.json") {
+		t.Errorf("path = %s", file)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := story.ParseTaskInput(data)
+	if err != nil || !reflect.DeepEqual(got, in) {
+		t.Errorf("read back %+v, %v", got, err)
+	}
+	bad := in
+	bad.BaseRef = "main"
+	if _, err := WriteStoryTaskInput(dir, bad); err == nil {
+		t.Error("an input the child would refuse was written")
+	}
+}
+
+func TestReplaceFile_KeepsTheMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "TASK.md")
+	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReplaceFile(path, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("mode = %v, %v", info.Mode(), err)
+	}
+	if data, _ := os.ReadFile(path); string(data) != "new" {
+		t.Errorf("content = %q", data)
 	}
 }
 

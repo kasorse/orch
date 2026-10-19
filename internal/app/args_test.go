@@ -174,15 +174,15 @@ func TestRun_JiraOnlyWithRun(t *testing.T) {
 	}
 }
 
-// --claude-auth belongs to run, resume and validate: a usage error elsewhere (corner case 13).
+// --claude-auth belongs to run, resume, validate and story run: a usage error elsewhere (corner case 13).
 func TestRun_ClaudeAuthOnlyWithRunResumeValidate(t *testing.T) {
-	for _, command := range [][]string{{"version"}, {"decisions", "report"}, {"runs", "report"}} {
-		t.Run(command[0], func(t *testing.T) {
+	for _, command := range [][]string{{"version"}, {"decisions", "report"}, {"runs", "report"}, {"story", "plan", "x"}, {"story", "status", "d"}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
 			var out bytes.Buffer
 			args := append([]string{"--config", "/nonexistent.yaml", "--claude-auth", "api"}, command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume and validate" {
+			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume, validate and story run" {
 				t.Fatalf("got %v, want the --claude-auth usage error", err)
 			}
 		})
@@ -222,14 +222,27 @@ func TestRun_RepoOnlyWithStoryPlan(t *testing.T) {
 // story takes the plan subcommand and, without --jira, a task: anything else is its usage,
 // before any config is read.
 func TestRun_StoryUsage(t *testing.T) {
-	for _, command := range [][]string{{"story"}, {"story", "frobnicate"}, {"story", "plan"}, {"story", "plan", "  "}} {
-		t.Run(strings.Join(command, " "), func(t *testing.T) {
+	cases := []struct {
+		command []string
+		want    string
+	}{
+		{[]string{"story"}, storyUsage},
+		{[]string{"story", "frobnicate"}, storyUsage},
+		{[]string{"story", "plan"}, storyPlanUsage},
+		{[]string{"story", "plan", "  "}, storyPlanUsage},
+		{[]string{"story", "run"}, storyRunUsage},
+		{[]string{"story", "run", "specs/a", "specs/b"}, storyRunUsage},
+		{[]string{"story", "status"}, storyStatusUsage},
+		{[]string{"story", "status", "specs/a", "specs/b"}, storyStatusUsage},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.command, " "), func(t *testing.T) {
 			var out bytes.Buffer
-			args := append([]string{"--config", "/nonexistent.yaml"}, command...)
+			args := append([]string{"--config", "/nonexistent.yaml"}, tc.command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != storyPlanUsage {
-				t.Fatalf("got %v, want the story plan usage", err)
+			if !errors.As(err, &cerr) || err.Error() != tc.want {
+				t.Fatalf("got %v, want %q", err, tc.want)
 			}
 			if out.Len() != 0 {
 				t.Errorf("printed %q", out.String())
@@ -237,8 +250,98 @@ func TestRun_StoryUsage(t *testing.T) {
 		})
 	}
 	err := Run(context.Background(), nil, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), `story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"`) {
-		t.Errorf("the general usage lacks story plan: %v", err)
+	for _, want := range []string{`story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"`, `story run <spec-dir> [--retry <ID>]`, `story status <spec-dir>`} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("the general usage lacks %q: %v", want, err)
+		}
+	}
+}
+
+// story run and story status take one directory; --retry, a task ID, belongs to story run alone
+// and --mode and --claude-auth pass through it.
+func TestParseArgs_StoryRun(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want cliArgs
+	}{
+		{"plain", []string{"story", "run", "specs/refunds"},
+			cliArgs{configPath: defaultConfigPath, rest: []string{"story", "run", "specs/refunds"}}},
+		{"retry separate, any position", []string{"--retry", "RF02", "story", "run", "specs/refunds"},
+			cliArgs{configPath: defaultConfigPath, retry: "RF02", rest: []string{"story", "run", "specs/refunds"}}},
+		{"retry equals, mode, claude-auth, config", []string{"story", "run", "specs/refunds", "--retry=RF02", "--mode", "auto", "--claude-auth=login", "--config", "c.yaml"},
+			cliArgs{configPath: "c.yaml", configGiven: true, mode: domain.ModeAuto, claudeAuth: "login", retry: "RF02", rest: []string{"story", "run", "specs/refunds"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseArgs(tc.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.configPath != tc.want.configPath || got.configGiven != tc.want.configGiven || got.mode != tc.want.mode ||
+				got.claudeAuth != tc.want.claudeAuth || got.retry != tc.want.retry || !slices.Equal(got.rest, tc.want.rest) {
+				t.Errorf("parseArgs(%q) = %+v, want %+v", tc.args, got, tc.want)
+			}
+		})
+	}
+
+	bad := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"retry twice", []string{"story", "run", "d", "--retry", "RF01", "--retry=RF02"}, "--retry given twice"},
+		{"retry missing value", []string{"story", "run", "d", "--retry"}, "--retry requires a value"},
+		{"retry bad ID", []string{"story", "run", "d", "--retry", "rf2"}, "--retry requires a task ID"},
+		{"retry a branch", []string{"story", "run", "d", "--retry=../RF02"}, "--retry requires a task ID"},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseArgs(tc.args); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("parseArgs(%q) error = %v, want one containing %q", tc.args, err, tc.want)
+			}
+		})
+	}
+}
+
+// --retry is a usage error with any command but story run, before any config is read.
+func TestRun_RetryOnlyWithStoryRun(t *testing.T) {
+	for _, command := range [][]string{{"run", "x"}, {"validate"}, {"story", "plan", "x"}, {"story", "status", "specs/x"}} {
+		t.Run(strings.Join(command, " "), func(t *testing.T) {
+			var out bytes.Buffer
+			args := append([]string{"--config", "/nonexistent.yaml", "--retry", "RF02"}, command...)
+			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+			var cerr *apperr.ConfigError
+			if !errors.As(err, &cerr) || err.Error() != "--retry is only valid with story run" {
+				t.Fatalf("got %v, want the --retry usage error", err)
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed %q", out.String())
+			}
+		})
+	}
+}
+
+// --claude-auth passes through story run (to the children it spawns) and --jira and --repo do not.
+func TestRun_StoryRunFlags(t *testing.T) {
+	flags := []struct {
+		flag, value, want string
+	}{
+		{"--jira", "PMC-1", "--jira is only valid with run and story plan"},
+		{"--repo", "billing", "--repo is only valid with story plan"},
+	}
+	for _, tc := range flags {
+		var out bytes.Buffer
+		err := Run(context.Background(), []string{"--config", "/nonexistent.yaml", tc.flag, tc.value, "story", "run", "specs/x"}, strings.NewReader(""), &out, &out)
+		if err == nil || err.Error() != tc.want {
+			t.Errorf("%s with story run: %v, want %q", tc.flag, err, tc.want)
+		}
+	}
+	// With a valid shape the command starts: the missing config is what stops it, not the flag.
+	var out bytes.Buffer
+	err := Run(context.Background(), []string{"--config", "/nonexistent.yaml", "--claude-auth", "login", "--mode", "auto", "story", "run", t.TempDir()}, strings.NewReader(""), &out, &out)
+	if err == nil || strings.Contains(err.Error(), "only valid") {
+		t.Errorf("story run with --claude-auth and --mode: %v", err)
 	}
 }
 

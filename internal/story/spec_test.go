@@ -42,6 +42,40 @@ func TestRenderSpecGolden(t *testing.T) {
 	}
 }
 
+// ParseSpec reads back what RenderSpec wrote, and tolerates a hand-written file.
+func TestParseSpec(t *testing.T) {
+	rendered := RenderSpec("Partial\nrefunds", SpecText{
+		Problem:   "Refunds are all or nothing.",
+		Approach:  "Billing stores the amount.\n\n### Billing\n\n```\n## Not a section\n```\n",
+		Contracts: "POST /v1/refunds takes an amount.",
+	})
+	title, approach, contracts := ParseSpec(rendered)
+	if title != "Partial refunds" {
+		t.Errorf("title = %q", title)
+	}
+	if want := "Billing stores the amount.\n\n### Billing\n\n```\n## Not a section\n```"; approach != want {
+		t.Errorf("approach = %q, want %q", approach, want)
+	}
+	if contracts != "POST /v1/refunds takes an amount." {
+		t.Errorf("contracts = %q", contracts)
+	}
+
+	// RenderSpec marks an empty section with a dash.
+	_, approach, contracts = ParseSpec(RenderSpec("T", SpecText{Approach: "a"}))
+	if approach != "a" || contracts != "" {
+		t.Errorf("approach = %q, contracts = %q; want a and nothing", approach, contracts)
+	}
+
+	// A hand-written file: no title, CRLF, only some sections.
+	title, approach, contracts = ParseSpec([]byte("## Approach\r\nDo it.\r\n\r\n## Risks\r\nMany.\r\n"))
+	if title != "" || approach != "Do it." || contracts != "" {
+		t.Errorf("hand-written: %q, %q, %q", title, approach, contracts)
+	}
+	if title, approach, contracts = ParseSpec(nil); title != "" || approach != "" || contracts != "" {
+		t.Errorf("empty file: %q, %q, %q", title, approach, contracts)
+	}
+}
+
 func TestTaskFileName(t *testing.T) {
 	cases := []struct {
 		id, title, want string

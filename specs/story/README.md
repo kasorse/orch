@@ -5,7 +5,9 @@ done (`story` and `jira.create` config, the service finder), ST03 done (the surv
 calls, strict answers), ST04 done (`orchestrator story plan`: the spec on disk, the one-task
 case, `.orchestrator/stories/`, `story.json`), ST05 done (`run --story-task`: the task input, the
 worktree on its branch and base, development forced, the task's criteria, the commit message;
-`scripts/check.sh` is the run's test step); the rest not started. Owner's
+`scripts/check.sh` is the run's test step), ST06 done (`orchestrator story run` and `story status`:
+the lock, the checks, the ordered children, resume, retry, As built, the budget); the rest not
+started. Owner's
 decisions D1–D7 and author's defaults A1–A11 in `SPEC.md` §19–§20. Builds on
 [`specs/worktree/`](../worktree/README.md), which comes first.
 
@@ -39,7 +41,7 @@ every ordinary run looks, for a later calibration, and decides nothing.
 | [ST03](tasks/TASK-ST03-survey-specify.md) | survey and specify: prompts, calls, strict answers, logs ✓ | M–L | ST02 |
 | [ST04](tasks/TASK-ST04-story-plan.md) | `story plan`: writing the spec, the one-task case, `.plan-<id>` ✓ | M | ST01, ST03 |
 | [ST05](tasks/TASK-ST05-story-task-run.md) | `run --story-task`: input, base and branch, development on, criteria, commit message ✓ | M | ST01, WT04, WT06 |
-| [ST06](tasks/TASK-ST06-story-run.md) | `story run` / `status`: state, lock, pre-checks, dispatch, resume, retry, As built, budget | L | ST01, ST02, ST05, WT07 |
+| [ST06](tasks/TASK-ST06-story-run.md) | `story run` / `status`: state, lock, pre-checks, dispatch, resume, retry, As built, budget ✓ | L | ST01, ST02, ST05, WT07 |
 | [ST07](tasks/TASK-ST07-jira-children.md) | Jira children: create, wiki rendering, intents, front matter write-back | M | ST06 |
 | [ST08](tasks/TASK-ST08-jira-story-type.md) | `run --jira` refuses a story issue type | S | ST02 |
 | [ST09](tasks/TASK-ST09-scope-question.md) | the scope question (shadow) | M | — |

@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, story plan, decisions report|calibrate, runs report). This is the composition root - no other package
+// (version, validate, run, resume, story plan|run|status, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -52,7 +52,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -66,12 +66,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if len(rest) == 0 {
 		return &apperr.ConfigError{Msg: usage}
 	}
-	storyPlanCmd := rest[0] == "story" && len(rest) > 1 && rest[1] == "plan"
+	storySub := ""
+	if rest[0] == "story" && len(rest) > 1 {
+		storySub = rest[1]
+	}
+	storyPlanCmd := storySub == "plan"
+	storyRunCmd := storySub == "run"
 	if cli.jiraRef != "" && rest[0] != "run" && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--jira is only valid with run and story plan"}
 	}
 	if len(cli.repos) > 0 && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--repo is only valid with story plan"}
+	}
+	if cli.retry != "" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--retry is only valid with story run"}
 	}
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
@@ -82,8 +90,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.isolation != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--" + cli.isolation + " is only valid with run"}
 	}
-	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" {
-		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume and validate"}
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, validate and story run"}
 	}
 	if cli.storyTaskFile != "" {
 		if err := checkStoryTaskFlags(cli, rest); err != nil {
@@ -109,15 +117,29 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
 	case "story":
-		if !storyPlanCmd {
-			return &apperr.ConfigError{Msg: storyPlanUsage}
+		switch storySub {
+		case "plan":
+			// With --jira the ticket is the task, and any text is the operator's notes on it.
+			request := strings.Join(rest[2:], " ")
+			if cli.jiraRef == "" && strings.TrimSpace(request) == "" {
+				return &apperr.ConfigError{Msg: storyPlanUsage}
+			}
+			return storyPlan(ctx, cli.configPath, request, cli.jiraRef, cli.repos, cli.verbose, stdout)
+		case "run":
+			if len(rest) != 3 {
+				return &apperr.ConfigError{Msg: storyRunUsage}
+			}
+			return storyRun(ctx, rest[2], storyRunOptions{
+				configPath: cli.configPath, explicitConfig: cli.configGiven, mode: cli.mode, claudeAuth: cli.claudeAuth,
+				retry: cli.retry, verbose: cli.verbose,
+			}, stdin, stdout, stderr)
+		case "status":
+			if len(rest) != 3 {
+				return &apperr.ConfigError{Msg: storyStatusUsage}
+			}
+			return storyStatus(ctx, rest[2], stdout)
 		}
-		// With --jira the ticket is the task, and any text is the operator's notes on it.
-		request := strings.Join(rest[2:], " ")
-		if cli.jiraRef == "" && strings.TrimSpace(request) == "" {
-			return &apperr.ConfigError{Msg: storyPlanUsage}
-		}
-		return storyPlan(ctx, cli.configPath, request, cli.jiraRef, cli.repos, cli.verbose, stdout)
+		return &apperr.ConfigError{Msg: storyUsage}
 	case "decisions":
 		if len(rest) == 2 && rest[1] == "report" {
 			return decisionsReport(stdout)
@@ -232,6 +254,9 @@ func checkStoryTarget(ctx context.Context, repo *repository.Repository, in story
 // cliArgs is the command line after parseArgs.
 type cliArgs struct {
 	configPath string
+	// configGiven is whether --config was given; without it the config is orchestrator.yaml of
+	// the directory the command works in (story run: the story home).
+	configGiven bool
 	// mode is empty if --mode was not given - the caller then runs the interactive
 	// mode-select prompt.
 	mode domain.RunMode
@@ -259,11 +284,14 @@ type cliArgs struct {
 	// repos are the --repo values, in the order given and without duplicates: the services of
 	// story plan, instead of those the task names (specs/story/SPEC.md §7.1).
 	repos []string
+	// retry is --retry's value, a task ID: story run abandons that task's run and dispatches it
+	// again on the next attempt's branch (specs/story/SPEC.md §10.2).
+	retry string
 	// rest are the positional arguments.
 	rest []string
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, the hidden --story-task/--story-task=X, the repeatable
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -287,7 +315,7 @@ func parseArgs(args []string) (cliArgs, error) {
 			if err != nil {
 				return cliArgs{}, err
 			}
-			cli.configPath = v
+			cli.configPath, cli.configGiven = v, true
 		case arg == "--mode" || strings.HasPrefix(arg, "--mode="):
 			v, err := value(&i, "--mode")
 			if err != nil {
@@ -352,6 +380,18 @@ func parseArgs(args []string) (cliArgs, error) {
 			if !slices.Contains(cli.repos, v) {
 				cli.repos = append(cli.repos, v)
 			}
+		case arg == "--retry" || strings.HasPrefix(arg, "--retry="):
+			if cli.retry != "" {
+				return cliArgs{}, fmt.Errorf("--retry given twice")
+			}
+			v, err := value(&i, "--retry")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if !story.ValidID(v) {
+				return cliArgs{}, fmt.Errorf("--retry requires a task ID (two capital letters and two digits, like RF02), got %q", v)
+			}
+			cli.retry = v
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":

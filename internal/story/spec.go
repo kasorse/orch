@@ -27,6 +27,49 @@ func RenderSpec(title string, s SpecText) []byte {
 	return []byte(b.String())
 }
 
+// ParseSpec reads the parts of a SPEC.md that story run uses: the title from the "# " heading
+// and the text of the Approach and Contracts sections, as RenderSpec writes them. A hand-written
+// file may lack any of them, which gives "" for it; "—", RenderSpec's mark of an empty section,
+// is "" too. Headings inside a code fence are text.
+func ParseSpec(data []byte) (title, approach, contracts string) {
+	section := ""
+	var cur strings.Builder
+	flush := func() {
+		text := strings.TrimSpace(cur.String())
+		if text == "—" {
+			text = ""
+		}
+		switch section {
+		case "Approach":
+			approach = text
+		case "Contracts":
+			contracts = text
+		}
+		cur.Reset()
+	}
+	fence := false
+	for _, line := range strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "```") {
+			fence = !fence
+		} else if !fence {
+			if t, ok := strings.CutPrefix(line, "# "); ok && title == "" && section == "" {
+				title = oneLine(t)
+				continue
+			}
+			if h, ok := strings.CutPrefix(line, "## "); ok {
+				flush()
+				section = strings.TrimSpace(h)
+				continue
+			}
+		}
+		if section != "" {
+			cur.WriteString(line + "\n")
+		}
+	}
+	flush()
+	return title, approach, contracts
+}
+
 // TaskFileName is the name of a task's file, TASK-<ID>-<slug>.md, as ParseTaskFile reads it.
 // The slug is built here from the title, never taken from it: ASCII letters (lowercased) and
 // digits are kept, every other run of characters becomes one "-", and the result is cut to 40
