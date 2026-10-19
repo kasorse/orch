@@ -86,6 +86,9 @@ type configOptions struct {
 	byComplexity map[string]map[string]string
 	// escalate is actions.implement.escalate (specs/decision-shape/SPEC.md §8).
 	escalate bool
+	// escalateTo is the model of an implement by_complexity entry's own escalate, by level
+	// (specs/decision-shape/SPEC.md §8.1); the level needs an entry in byComplexity.
+	escalateTo map[string]string
 	// fixMedium is review.fix_medium.
 	fixMedium bool
 	// reviewModels is actions.review.models: the extra reviewers.
@@ -138,6 +141,10 @@ func (o configOptions) actionsYAML() string {
 			}
 			sort.Strings(names)
 			for _, level := range names {
+				if up, ok := o.escalateTo[level]; ok && a.name == "implement" {
+					fmt.Fprintf(&b, "      %s: {model: %s, escalate: {model: %s}}\n", level, levels[level], up)
+					continue
+				}
 				fmt.Fprintf(&b, "      %s: {model: %s}\n", level, levels[level])
 			}
 		}

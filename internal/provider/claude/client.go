@@ -321,6 +321,29 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 
+	// The account's usage limit refused the call: a reset clears it, so the run can wait for one.
+	if rep.usageLimit && (res.ExitCode != 0 || rep.isError) {
+		detail := "the claude usage limit was reached"
+		if !rep.limitResets.IsZero() {
+			detail += "; it resets at " + rep.limitResets.Local().Format("2006-01-02 15:04 MST")
+		}
+		return result, &apperr.ProviderError{
+			Provider:    string(provider.Claude),
+			Model:       req.Model,
+			Kind:        apperr.FailureRateLimit,
+			Executable:  executable,
+			Args:        argv,
+			PromptBytes: len(req.Prompt),
+			WorkingDir:  req.WorkingDir,
+			ExitCode:    res.ExitCode,
+			Duration:    res.Duration,
+			Stdout:      stdout,
+			Stderr:      res.Stderr,
+			Detail:      detail,
+			ResetsAt:    rep.limitResets,
+		}
+	}
+
 	if res.ExitCode != 0 {
 		return result, &apperr.ProviderError{
 			Provider:    string(provider.Claude),

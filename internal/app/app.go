@@ -1222,8 +1222,35 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		engine.Gate = gate
 	}
 
-	// Whether the engine finished or not, a terminal status gets its outcome.
+	// Whether the engine finished or not, a terminal status gets its outcome. A step the
+	// usage limit refused is retried once the limit resets; until then the run is on disk
+	// as failed, so one killed while waiting is resumed like any other.
 	runErr := engine.Run(runCtx, run)
+	for isRateLimit(runErr, cfg.Execution.RateLimitWait) {
+		if err := writeOutcome(store, run); err != nil {
+			break
+		}
+		if !waitForLimit(ctx, s, runErr) {
+			break
+		}
+		// What resume checks before it runs anything: the wait was long enough to change the tree.
+		if err := checkProtectedState(ctx, s.repo, run); err != nil {
+			runErr = err
+			break
+		}
+		run.Status, run.FailureReason, run.Outcome = domain.RunRunning, "", nil
+		observer.finished = false
+		cancelRun()
+		// A fresh execution.timeout, as a resume gets: the wait is not the steps' time.
+		runErr = func() error {
+			retryCtx, cancel := context.WithTimeout(ctx, cfg.Execution.Timeout)
+			defer cancel()
+			return engine.Run(retryCtx, run)
+		}()
+	}
+	if observer.finished {
+		s.reporter.RunFinished(run)
+	}
 	outcomeErr := writeOutcome(store, run)
 	if runErr != nil {
 		if s.worktree != nil {
@@ -1596,6 +1623,8 @@ type runObserver struct {
 	// repo, when set (pretty renderer), lets the observer show what implement changed:
 	// the diff between the trees the step recorded around itself.
 	repo *repository.Repository
+	// finished is set when the engine reached a terminal status, for executeWorkflow to print.
+	finished bool
 }
 
 func (o *runObserver) StepStarted(run *domain.Run, index int, action domain.ActionType) {
@@ -1638,8 +1667,10 @@ func (o *runObserver) StepFinished(run *domain.Run, index int, exec domain.StepE
 	o.reporter.StepFinished(run, index, exec, outcome)
 }
 
+// RunFinished is printed by executeWorkflow, which knows whether the run waits for a usage
+// limit instead of ending.
 func (o *runObserver) RunFinished(run *domain.Run) {
-	o.reporter.RunFinished(run)
+	o.finished = true
 }
 
 // review asks the operator to approve the workflow and resolves the mode. On an

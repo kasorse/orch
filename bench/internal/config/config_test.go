@@ -68,7 +68,7 @@ func TestShippedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"A", "B", "Bmock", "C", "D", "E", "F"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"A", "B", "Bmock", "C", "D", "E", "F", "G", "H"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("configs = %v, want %v", names, want)
 	}
 
@@ -84,6 +84,8 @@ func TestShippedConfigs(t *testing.T) {
 		{"D", KindOrchestrator, []string{"development", "testing"}},
 		{"E", KindOrchestrator, []string{"development", "testing"}},
 		{"F", KindOrchestrator, nil},
+		{"G", KindOrchestrator, nil},
+		{"H", KindOrchestrator, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,7 +109,7 @@ func TestShippedConfigs(t *testing.T) {
 }
 
 func TestRenderGolden(t *testing.T) {
-	for _, name := range []string{"B", "C", "D", "E", "F", "Bmock"} {
+	for _, name := range []string{"B", "C", "D", "E", "F", "G", "H", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			c := load(t, name)
 			out, sha, err := c.RenderConfig(goldenTask())
@@ -191,16 +193,20 @@ func TestOrchestratorConfigsDifferOnlyInTheDecision(t *testing.T) {
 	}
 }
 
-// E is D and F is B, each with one change to actions.implement: E turns verify on, F routes
-// a simple task to a cheaper model at low effort. The comparison E against D and F against B
-// measures that change only, so nothing else may differ.
-func TestEAndFDifferFromDAndBOnlyInImplement(t *testing.T) {
+// E is D and F, G and H are B, each with one change to actions.implement: E turns verify on, F
+// routes a simple task to a cheaper model at low effort, G a complex one to the strong model and
+// H a complex one's fix to it. The comparisons E against D, F against B and H against G measure
+// that change only, so nothing else may differ.
+func TestVariantsDifferFromTheirBaseOnlyInImplement(t *testing.T) {
 	for _, tc := range []struct {
 		name, base string
 		extra      map[string]any
 	}{
 		{"E", "D", map[string]any{"verify": true}},
 		{"F", "B", map[string]any{"by_complexity": map[string]any{"simple": map[string]any{"model": "haiku", "effort": "low"}}}},
+		{"G", "B", map[string]any{"by_complexity": map[string]any{"complex": map[string]any{"model": "opus", "effort": "high"}}}},
+		{"H", "B", map[string]any{"by_complexity": map[string]any{"complex": map[string]any{"effort": "high",
+			"escalate": map[string]any{"model": "opus", "effort": "high"}}}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want := renderedMap(t, tc.base)
@@ -231,7 +237,7 @@ func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// E and F are not listed: they are held to D and B above, which are held to the example.
+	// E, F, G and H are not listed: they are held to D and B above, which are held to the example.
 	for _, name := range []string{"B", "C", "D", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			var example map[string]any
@@ -471,7 +477,7 @@ func TestRenderedConfigsPassOrchestratorValidate(t *testing.T) {
 	tk.TestCommand = "true"
 	tk.Sandbox = task.Sandbox{}
 
-	for _, name := range []string{"B", "C", "D", "E", "F", "Bmock"} {
+	for _, name := range []string{"B", "C", "D", "E", "F", "G", "H", "Bmock"} {
 		t.Run(name, func(t *testing.T) {
 			out, _, err := load(t, name).RenderConfig(tk)
 			if err != nil {

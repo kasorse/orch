@@ -260,7 +260,8 @@ history, otherwise the state the history and the transition table give (MVP.md Â
   complexity, model and effort only (never the provider), so the same decision always gives the
   same models; `run --stage` has no complexity and uses the base. `actions.implement.escalate`
   is the one model a failure changes: an implement that fixes a failed test or review (read
-  from `run.Executions`) runs on the `by_complexity` entry one level up, derivable on resume.
+  from `run.Executions`) runs on the `by_complexity` entry one level up, or on the decided
+  level's own `by_complexity.<level>.escalate` when it has one, derivable on resume.
 - **Secrets never leave the machine**: the Context Manager applies its deny list (`.env*`,
   `*.pem`, `*.key`, `credentials*`, `secrets*`, `context.extra_deny`, to every path segment)
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads

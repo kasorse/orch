@@ -298,6 +298,28 @@ actions:
 - A resume derives the route from the persisted history, so it routes the same way.
 - `decision.json: models` does not list it (DS06 "As built"): `run.json` records it per step.
 
+### 8.1 A level's own escalation (DS08)
+
+```yaml
+actions:
+  implement:
+    by_complexity:
+      medium:  {model: sonnet, effort: high, escalate: {model: opus}}
+      complex: {model: sonnet, effort: high, escalate: {model: opus, effort: high}}
+```
+
+- A `by_complexity` entry of implement may name `escalate: {model, effort}`: a fix at that level
+  runs on the entry's route with the escalate's non-empty fields over it. It takes precedence
+  over `escalate: true` for its level and needs no `escalate: true`; levels without one climb
+  as above when `escalate: true` is set.
+- It covers complex, which has nothing above it. Measured on 6 complex runs (2026-10-18):
+  the first implement on opus/high was 65–75% of the run's cost (84–127 turns), while
+  analyze + plan were under 15%. With a plan to follow, the first attempt can run cheaper and
+  the test or review verdict escalates the fix.
+- `provider.model_source` records `by_complexity.<level>.escalate`. The rest of §8 holds: never
+  under `--stage`, the provider never changes, `allowed_models` checks the escalate's model, a
+  resume derives the route from the history.
+
 This needs the owner's reading of MVP.md §31.1 (§11, O1): it is a config table keyed by the
 attempt, as `by_complexity` is keyed by the level. It is not "best model" selection.
 

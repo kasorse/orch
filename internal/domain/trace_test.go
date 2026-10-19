@@ -140,6 +140,8 @@ func TestValidModelSource(t *testing.T) {
 	for s, want := range map[string]bool{
 		"base": true, "by_complexity.simple": true, "by_complexity.complex": true,
 		"escalated.medium": true, "escalated.complex": true,
+		"by_complexity.simple.escalate": true, "by_complexity.complex.escalate": true,
+		"by_complexity..escalate": false, "by_complexity.complex.escalate.escalate": false, "escalated.complex.escalate": false,
 		"escalated.simple": false, "escalated.huge": false, "by_complexity.": false, "": false, "other": false,
 	} {
 		if got := ValidModelSource(s); got != want {

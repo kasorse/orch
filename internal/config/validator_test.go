@@ -534,6 +534,9 @@ func TestValidate_AllowedModels(t *testing.T) {
 		"by_complexity": {func(c *Config) {
 			c.Actions.Plan.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "mythos"}}
 		}, "actions.plan.by_complexity.complex: model mythos is not in allowed_models (" + org + ")"},
+		"by_complexity escalate": {func(c *Config) {
+			c.Actions.Implement.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Effort: "high", Escalate: &Escalation{Model: "mythos"}}}
+		}, "actions.implement.by_complexity.complex.escalate: model mythos is not in allowed_models (" + org + ")"},
 		"extra reviewer": {func(c *Config) { c.Actions.Review.Models = []string{"o3"} },
 			"actions.review.models[0]: model o3 is not in allowed_models (" + org + ")"},
 		"translator": {func(c *Config) { c.Translation.Model = "tiny" },
