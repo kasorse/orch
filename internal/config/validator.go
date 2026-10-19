@@ -72,6 +72,9 @@ func Validate(cfg Config) error {
 	if cfg.Execution.Timeout <= 0 {
 		problems = append(problems, "execution.timeout must be a positive duration")
 	}
+	if cfg.Execution.RateLimitWait < 0 {
+		problems = append(problems, "execution.rate_limit_wait must not be negative (0 turns waiting off)")
+	}
 
 	problems = append(problems, decisionProblems(cfg)...)
 	problems = append(problems, pathRuleProblems(cfg)...)

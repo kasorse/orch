@@ -1772,6 +1772,25 @@ negative`). A resulting timeout failure's error message names which limit fired 
 `actions.review.timeout = 20m` vs. the run-wide `execution.timeout` - so a report of
 "context deadline exceeded" is attributable to a specific, tunable cause.
 
+## 25.2 Waiting for a Usage Limit
+
+```yaml
+execution:
+  rate_limit_wait: 5m   # default; 0 fails the run at once
+```
+
+A step the account's usage limit refused does not end the run. The claude adapter tells it
+from any other refusal by the CLI's `api_error: "usage_limit_reached"` (an org policy, a
+server throttle or a 429 on an API key carry none) and reports `FailureRateLimit` with the
+reset time from `api_error_params.rate_limit_info.resetsAt`. The shared tail
+(`executeWorkflow`) then writes the run's outcome as failed - a process killed while waiting
+leaves a run `resume` continues - and sleeps until the reset plus one minute, or
+`rate_limit_wait` when the CLI gave no reset time. Nothing is called while it sleeps.
+Afterwards it runs what a resume checks first (the git fingerprint, the protected paths,
+HEAD; §37) and enters the engine again, which retries the refused step (`workflow.Entry`)
+with a fresh `execution.timeout`: the wait is not the steps' time. A step refused again
+waits again. SIGINT/SIGTERM during the wait leaves the run failed and resumable.
+
 ---
 
 # 26. Project Structure
