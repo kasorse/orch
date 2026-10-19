@@ -47,8 +47,9 @@ anything but a committed task, continue later.
 
 ## As built
 
-2026-10-19. `scripts/check.sh` is the run's test step; it was not run while writing the change, so
-the tests below were written without being executed.
+2026-10-19. Written by run `be10ef23`, whose implement step hit `execution.timeout` on its last
+README edit, before its test and review steps; `scripts/check.sh` was then run by hand and
+passed. No review step ran.
 
 - **`story.json`** (`internal/persistence/story.go`): `StoryRecord` gains `approved_at`, `bases`
   and `tasks`, all optional, so a plan-time record loads; the loader stays strict. `StoryTask`
