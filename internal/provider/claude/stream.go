@@ -30,7 +30,8 @@ type streamEvent struct {
 	// (specs/claude-auth/SPEC.md §8). Raw, so a shape the spec does not document drops this
 	// field and not the whole event.
 	APIKeySource json.RawMessage `json:"apiKeySource"`
-	// type "system", subtype "api_retry": why the API call is being retried (§9).
+	// type "system", subtype "api_retry": why the API call is being retried (§9); type
+	// "assistant": the category of the API error the CLI answered with.
 	Error json.RawMessage `json:"error"`
 	// type "assistant" (and "result"): the typed cause of an API error the CLI answered with.
 	// "usage_limit_reached" is the account's own usage limit, the one refusal that a reset
@@ -90,8 +91,8 @@ type streamReport struct {
 	// apiKeySource is what the init event said the credential came from; "" when there was
 	// no init event or it did not say.
 	apiKeySource string
-	// authErr is the first authentication-category error a system/api_retry event carried
-	// (authErrorCategories); "" when none did.
+	// authErr is the first authentication-category error a system/api_retry event or an
+	// assistant API-error message carried (authErrorCategories); "" when none did.
 	authErr string
 	// usageLimit is set when an event said the account's usage limit refused the call;
 	// limitResets is when it resets, zero when no event said.
@@ -160,6 +161,11 @@ func parseStream(stdout string) streamReport {
 				limits = l
 			}
 		case "assistant":
+			// A refused credential the CLI does not retry (2.1.287: an invalid key) comes back
+			// as a synthetic answer whose top-level error is the category.
+			if cat := rawString(ev.Error); authErrorCategories[cat] && authErr == "" {
+				authErr = cat
+			}
 			if ev.Message == nil {
 				continue
 			}

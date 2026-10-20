@@ -175,7 +175,11 @@ run (§16 D4). Since a mismatch is fatal (§9), it is at most one call, usually 
 A new `apperr` failure kind `FailureAuth` covers: the mismatch in §8, and a call whose stream
 carries a `system/api_retry` event with `error` in `authentication_failed`,
 `oauth_org_not_allowed`, `account_on_hold`, `billing_error`, or whose result event is an error
-and whose stream had one of those. It is **fatal everywhere**:
+and whose stream had one of those. An assistant event with such an `error` counts the same:
+claude 2.1.287 does not retry an invalid key but answers at once with a synthetic message
+(`"error":"authentication_failed","is_api_error_message":true`, then a result with
+`api_error_status: 401`), which before 2026-10-21 passed as an ordinary exit 1. It is **fatal
+everywhere**:
 
 - the translator does not fall back to the original text with a warning;
 - the LLM decision provider does not lead to the manual choice (`on_failure: ask`);

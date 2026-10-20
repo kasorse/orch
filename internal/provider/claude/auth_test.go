@@ -389,6 +389,19 @@ func TestExecute_AuthRetryCategories(t *testing.T) {
 	}
 }
 
+// claude 2.1.287 does not retry an invalid key: it answers with a synthetic message whose
+// top-level error is the category, and exits 1.
+func TestExecute_AuthErrorAnswer(t *testing.T) {
+	stdout := initEvent("ANTHROPIC_API_KEY") +
+		`{"type":"assistant","message":{"id":"x","model":"<synthetic>","content":[{"type":"text","text":"Invalid API key · Fix external API key"}]},"error":"authentication_failed","is_api_error_message":true}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Invalid API key · Fix external API key"}` + "\n"
+	_, err := executeUnder(domain.ClaudeAuthAPI, testKey(), execution.ProcessResult{Stdout: stdout, ExitCode: 1})
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || pe.Kind != apperr.FailureAuth || !strings.Contains(err.Error(), "authentication_failed") {
+		t.Fatalf("err = %v, want FailureAuth naming authentication_failed", err)
+	}
+}
+
 // A timeout whose stream already showed the credential was refused is reported as that.
 func TestExecute_AuthFailureWinsOverTimeout(t *testing.T) {
 	stdout := initEvent("ANTHROPIC_API_KEY") + `{"type":"system","subtype":"api_retry","error":"authentication_failed"}` + "\n"

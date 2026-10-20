@@ -278,6 +278,11 @@ func TestCallFailures(t *testing.T) {
 		}
 	}
 
+	// A refused credential the adapter recognised is auth, not an outage.
+	p, _ = newProvider(&fakeClient{err: &apperr.ProviderError{Provider: "claude", Kind: apperr.FailureAuth, ExitCode: 1}}, both)
+	_, err = p.ContextDepth(context.Background(), "x")
+	assertKind(t, err, apperr.DecisionAuth)
+
 	p, l := newProvider(&fakeClient{block: true}, both)
 	p.Timeout = 20 * time.Millisecond
 	_, err = p.Classify(context.Background(), domain.ClassificationInput{Request: "x"})

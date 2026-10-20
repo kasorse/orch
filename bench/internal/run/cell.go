@@ -61,7 +61,7 @@ type Finished struct {
 }
 
 // ExecFunc runs one cell. It returns ctx's error, and no line, when ctx ended before the cell
-// did; every other outcome, an infra_error included, is a Finished.
+// did, and a refused credential's; every other outcome, an infra_error included, is a Finished.
 type ExecFunc func(ctx context.Context, c Cell) (Finished, error)
 
 func (e Env) now() time.Time {
@@ -80,8 +80,9 @@ func (e Env) cellDir(kind string, c Cell) string {
 // failure that says nothing about the model (an infra error of the runner, a failed setup, git,
 // bwrap or the disk) is retried once at once in a fresh workspace, and if it persists the cell
 // is an infra_error line. The account's usage limit is not an attempt: the cell waits for the
-// reset and runs again, as often as it takes, until ctx ends. The cost of the failed attempts
-// is added to the cell's, so that the budget sees every dollar spent.
+// reset and runs again, as often as it takes, until ctx ends. A refused credential writes no
+// line and returns its error, which stops the run: every later cell would be refused too. The
+// cost of the failed attempts is added to the cell's, so that the budget sees every dollar spent.
 func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 	began := e.now()
 	var (
@@ -100,6 +101,9 @@ func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 		}
 		spent += cost
 		last, kept = err, fin.Kept
+		if runner.AuthFailure(err) {
+			return Finished{}, err
+		}
 		if resets, ok := runner.UsageLimit(err); ok {
 			if err := e.waitForLimit(ctx, c, resets); err != nil {
 				return Finished{}, err

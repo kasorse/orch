@@ -4502,8 +4502,9 @@ would get a different context depending on who pays.
 ## 46.5 `FailureAuth`
 
 The `apperr` failure kind `FailureAuth` (exit code 2) covers the mismatch of §46.4 and a call
-whose stream carries `system/api_retry` with `error` in `authentication_failed`,
-`oauth_org_not_allowed`, `account_on_hold` or `billing_error`. It is fatal everywhere: the
+whose stream carries `system/api_retry`, or an assistant API-error message, with `error` in
+`authentication_failed`, `oauth_org_not_allowed`, `account_on_hold` or `billing_error`. It is
+fatal everywhere: the
 translator does not fall back to the original text, the LLM decision provider does not lead to
 the manual choice whatever `on_failure` says, and a workflow step fails the run with no retry
 or fix loop. The message names the mode and what to try. Rate limits are not `FailureAuth`.

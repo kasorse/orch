@@ -14,8 +14,8 @@
 #   run.sh ~/tasks ~/results env
 #
 # What the container gets, and nothing else:
-#   - ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN, by name, whichever is set: the value is
-#     read from the environment of this script and never appears on a command line;
+#   - ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by name, whichever is set (both is an error):
+#     the value is read from the environment of this script and never appears on a command line;
 #   - <tasks-dir> at /tasks, read-only;
 #   - <results-dir> at /results, read-write;
 #   - the named volume ORCHBENCH_CACHE_VOLUME (default orchbench-cache) at /home/bench/.cache:
@@ -47,6 +47,10 @@ fi
 [ $# -ge 2 ] || die "usage: run.sh build | run.sh <tasks-dir> <results-dir> [command [args...]]"
 [ -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] ||
 	die "neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set: they are the only credentials the container gets"
+# claude takes the key over the token, and the orchestrator's auth: auto picks api mode for it:
+# with both set a subscription run would quietly bill (or fail on) the key.
+[ -z "${ANTHROPIC_API_KEY:-}" ] || [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] ||
+	die "both ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN are set: claude would use the key; unset one (env -u ANTHROPIC_API_KEY bench/docker/run.sh ...)"
 [ "$(id -u)" -ne 0 ] || die "refusing to run as root: the container runs as the caller's uid"
 
 tasks=$1

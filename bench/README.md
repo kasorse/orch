@@ -198,7 +198,7 @@ with `pass` or `fail` are skipped, `infra_error` ones are run again, so the same
 continues an interrupted or partly failed run, and a larger `--reps` or a new `--configs` on
 the same `--out` adds only the missing cells. An infra error (setup failed, git, bwrap, the
 disk, a crashed runner) is retried once at once in a fresh workspace; if it persists the cell
-is left as `infra_error`, its cost counted, and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error. Ctrl-C stops the running cells, waiting ones included,
+is left as `infra_error`, its cost counted, and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error. A refused credential (claude's `authentication_failed`, `billing_error`, …, a 401 result, or the orchestrator's `FailureAuth`) writes no line and stops the run, since every later cell would be refused too; fix the credential and run the same command again. Ctrl-C stops the running cells, waiting ones included,
 without writing their lines. `--max-cost` is checked before each cell starts; running cells
 finish, then the run exits 3 and the same command with a higher `--max-cost` continues it.
 
@@ -346,7 +346,9 @@ ANTHROPIC_API_KEY=... bench/docker/run.sh <tasks-dir> <results-dir> orchbench ru
 `build` builds the image from the committed tree (`git archive HEAD`), so uncommitted edits
 never get in, and records the commit in it. The second form runs the command in a fresh
 container (default `orchbench --help`). The container gets only `ANTHROPIC_API_KEY` or, for a
-claude subscription, `CLAUDE_CODE_OAUTH_TOKEN` (the token `claude setup-token` prints; by name),
+claude subscription, `CLAUDE_CODE_OAUTH_TOKEN` (the token `claude setup-token` prints; by name;
+`run.sh` refuses both at once, since claude would take the key and the orchestrator's
+`auth: auto` its api mode: `env -u ANTHROPIC_API_KEY bench/docker/run.sh ...`),
 `<tasks-dir>` read-only at `/tasks`, `<results-dir>` at `/results` and a named volume
 (`ORCHBENCH_CACHE_VOLUME`, default `orchbench-cache`) at `/home/bench/.cache`, where the
 mirrors, workspaces and `validated.json` live. Not the host's home, SSH agent or Docker socket;
