@@ -280,6 +280,70 @@ func TestExecRetriesAnInfraErrorOnceAtOnce(t *testing.T) {
 	})
 }
 
+func TestExecWaitsForAUsageLimitAndRunsAgain(t *testing.T) {
+	testutil.RequireBwrap(t)
+	p := testutil.NewSHProject(t)
+	refused := func(resets time.Time) (runner.Outcome, error) {
+		return runner.Outcome{CostUSD: 0.1}, &runner.InfraError{Reason: "claude hit a rate limit", UsageLimit: true, ResetsAt: resets}
+	}
+
+	t.Run("it waits for the reset, more often than the infra retries", func(t *testing.T) {
+		var calls atomic.Int32
+		good := fixer(t, &calls, 0.5, "", true)
+		env := newEnv(t, nil)
+		resets := env.now().Add(time.Hour)
+		env.Runner = func(ctx context.Context, cfg config.Config, tk task.Task, ws runner.Workspace) (runner.Outcome, error) {
+			switch calls.Load() {
+			case 0, 1:
+				calls.Add(1)
+				if calls.Load() == 1 {
+					return refused(resets)
+				}
+				return refused(time.Time{})
+			}
+			return good(ctx, cfg, tk, ws)
+		}
+		var waits []time.Duration
+		env.Sleep = func(ctx context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+		var out strings.Builder
+		env.Out = &out
+
+		fin, err := env.Exec(context.Background(), cellOf(p.Task("code")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fin.Record.Result != results.Pass || calls.Load() != 3 {
+			t.Errorf("result %s after %d calls", fin.Record.Result, calls.Load())
+		}
+		// The clock moves a second at each reading: the first wait is read 2 s after resets was.
+		if len(waits) != 2 || waits[0] < time.Hour || waits[0] > time.Hour+limitMargin || waits[1] != limitFallback {
+			t.Errorf("waits %v, want about 1h+%v, then %v", waits, limitMargin, limitFallback)
+		}
+		if math.Abs(fin.Record.CostUSD-0.7) > 1e-9 {
+			t.Errorf("cost %v, want 0.7: the refused tries were paid for", fin.Record.CostUSD)
+		}
+		if strings.Count(out.String(), "usage limit reached") != 2 {
+			t.Errorf("output %q, want one line per wait", out.String())
+		}
+	})
+
+	t.Run("Ctrl-C while waiting writes nothing", func(t *testing.T) {
+		env := newEnv(t, func(ctx context.Context, cfg config.Config, tk task.Task, ws runner.Workspace) (runner.Outcome, error) {
+			return refused(time.Time{})
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		env.Sleep = func(ctx context.Context, d time.Duration) error { cancel(); return ctx.Err() }
+
+		fin, err := env.Exec(ctx, cellOf(p.Task("code")))
+		if !errors.Is(err, context.Canceled) || fin.Record.Task != "" {
+			t.Fatalf("finished %+v, err %v; want no record and the context's error", fin, err)
+		}
+		if workDirEntries(t, env) != 0 {
+			t.Error("a workspace was left behind")
+		}
+	})
+}
+
 func TestExecTreatsAFailedSetupAsInfrastructure(t *testing.T) {
 	testutil.RequireBwrap(t)
 	p := testutil.NewSHProject(t)

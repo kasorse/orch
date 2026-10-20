@@ -198,7 +198,7 @@ with `pass` or `fail` are skipped, `infra_error` ones are run again, so the same
 continues an interrupted or partly failed run, and a larger `--reps` or a new `--configs` on
 the same `--out` adds only the missing cells. An infra error (setup failed, git, bwrap, the
 disk, a crashed runner) is retried once at once in a fresh workspace; if it persists the cell
-is left as `infra_error`, its cost counted, and the run goes on. Ctrl-C stops the running cells
+is left as `infra_error`, its cost counted, and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error. Ctrl-C stops the running cells, waiting ones included,
 without writing their lines. `--max-cost` is checked before each cell starts; running cells
 finish, then the run exits 3 and the same command with a higher `--max-cost` continues it.
 
@@ -344,7 +344,7 @@ orchestrator runs report --dir <out>/runs
 | progress during a long run | `orchbench summarize <out> --stdout` in another terminal |
 | retry what failed for infra reasons | the same `run` command again: `infra_error` cells are run again, others are skipped |
 | the budget was reached | the same `run` command with a higher `--max-cost` |
-| a claude subscription's limit was reached (`You've hit your session limit`) | the remaining cells end as `infra_error` within seconds; after the limit resets, the same `run` command retries them. Results written before 2026-10-12 by an older orchbench recorded A, C and D cells as `fail` with $0: remove those lines from `results.jsonl` and `run --redo --ids <their tasks>` |
+| a claude subscription's limit was reached (`You've hit your session limit`) | nothing: the cells wait for the reset and go on by themselves (a config of your own for the orchestrator needs `execution.rate_limit_wait: 0s`, or the orchestrator waits inside the task's timeout and the cell ends as a `fail` by timeout). Ctrl-C while waiting, and the same `run` command later continues. Results written before 2026-10-12 by an older orchbench recorded A, C and D cells as `fail` with $0: remove those lines from `results.jsonl` and `run --redo --ids <their tasks>` |
 
 ## The container
 

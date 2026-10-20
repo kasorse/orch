@@ -69,6 +69,7 @@ limits:
 execution:
   timeout: "30m0s"
   isolation: inplace   # the bench's final check reads the workspace tree
+  rate_limit_wait: 0s  # fail at once on a usage limit: orchbench waits for the reset and reruns the cell
 
 security:
   require_clean_worktree: true

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"orchbench/internal/config"
 	"orchbench/internal/task"
@@ -27,6 +28,27 @@ type streamEvent struct {
 		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
 	} `json:"usage"`
+	// api_error "usage_limit_reached" is the account's usage limit; its params carry
+	// rate_limit_info.resetsAt in Unix seconds (read as internal/provider/claude reads them).
+	// Raw, so an unexpected shape drops the reset time and not the whole event.
+	APIError       json.RawMessage `json:"api_error"`
+	APIErrorParams json.RawMessage `json:"api_error_params"`
+}
+
+// limitResets is when the usage limit that refused this event resets, zero when it is not one
+// or did not say.
+func (ev *streamEvent) limitResets() time.Time {
+	var kind string
+	var params struct {
+		RateLimitInfo struct {
+			ResetsAt int64 `json:"resetsAt"`
+		} `json:"rate_limit_info"`
+	}
+	if json.Unmarshal(ev.APIError, &kind) != nil || kind != "usage_limit_reached" ||
+		json.Unmarshal(ev.APIErrorParams, &params) != nil || params.RateLimitInfo.ResetsAt <= 0 {
+		return time.Time{}
+	}
+	return time.Unix(params.RateLimitInfo.ResetsAt, 0)
 }
 
 // claudeArgs is config A's invocation (SPEC.md §8). The prompt is not here: it goes on stdin.
@@ -64,6 +86,7 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 	defer cancel()
 
 	var result *streamEvent
+	var resets time.Time
 	// plain keeps the lines that are not stream-json events: the CLI's own messages. Tool
 	// output, test output among it, is always inside an event, so it never lands here.
 	plain := &tailBuffer{max: tailBytes}
@@ -77,7 +100,13 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 			return
 		}
 		var ev streamEvent
-		if json.Unmarshal(line, &ev) == nil && ev.Type == "result" {
+		if json.Unmarshal(line, &ev) != nil {
+			return
+		}
+		if t := ev.limitResets(); !t.IsZero() {
+			resets = t
+		}
+		if ev.Type == "result" {
 			result = &ev
 		}
 	}}
@@ -137,8 +166,11 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 		if result != nil && result.IsError && result.Result != nil {
 			texts = append(texts, *result.Result)
 		}
-		if line, ok := rateLimited(texts...); ok {
-			return Outcome{}, infra("claude hit a rate limit: %s", line)
+		if line, ok := rateLimited(texts...); ok || !resets.IsZero() {
+			if !ok {
+				line = "usage_limit_reached"
+			}
+			return Outcome{}, limitError("claude", line, texts, resets)
 		}
 	}
 	if result == nil {

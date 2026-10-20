@@ -239,6 +239,7 @@ func runRun(ctx context.Context, inv invocation) error {
 		ClaudeCLI:           manifest.ClaudeCLI,
 		OrchestratorVersion: manifest.Orchestrator.Version,
 		Contributor:         contributor,
+		Out:                 inv.stdout,
 	}
 	fmt.Fprintln(inv.stdout, header)
 	_, err = benchrun.Run(ctx, cells, benchrun.Options{

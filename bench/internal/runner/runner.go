@@ -130,6 +130,10 @@ type Outcome struct {
 type InfraError struct {
 	Reason string
 	Err    error
+	// UsageLimit marks the account's usage limit, which a reset clears: the cell waits for it
+	// and runs again (run.Env.Exec). ResetsAt is when it resets, zero when nobody said.
+	UsageLimit bool
+	ResetsAt   time.Time
 }
 
 func (e *InfraError) Error() string {
@@ -145,6 +149,27 @@ func (e *InfraError) Unwrap() error { return e.Err }
 func IsInfra(err error) bool {
 	var ie *InfraError
 	return errors.As(err, &ie)
+}
+
+// UsageLimit reports whether err is, or wraps, an *InfraError of the account's usage limit, and
+// when that limit resets (zero when unknown).
+func UsageLimit(err error) (time.Time, bool) {
+	var ie *InfraError
+	if !errors.As(err, &ie) || !ie.UsageLimit {
+		return time.Time{}, false
+	}
+	return ie.ResetsAt, true
+}
+
+// limitError is the infra error of a run a provider refused with a rate limit: line is what it
+// said, resets the usage limit's reset time when it reported one.
+func limitError(who, line string, texts []string, resets time.Time) *InfraError {
+	_, usage := matchLine(usageLimitPatterns, texts...)
+	return &InfraError{
+		Reason:     fmt.Sprintf("%s hit a rate limit: %s", who, line),
+		UsageLimit: usage || !resets.IsZero(),
+		ResetsAt:   resets,
+	}
 }
 
 func infra(format string, args ...any) *InfraError {
@@ -331,23 +356,51 @@ func (w *lineWriter) flush() {
 // hide a failed task. They are matched only against what the provider CLIs write (stderr,
 // stdout outside the stream-json events, a result event's text, a run's failure reason), and
 // only for a run that failed, never against test output, which may be about rate limiting.
-var rateLimitPatterns = []*regexp.Regexp{
+var rateLimitPatterns = append([]*regexp.Regexp{
 	regexp.MustCompile(`(?i)rate[ _-]?limit`),
-	regexp.MustCompile(`(?i)usage limit`),
-	regexp.MustCompile(`(?i)hit your (\w+ )?limit`), // usage, rate, session, weekly, ...
-	regexp.MustCompile(`(?i)(5-hour|five[ -]hour|weekly) limit`),
 	regexp.MustCompile(`(?i)too many requests`),
 	regexp.MustCompile(`(?i)overloaded_error|api error:? *(\d+ )?overloaded`),
 	regexp.MustCompile(`(?i)(api error|http|status)[: ]+429\b`),
 	regexp.MustCompile(`(?i)quota (exceeded|exhausted)`),
 	regexp.MustCompile(`(?i)credit balance is too low`),
+}, usageLimitPatterns...)
+
+// usageLimitPatterns are the subscription's own limits, the ones a reset clears. The others
+// (a 429, an overloaded API, an empty balance) are not waited for: they stay infra errors.
+var usageLimitPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)usage limit`),
+	regexp.MustCompile(`(?i)hit your (\w+ )?limit`), // usage, rate, session, weekly, ...
+	regexp.MustCompile(`(?i)(5-hour|five[ -]hour|weekly) limit`),
+}
+
+// resetsAtPattern is the reset time the orchestrator's claude adapter writes into a usage-limit
+// error: "it resets at 2026-10-20 15:04 MSK", in the local zone, which the orchestrator shares
+// with us as our child.
+// shortcut: parses the core's error wording; upgrade when run.json records the reset time.
+var resetsAtPattern = regexp.MustCompile(`resets at (\d{4}-\d{2}-\d{2} \d{2}:\d{2})`)
+
+// resetsAtText is the first reset time in texts, zero when none is there.
+func resetsAtText(texts ...string) time.Time {
+	for _, text := range texts {
+		if m := resetsAtPattern.FindStringSubmatch(text); m != nil {
+			if t, err := time.ParseInLocation("2006-01-02 15:04", m[1], time.Local); err == nil {
+				return t
+			}
+		}
+	}
+	return time.Time{}
 }
 
 // rateLimited returns the first line of texts that looks like a rate limit, shortened.
 func rateLimited(texts ...string) (string, bool) {
+	return matchLine(rateLimitPatterns, texts...)
+}
+
+// matchLine returns the first line of texts one of patterns matches, shortened.
+func matchLine(patterns []*regexp.Regexp, texts ...string) (string, bool) {
 	for _, text := range texts {
 		for _, line := range strings.Split(text, "\n") {
-			for _, re := range rateLimitPatterns {
+			for _, re := range patterns {
 				if re.MatchString(line) {
 					return excerpt(line), true
 				}

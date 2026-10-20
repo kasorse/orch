@@ -776,6 +776,56 @@ func TestRateLimited(t *testing.T) {
 	}
 }
 
+// TestUsageLimitIsMarked: only the account's usage limit is marked for a wait, with its reset
+// time when the provider reported one; other refusals stay plain infra errors.
+func TestUsageLimitIsMarked(t *testing.T) {
+	reset := time.Unix(1760970000, 0)
+	limitEvent := `{"type":"assistant","api_error":"usage_limit_reached","api_error_params":{"rate_limit_info":{"resetsAt":1760970000}}}`
+	errResult := `{"type":"result","subtype":"success","is_error":true,"result":"You've hit your usage limit","total_cost_usd":0}`
+	coreLimit := "provider execution failed\n\nfailure: rate_limit (the account's usage limit was reached)\n" +
+		"detail: the claude usage limit was reached; it resets at 2026-10-20 15:04 MSK\n"
+	coreReset := time.Date(2026, 10, 20, 15, 4, 0, 0, time.Local)
+	limitExec := fmt.Sprintf(`{"index":1,"action":"implement","status":"failed","error":%q}`, coreLimit)
+
+	cases := []struct {
+		name           string
+		config         string
+		stdout, stderr string
+		run            map[string]string
+		exit           string
+		usage          bool
+		resets         time.Time
+	}{
+		{name: "claude: limit event with a reset", config: "A", stdout: initEvent + "\n" + limitEvent + "\n" + errResult, exit: "1", usage: true, resets: reset},
+		{name: "claude: limit text without a reset", config: "A", stdout: errResult, exit: "1", usage: true},
+		{name: "claude: limit event alone", config: "A", stdout: limitEvent, exit: "1", usage: true, resets: reset},
+		{name: "claude: a 429 is not waited for", config: "A", stderr: "API Error: 429 rate_limit_error", exit: "1"},
+		{name: "claude: an empty balance is not waited for", config: "A", stderr: "Credit balance is too low", exit: "1"},
+		{name: "orchestrator: step refused with a reset", config: "B", run: runFiles("failed", "claude exited with code 1", limitExec), exit: "3", usage: true, resets: coreReset},
+		{name: "orchestrator: decision call refused before any step", config: "B", run: runFiles("failed", "", ""), stderr: "decision provider claude failed: " + coreLimit, exit: "3", usage: true, resets: coreReset},
+		{name: "orchestrator: overloaded is not waited for", config: "B", run: runFiles("failed", "claude exited with code 1", execImplLimit), exit: "3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			if tc.run != nil {
+				h.runDir(tc.run)
+			}
+			h.set("FAKE_STDOUT", tc.stdout)
+			h.set("FAKE_STDERR", tc.stderr)
+			h.set("FAKE_EXIT", tc.exit)
+			_, err := h.run(tc.config, codeTask())
+			if !IsInfra(err) {
+				t.Fatalf("error = %v, want an infra error", err)
+			}
+			resets, usage := UsageLimit(err)
+			if usage != tc.usage || !resets.Equal(tc.resets) {
+				t.Errorf("UsageLimit = %v, %v; want %v, %v (%v)", resets, usage, tc.resets, tc.usage, err)
+			}
+		})
+	}
+}
+
 func TestTailBufferKeepsTheEnd(t *testing.T) {
 	b := &tailBuffer{max: 8}
 	for _, s := range []string{"abcdef", "ghijkl", "mn"} {

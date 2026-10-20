@@ -76,7 +76,8 @@ It does not tune anything: calibration is G5, model-by-complexity is Q3.
 5. **Reproducible.** A result line records every input that can change it: task file hash,
    orchestrator commit, claude CLI version, model, config file hash, repetition number.
 6. **Infra failures are not results.** Setup failure, rate limiting, a crashed CLI are
-   recorded as `infra_error` and retried; they never count as an unsolved task.
+   recorded as `infra_error` and retried; they never count as an unsolved task. The account's
+   usage limit is waited out: the cell runs again after the reset (§13.5).
 7. **Model-written code is untrusted here too.** The oracle and setup run under the same
    kind of sandbox the orchestrator uses; config A runs a model with a shell (§7.4, Q4).
 
@@ -636,8 +637,8 @@ What one cell does is §7.1 and §7.5. Cells already in `results.jsonl` with `pa
 are skipped, `infra_error` ones are run again, so the same command continues an interrupted
 or partly failed run, and a larger `--reps` or a new `--configs` on the same `--out` adds
 only the missing cells. An infra error is retried once at once; if it persists the cell is
-left as `infra_error` and the run goes on. Ctrl-C stops the current cell without writing
-its line. Output: one progress line per cell (example in §13.10) and a total.
+left as `infra_error` and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error.
+Ctrl-C stops the current cell without writing its line. Output: one progress line per cell (example in §13.10) and a total.
 
 ### 13.6 `orchbench summarize` — the report
 

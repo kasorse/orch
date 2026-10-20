@@ -21,6 +21,15 @@ import (
 // maxReason is how much of an error a failure_reason keeps.
 const maxReason = 300
 
+const (
+	// limitMargin is added to a usage limit's reported reset, so that a clock a little behind
+	// the provider's does not run into the same limit (as the orchestrator does, MVP.md §25.2).
+	limitMargin = time.Minute
+	// limitFallback is the wait for a usage limit whose reset nobody reported, the
+	// orchestrator's execution.rate_limit_wait default.
+	limitFallback = 5 * time.Minute
+)
+
 // Runner is runner.Run; a test replaces it with a fake that needs no model.
 type Runner func(ctx context.Context, cfg config.Config, t task.Task, ws runner.Workspace) (runner.Outcome, error)
 
@@ -35,9 +44,13 @@ type Env struct {
 	ClaudeCLI           string
 	OrchestratorVersion string
 	Contributor         string
-	// Now is the clock; nil is time.Now. Runner nil is runner.Run.
+	// Out is where a cell waiting for a usage limit says so; nil says nothing.
+	Out io.Writer
+	// Now is the clock; nil is time.Now. Runner nil is runner.Run. Sleep waits d or until ctx
+	// ends, with ctx's error then; nil is a timer.
 	Now    func() time.Time
 	Runner Runner
+	Sleep  func(ctx context.Context, d time.Duration) error
 }
 
 // Finished is a cell that ended with a result line. Kept is the workspace left in place by
@@ -66,8 +79,9 @@ func (e Env) cellDir(kind string, c Cell) string {
 // Exec runs a cell (SPEC.md §7.1): workspace, setup, config, final check, copies, record. A
 // failure that says nothing about the model (an infra error of the runner, a failed setup, git,
 // bwrap or the disk) is retried once at once in a fresh workspace, and if it persists the cell
-// is an infra_error line. The cost of the failed attempts is added to the cell's, so that the
-// budget sees every dollar spent.
+// is an infra_error line. The account's usage limit is not an attempt: the cell waits for the
+// reset and runs again, as often as it takes, until ctx ends. The cost of the failed attempts
+// is added to the cell's, so that the budget sees every dollar spent.
 func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 	began := e.now()
 	var (
@@ -75,7 +89,7 @@ func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 		last  error
 		kept  string
 	)
-	for range 2 {
+	for tries := 0; tries < 2; {
 		fin, cost, err := e.attempt(ctx, c)
 		if ctx.Err() != nil {
 			return Finished{}, ctx.Err()
@@ -86,6 +100,13 @@ func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 		}
 		spent += cost
 		last, kept = err, fin.Kept
+		if resets, ok := runner.UsageLimit(err); ok {
+			if err := e.waitForLimit(ctx, c, resets); err != nil {
+				return Finished{}, err
+			}
+			continue
+		}
+		tries++
 	}
 
 	rec := e.base(c, began)
@@ -94,6 +115,30 @@ func (e Env) Exec(ctx context.Context, c Cell) (Finished, error) {
 	rec.CostUSD = spent
 	rec.WallMS = e.now().Sub(began).Milliseconds()
 	return Finished{Record: rec, Kept: kept}, nil
+}
+
+// waitForLimit sleeps until the usage limit that refused c resets, plus limitMargin, or
+// limitFallback when the reset is unknown. It returns ctx's error when ctx ends first.
+func (e Env) waitForLimit(ctx context.Context, c Cell, resets time.Time) error {
+	wait := limitFallback
+	if !resets.IsZero() {
+		wait = max(resets.Sub(e.now()), 0) + limitMargin
+	}
+	if e.Out != nil {
+		fmt.Fprintf(e.Out, "%s %s rep%d: usage limit reached, running it again at %s; Ctrl-C stops, the same command continues later\n",
+			c.Task.ID, c.Config.Name, c.Rep, e.now().Add(wait).Local().Format("2006-01-02 15:04"))
+	}
+	if e.Sleep != nil {
+		return e.Sleep(ctx, wait)
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // attempt is one try of a cell. An error is infrastructure; cost is what the model already

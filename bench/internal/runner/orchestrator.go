@@ -234,18 +234,19 @@ func classifyOrchestrator(out Outcome, t task.Task, workDir string, proc process
 	if proc.TimedOut {
 		return timedOut(out), nil
 	}
-	if len(run.Executions) == 0 && proc.ExitCode != 0 {
-		return Outcome{ConfigPath: out.ConfigPath, ConfigSHA256: out.ConfigSHA256, RunDir: runDir, ExitCode: proc.ExitCode},
-			infra("the orchestrator crashed before any step (exit %d)%s", proc.ExitCode, tailNote(proc.Stderr))
-	}
+	// Before the crash check: a decision call the limit refused leaves no step either.
 	if proc.ExitCode == exitProviderExecution {
 		texts := []string{proc.Stderr, run.FailureReason}
 		if n := len(run.Executions); n > 0 {
 			texts = append(texts, run.Executions[n-1].Error)
 		}
 		if line, ok := rateLimited(texts...); ok {
-			return out, infra("the provider hit a rate limit: %s", line)
+			return out, limitError("the provider", line, texts, resetsAtText(texts...))
 		}
+	}
+	if len(run.Executions) == 0 && proc.ExitCode != 0 {
+		return Outcome{ConfigPath: out.ConfigPath, ConfigSHA256: out.ConfigSHA256, RunDir: runDir, ExitCode: proc.ExitCode},
+			infra("the orchestrator crashed before any step (exit %d)%s", proc.ExitCode, tailNote(proc.Stderr))
 	}
 
 	switch run.Status {
