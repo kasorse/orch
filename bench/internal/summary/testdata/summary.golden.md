@@ -11,8 +11,8 @@ Baseline A · seed 1 · 10000 bootstrap resamples · a group under 3 tasks is ma
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | 25% (0–50) | $0.60 | $0.50 | $2.40 | 2m00s | 1.0 | 0.0 | 0 |
 | B | 67% (33–100) | $1.00 | $1.00 | $1.40 | 5m00s | 5.0 | 0.4 | 1 |
-| Bmock | 25% (0–50) | $0.60 | $0.60 | $2.40 | 3m00s | 3.0 | 0.0 | 0 |
-| C | 67% (33–100) | $2.00 | $2.00 | $2.80 | 15m00s | 8.0 | 0.3 | 0 |
+| C | 25% (0–50) | $0.60 | $0.60 | $2.40 | 3m00s | 3.0 | 0.0 | 0 |
+| D | 67% (33–100) | $2.00 | $2.00 | $2.80 | 15m00s | 8.0 | 0.3 | 0 |
 
 ## Failures by fail_reason
 
@@ -20,8 +20,8 @@ Baseline A · seed 1 · 10000 bootstrap resamples · a group under 3 tasks is ma
 | --- | --- | --- | --- | --- | --- | --- |
 | A | 6 | 2 | 2 | 1 | 1 | 0.4 |
 | B | 2 | 1 | 0 | 1 | 0 | 0.1 |
-| Bmock | 6 | 2 | 2 | 1 | 1 | 0.1 |
-| C | 2 | 0 | 1 | 0 | 1 | 0.0 |
+| C | 6 | 2 | 2 | 1 | 1 | 0.1 |
+| D | 2 | 0 | 1 | 0 | 1 | 0.0 |
 
 ## By category
 
@@ -33,8 +33,8 @@ A group under 3 tasks is shown with its numbers and marked insufficient data: no
 | --- | --- | --- | --- |
 | A | 25% (0–50) | $0.50 | 0 |
 | B | 50% (0–100) | $1.00 | 1 |
-| Bmock | 25% (0–50) | $0.60 | 0 |
-| C | 75% (50–100) | $2.00 | 0 |
+| C | 25% (0–50) | $0.60 | 0 |
+| D | 75% (50–100) | $2.00 | 0 |
 
 ### feature (1 task, insufficient data)
 
@@ -42,8 +42,8 @@ A group under 3 tasks is shown with its numbers and marked insufficient data: no
 | --- | --- | --- | --- |
 | A | 50% (0–100) | $0.90 | 0 |
 | B | 100% (100–100) | $1.00 | 0 |
-| Bmock | 50% (0–100) | $0.60 | 0 |
-| C | 100% (100–100) | $2.00 | 0 |
+| C | 50% (0–100) | $0.60 | 0 |
+| D | 100% (100–100) | $2.00 | 0 |
 
 ### question (1 task, insufficient data)
 
@@ -51,8 +51,8 @@ A group under 3 tasks is shown with its numbers and marked insufficient data: no
 | --- | --- | --- | --- |
 | A | 0% (0–0) | $0.50 | 0 |
 | B | 50% (0–100) | $1.00 | 0 |
-| Bmock | 0% (0–0) | $0.60 | 0 |
-| C | 50% (0–100) | $2.00 | 0 |
+| C | 0% (0–0) | $0.60 | 0 |
+| D | 50% (0–100) | $2.00 | 0 |
 
 ## By language
 
@@ -64,8 +64,8 @@ A group under 3 tasks is shown with its numbers and marked insufficient data: no
 | --- | --- | --- | --- |
 | A | 33% (0–67) | $0.63 | 0 |
 | B | 75% (50–100) | $1.00 | 1 |
-| Bmock | 33% (0–67) | $0.60 | 0 |
-| C | 75% (50–100) | $2.00 | 0 |
+| C | 33% (0–67) | $0.60 | 0 |
+| D | 75% (50–100) | $2.00 | 0 |
 
 ### python (1 task, insufficient data)
 
@@ -73,8 +73,8 @@ A group under 3 tasks is shown with its numbers and marked insufficient data: no
 | --- | --- | --- | --- |
 | A | 0% (0–0) | $0.50 | 0 |
 | B | 50% (0–100) | $1.00 | 0 |
-| Bmock | 0% (0–0) | $0.60 | 0 |
-| C | 50% (0–100) | $2.00 | 0 |
+| C | 0% (0–0) | $0.60 | 0 |
+| D | 50% (0–100) | $2.00 | 0 |
 
 ## Paired vs A (per task, majority over reps)
 
@@ -83,8 +83,8 @@ A task counts when both configs have a result for it. Difference of pass rates i
 | config | tasks | wins | ties | losses | pass-rate difference | 95% CI | tasks without A | tasks without config |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | B | 4 | 2 | 2 | 0 | +50 pp | [+50, +50] | 0 | 0 |
-| Bmock | 4 | 0 | 4 | 0 | 0 pp | [0, 0] | 0 | 0 |
-| C | 4 | 2 | 2 | 0 | +50 pp | [+50, +50] | 0 | 0 |
+| C | 4 | 0 | 4 | 0 | 0 pp | [0, 0] | 0 | 0 |
+| D | 4 | 2 | 2 | 0 | +50 pp | [+50, +50] | 0 | 0 |
 
 ## Decision overhead (B)
 
@@ -92,9 +92,9 @@ A task counts when both configs have a result for it. Difference of pass rates i
 
 ## B vs C cost
 
-B $1.00 per cell, C $2.00 per cell: B costs 0.50x C. Paired over 4 tasks: B − C = −$1.00 per task.
+B $1.00 per cell, C $0.60 per cell: B costs 1.67x C. Paired over 4 tasks: B − C = +$0.40 per task.
 
-## Stage choice (B, Bmock) vs expected_stages
+## Stage choice (B, C) vs expected_stages
 
 The chosen stages against expected_stages as sets, over the cells that have expected_stages.
 
@@ -110,7 +110,7 @@ exact match 4/7 cells
 | testing | 5 | 0 | 0 | 1.00 | 1.00 |
 | review | 0 | 1 | 0 | 0.00 | — |
 
-### Bmock
+### C
 
 exact match 2/8 cells
 
@@ -121,19 +121,19 @@ exact match 2/8 cells
 | development | 6 | 0 | 0 | 1.00 | 1.00 |
 | testing | 6 | 0 | 0 | 1.00 | 1.00 |
 
-## Complexity (B, Bmock)
+## Complexity (B, C)
 
 | config | complexity | cells | pass rate |
 | --- | --- | --- | --- |
 | B | simple | 4 | 75% |
 | B | medium | 3 | 67% |
-| Bmock | simple | 4 | 25% |
-| Bmock | medium | 4 | 25% |
+| C | simple | 4 | 25% |
+| C | medium | 4 | 25% |
 
 ## Translation (en/ru)
 
-| pair (en / ru) | B stages en | B stages ru | same stages | A both passed | B both passed | Bmock both passed | C both passed |
+| pair (en / ru) | B stages en | B stages ru | same stages | A both passed | B both passed | C both passed | D both passed |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | go-retry / go-retry-ru | analysis,development,testing | analysis,development,testing,review | no | no | no | no | no |
 
-same stages 0/1 pairs; both passed: A 0/1, B 0/1, Bmock 0/1, C 0/1
+same stages 0/1 pairs; both passed: A 0/1, B 0/1, C 0/1, D 0/1

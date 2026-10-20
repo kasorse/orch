@@ -250,14 +250,16 @@ A config is a file named after it in `bench/configs/`; `common.yaml` is shared b
 | config | what | file |
 |---|---|---|
 | `A` | bare Claude Code, the baseline: `claude -p` with Read, Grep, Glob, Edit, Write and Bash, the task text and one line naming `test_command` on stdin | `A.yaml` |
-| `B` | the orchestrator, stages chosen by the decision (`--mode auto`) | `B.yaml` |
-| `C` | the orchestrator, all six stages | `C.yaml` |
-| `D` | the orchestrator, `development` and `testing` only | `D.yaml` |
-| `E` | D plus `actions.implement.verify: true`: the implement session can run the task's test command through the `run_tests` tool; no `checks:`; not in the default `--configs`: `--configs D,E` | `E.yaml` |
-| `F` | B plus `actions.implement.by_complexity.simple: {model: haiku, effort: low}`: a simple task is implemented by a cheaper model; not in the default `--configs`: `--configs B,F` | `F.yaml` |
-| `G` | B plus `actions.implement.by_complexity.complex: {model: opus, effort: high}`: a complex task is implemented by the strong model from the first attempt; the baseline of H; not in the default `--configs`: `--configs G,H` | `G.yaml` |
-| `H` | B plus `actions.implement.by_complexity.complex: {effort: high, escalate: {model: opus, effort: high}}`: a complex task is implemented by the common model following the plan, and only a fix after a failed test or review runs on the strong model; not in the default `--configs`: `--configs G,H` | `H.yaml` |
-| `Bmock` | B with the offline keyword heuristic as the decision provider (`decision.jev.mock: true`); not in the default `--configs`, name it: `--configs A,B,Bmock` | `Bmock.yaml` |
+| `B` | the orchestrator as the owner runs it (`~/orchestrator_v2.yaml`): `--mode auto`, decision and translation on opus, `by_complexity` routes for analyze, plan, implement and review, implement `escalate` to opus, analysis threshold 0.86. Left out: jira, providers, the graphify extension, `auto_commit`, secret-scan allow paths (see the file's comment) | `B.yaml` |
+| `C` | the orchestrator with its defaults: `--mode auto`, everything from `orchestrator.example.yaml` | `C.yaml` |
+| `D` | the orchestrator, `development` and `testing` only (`--stage`), C's template otherwise | `D.yaml` |
+
+Every orchestrator config sets `execution.rate_limit_wait: 0s`: the orchestrator stops at once on
+a usage limit and orchbench waits for the reset (a test holds it). B against A asks whether the
+pipeline as it is used beats bare Claude Code; C against A the same for the defaults; B against C
+what the owner's choices change; D against C what the decision and the read-only stages add.
+Another setting is measured by editing B and running into a new `--out`, not by a new config;
+the config's hash is in every result line, so the two B files stay apart.
 
 ```yaml
 # bench/configs/common.yaml
@@ -279,22 +281,6 @@ template. Placeholders filled per task: `{{.Model}}`, `{{.TestCommand}}`, `{{.Ro
 before a benchmark starts. The config generated for a task is saved as
 `<out>/configs/<task>-<config>.yaml` and its hash goes into the result line. To add a config,
 add `<name>.yaml` and run `--configs <name>` on the same `--out`.
-
-E and F answer the two questions of the quality phase (specs/quality/SPEC.md): does verify raise
-the pass rate over D without more guard violations (E against D), and does `by_complexity`
-lower the cost at an equal pass rate (F against B). Each differs from its base in one key of
-`actions.implement`, which a test holds. Run them on the same `--out` as their base and compare
-with the baseline set to the base: `orchbench summarize --out <out> --baseline D` for E,
-`--baseline B` for F. The number of `verify_calls` per task is in each cell's `run.json` in the
-run directory, and `model_source` in each step's provider; `orchbench` does not summarise them.
-
-G and H answer one question of the decision shape (`specs/decision-shape/SPEC.md` §8.1): with a
-plan to follow, does a complex task keep its pass rate when the first implement runs on the
-common model and only the fix escalates to the strong one, at a lower cost (H against G,
-`--baseline G`). Both differ from B in `actions.implement.by_complexity` alone, so they differ
-from each other only on tasks the decision calls `complex` (about 15% at the shipped cuts):
-pick tasks that are, and read the cost and the pass rate on those. A fix that escalated shows
-`model_source: by_complexity.complex.escalate` in its step.
 
 ## Task files
 

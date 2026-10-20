@@ -383,7 +383,7 @@ func TestNoBMeansNoBSections(t *testing.T) {
 		t.Fatalf("report = %+v", r)
 	}
 	got := render(t, r)
-	for _, want := range []string{"no B results yet", "no B or C results yet", "no B or Bmock results yet", "no complete en/ru pair"} {
+	for _, want := range []string{"no B results yet", "no B or C results yet", "no complete en/ru pair"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("rendering does not say %q:\n%s", want, got)
 		}

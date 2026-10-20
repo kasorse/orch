@@ -454,10 +454,9 @@ func TestOrchestratorMapsRunAndDecision(t *testing.T) {
 
 func TestOrchestratorPassesTheStages(t *testing.T) {
 	for name, want := range map[string][]string{
-		"C": {"--stage", "research", "--stage", "analysis", "--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review"},
+		"B": nil,
+		"C": nil,
 		"D": {"--stage", "development", "--stage", "testing"},
-		"E": {"--stage", "development", "--stage", "testing"},
-		"F": nil,
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)

@@ -205,7 +205,13 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
 > (auto с `jev.mock`) — пятая; бенч целиком запускается в контейнере.
 >
 > Сделано (BM01–BM14): B3 целиком (`outcome`, `usage`, `runs report`) и каркас B1/B2 —
-> `orchbench mine | validate | run | summarize`, конфиги A, B, C, D, Bmock, контейнер.
+> `orchbench mine | validate | run | summarize`, конфиги A, B, C, D, контейнер.
+>
+> **2026-10-20:** конфигураций четыре: A — голый claude, B — конфиг владельца
+> (`~/orchestrator_v2.yaml`: решение на opus, `by_complexity`, `escalate`), C — умолчания
+> `orchestrator.example.yaml`, D — только implement и test. Bmock, прежний C (все стадии) и
+> варианты E–H удалены: отдельный конфиг на каждую настройку множил прогоны. Настройка теперь
+> меряется правкой B.
 > Как этим пользоваться: [`bench/README.md`](bench/README.md). B1 и B2 остаются `[~]` до
 > BM15 (30 задач) и BM16 (пилот и полный прогон).
 >
@@ -254,7 +260,7 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
    - **B. orchestrator auto** (decision provider = claude).
    - **C. orchestrator, все стадии** (`--stage` × 6).
    - **D. orchestrator, только implement + test.**
-   - **E.** после Q1/Q2 — новые варианты. Шаблоны E (D + verify) и F (B + `by_complexity`)
+   - **E.** после Q1/Q2 — новые варианты. (2026-10-20: удалены, см. выше.) Шаблоны E (D + verify) и F (B + `by_complexity`)
      лежат в `bench/configs/` (QL15); прогона по ним ещё не было.
 4. Метрики: pass rate по оракулу, стоимость в $ (из `usage` в stream-json и таблицы цен в
    конфиге бенча), общее время, число LLM-вызовов, доля времени и стоимости на decision
@@ -318,6 +324,8 @@ regex: AWS keys, `-----BEGIN .* PRIVATE KEY-----`, `ghp_`, `glpat-`, `sk-ant-`, 
 > **2026-10-11:** шлюзы `scripts/check.sh` прошли для всех задач QL, написанных без запуска;
 > QL01–QL14 закрыты (QL06 — live-набор прошёл на claude 2.1.293), Q1, Q5, Q6, Q7 — `[x]`.
 > Остаются `[~]`: Q2 (сравнение E против D в бенче, QL15) и Q3 (сравнение F против B, QL15).
+> 2026-10-20: конфиги E и F удалены; `by_complexity` (Q3) входит в B, а verify (Q2) меряется
+> правкой B, если понадобится.
 
 ### [x] Q1. Передавать стадиям полный контекст — P0 · S
 **Зачем:** 0.2. Дешёвое и заметное улучшение.

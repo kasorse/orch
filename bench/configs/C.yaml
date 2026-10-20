@@ -1,7 +1,10 @@
-# C: every stage, the upper bound of the pipeline (SPEC.md §8). `stages` become --stage flags,
-# so the decision section is not called; it is only here because the config must be valid.
+# C: the orchestrator with its defaults: `run --mode auto`, the LLM decision provider chooses
+# the stages (SPEC.md §8). Everything not named in the template below is
+# orchestrator.example.yaml unchanged; the fields filled per task are {{.Model}},
+# {{.TestCommand}}, {{.RoBinds}}, {{.RwBinds}} and {{.Timeout}}. decision.on_failure is
+# `fail` here, not the example's `ask`: ask would wait for a person on stdin, and a benchmark
+# has none.
 kind: orchestrator
-stages: [research, analysis, planning, development, testing, review]
 config: |
   version: 2
 

@@ -68,7 +68,7 @@ func TestShippedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"A", "B", "Bmock", "C", "D", "E", "F", "G", "H"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"A", "B", "C", "D"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("configs = %v, want %v", names, want)
 	}
 
@@ -79,13 +79,8 @@ func TestShippedConfigs(t *testing.T) {
 	}{
 		{"A", KindClaude, nil},
 		{"B", KindOrchestrator, nil},
-		{"Bmock", KindOrchestrator, nil},
-		{"C", KindOrchestrator, []string{"research", "analysis", "planning", "development", "testing", "review"}},
+		{"C", KindOrchestrator, nil},
 		{"D", KindOrchestrator, []string{"development", "testing"}},
-		{"E", KindOrchestrator, []string{"development", "testing"}},
-		{"F", KindOrchestrator, nil},
-		{"G", KindOrchestrator, nil},
-		{"H", KindOrchestrator, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -108,8 +103,20 @@ func TestShippedConfigs(t *testing.T) {
 	}
 }
 
+// orchbench waits for a usage limit's reset itself and runs the cell again (run.Env.Exec). An
+// orchestrator that waited instead would be killed at the task's timeout and the cell recorded as
+// a timeout fail, so every orchestrator config turns the orchestrator's own wait off.
+func TestOrchestratorConfigsDoNotWaitForTheLimit(t *testing.T) {
+	for _, name := range []string{"B", "C", "D"} {
+		execution, ok := renderedMap(t, name)["execution"].(map[string]any)
+		if !ok || execution["rate_limit_wait"] != "0s" {
+			t.Errorf("%s: execution = %v, want rate_limit_wait: 0s", name, execution)
+		}
+	}
+}
+
 func TestRenderGolden(t *testing.T) {
-	for _, name := range []string{"B", "C", "D", "E", "F", "G", "H", "Bmock"} {
+	for _, name := range []string{"B", "C", "D"} {
 		t.Run(name, func(t *testing.T) {
 			c := load(t, name)
 			out, sha, err := c.RenderConfig(goldenTask())
@@ -132,36 +139,6 @@ func TestRenderGolden(t *testing.T) {
 	})
 }
 
-// The decision is what tells B, C, D and B′ apart besides the flags; the rest of the template
-// is the same and must stay so.
-func TestBmockUsesTheMockDecision(t *testing.T) {
-	type decision struct {
-		Provider string `yaml:"provider"`
-		Jev      struct {
-			Mock bool `yaml:"mock"`
-		} `yaml:"jev"`
-	}
-	for name, want := range map[string]decision{
-		"B":     {Provider: "claude"},
-		"Bmock": {Provider: "jev"},
-	} {
-		out, _, err := load(t, name).RenderConfig(goldenTask())
-		if err != nil {
-			t.Fatal(err)
-		}
-		var got struct {
-			Decision decision `yaml:"decision"`
-		}
-		if err := yaml.Unmarshal(out, &got); err != nil {
-			t.Fatal(err)
-		}
-		want.Jev.Mock = name == "Bmock"
-		if got.Decision != want {
-			t.Errorf("%s: decision = %+v, want %+v", name, got.Decision, want)
-		}
-	}
-}
-
 // renderedMap is the rendering of a shipped orchestrator config as a generic YAML map.
 func renderedMap(t *testing.T, name string) map[string]any {
 	t.Helper()
@@ -176,69 +153,34 @@ func renderedMap(t *testing.T, name string) map[string]any {
 	return m
 }
 
-// Each orchestrator config carries its own copy of the template. B, B′, C and D are only
-// comparable while everything but the decision section is identical, so a threshold, a model
-// or a limit edited in one file and not the others fails here.
+// D carries its own copy of C's template. D measures the stages C would not choose only while
+// everything but the decision section (not called under --stage) is identical, so a threshold, a
+// model or a limit edited in one file and not the other fails here.
 func TestOrchestratorConfigsDifferOnlyInTheDecision(t *testing.T) {
-	base := renderedMap(t, "B")
+	base := renderedMap(t, "C")
 	delete(base, "decision")
-	for _, name := range []string{"Bmock", "C", "D"} {
+	for _, name := range []string{"D"} {
 		t.Run(name, func(t *testing.T) {
 			got := renderedMap(t, name)
 			delete(got, "decision")
 			if !reflect.DeepEqual(got, base) {
-				t.Errorf("%s differs from B outside the decision section:\n got %v\nwant %v", name, got, base)
+				t.Errorf("%s differs from C outside the decision section:\n got %v\nwant %v", name, got, base)
 			}
 		})
 	}
 }
 
-// E is D and F, G and H are B, each with one change to actions.implement: E turns verify on, F
-// routes a simple task to a cheaper model at low effort, G a complex one to the strong model and
-// H a complex one's fix to it. The comparisons E against D, F against B and H against G measure
-// that change only, so nothing else may differ.
-func TestVariantsDifferFromTheirBaseOnlyInImplement(t *testing.T) {
-	for _, tc := range []struct {
-		name, base string
-		extra      map[string]any
-	}{
-		{"E", "D", map[string]any{"verify": true}},
-		{"F", "B", map[string]any{"by_complexity": map[string]any{"simple": map[string]any{"model": "haiku", "effort": "low"}}}},
-		{"G", "B", map[string]any{"by_complexity": map[string]any{"complex": map[string]any{"model": "opus", "effort": "high"}}}},
-		{"H", "B", map[string]any{"by_complexity": map[string]any{"complex": map[string]any{"effort": "high",
-			"escalate": map[string]any{"model": "opus", "effort": "high"}}}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			want := renderedMap(t, tc.base)
-			actions, ok := want["actions"].(map[string]any)
-			if !ok {
-				t.Fatalf("actions is not a mapping: %v", want["actions"])
-			}
-			implement, ok := actions["implement"].(map[string]any)
-			if !ok {
-				t.Fatalf("actions.implement is not a mapping: %v", actions["implement"])
-			}
-			for k, v := range tc.extra {
-				implement[k] = v
-			}
-			if got := renderedMap(t, tc.name); !reflect.DeepEqual(got, want) {
-				t.Errorf("%s differs from %s beyond actions.implement:\n got %v\nwant %v", tc.name, tc.base, got, want)
-			}
-		})
-	}
-}
-
-// The configs are orchestrator.example.yaml with the per-task fields filled in, as the
-// template comment says. A change to the example's thresholds, limits or models must be made
-// here too, or the benchmark measures a configuration nobody runs.
+// C and D are orchestrator.example.yaml with the per-task fields filled in, as the template
+// comment says. A change to the example's thresholds, limits or models must be made here too,
+// or C measures defaults nobody ships. B is the owner's own configuration and follows no file of
+// this repository.
 func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 	raw, err := os.ReadFile("../../../orchestrator.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// E, F, G and H are not listed: they are held to D and B above, which are held to the example.
-	for _, name := range []string{"B", "C", "D", "Bmock"} {
+	for _, name := range []string{"C", "D"} {
 		t.Run(name, func(t *testing.T) {
 			var example map[string]any
 			if err := yaml.Unmarshal(raw, &example); err != nil {
@@ -247,7 +189,7 @@ func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 			got := renderedMap(t, name)
 
 			// implement runs the common model; decision, test and execution are filled per
-			// task or deliberately different (see the comment of B.yaml).
+			// task or deliberately different (see the comment of C.yaml).
 			actions, ok := example["actions"].(map[string]any)
 			if !ok {
 				t.Fatalf("actions is not a mapping in the example: %v", example["actions"])
@@ -261,39 +203,6 @@ func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 				t.Errorf("%s differs from orchestrator.example.yaml outside decision, test and execution:\n got %v\nwant %v", name, got, example)
 			}
 		})
-	}
-}
-
-// B′'s decision is the example's Jev decision with the two changes it is meant to have: the
-// offline mock, and fail instead of ask (nobody answers stdin in a benchmark run). The rest
-// (model version, timeout, base_url, api_key_env, max_retries) is what the core validates for
-// provider jev, so it is held to the example rather than left to the skipped validate test.
-func TestBmockDecisionFollowsTheExample(t *testing.T) {
-	raw, err := os.ReadFile("../../../orchestrator.example.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var example map[string]any
-	if err := yaml.Unmarshal(raw, &example); err != nil {
-		t.Fatal(err)
-	}
-	want, ok := example["decision"].(map[string]any)
-	if !ok {
-		t.Fatalf("decision is not a mapping in the example: %v", example["decision"])
-	}
-	if want["provider"] != "jev" {
-		t.Fatalf("the example's decision provider is %v, not jev: B′ no longer has a reference", want["provider"])
-	}
-	jev, ok := want["jev"].(map[string]any)
-	if !ok {
-		t.Fatalf("decision.jev is not a mapping in the example: %v", want["jev"])
-	}
-	want["on_failure"] = "fail"
-	jev["mock"] = true
-
-	got := renderedMap(t, "Bmock")["decision"]
-	if !reflect.DeepEqual(got, any(want)) {
-		t.Errorf("Bmock decision differs from the example's beyond on_failure and jev.mock:\n got %v\nwant %v", got, want)
 	}
 }
 
@@ -477,7 +386,7 @@ func TestRenderedConfigsPassOrchestratorValidate(t *testing.T) {
 	tk.TestCommand = "true"
 	tk.Sandbox = task.Sandbox{}
 
-	for _, name := range []string{"B", "C", "D", "E", "F", "G", "H", "Bmock"} {
+	for _, name := range []string{"B", "C", "D"} {
 		t.Run(name, func(t *testing.T) {
 			out, _, err := load(t, name).RenderConfig(tk)
 			if err != nil {

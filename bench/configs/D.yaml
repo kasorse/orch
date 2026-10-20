@@ -1,6 +1,6 @@
 # D: implement + test, the pipeline without planning or review (SPEC.md §8). `stages` become
 # --stage flags, so the decision section is not called; it is only here because the config
-# must be valid.
+# must be valid. The rest is C's template, which a test holds.
 kind: orchestrator
 stages: [development, testing]
 config: |
