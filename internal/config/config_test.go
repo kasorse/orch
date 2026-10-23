@@ -181,14 +181,15 @@ func TestValidate_ReviewModels(t *testing.T) {
 
 func TestValidate_ByComplexityEffortNeedsClaude(t *testing.T) {
 	cfg := validConfig()
+	cfg.Actions.Review.Provider = "gemini"
 	cfg.Actions.Review.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexitySimple: {Effort: "low"}}
-	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "actions.review.by_complexity.simple.effort is only supported with provider claude") {
-		t.Errorf("effort on a codex action must be refused, got %v", err)
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "actions.review.by_complexity.simple.effort is only supported with provider claude or codex") {
+		t.Errorf("effort on a gemini action must be refused, got %v", err)
 	}
 
 	cfg.Actions.Review.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexitySimple: {Model: "mini"}}
 	if err := Validate(cfg); err != nil {
-		t.Errorf("a model on a codex action is valid: %v", err)
+		t.Errorf("a model on a gemini action is valid: %v", err)
 	}
 }
 

@@ -409,7 +409,7 @@ func TestValidate_Verify(t *testing.T) {
 	}{
 		{"no sandbox", func(c *Config) { c.Test.Sandbox = SandboxNone }, "actions.implement.verify needs test.sandbox bwrap"},
 		{"no test command", func(c *Config) { c.Test.Command = "" }, "actions.implement.verify needs test.command"},
-		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "codex" }, "actions.implement.verify is only supported with provider claude"},
+		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "gemini" }, "actions.implement.verify is only supported with provider claude or codex"},
 		{"on review", func(c *Config) { c.Actions.Review.Verify = true }, "actions.review.verify: unknown key"},
 		{"written on plan", func(c *Config) { c.Actions.Plan.verifySet = true }, "actions.plan.verify: unknown key"},
 		{"zero calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &zero }, "limits.verify.max_calls_per_step must be between 1 and 50, got 0"},

@@ -22,8 +22,8 @@ func TestValidateExtensions(t *testing.T) {
 			t.Errorf("expected %q in:\n%s", want, got)
 		}
 	}
-	codex := map[string]string{"analyze": "codex", "plan": "claude", "review": "claude"}
-	if p := strings.Join(validateExtensions(ok, codex), "\n"); !strings.Contains(p, "only supported with provider claude") {
-		t.Errorf("a non-claude action must be refused: %s", p)
+	gemini := map[string]string{"analyze": "gemini", "plan": "claude", "review": "claude"}
+	if p := strings.Join(validateExtensions(ok, gemini), "\n"); !strings.Contains(p, "only supported with provider claude or codex") {
+		t.Errorf("a gemini action must be refused: %s", p)
 	}
 }

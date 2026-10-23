@@ -276,7 +276,7 @@ func TestLoad_ProvidersStrictKeys(t *testing.T) {
 		extra string
 		want  string
 	}{
-		"other provider": {"providers:\n  codex:\n    auth: api\n", "line 26: codex"},
+		"other provider": {"providers:\n  gemini:\n    auth: api\n", "line 26: gemini"},
 		"unknown claude": {"providers:\n  claude:\n    autho: api\n", "line 27: autho"},
 	} {
 		t.Run(name, func(t *testing.T) {
