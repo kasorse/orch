@@ -292,14 +292,8 @@ func (a SpecifyAnswer) check(repos []string, maxTasks int, specDirExists func(st
 		}
 	}
 
-	tasks := a.Tasks()
-	if err := Validate(tasks, repos, maxTasks); err != nil {
+	if err := Validate(a.Tasks(), repos, maxTasks); err != nil {
 		return answerErr("tasks", "%v", err)
-	}
-	for i, t := range tasks {
-		if _, err := Base(tasks, t.ID); err != nil {
-			return answerErr(fmt.Sprintf("tasks[%d].depends_on", i), "%v", err)
-		}
 	}
 	return nil
 }

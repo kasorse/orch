@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -68,6 +69,27 @@ func TestStoryRunLines(t *testing.T) {
 		"  run it again to resume\n  or --retry RF02\n"
 	if buf.String() != want {
 		t.Errorf("got\n%s\nwant\n%s", buf.String(), want)
+	}
+}
+
+func TestStoryConflict(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+	r.StoryConflict("RF03", []string{"RF01", "RF02"}, []string{"a.go", "pkg/b.go"}, "story/refunds/spec", "merge them by hand", "then: orchestrator story run specs/refunds")
+	want := "\nRF03: conflict (RF01 + RF02 do not merge cleanly on story/refunds/spec)\n" +
+		"  Conflicting files:\n    a.go\n    pkg/b.go\n" +
+		"  merge them by hand\n  then: orchestrator story run specs/refunds\n"
+	if buf.String() != want {
+		t.Errorf("got\n%s\nwant\n%s", buf.String(), want)
+	}
+
+	buf.Reset()
+	pretty := &ConsoleReporter{Out: &buf, Pretty: true}
+	pretty.StoryConflict("RF03", []string{"RF01", "RF02"}, []string{"a.go", "pkg/b.go"}, "story/refunds/spec", "merge them by hand")
+	for _, w := range []string{"RF03: conflict (RF01 + RF02 do not merge cleanly on story/refunds/spec)", "a.go, pkg/b.go", "merge them by hand"} {
+		if !strings.Contains(buf.String(), w) {
+			t.Errorf("the pretty line lacks %q:\n%s", w, buf.String())
+		}
 	}
 }
 

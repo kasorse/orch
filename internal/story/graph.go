@@ -192,25 +192,6 @@ func ancestors(byID map[string]Task, id string) map[string]bool {
 	return seen
 }
 
-// Base is the task a task's branch is stacked on (SPEC §9.2). Of the task's ancestors,
-// transitively and across repositories, it takes those in the task's own repository and drops
-// each one that another of them depends on, directly or through others. None left: "", the
-// repository's story base. One left: that task. More: an error, because the orchestrator
-// does not decide how to merge branches.
-func Base(tasks []Task, id string) (string, error) {
-	keep, err := Parents(tasks, id)
-	if err != nil {
-		return "", err
-	}
-	switch len(keep) {
-	case 0:
-		return "", nil
-	case 1:
-		return keep[0], nil
-	}
-	return "", fmt.Errorf("%s needs %s in %s on different branches; make one depend on the other", id, joinAnd(keep), indexTasks(tasks)[id].Repo)
-}
-
 // Ready is the tasks to dispatch now, in Order: those whose every dependency is TaskDone and
 // whose own state is neither TaskDone nor TaskRunning. A task with no entry in states is pending.
 func Ready(tasks []Task, states map[string]TaskStatus) []string {
@@ -267,11 +248,4 @@ func Parents(tasks []Task, id string) ([]string, error) {
 	}
 
 	return keep, nil
-}
-
-func joinAnd(ids []string) string {
-	if len(ids) == 1 {
-		return ids[0]
-	}
-	return strings.Join(ids[:len(ids)-1], ", ") + " and " + ids[len(ids)-1]
 }

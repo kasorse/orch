@@ -92,6 +92,11 @@ func PrependPath(t *testing.T, dir string) {
 //     (migrations/x.sql, for a path rule). From the implement call number in
 //     FAKE_IMPLEMENT_REVERT_ON_CALL on, the call removes the file instead, as a later attempt
 //     reverting an earlier one.
+//   - FAKE_IMPLEMENT_BRANCH_FILE / FAKE_IMPLEMENT_BRANCH_DIR: every implement call writes the
+//     name of the branch checked out where it runs (a story task's worktree: story/<slug>/<ID>)
+//     to the path FAKE_IMPLEMENT_BRANCH_FILE, and to <FAKE_IMPLEMENT_BRANCH_DIR>/<branch with
+//     "/" as "-">.txt. Two tasks that name the same file change it differently (a merge
+//     conflict); in the directory each adds a file of its own (a clean merge).
 //   - FAKE_PLANT_HOOK_BEFORE_CALL: 1-based implement call number before which the script
 //     writes an executable .git/hooks/pre-commit that touches FAKE_HOOK_MARKER (default
 //     $FAKE_STATE_DIR/hook-ran), as a model planting a hook would. A test asserts the
@@ -228,6 +233,17 @@ if [ "$action" = "implement" ] && [ -n "$call_count" ]; then
     else
       mkdir -p "$(dirname "$FAKE_IMPLEMENT_TOUCH_FILE")"
       printf '%s\n' "-- implement call $call_count" > "$FAKE_IMPLEMENT_TOUCH_FILE"
+    fi
+  fi
+
+  if [ -n "${FAKE_IMPLEMENT_BRANCH_FILE:-}" ] || [ -n "${FAKE_IMPLEMENT_BRANCH_DIR:-}" ]; then
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)
+    if [ -n "${FAKE_IMPLEMENT_BRANCH_FILE:-}" ]; then
+      printf '%s\n' "$branch" > "$FAKE_IMPLEMENT_BRANCH_FILE"
+    fi
+    if [ -n "${FAKE_IMPLEMENT_BRANCH_DIR:-}" ]; then
+      mkdir -p "$FAKE_IMPLEMENT_BRANCH_DIR"
+      printf '%s\n' "$branch" > "$FAKE_IMPLEMENT_BRANCH_DIR/$(printf '%s' "$branch" | tr '/' '-').txt"
     fi
   fi
 

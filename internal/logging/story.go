@@ -267,6 +267,29 @@ func (r *ConsoleReporter) StoryHint(lines ...string) {
 	}
 }
 
+// StoryConflict says that the parents of a task do not merge cleanly on the spec branch, so the
+// task is not dispatched: the conflicting files, then one line each of hints - the manual merge
+// and the command that goes on.
+func (r *ConsoleReporter) StoryConflict(id string, parents, files []string, specBranch string, hints ...string) {
+	r.stopSpin()
+	text := fmt.Sprintf("%s: conflict (%s do not merge cleanly on %s)", id, strings.Join(parents, " + "), specBranch)
+	if r.Pretty {
+		fmt.Fprintf(r.Out, "\n%s\n", r.st().yellow(text))
+		if len(files) > 0 {
+			r.detail("conflicting files: " + strings.Join(files, ", "))
+		}
+	} else {
+		fmt.Fprintf(r.Out, "\n%s\n", text)
+		if len(files) > 0 {
+			fmt.Fprintf(r.Out, "  Conflicting files:\n")
+			for _, f := range files {
+				fmt.Fprintf(r.Out, "    %s\n", f)
+			}
+		}
+	}
+	r.StoryHint(hints...)
+}
+
 // StoryEnd prints the table that ends a completed story (§10.4): per task the repository, the
 // branch, the branch its merge request targets, the commit, the Jira key and the conflicts.
 func (r *ConsoleReporter) StoryEnd(rows []StoryEndRow) {

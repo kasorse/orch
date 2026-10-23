@@ -68,12 +68,15 @@ type storyRunFixtureOpts struct {
 	maxCostUSD float64
 	// jira, when set, is the home's jira section (with jira.create) at a fake Jira.
 	jira *jiraOptions
+	// tasks, when set, are the spec's tasks in place of storyRunTasks.
+	tasks []story.Task
 }
 
 type storyRunFixture struct {
 	home, specDir, storyDir, cfg string
 	repos                        map[string]string
 	invocationsLog, responses    string
+	tasks                        []story.Task
 }
 
 func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *storyRunFixture {
@@ -103,7 +106,10 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 	t.Setenv("FAKE_CWD_DIR", t.TempDir())
 	t.Setenv("FAKE_FIX_TARGET_FILE", "fixture.go")
 	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "added.txt")
-	f := &storyRunFixture{repos: map[string]string{}, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR")}
+	f := &storyRunFixture{repos: map[string]string{}, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR"), tasks: storyRunTasks}
+	if o.tasks != nil {
+		f.tasks = o.tasks
+	}
 	writeResponse(t, f.responses, "implement", storyImplementResponse)
 	writeResponse(t, f.responses, "review", storyReviewPass)
 
@@ -164,7 +170,7 @@ func (f *storyRunFixture) writeSpec(t *testing.T) {
 		Risks:      "None.",
 	}))
 	var tasks []story.Task
-	for _, task := range storyRunTasks {
+	for _, task := range f.tasks {
 		task.Body = "\n## Goal\n\nDo " + task.ID + ".\n\n## Acceptance\n\n- the change is made\n- a test covers it\n"
 		writeStoryFile(t, f.taskPath(task.ID), story.RenderTaskFile(task, "M"))
 		tasks = append(tasks, task)
@@ -173,7 +179,7 @@ func (f *storyRunFixture) writeSpec(t *testing.T) {
 }
 
 func (f *storyRunFixture) taskPath(id string) string {
-	for _, task := range storyRunTasks {
+	for _, task := range f.tasks {
 		if task.ID == id {
 			return filepath.Join(f.specDir, "tasks", story.TaskFileName(id, task.Title))
 		}
@@ -502,7 +508,7 @@ func TestStoryRun_OrderStackingAsBuiltAndTheEnd(t *testing.T) {
 	assertContains(t, "stdout", stdout, "Story plan: 4 tasks in 2 repositories", "── RF01 · billing · 1/4 ──",
 		"── RF03 · gateway · 3/4 ──", "✓ Story completed: all 4 tasks done",
 		"RF02 · billing · story/refunds/RF02 → story/refunds/RF01",
-		"RF03 · gateway · story/refunds/RF03 → "+f.baseBranch(t, "gateway"))
+		"RF03 · gateway · story/refunds/RF03 → story/refunds/spec")
 	f.assertCheckoutsUnchanged(t, before)
 
 	// story status reads: nothing in the story or spec directory changes, and it shows the README.
