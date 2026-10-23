@@ -1,16 +1,20 @@
 # Spec: Delivery — from a finished run to a merge request, in a terminal or in CI
 
 Status: **specified** (2026-10-23), nothing built. The owner's decisions are in §16 (taken
-2026-10-23 while scoping; D12–D15 the same day, on the branch name), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
+2026-10-23 while scoping; D12–D15 the same day, on the branch name; D16–D20 the same day, on the
+worktree default and the end of a run, which replace D2, D3 and D5), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
 W4, W5. Builds on `specs/worktree/` (§47) and `specs/story/` (§48), both done.
 
 The spec touches these MVP.md sections:
-- §4: CLI (`--mr`, `--output json`, `orchestrator review`, the exit code table);
-- §30: out of scope (GitLab: one push, one merge request, one note per run);
+- §4: CLI (`--output json`, `orchestrator review`, the exit code table);
+- §30: out of scope (GitLab: one push of the run's branch, which opens one merge request);
 - §39: Jira (a comment and a transition after a merge request, §39.12);
 - §42: the commit message (a Conventional Commit type, the `Orchestrator-Decision` trailer);
+  §42.1/§42.6: a worktree run asks, or under `--mode auto` does not ask (§7.2);
 - §43: `report.md` next to `summary.md`;
+- §47.1: `worktree` is the default isolation again (§6);
 - §47.2: the branch name (instructions, a template, then `orchestrator/<run-id>`);
+- §47.5: commit, push and merge request at the end of a worktree run (§7);
 - §47.7 and §48.10: pushing and merge requests are no longer "not covered";
 - new §49: delivery.
 
@@ -61,16 +65,19 @@ changes in the current tree (§40.4), so it cannot review a merge request.
 1. **Go writes everything a person reads**: the commit message, the report, the MR title and
    description, the Jira comment. A model proposes at most one closed-list word (the commit type)
    and the `summary_short` it already writes.
-2. **No delivery without the commit.** Push and merge request happen only after the §42.6 /
-   §47.5 rules committed; they never relax those rules (D7).
-3. **Writes outside the machine happen once, after an intent, never retried blindly** - the
-   §48.7 discipline for every GitLab and Jira write.
-4. **Requests go only to the configured host.** The GitLab project comes from the git remote
-   (D3), but the token is sent only to `gitlab.base_url`, and the remote must point at that host.
-5. **Only the run's own branch is pushed**, never with force, never the operator's branch.
-6. **The exit code and one JSON line are the machine interface**; everything else is for a
+2. **No delivery without the commit.** Push and merge request happen only after the run
+   committed; they never relax the §42.6 rules (D7).
+3. **Only `--mode auto` delivers without asking** (D18). Every other mode asks before the
+   commit, before the push and before the merge request, and a no stops there.
+4. **Writes outside the machine happen once, after an intent, never retried blindly** - the
+   §48.7 discipline for the push and every Jira write.
+5. **The orchestrator holds no GitLab credentials.** The merge request is opened by the push
+   itself (GitLab push options, D19), with the operator's own git credentials; there is no
+   GitLab API client.
+6. **Only the run's own branch is pushed**, never with force, never the operator's branch.
+7. **The exit code and one JSON line are the machine interface**; everything else is for a
    person and goes to stderr under `--output json`.
-7. **Review-only is a run**: same store, decision record, guard, report and resume; it just has no
+8. **Review-only is a run**: same store, decision record, guard, report and resume; it just has no
    `implement` and reviews `base...head`.
 
 ---
@@ -176,7 +183,7 @@ implement, and the name is fixed before it (D14).
 
 - `git check-ref-format --branch`; only `[A-Za-z0-9._/-]`; at most 100 bytes; no leading `-`
   or `/`, no `//`, no `..`, no `.lock` suffix;
-- not `HEAD`, not the base branch, not `gitlab.target_branch`, not under `story/` (reserved for
+- not `HEAD`, not the base branch, not `delivery.target_branch`, not under `story/` (reserved for
   §48), and not an existing local branch (`refs/heads/<name>`);
 - an existing branch with the template's name gets `-<last 6 of the run ID>` appended once, then
   is checked again; a model's name that exists is rejected (to the template).
@@ -190,7 +197,7 @@ derived from the run ID, so a resume checks it instead: the §4.3 character and 
 `git worktree list` showing the derived path on exactly that branch (the check §47's resume
 already makes). The path stays derived from the run ID.
 
-**Push** (§8): before pushing, `git ls-remote --heads <remote> <name>` must show nothing. A branch
+**Push** (§7.3): before pushing, `git ls-remote --heads <remote> <name>` must show nothing. A branch
 of that name on the remote is never pushed to, even as a fast-forward: `mr.error: the branch
 <name> already exists on <remote>`, exit 6. A name from a model, or a template without `{id}`,
 could otherwise move somebody else's branch.
@@ -199,8 +206,8 @@ could otherwise move somebody else's branch.
 
 Written next to `summary.md` whenever a run reaches a terminal status, by Go from `run.json` and
 `decision.json`, never read back, never a resume input; failing to write it fails nothing
-(§43.2's rules). It is the MR description (§8) and the MR note of a review run (§12.5).
-`summary.md` keeps the metrics; `report.md` is for the reviewer.
+(§43.2's rules). It is the MR description (§7.3) and, in the CI example, the note of a review
+(§11.4). `summary.md` keeps the metrics; `report.md` is for the reviewer.
 
 ```markdown
 ## fix: PAY-12 Use + in Add
@@ -258,138 +265,180 @@ Rules:
   GitLab references that notify or link (`@user`, `#123`, `!123`, `~label`, `%milestone`)
   are backslash-escaped. A model cannot put a link, an image, a mention or a quick action
   (`/merge` at the start of a line) into an MR. Lines that start with `/` are indented by one space.
-- Bounded at 60 000 bytes (lists are cut first, then the task quote); GitLab's limit is 1 MiB.
+- Bounded at 60 000 bytes (lists are cut first, then the task quote); GitLab's note limit is 1 MiB.
 - A review run (§12) has "Reviewed" (`base...head`, the MR) in place of "What changed", and no
   "Why these stages".
 
-## 6. GitLab: configuration, project, client
+## 6. Worktree by default (D16)
 
-### 6.1 Configuration
+- `execution.isolation` defaults to `worktree` again (it was `inplace` since 2026-10-18; MVP.md
+  §47.1 changes back). `run --inplace`, or `isolation: inplace` written out, opts out;
+  `run --worktree` stays and overrides an `inplace` config. Given together they remain a usage
+  error.
+- What becomes a worktree run is unchanged (§47.1): a workflow with `implement`. A workflow
+  without it runs in place, so `run --stage review` still reviews the operator's uncommitted work.
+- `worktree.setup` with `isolation` absent now runs in every worktree run (it ran only under
+  `run --worktree`).
+- An unborn HEAD stays a config error; its message names `--inplace`.
+- Existing tests and scenarios that read a run's result in the working tree pin `isolation:
+  inplace` (the rule CLAUDE.md already sets for new ones); DL03 does that.
+
+The owner's table for the worktree feature (D20) is §47 as built, plus this spec:
+
+| capability | phase | where |
+|---|---|---|
+| a worktree per task | now | §47.2 |
+| a branch of its own per task | now | §47.2, §4.3 |
+| every CLI step runs in the worktree | now | §47.2 |
+| git status and diff from the worktree | now | `diff.run`, the review diff, `report.md` |
+| removed after the run | now | §47.5: after a successful commit, whatever the push did (§7.1) |
+| kept on an error | now | §47.5: no commit (a failed run, a refused commit, a no) keeps it |
+| parallel agents, a separate worktree for review, merge conflicts resolved, changes integrated automatically, a lifecycle manager over persistent state | next version | §18 |
+
+## 7. The end of a worktree run: commit, push, merge request (D17–D19)
+
+### 7.1 The chain
+
+A worktree run that completes with `implement` in its workflow always ends with this chain.
+There is no flag; `--inplace` is the only way out (an `inplace` run keeps §42: the commit
+question or `auto_commit`, no push, no MR). Each step runs only after the one before it
+succeeded:
+
+1. **commit** on the run's branch, in the worktree (§42.2 message, §42.3 commit);
+2. the conflict check (`merge-tree`, §47.5), unchanged;
+3. **push** of the branch to `delivery.remote`;
+4. **merge request** `branch → target`, opened by that same push (§7.3);
+5. the worktree removal (§47.5), unchanged: after a successful commit, whatever steps 3–4 did.
+   The branch holds the result.
+
+### 7.2 Who says yes (D18)
+
+| mode | commit | push | merge request |
+|---|---|---|---|
+| `--mode auto` | no question, under the §42.6 rules | no question | no question |
+| any other mode (`manual`, `accept-edits`, the interactive default) | `Commit to <branch>? [y]es / [N]o / [e]dit message` (§42.2) | `Push <branch> to <remote>? [y]es / [N]o` | `Open a merge request <branch> → <target>? [y]es / [N]o` |
+
+- The questions come in that order; the default (an empty answer, a closed stdin) is no, and a no
+  stops the chain: nothing after it is asked or done. Both the push and the MR answer are taken
+  before the one `git push` (§7.3).
+- The commit question is §42.2's as it is: its warnings (a failing review, a secret finding, the
+  `policy.paths` approvals), a typed line when there is no `summary_short`. The §42.6 refusals
+  apply only under `--mode auto`, where nobody can read a warning.
+- `auto_commit` has no effect in a worktree run (it behaved as if true, §42.6): `--mode auto` is
+  the yes given in advance for all three, every other mode asks.
+- `--mode plan` never completes a run, so it never reaches the chain. A non-auto mode without a
+  terminal is a usage error at the start (§11.1).
+- A story child runs under `--mode auto` (§9).
+
+### 7.3 The push, which opens the merge request
+
+From the operator's repository (the branch is shared with the worktree), after the operator
+repository's git fingerprint matched the one taken when the worktree was created (as before
+`merge-tree`; a pre-push hook runs) and `git ls-remote --heads <remote> <branch>` showed nothing
+(§4.3):
+
+```
+git push -u --no-follow-tags <remote> refs/heads/<branch>:refs/heads/<branch> \
+    -o merge_request.create \
+    -o merge_request.target=<target> \
+    -o "merge_request.title=<title>" \
+    -o "merge_request.description=<description>"
+```
+
+Without the MR (a no to the third question) the same command without the `-o` options.
+
+- argv, never `sh -c`; the full environment (the operator's credential helper, ssh agent), as
+  every git call; never `--force`; bounded by a fixed 5 minutes (A10). `-u` records the upstream
+  in the shared git config: the push is the last step that compares the fingerprint, so nothing
+  after it can take that for tampering.
+- `run.json: mr {state: intent, remote, source, target}` is saved before the push. The push is
+  never repeated by this run: one that timed out may have reached the remote.
+- **target**: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
+  `delivery.target_branch`; with neither, an error before the worktree is created (§8).
+- **title**: the commit header (§4.1), e.g. `PMC-123: Implement new feature` or
+  `fix: PMC-123 Implement new feature`.
+- **description**: `report.md` rendered for this run after the commit, with every line break
+  written as the two characters `\n` (CR dropped). git refuses a push option with LF or NUL
+  (`push options must not have new line characters`); GitLab turns a literal `\n` back into a
+  line break (A17). A `\n` that was text in the report also becomes a break: harmless.
+- **Bounds**: the title 255 bytes, cut at a rune. A push option travels as one pkt-line (at most
+  65 516 bytes), so the whole `merge_request.description=…` option is at most 64 000 bytes after
+  encoding: when it would be longer, the report is rendered again with smaller lists, then a
+  shorter task quote (the §5 cut order), and as a last resort cut at a line with `…(cut)`.
+  `report.md` on disk stays the 60 000-byte version. Title and report text are already escaped as
+  untrusted text (§5).
+- **The result.** GitLab answers on the push's stderr (`remote: View merge request for
+  <branch>:` and the URL on the next line). Go takes the first line after that marker that is
+  exactly `https://<host>/<path>/-/merge_requests/<n>`, `<host>` being the remote's host
+  (`git remote get-url`, userinfo dropped). The "To create a merge request … visit" link
+  (`…/merge_requests/new?…`) never matches. The URL is only recorded and printed, never requested.
+
+| what happened | `run.json: mr` | printed | exit |
+|---|---|---|---|
+| pushed, MR URL found | `state: created`, `iid`, `url` | `Merge request !12: <url>` | 0 |
+| pushed, MR not wanted (a no) | `state: pushed`, `skipped: declined at merge request` | `Pushed <branch> to <remote>.` | 0 |
+| pushed, MR asked, no URL in the answer | `state: pushed`, `error: the remote reported no merge request` | the error and the GitLab link to create one, if printed | 6 |
+| push failed: rejected, a hook, the network, `the receiving end does not support push options` (not GitLab) | `state: intent`, `error: <git's last line>` | `To push it yourself: git push -u <remote> <branch>` | 6 |
+
+Minimum: git 2.10 (push options), GitLab 12.2 (the `title` and `description` options). Neither is
+checked in advance; the push says so. A GitLab that does not decode `\n` (older versions, see
+[gitlab#241710](https://gitlab.com/gitlab-org/gitlab/-/issues/241710)) shows the description
+with literal `\n`; the live check (§15) confirms the decoding on gitlab.com, and the version
+that first does it goes into DL04's As built.
+
+### 7.4 No commit, no delivery (D7)
+
+- Under `--mode auto`, when §42.6 does not commit (a warning, no `summary_short`, `approval:
+  manual`) or the commit fails: `mr.skipped: <why>`, `No push and no merge request: <why>`, the
+  changes stay in the worktree and its path is printed. Exit code 6.
+- In any other mode, a no: `mr.skipped: declined at <commit|push|merge request>`. Exit code 0:
+  the person decided.
+- A workflow without `implement` runs in place and has no chain.
+
+### 7.5 Output, resume
+
+- `summary.md` gains a "Merge request" row (the URL, or the skip or error); `report.md`'s
+  footer names the MR when there is one.
+- A resume that completes the run runs the same chain: the mode is the resume's own `--mode`,
+  the isolation `options.isolation`. A completed run is not resumable (§37), so a failed push or
+  MR is finished by hand with the printed command.
+
+## 8. Configuration and the checks before the worktree
 
 ```yaml
-gitlab:
-  base_url: https://gitlab.example.com   # https; http only for localhost (jira.base_url's rule)
-  token_env: GITLAB_TOKEN                # required; a literal `token` is a config error
-  remote: origin                         # the remote that is pushed to and names the project
-  target_branch: main                    # only when the run has no base branch (detached HEAD)
-  draft: true                            # default true: the title gets "Draft: "
-  labels: [ai-generated]                 # optional
-  timeout: 30s                           # one HTTP attempt
-  max_retries: 2                         # only 429/503 with Retry-After
+delivery:
+  remote: origin          # default origin: pushed to
+  target_branch: main     # optional: the target when HEAD is detached
 ```
 
-Strict schema, defaults for absent keys, `token_env` registered in `Config.CredentialEnvNames` (so
-it is scrubbed from every provider CLI and test process; git keeps the full environment).
-Checked only when something needs GitLab (`DependencyOptions{GitLab: true}`: `run --mr`,
-`story run --mr`, `review --mr`, and `validate` when the section is present).
+Strict schema, both keys optional, the section optional. No token, no URL: the push uses the
+operator's git credentials.
 
-### 6.2 The project comes from the remote (D3)
+Checked once the workflow is known and approved (with `--stage`, before any call), before the
+worktree is created and before any step, for a run that will be a worktree run (A20):
 
-`git remote get-url <remote>` (which applies `insteadOf`) is parsed in Go:
+1. `git remote get-url <remote>` succeeds;
+2. a target is known: the current branch, else `delivery.target_branch`;
+3. `security.secret_scan.mode` is not `off`: a push publishes the tree (A3).
 
-| remote URL | host | project |
-|---|---|---|
-| `git@gitlab.example.com:group/sub/app.git` | gitlab.example.com | `group/sub/app` |
-| `ssh://git@gitlab.example.com:2222/group/app.git` | gitlab.example.com | `group/app` |
-| `https://gitlab.example.com/group/app.git` | gitlab.example.com | `group/app` |
-| `https://oauth2:TOKEN@gitlab.example.com/group/app` | gitlab.example.com | `group/app` |
-| `https://gitlab.example.com/gitlab/group/app.git` with `base_url` `…/gitlab` | gitlab.example.com | `group/app` |
+A failure is a config error (exit 2) whose message names `--inplace`. Whether the remote is GitLab
+is not checked: only the push can tell (§7.3). `orchestrator validate` makes checks 1 and 3 when
+the configured isolation is `worktree`.
 
-- The host must equal `base_url`'s host (case-insensitive; the ssh port is ignored). Otherwise:
-  config error `gitlab.remote origin points at github.com, not gitlab.example.com (gitlab.base_url)`.
-  The token is never sent anywhere else.
-- Userinfo is dropped before anything is printed or recorded.
-- `.git` is stripped; for http(s), `base_url`'s path prefix is stripped; the rest must match
-  `^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)+$`. `file://`, a local path and anything else are config
-  errors.
-- The project path is URL-encoded as the `:id` of every API call.
+## 9. `story run`
 
-### 6.3 The client (`internal/gitlab`)
-
-Same rules as `internal/jira`: imports only `domain`, `apperr` and the standard library;
-unexported wire types; `PRIVATE-TOKEN` header from the constructor only; the token redacted from
-every error; no redirect followed; response bodies read up to 1 MiB; every answer validated
-strictly (`InvalidResponse` naming the JSON path); retries only on 429/503 with a `Retry-After`
-that fits; `gitlab.MayExist(err)` for a write.
-
-| call | request | answer validated |
-|---|---|---|
-| `Project` | `GET /api/v4/projects/:id` | `id` > 0, `path_with_namespace` equal to the one asked (case-insensitive) |
-| `OpenMR` | `GET /projects/:id/merge_requests?state=opened&source_branch=B` | array of MRs (below); more than one is an error |
-| `CreateMR` | `POST /projects/:id/merge_requests` | 201, MR |
-| `MR` | `GET /projects/:id/merge_requests/:iid` | MR with `diff_refs` |
-| `CreateNote` | `POST /projects/:id/merge_requests/:iid/notes` | 201, `id` > 0 |
-
-MR: `iid` > 0, `web_url` https on `base_url`'s host, `source_branch` / `target_branch` equal to the
-ones sent (on create), `state`, `source_project_id`, `target_project_id`, and for `MR` also
-`title`, `description` (string or null) and `diff_refs.{base_sha,head_sha,start_sha}` (40 hex).
-
-Minimum GitLab: API v4, 15.0 (`Draft:` title prefix, `refs/merge-requests/<iid>/head`). The live
-check is on gitlab.com (D10, §15).
-
-## 7. Fail-fast for GitLab
-
-With `--mr` (any command), after the whole §7 chain (`ValidateDependencies` with `GitLab: true`
-checks the section, the token variable, the remote and its host) and before any decision call or
-run directory:
-
-1. `GET /projects/:id`: a wrong token (401), no access (403/404) or an unreachable host is a
-   `ConfigError` (exit 2) before anything is spent. Like `jev.CheckModel`.
-2. `run --mr` also needs `security.secret_scan.mode` other than `off`: a push publishes the tree,
-   so the scan that stops a secret before the commit must be on (A3).
-
-## 8. `run --mr` (W2)
-
-```bash
-orchestrator run --mr "fix the rounding in Add"
-orchestrator run --mr --jira PAY-12 --mode auto --output json
-```
-
-- `--mr` makes the run a worktree run (`--worktree` implied, D2); with `--inplace` it is a usage
-  error. Valid with `run` and `story run` (and `review`, §12.4); `resume` takes the choice from the
-  run (`options.mr`), never from a flag.
-- A workflow without `implement` prints `No merge request: the workflow has no implement` and
-  does nothing else.
-- **After the commit and the conflict check, before the worktree is removed** (§47.5):
-  1. **No commit, no MR.** When §42.6 / §47.5 did not commit (a review that failed, a secret
-     finding, no `summary_short`, `approval: manual`) or the operator answered no, the run records
-     `mr.skipped: <why>` and prints `No merge request: <why>`. Exit code 6 (§11.3).
-  2. **Push.** The operator repository's git fingerprint is compared with the one taken when the
-     worktree was created (as before merge-tree; a pre-push hook runs), the remote must not have
-     the branch yet (`git ls-remote`, §4.3), then
-     `git push --no-follow-tags <remote> refs/heads/<branch>:refs/heads/<branch>` from the
-     operator's repository, with the full environment (the operator's own credentials), no
-     `--force`, bounded by a fixed 5 minutes. A rejected or failed push: `mr.error`, the message,
-     and `To push it yourself: git push <remote> <branch>`. Exit code 6.
-  3. **The intent.** `run.json: mr {state: intent, project, source, target}` is saved.
-  4. **One MR per branch.** `OpenMR(source)`: one found is recorded (`state: found`) and reused
-     as it is (no update). Otherwise `CreateMR`: title = the commit header, prefixed `Draft: ` with
-     `gitlab.draft`; description = `report.md` rendered for this run after the commit; `labels`;
-     `remove_source_branch` false. 201 → `state: created`, `iid`, `url`.
-  5. A create that may have reached GitLab (`MayExist`) keeps the intent with `mr.error` and is
-     never repeated by this run. Exit code 6.
-- Target branch: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
-  `gitlab.target_branch`; with neither, `--mr` is a config error before any call.
-- Output: `Merge request !12: https://gitlab.example.com/group/app/-/merge_requests/12`.
-- `summary.md` gains a "Merge request" row; `report.md` is the description and is not changed
-  afterwards.
-- A resume that completes the run does the same with `options.mr` (it builds a GitLab client
-  only then). A completed run is not resumable (§37), so a failed push or MR is finished by hand.
-
-## 9. `story run --mr`
-
-- `story run --mr` checks every service with `orchestrator validate --mr` (the check `story run`
-  already makes per service before the first dispatch, §48.6) - a service without a `gitlab`
-  section stops the story before anything runs.
-- Every child gets `run --story-task <file> --mr`; its branch is `story/<slug>/<ID>`, its target
-  the branch its base came from: the dependency's branch, else the story's base branch - exactly
-  the "target" `story run` prints today. The dependency's branch is on the remote by then (its own
-  child pushed it); GitLab retargets the stacked MR when the parent MR merges and deletes its
-  branch.
+- Children already run as `run --mode auto --story-task <file>` (§48.5), so every child runs the
+  §7 chain without questions; `story run`'s confirmation is the operator's yes. Branch
+  `story/<slug>/<ID>`; target the branch its base came from (the dependency's branch, else the
+  story's base branch), exactly the "target" `story run` prints today. The dependency's branch is
+  on the remote by then (its own child pushed it); GitLab retargets the stacked MR when the parent
+  MR merges and deletes its branch.
+- The per-service `orchestrator validate` that `story run` makes before the first dispatch
+  (§48.6) includes §8's checks: a service without its remote stops the story before anything runs.
 - `story.json` records each task's `mr` (url, iid) read from the child's `run.json`; `story status`
   and the end table print it. A child that ends with exit 6 (no MR) is `completed` without an MR:
-  the story **stops** before the next task that depends on it (its branch is not on the remote),
-  and continues independent tasks. `story run --retry <ID>` works as today.
+  the story **stops** before the next task that depends on it (its branch may not be on the
+  remote), and continues independent tasks. `story run --retry <ID>` works as today.
 
 ## 10. Jira write-back (W3)
 
@@ -401,7 +450,7 @@ jira:
 ```
 
 - Only for a task with a Jira key (`run --jira`: the issue; a story task: its child issue, §48.7)
-  and only after an MR was created or found in this run. Same `jira.base_url`, credentials,
+  and only after this run's push opened an MR (`mr.state: created`). Same `jira.base_url`, credentials,
   redaction, no-redirect and strict rules as §39 and §39.11 (D9: the same token).
 - **Comment**: `POST /rest/api/2/issue/{key}/comment`, wiki markup rendered by Go:
   ```
@@ -437,7 +486,7 @@ never the pretty one); stdout gets exactly one line when the process exits:
 {"v":1,"run_id":"20261023-101500-ab12cd","status":"completed","exit_code":0,
  "failure_reason":"","workflow":["analyze","plan","implement","test","review"],
  "commit":"<sha>","branch":"orchestrator/20261023-101500-ab12cd",
- "mr":{"iid":12,"url":"https://…/-/merge_requests/12"},"mr_skipped":"",
+ "mr":{"iid":12,"url":"https://…/-/merge_requests/12"},"mr_skipped":"","mr_error":"",
  "review_verdict":"pass","tests_passed_final":true,"approval_required":false,
  "cost_usd":0.84,"cost_partial":false,
  "run_dir":".orchestrator/runs/20261023-101500-ab12cd","report":"…/report.md"}
@@ -454,11 +503,11 @@ never the pretty one); stdout gets exactly one line when the process exits:
 |---|---|
 | 0 | completed, and what was asked was delivered |
 | 1 | a run that cannot be used, an unexpected error |
-| 2 | config, dependency, usage, credentials (`FailureAuth`), GitLab/Jira fail-fast |
+| 2 | config, dependency, usage, credentials (`FailureAuth`), Jira fail-fast, the §8 checks |
 | 3 | a provider failed |
 | 4 | the workflow failed or a limit stopped it (a red test, `max_steps`, budget, no progress) |
 | 5 | cancelled by the operator |
-| **6** | **completed, but needs a person**: `--mr` produced no MR (skipped or failed), or `orchestrator review` gave a failing verdict (A6) |
+| **6** | **completed, but needs a person**: a worktree run with `implement` ended without an MR that nobody declined (`--mode auto` did not commit, or the push or MR failed in any mode, §7.3–§7.4), or `orchestrator review` gave a failing verdict (A6) |
 
 ### 11.4 Docker image and CI example (D8)
 
@@ -473,10 +522,13 @@ never the pretty one); stdout gets exactly one line when the process exits:
 - In CI only `--claude-auth api` (`ANTHROPIC_API_KEY`, §46; TODO P6).
 - `examples/ci/.gitlab-ci.yml`:
   - `ai-implement`: manual, or a pipeline variable `JIRA_KEY` →
-    `orchestrator run --jira "$JIRA_KEY" --mr --mode auto --output json > result.json`;
-    `result.json` and the run directory as artifacts.
+    `orchestrator run --jira "$JIRA_KEY" --mode auto --output json > result.json` (a worktree
+    run by default: it pushes and opens the MR, §7); `result.json` and the run directory as
+    artifacts. The checkout is detached, so the example sets `delivery.target_branch`.
   - `ai-review`: on `merge_request_event` →
-    `orchestrator review --mr "$CI_MERGE_REQUEST_IID" --comment --mode auto --output json`.
+    `orchestrator review --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA"
+    --mode auto --output json`, then the job itself posts `report.md` as one note with `curl` to
+    the notes API and `$GITLAB_TOKEN` (job script, not orchestrator code; A21).
   - Push credentials through a credential helper in the job's global git config that reads
     `$GITLAB_TOKEN` from the environment, never a token in the remote URL inside the repository
     (a URL in `.git/config` is readable to an `inplace` implement's file tools).
@@ -490,12 +542,12 @@ orchestrator review --base main                       # main...HEAD
 orchestrator review --base v1.3.0 --head feature/x
 orchestrator review --base main --task "the new cache must not change the API"
 orchestrator review --base main --jira PAY-12         # the ticket is the task
-orchestrator review --mr 12 --comment                 # §12.4
 ```
 
-- Exactly one of `--base` and `--mr`; `--head` only with `--base` (default `HEAD`); `--comment`
-  only with `--mr`. `--mode`, `--output json`, `--config`, `--claude-auth`, `--codex-auth` as for
-  `run`. Not `--stage`, `--mr` with `--base`, `--inplace`/`--worktree`, `--allow-red-tests`.
+- `--base` is required; `--head` defaults to `HEAD`. `--mode`, `--output json`, `--config`,
+  `--claude-auth`, `--codex-auth` as for `run`. Not `--stage`, `--inplace`/`--worktree`,
+  `--allow-red-tests`. A merge request is reviewed by its refs (in CI: §11.4); there is no
+  `--mr` (A21).
 - Refs resolve with `git rev-parse --verify --end-of-options <ref>^{commit}`; the reviewed change
   is `merge-base(base, head)..head` - three dots, like a merge request. An empty change: usage
   error `nothing to review: <head> adds nothing to <base>`.
@@ -515,11 +567,10 @@ orchestrator review --mr 12 --comment                 # §12.4
 - The `test` step runs the checks and `test.command` on `head`, sandboxed and guarded as any test
   step. A red test fails the run before the review (§11's transitions; A7). The pre-run test does
   not apply (no `implement`).
-- The task: `--task`, else the `--jira` ticket, else the MR's title and description (§12.4), else
-  Go writes one from the commits:
+- The task: `--task`, else the `--jira` ticket, else Go writes one from the commits:
   `Review the change from <base> to <head>. Its commits:\n- <subject>…` (at most 50 subjects,
   8 KiB). Through `action.taskBlock` as every task.
-- `run.json: review_target {base, head, merge_base, base_ref_name, head_ref_name, mr_iid?}`.
+- `run.json: review_target {base, head, merge_base, base_ref_name, head_ref_name}`.
   `worktree.branch` is empty for a review run only.
 - A verdict that fails completes the run with it, as today, and the command exits 6.
 - `resume` works: same worktree (verified detached at `head`), same `review_target`.
@@ -527,25 +578,7 @@ orchestrator review --mr 12 --comment                 # §12.4
 ### 12.3 Output
 
 `report.md` (§5, the review form), `summary.md`, the console verdict and issues; with
-`--output json` the one line (`review_verdict`, `mr_note`).
-
-### 12.4 `--mr` and `--comment`
-
-- `--mr 12` or `--mr https://gitlab.example.com/group/app/-/merge_requests/12`: the URL only
-  supplies the iid; its host and project must equal `base_url`'s host and the remote's project,
-  otherwise a usage error. Nothing is ever requested from a pasted URL (the `jira.ParseRef` rule).
-- `MR(iid)`: an MR from a fork (`source_project_id ≠ target_project_id`) or one not `opened` is
-  refused (A9).
-- `git fetch --no-tags <remote> refs/merge-requests/<iid>/head:refs/orchestrator/review/<run-id>/head
-  refs/heads/<target>:refs/orchestrator/review/<run-id>/base` in the operator's repository (full
-  environment, the operator's credentials; the fingerprint compared before, as for push). The
-  fetched head must equal `diff_refs.head_sha` (else `the merge request changed while it was being
-  fetched; run again`); `base` is `diff_refs.base_sha`. The refs stay, like restore points, so a
-  resume finds them.
-- The task is the MR's title and description (untrusted text, fenced, bounded to 32 KiB).
-- `--comment`: when the run reaches a terminal status after at least one step, `report.md` is
-  posted as one note, an intent first (`run.json: mr_note {state, id}`), never twice. A failure is
-  a warning.
+`--output json` the one line (`review_verdict`).
 
 ## 13. Persistence
 
@@ -553,14 +586,13 @@ All optional on load, strictly validated when present.
 
 | field | rule |
 |---|---|
-| `options.mr` | bool; set at run start from `--mr` |
+| `options.isolation` | unchanged; a run started without `--inplace` and without `isolation: inplace` now records `worktree` |
 | `branch_naming` | `{source: instructions\|template\|default, proposed?, rejected?, usage?, call?}`; `proposed` ≤ 255 printable bytes, `rejected` one line ≤ 500 bytes; absent for an inplace, story or review run |
 | `worktree.branch` | no longer `orchestrator/<run-id>` only: any name that passes §4.3's character and format rules (a story task: its story pattern, as today) |
 | `options.jira_write` | `{comment: bool, transition: string}`, copied from `jira.write` at run start |
-| `mr` | `{state: intent\|created\|found, project, source, target, iid?, url?, skipped?, error?}`; `iid`/`url` only with created/found; `url` https; `skipped` and `error` one line, ≤ 500 bytes, redacted |
+| `mr` | `{state: intent\|pushed\|created, remote, source, target, iid?, url?, skipped?, error?}`; `iid`/`url` only with `created`; `url` https on the remote's host, ending `/-/merge_requests/<iid>`; `skipped` and `error` one line, ≤ 500 bytes, redacted; `skipped` alone (no `state`) when the chain stopped before the push |
 | `jira_write` | `{comment: {state, id?}, transition: {name, state: done\|missing\|failed\|unchanged}}` |
-| `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable ≤ 255; `mr_iid` > 0 |
-| `mr_note` | `{state: intent\|created, id?}` |
+| `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable ≤ 255 |
 | `executions[].diff.run_files[]` | ≤ 200 `{path (clean, repository-relative), insertions, deletions, binary}`, on an implement with `diff.run` only |
 | `story.json: tasks.<ID>.mr` | `{iid, url}` |
 
@@ -568,38 +600,41 @@ All optional on load, strictly validated when present.
 
 ## 14. Security
 
-- GitLab token: env-only (`gitlab.token_env`), read in `app` only, passed only to the client's
-  constructor, redacted from every error, scrubbed from every provider CLI and test process; a
-  literal `gitlab.token` is a config error naming the key. Never in argv, config, `run.json`,
-  logs, `report.md`.
-- Requests go only to `gitlab.base_url`; the remote must point at its host; a pasted MR URL only
-  yields an iid.
+- No GitLab credentials in the orchestrator: no token variable, no API client, no request to
+  GitLab but the push. The push uses the operator's git credentials, like every git call; the CI
+  example keeps the token in a credential helper, never in the remote URL (§11.4).
 - Push: only the run's own branch (`worktree.branch`, created by this run), explicit refspec, no
   `--force`, after the operator fingerprint check, and never to a branch that already exists on the
-  remote (§4.3): a model-proposed or template name cannot move somebody else's branch.
+  remote (§4.3): a model-proposed or template name cannot move somebody else's branch. The `-o`
+  values are built by Go, escaped and bounded, with no LF or NUL (`\n` encoded, §7.3). The MR URL is read from the
+  remote's answer, checked against the remote's host and pattern, and only recorded and printed.
+- Only `--mode auto` publishes without a question (§7.2); a story's children run under it after
+  `story run`'s confirmation.
 - The branch-name call has authority `none`; the instruction files are read from `base_ref` with
-  `git show`, bounded and fenced; whatever it answers only passes Go's name checks or is dropped. A secret finding never reaches a push: it blocks the commit
-  (§42.6), and the scan cannot be `off` under `--mr`.
-- Fetch: explicit refspecs into `refs/orchestrator/review/<run-id>/` only, `--no-tags`.
+  `git show`, bounded and fenced; whatever it answers only passes Go's name checks or is dropped. A secret finding never reaches a push: under `--mode auto` it blocks the commit
+  (§42.6), in another mode the commit question shows it, and the scan cannot be `off` in a worktree run (§8).
 - Everything model- or ticket-written that reaches GitLab or Jira is escaped (§5).
-- `inplace` is never used for `--mr`, so `.git/config` (with a URL that may carry a token) is
+- A delivering run is never `inplace`, so `.git/config` (with a URL that may carry a token) is
   outside the worktree's file tools (§47.3).
 
 ## 15. Live check (gitlab.com, D10)
 
-An operator gate, not a test step (it makes real requests). A test project on gitlab.com, a token
-with `api` and `write_repository` in `GITLAB_TOKEN`, a repository whose `origin` is that project:
+An operator gate, not a test step (it reaches a real remote). A test project on gitlab.com and a
+repository whose `origin` is that project, pushable with the operator's credentials:
 
-1. `orchestrator validate` with the `gitlab` section → the project check passes; a wrong token →
-   exit 2 naming `GITLAB_TOKEN`, without its value.
-2. `orchestrator run --mr --mode auto --output json "<small fix>"` → a draft MR with the
-   `report.md` description, `run.json: mr.state: created`, exit 0.
-3. The same task with a test that cannot pass → no MR, `mr.skipped`, exit 6.
-4. `orchestrator review --mr <iid> --comment --mode auto` → one note on the MR.
-5. A two-task story in that repository with `story run --mr` → two MRs, the second targeting the
-   first's branch.
+1. `orchestrator run --mode auto --output json "<small fix>"` → a worktree run, a pushed branch,
+   an MR with the commit header as title and `report.md` as a multi-line description (the
+   `\n` decoded, not shown literally), `run.json: mr.state: created`, exit 0, the worktree
+   removed.
+2. The same task with a test that cannot pass → no commit, no push, `mr.skipped`, exit 6, the
+   worktree kept.
+3. Without `--mode auto`: `y` to the commit, `y` to the push, `n` to the MR → the branch on the
+   remote, no MR, `mr.state: pushed`, exit 0.
+4. A two-task story in that repository → two MRs, the second targeting the first's branch.
+5. A run whose `origin` is a GitHub repository → `the receiving end does not support push
+   options`, `mr.error`, the manual command, exit 6.
 
-The steps and their results go into the As built of DL04 and DL09 and the README's `Status:`.
+The steps and their results go into the As built of DL04 and DL05 and the README's `Status:`.
 
 ---
 
@@ -608,12 +643,12 @@ The steps and their results go into the As built of DL04 and DL09 and the README
 | # | decision |
 |---|---|
 | D1 | Phase 3 in one spec: W1 (rest), W2, W3, W4, W5. GitHub stays out. |
-| D2 | `--mr` implies a worktree run; `--mr --inplace` is a usage error. |
-| D3 | The GitLab project comes from the current repository's git remote, not from config. (Author's addition, §6.2: the API host stays `gitlab.base_url` and the remote must point at it, so the token goes only to the configured host.) |
-| D4 | `story run --mr` is in: one MR per task, stacked on the dependency's branch. |
-| D5 | W5: local `--base/--head`, plus `--mr` with an optional `--comment` (one note). No inline comments. |
+| ~~D2~~ | ~~`--mr` implies a worktree run; `--mr --inplace` is a usage error.~~ Replaced by D16–D17: there is no `--mr`. |
+| ~~D3~~ | ~~The GitLab project comes from the git remote; the token only to `gitlab.base_url`.~~ Replaced by D19: no API client, the push opens the MR. |
+| D4 | One MR per story task, stacked on the dependency's branch (now without a flag, §9). |
+| ~~D5~~ | ~~W5: local `--base/--head`, plus `--mr` with an optional `--comment`.~~ Narrowed by D19 to `--base/--head` (A21). |
 | D6 | A separate `report.md` for the reviewer; `summary.md` stays the metrics. |
-| D7 | No commit → no MR. `--mr` does not relax §42.6 (review failed, secret, no `summary_short`, `approval: manual`). |
+| D7 | No commit → no MR. Delivery does not relax §42.6 (review failed, secret, no `summary_short`, `approval: manual`). |
 | D8 | A `Dockerfile` and `examples/ci/`; no published image; `--claude-auth api` in CI. |
 | D9 | W3 in: a comment and a configured transition, only after an MR, with the same Jira credentials as the read. |
 | D10 | The live check runs on gitlab.com. |
@@ -622,6 +657,11 @@ The steps and their results go into the As built of DL04 and DL09 and the README
 | D13 | "The repository's instructions" are the prose of CLAUDE.md / AGENTS.md (and CONTRIBUTING.md): a model reads them and proposes a name, Go checks it. |
 | D14 | The name is fixed when the worktree is created and never renamed; the instructions win over the config template. |
 | D15 | Story tasks keep `story/<slug>/<ID>`. |
+| D16 | Every task runs in its own worktree by default; a flag (`--inplace`) cancels it. Reverses the 2026-10-18 default. |
+| D17 | After all the stages of a worktree run: commit, push, merge request. Always: no opt-in flag. |
+| D18 | Commit, push and MR are automatic only under `--mode auto`; in a manual mode each of them is asked. |
+| D19 | The MR is opened with `glab mr create` or with GitLab's push options (`git push -u origin <branch> -o merge_request.create -o merge_request.target=main -o merge_request.title=…`); the owner accepted either (the author chose push options, A17). |
+| D20 | The worktree scope table (§6): worktree per task, own branch, CLI in the worktree, git status and diff, cleanup, kept on error now; parallel agents, review worktrees, merge conflict resolution, automatic integration, lifecycle over persistent state in the next version. |
 
 ## 17. Author's defaults (the owner may override any)
 
@@ -629,13 +669,10 @@ The steps and their results go into the As built of DL04 and DL09 and the README
 |---|---|---|
 | A1 | With a type and a key: `fix: PAY-12 summary` | stays a valid Conventional Commit; GitLab–Jira finds the key anywhere |
 | A2 | `Orchestrator-Decision: <complexity>/<stages>`, `manual/…` for `--stage` and review | TODO W1's format; complexity is absent for manual |
-| A3 | `--mr` with `secret_scan.mode: off` is a config error | a push publishes the tree |
-| A4 | `GET project` before the run, as the Jev model check | a wrong token costs nothing |
-| A5 | An open MR for the branch is reused, not updated | one MR per branch; a story `--retry` reuses its branch |
-| A6 | Exit code 6 "completed, needs a person" | CI needs to tell "no MR" and "review failed" from success without parsing |
+| A3 | A worktree run with `secret_scan.mode: off` is a config error | a push publishes the tree |
+| A6 | Exit code 6 "completed, needs a person"; an operator's no is 0 | CI needs to tell "no MR" and "review failed" from success without parsing; a no is a decision, not a failure |
 | A7 | In a review run a red test fails the run before the review | the engine's transitions stay unchanged; the report says why |
-| A8 | Report bounds: 30 task lines, 50 files, 30 issues, 60 000 bytes | readable in an MR |
-| A9 | `review --mr`: forks and non-open MRs are refused | a fork's branch is another project's code and credentials |
+| A8 | Report bounds: 30 task lines, 50 files, 30 issues, 60 000 bytes | readable in an MR note |
 | A10 | Push timeout is a fixed 5 minutes, not a key | one less setting |
 | A11 | `--output json` is not offered for `story run` and `story plan` | a story is long and interactive; `story status` exists |
 | A12 | A Jira write failure is only a warning | the MR is the delivered result |
@@ -643,17 +680,30 @@ The steps and their results go into the As built of DL04 and DL09 and the README
 | A14 | The instruction files are read from `base_ref`, not the operator's tree | the run is built from `base_ref`; an uncommitted edit is not the repository's rule |
 | A15 | Template placeholders `{id}`, `{key}`, `{slug}`, `{date}`; Cyrillic transliterated | `{type}` is unknown at creation (D14) |
 | A16 | Never push to a branch that already exists on the remote | a proposed name must not move somebody else's branch |
+| A17 | Push options, not `glab`; the description is `report.md` with line breaks encoded as `\n` | no new executable, no token, no API client, one command for push and MR; git refuses LF in a push option, GitLab decodes `\n` (owner, 2026-10-23) |
+| A18 | "Manual" is every mode but `auto`: `manual`, `accept-edits`, the interactive default | D18 names auto as the only automatic mode |
+| A19 | `auto_commit` has no effect in a worktree run | `--mode auto` is the yes in advance for all three steps |
+| A20 | The remote, target and scan checks run after the workflow is approved, before the worktree, not before the decision | a workflow without `implement` runs in place and needs no remote |
+| A21 | No `review --mr`: CI reviews the MR by `CI_MERGE_REQUEST_DIFF_BASE_SHA`/`CI_COMMIT_SHA` and posts the note in its own job script | without an API client the orchestrator cannot read an MR or post a note |
+
+A4, A5 and A9 (the project check, reusing an open MR, refusing forks in `review --mr`) went with
+D3 and D5.
 
 ## 18. Not covered
 
-- GitHub (TODO W2.5, after GitLab is used in production).
-- MR assignees, reviewers, milestones, squash and auto-merge; waiting for the MR pipeline.
+- GitHub (TODO W2.5, after GitLab is used in production); a GitHub remote fails at the push (§7.3).
+- `glab`, the GitLab API; draft, labels, assignees, reviewers,
+  milestones, squash and auto-merge; waiting for the MR pipeline.
+- A flag that keeps a worktree run but skips the push (an operator says no; CI uses `--inplace`).
 - Updating an existing MR's description or pushing again to it; force-push after a story rebase.
-- Inline review comments; reviewing a fork's MR.
+- `review --mr`, MR notes from the orchestrator, inline review comments; reviewing a fork's MR.
 - Jira comments on a failed run or without an MR; links between issues.
 - Publishing a Docker image; macOS images; a non-GitLab CI example.
 - A retry command for a push or MR that failed at the end of a completed run (it is a printed
   `git push` and the GitLab UI).
-- An org-level floor that forbids or forces `--mr`.
+- An org-level floor that forbids or forces delivery or `inplace`.
 - Renaming a branch after implement (`{type}`, a name from `summary_short`); a template for story
   branches; a branch name for an `inplace` run (it commits on the current branch, §42).
+- The next version of the worktree feature (D20): parallel agents, a separate worktree for
+  review, resolving merge conflicts, integrating changes automatically, a lifecycle manager over
+  persistent state (beyond `run.json`, resume and `runs clean`).

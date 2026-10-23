@@ -1,15 +1,15 @@
-# DL05 — `story run --mr`
+# DL05 — `story run`: one MR per task
 
-**Size** S (1.5 d) · **Depends on** DL04 · **Blocks** DL11
+**Size** S (1 d) · **Depends on** DL04 · **Blocks** DL11
 
 ## Goal
 
-Every story task gets its own MR, stacked on its dependency's branch (`SPEC.md` §9).
+Every story task's child delivers (it already runs under `--mode auto`) and its MR is stacked on
+its dependency's branch (`SPEC.md` §9).
 
 ## Files
 
-- `internal/app/story_run.go`: `--mr` accepted; the per-service `validate` becomes
-  `validate --mr`; children get `--mr` (and `resume` children read it from their run); exit 6 from a
+- `internal/app/story_run.go`: the per-service `validate` includes the §8 checks; exit 6 from a
   child is "completed without an MR": the task is `completed`, the story stops before any task that
   depends on it (`blocked: <ID> has no merge request`), independent tasks continue.
 - `internal/story` / `story.json`: `tasks.<ID>.mr {iid, url}` read from the child's `run.json`,
@@ -19,10 +19,11 @@ Every story task gets its own MR, stacked on its dependency's branch (`SPEC.md` 
 
 ## Acceptance
 
-- Two tasks in one repository, B depends on A, fake GitLab: two MRs, B's target `story/<slug>/A`.
+- Two tasks in one repository, B depends on A, a bare remote with the push-options hook: two MRs,
+  B's target `story/<slug>/A`.
 - A with a failing review (no commit → exit 6): B blocked, an independent C runs.
-- `story run --mr` with a service lacking `gitlab`: stops before the first dispatch.
+- A service without its remote: stops before the first dispatch.
 
 ## Gates
 
-`scripts/check.sh`; live check step 5 (operator).
+`scripts/check.sh`; live check step 4 (operator).

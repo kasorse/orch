@@ -20,7 +20,7 @@ documented exit code table (`SPEC.md` §11.1–§11.3).
 
 - A pipe stdin without `--mode` → exit 2 and the message, no provider call.
 - `--output json`: stdout is exactly one valid JSON line for a completed run, a failed run, a
-  config error before the run, an MR skip (exit 6); nothing else on stdout (the test reads both
+  config error before the run, an MR skip (exit 6), an MR error (exit 6); nothing else on stdout (the test reads both
   streams).
 - The field set is stable: a golden of the line with the run ID and sha masked.
 

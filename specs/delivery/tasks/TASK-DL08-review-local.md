@@ -1,6 +1,6 @@
 # DL08 — `orchestrator review --base/--head`
 
-**Size** M (3 d) · **Depends on** DL02 · **Blocks** DL09, DL11
+**Size** M (3 d) · **Depends on** DL02 · **Blocks** DL10, DL11
 
 ## Goal
 
@@ -30,7 +30,7 @@ worktree, as an ordinary run (`SPEC.md` §12.1–§12.3).
 - A failing test → the run fails before the review, the report says so, exit 4.
 - Failing verdict → exit 6; passing → exit 0. Resume of a stopped review run continues in the same
   worktree.
-- Flag errors: `--head` without `--base`, `--comment` without `--mr`, `--base` with `--mr`.
+- Flag errors: no `--base`, `--head` without `--base`.
 
 ## Gates
 
