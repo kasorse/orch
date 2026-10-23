@@ -113,6 +113,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
+		if err := checkNotAStory(rest[1:]); err != nil {
+			return err
+		}
 		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
@@ -178,6 +181,23 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+// checkNotAStory refuses `run story <dir>`: run would take it for the text of one task and do
+// a whole spec in a single session. The tasks of a spec directory run with story run.
+func checkNotAStory(text []string) error {
+	if len(text) != 2 || text[0] != "story" {
+		return nil
+	}
+	if info, err := os.Stat(text[1]); err != nil || !info.IsDir() {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(text[1], "tasks")); err == nil && info.IsDir() {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("run takes %q for the text of one task; to run the tasks of %s one by one, each in its own run: orchestrator story run %s",
+			strings.Join(text, " "), text[1], logging.ShellWord(text[1]))}
+	}
+	return &apperr.ConfigError{Msg: fmt.Sprintf("run takes %q for the text of one task; %s has no tasks/ to run. Plan a story first: orchestrator story plan \"<request>\"",
+		strings.Join(text, " "), text[1])}
+}
+
 // checkStoryTaskFlags refuses the hidden --story-task where it does not belong: outside run,
 // and with anything else that says what the task is or where it runs (specs/story/SPEC.md
 // §11.1). The input file gives the text, the stages are the policy's plus development, and the
@@ -201,6 +221,10 @@ func checkStoryTaskFlags(cli cliArgs, rest []string) error {
 // storyTaskReason is the reason decision.json gives development, and testing with it, for a
 // story task (specs/story/SPEC.md §11.2).
 const storyTaskReason = "story task"
+
+// storyTaskPlannedReason is the reason decision.json gives research, analysis and planning a
+// story task turned off: its task file is already the plan.
+const storyTaskPlannedReason = "story task: the task file is the plan"
 
 // maxStoryTaskFileBytes bounds the task input file read: its text may be 32 KiB, which JSON can
 // spell in up to six times as many bytes.

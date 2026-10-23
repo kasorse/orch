@@ -362,3 +362,21 @@ func TestRun_StageOnlyWithRun(t *testing.T) {
 		})
 	}
 }
+
+// run story <dir> is not a story run: it is refused before any config is read, with the command
+// that runs the spec's tasks.
+func TestRun_RunStoryDirIsRefused(t *testing.T) {
+	spec := t.TempDir()
+	var out bytes.Buffer
+	err := Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "story", spec}, strings.NewReader(""), &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "story plan") {
+		t.Fatalf("got %v, want a hint to story plan", err)
+	}
+	if err := os.Mkdir(filepath.Join(spec, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "story", spec}, strings.NewReader(""), &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "orchestrator story run "+spec) {
+		t.Fatalf("got %v, want a hint to story run", err)
+	}
+}

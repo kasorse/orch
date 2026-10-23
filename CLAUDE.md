@@ -331,8 +331,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   each task's base and branch (`story/<slug>/<ID>`, stacked on the same-repository task it
   needs); no model output picks what runs next, where, or with which stages. A story task is an
   ordinary worktree run started as a child process (`run --story-task`, hidden), with
-  development forced on, the task's acceptance items as review criteria and the
-  `Orchestrator-Story` commit trailer; stories do not nest and tasks run one at a time. A
+  development forced on and research, analysis and planning off (the task file is the plan),
+  the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer; stories do not nest and tasks run one at a time. A
   dispatched task's file is frozen up to `## As built`, which only Go appends. The scope
   question is shadow data: nothing reads `scope.story` to decide.
 - **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11). The one write is

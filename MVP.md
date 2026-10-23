@@ -4776,8 +4776,8 @@ story's title and the task's place in it, the task's body, the spec's approach a
 context, and the As built line of every done task it depends on; it becomes `Task.Description`.
 
 * Always a worktree run (§47), whatever `execution.isolation` says, on the given branch and base.
-* **Development is always on** (reason `story task` in `decision.json`); everything else is the
-  policy's.
+* **Development is always on** (reason `story task` in `decision.json`); research, analysis and
+  planning are off (reason `story task: the task file is the plan`); review is the policy's.
 * The scope question is not asked (§48.9).
 * The task's `acceptance` items are review criteria ahead of the plan's own (§44.4), recorded in
   `run.json: task.acceptance` so a resume uses the same ones; `task.source` (`kind: story`, story,

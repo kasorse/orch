@@ -118,3 +118,21 @@ func TestForceDevelopment_DoesNotMutateTheInput(t *testing.T) {
 		t.Errorf("input changed: %+v", dec)
 	}
 }
+
+func TestSkipPlanning_TurnsTheReadOnlyStagesOff(t *testing.T) {
+	dec := belowDevelopment(0.7, false)
+	dec.Stages.Stages = append(dec.Stages.Stages, domain.StageOutcome{Stage: domain.StagePlanning, Enabled: true, Forced: true, Reason: "forced: complexity=complex"})
+	before := belowDevelopment(0.7, false)
+	got := SkipPlanning(ForceDevelopment(dec, "story task"), "story task: planned")
+	for _, st := range []domain.Stage{domain.StageAnalysis, domain.StagePlanning} {
+		if s := stageOf(t, got, st); s.Enabled || s.Forced || s.Reason != "story task: planned" {
+			t.Errorf("%s = %+v, want off with the reason", st, s)
+		}
+	}
+	if dev := stageOf(t, got, domain.StageDevelopment); !dev.Enabled {
+		t.Errorf("development = %+v, want it kept on", dev)
+	}
+	if !reflect.DeepEqual(dec.Stages.Stages[:4], before.Stages.Stages) {
+		t.Errorf("input changed: %+v", dec)
+	}
+}

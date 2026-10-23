@@ -432,7 +432,10 @@ validated:
   is recorded), on the given base and branch.
 - **Development is always on.** A story task is a code change by construction: after the policy,
   `development` (and so `testing`) is added with the reason `story task` in `decision.json`,
-  like an explored stage. Everything else is the policy's.
+  like an explored stage.
+- **No research, analysis or planning.** The task file is the plan: the policy's research,
+  analysis and planning are turned off with the reason `story task: the task file is the plan`
+  (an operator's edit on the review screen may turn one back on). Review is the policy's.
 - **The scope question is not asked** (§13): a story task is never a story.
 - **Review criteria**: the task's `acceptance` items are review criteria, ahead of the plan's own
   (§44.4), and recorded in `run.json: task.acceptance` so a resume uses the same ones.
@@ -604,6 +607,7 @@ before the worktree work is done; ST05 and ST06 cannot.
 | A1 | A survey call per service the task names (`read`, in place) before specify, rather than the Context Manager's snapshot. | Contracts between services (OpenAPI, proto, events) are what a decomposition needs; a read session finds them, a file list may not. Only the named services are read (D3), so the cost is one call per service the story touches. One call per repository needs no multi-directory authority. |
 | A2 | Survey and specify reuse the `actions.analyze` and `actions.plan` routes. | Static routing with no new keys. |
 | A3 | A story task always has development on (§11.2). | A task that changes nothing would leave no branch for its dependents. |
+| A3a | A story task runs no research, analysis or planning (§11.2). | The spec's survey and specify calls did that work, and the task file says what to build; planning it again cost a call per task and could drift from the approved text. |
 | A4 | The task's acceptance items become review criteria (§11.2). | The approved spec, not a later plan, is what the task is checked against. |
 | A5 | `story run` both starts and continues; a failed task resumes its run; `--retry` starts over on a new branch. | One command; resume keeps the fix context, retry allows an edited task. |
 | A6 | A dispatched task's file is frozen up to `## As built`. | What ran is what the record says. |
