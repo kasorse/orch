@@ -150,6 +150,8 @@ type Resume struct {
 	// ClaudeAuth is the credential mode this resume ran under; a record, never an input
 	// (specs/claude-auth/SPEC.md §11). Nil in a run written before the field.
 	ClaudeAuth *ClaudeAuth `json:"claude_auth,omitempty"`
+	// CodexAuth is the credential mode this resume ran under; a record, never an input.
+	CodexAuth *CodexAuth `json:"codex_auth,omitempty"`
 }
 
 // OrgConfigRef names the org config file a run or a resume ran under and the sha256 of its
@@ -212,6 +214,8 @@ type Run struct {
 	// ClaudeAuth is the credential mode the run started under (specs/claude-auth/SPEC.md §10);
 	// a record, never read back to decide anything. Nil in a run written before the field.
 	ClaudeAuth *ClaudeAuth `json:"claude_auth,omitempty"`
+	// CodexAuth is the credential mode the run started under; a record, never read back to decide anything.
+	CodexAuth *CodexAuth `json:"codex_auth,omitempty"`
 	// Resumes is append-only: one entry per `orchestrator resume` of this run.
 	Resumes []Resume `json:"resumes,omitempty"`
 	// AllowRedTests is run --allow-red-tests: a red pre-run test does not stop the run, its

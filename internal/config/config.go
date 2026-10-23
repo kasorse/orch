@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 )
 
 type ProviderModel struct {
@@ -617,11 +618,17 @@ func (s SecurityConfig) CleanWorktreeRequired() bool {
 // CredentialEnvNames lists the environment variables the configuration names as the
 // orchestrator's own credentials, sorted and without duplicates: decision.jev.api_key_env
 // whatever the decision provider (the variable may be set either way), and jira.token_env
-// and jira.email_env when the jira section is present, and providers.claude.api_key_env (its
-// default when absent). No child process may inherit them (execution.ScrubCredentials,
-// specs/jira/SPEC.md §12); only the claude adapter puts the key back.
+// and jira.email_env when the jira section is present, and the configured Claude and Codex
+// API key variables (their defaults when absent). No child process may inherit them; the
+// matching adapter puts its key back for its own process.
 func (c Config) CredentialEnvNames() []string {
-	names := []string{strings.TrimSpace(c.Decision.Jev.APIKeyEnv), c.Providers.Claude.KeyEnv()}
+	names := []string{
+		strings.TrimSpace(c.Decision.Jev.APIKeyEnv),
+		c.Providers.Claude.KeyEnv(),
+	}
+	if c.Providers.Codex.Auth != "" || c.Providers.Codex.APIKeyEnv != "" || slices.Contains(ProvidersInUse(c), string(provider.Codex)) {
+		names = append(names, c.Providers.Codex.KeyEnv())
+	}
 	if c.Jira != nil {
 		names = append(names, c.Jira.TokenEnv, c.Jira.EmailEnv)
 	}

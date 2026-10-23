@@ -163,8 +163,8 @@ func verifyProblems(cfg Config) []string {
 		if !cfg.Test.Sandboxed() {
 			problems = append(problems, "actions.implement.verify needs test.sandbox bwrap: the model triggers these runs, so they never run unsandboxed")
 		}
-		if p := cfg.Actions.Implement.Provider; p != "" && p != "claude" {
-			problems = append(problems, fmt.Sprintf("actions.implement.verify is only supported with provider claude, got %s", p))
+		if p := cfg.Actions.Implement.Provider; p != "" && p != "claude" && p != "codex" {
+			problems = append(problems, fmt.Sprintf("actions.implement.verify is only supported with provider claude or codex, got %s", p))
 		}
 	}
 	v := cfg.Limits.Verify
@@ -278,8 +278,8 @@ func modelEffortProblems(key, model, effort, prov string) []string {
 		return nil
 	case !slices.Contains(EffortLevels, effort):
 		return []string{fmt.Sprintf("%s.effort %q must be one of: %s", key, effort, strings.Join(EffortLevels, ", "))}
-	case prov != string(provider.Claude):
-		return []string{fmt.Sprintf("%s.effort is only supported with provider claude, not %q", key, prov)}
+	case prov != string(provider.Claude) && prov != string(provider.Codex):
+		return []string{fmt.Sprintf("%s.effort is only supported with provider claude or codex, not %q", key, prov)}
 	}
 	return nil
 }
@@ -399,7 +399,7 @@ func complexityNames() string {
 	return strings.Join(names, ", ")
 }
 
-// EffortLevels are the accepted values of an action's effort, as the claude CLI names them.
+// EffortLevels are the values accepted by the Claude and Codex CLI adapters.
 var EffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
 
 func validateProviderModel(action string, pm ProviderModel) []string {
@@ -422,8 +422,8 @@ func validateProviderModel(action string, pm ProviderModel) []string {
 		switch {
 		case !slices.Contains(EffortLevels, pm.Effort):
 			problems = append(problems, fmt.Sprintf("%s.effort %q must be one of: %s", action, pm.Effort, strings.Join(EffortLevels, ", ")))
-		case pm.Provider != string(provider.Claude):
-			problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude, not %q", action, pm.Provider))
+		case pm.Provider != string(provider.Claude) && pm.Provider != string(provider.Codex):
+			problems = append(problems, fmt.Sprintf("%s.effort is only supported with provider claude or codex, not %q", action, pm.Provider))
 		}
 	}
 

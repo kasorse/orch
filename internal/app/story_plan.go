@@ -54,7 +54,7 @@ func storyPlan(ctx context.Context, configPath, request, jiraRef string, repos [
 	registry := newRegistry(osExec)
 
 	// Fail fast (MVP.md §7): the home's whole chain, with the Jira variables for --jira.
-	cfg, _, _, _, err := loadAndValidateConfig(configPath, "", registry, osExec, reporter,
+	cfg, _, _, _, _, err := loadAndValidateConfig(configPath, "", "", registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err

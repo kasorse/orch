@@ -195,7 +195,7 @@ func (r *ConsoleReporter) prettyStepFinished(run *domain.Run, exec domain.StepEx
 // stepUsageLine prints what the step's model calls cost, when the provider reported it.
 func (r *ConsoleReporter) stepUsageLine() {
 	u := r.stepUsage
-	if u.PromptTokens() == 0 && u.OutputTokens == 0 {
+	if u.PromptTokens() == 0 && u.OutputTokens == 0 && u.ReasoningTokens == 0 {
 		return
 	}
 	fmt.Fprintf(r.Out, "     %s\n", r.usageLine(u))

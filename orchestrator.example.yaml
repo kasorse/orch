@@ -22,9 +22,9 @@ translation:
   model: haiku
   timeout: 60s
 
-# Optional: how the claude CLI is authenticated (MVP.md §46). api: a Console API key from the
+# Optional: how the claude and codex CLIs are authenticated. api: a provider API key from the
 # variable api_key_env names, billed per token; login: the CLI's own login; auto (default):
-# api when that variable is set. --claude-auth overrides auth.
+# api when that variable is set. --claude-auth/--codex-auth overrides the matching auth.
 # providers:
 #   claude:
 #     auth: auto                       # auto | api | login
@@ -39,6 +39,9 @@ translation:
 #       AWS_REGION: eu-west-1
 #       ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
 #       ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock/eu.anthropic.claude-sonnet-5-5
+#   codex:
+#     auth: auto                     # auto | api | login
+#     api_key_env: OPENAI_API_KEY    # the variable that holds the key, never the key itself
 
 policy:
   context_depth:

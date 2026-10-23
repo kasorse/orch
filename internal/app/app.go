@@ -51,7 +51,7 @@ const defaultConfigPath = "orchestrator.yaml"
 
 const runsBaseDir = ".orchestrator/runs"
 
-const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--verbose] ` +
+const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
 	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
@@ -93,6 +93,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, validate and story run"}
 	}
+	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, validate and story run"}
+	}
 	if cli.storyTaskFile != "" {
 		if err := checkStoryTaskFlags(cli, rest); err != nil {
 			return err
@@ -104,18 +107,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "orchestrator version %s\n", Version)
 		return nil
 	case "validate":
-		return runValidate(ctx, cli.configPath, cli.claudeAuth, stdout, stderr)
+		return runValidate(ctx, cli.configPath, cli.claudeAuth, cli.codexAuth, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
 		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
 		}
-		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.verbose, stdin, stdout, stderr)
+		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "story":
 		switch storySub {
 		case "plan":
@@ -130,7 +133,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				return &apperr.ConfigError{Msg: storyRunUsage}
 			}
 			return storyRun(ctx, rest[2], storyRunOptions{
-				configPath: cli.configPath, explicitConfig: cli.configGiven, mode: cli.mode, claudeAuth: cli.claudeAuth,
+				configPath: cli.configPath, explicitConfig: cli.configGiven, mode: cli.mode, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth,
 				retry: cli.retry, verbose: cli.verbose,
 			}, stdin, stdout, stderr)
 		case "status":
@@ -281,6 +284,8 @@ type cliArgs struct {
 	// claudeAuth is --claude-auth (auto, api or login); empty if not given
 	// (specs/claude-auth/SPEC.md §6).
 	claudeAuth string
+	// codexAuth is --codex-auth (auto, api or login); empty if not given.
+	codexAuth string
 	// repos are the --repo values, in the order given and without duplicates: the services of
 	// story plan, instead of those the task names (specs/story/SPEC.md §7.1).
 	repos []string
@@ -291,7 +296,8 @@ type cliArgs struct {
 	rest []string
 }
 
-// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
+// parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
+// --codex-auth/--codex-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -333,6 +339,17 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, err
 			}
 			if cli.claudeAuth, err = config.ParseClaudeAuth(v); err != nil {
+				return cliArgs{}, err
+			}
+		case arg == "--codex-auth" || strings.HasPrefix(arg, "--codex-auth="):
+			if cli.codexAuth != "" {
+				return cliArgs{}, fmt.Errorf("--codex-auth given twice")
+			}
+			v, err := value(&i, "--codex-auth")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.codexAuth, err = config.ParseCodexAuth(v); err != nil {
 				return cliArgs{}, err
 			}
 		case arg == "--jira" || strings.HasPrefix(arg, "--jira="):
@@ -417,10 +434,10 @@ const sandboxProbeTimeout = 10 * time.Second
 // ValidateAuthorities. ResolveClaudeAuth runs right after ValidateDependencies. The registry is only asked what its
 // adapters can enforce; constructing it makes no calls. depOpts chooses the optional
 // dependency checks from the loaded config (see config.DependencyOptions).
-func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, error) {
+func loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag string, registry *provider.Registry, executor execution.ProcessExecutor, reporter *logging.ConsoleReporter, depOpts func(config.Config) config.DependencyOptions) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, domain.CodexAuth, error) {
 	reporter.ValidatingConfig()
-	fail := func(err error) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, error) {
-		return config.Config{}, nil, config.OrgSource{}, domain.ClaudeAuth{}, err
+	fail := func(err error) (config.Config, map[string]domain.ProviderCLI, config.OrgSource, domain.ClaudeAuth, domain.CodexAuth, error) {
+		return config.Config{}, nil, config.OrgSource{}, domain.ClaudeAuth{}, domain.CodexAuth{}, err
 	}
 
 	// The org layer is merged inside the Load step (specs/governance/SPEC.md §6.3), so every
@@ -449,6 +466,15 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	if err != nil {
 		return fail(err)
 	}
+	var codexAuth domain.CodexAuth
+	var codexNotices []string
+	codexConfigured := codexAuthFlag != "" || cfg.Providers.Codex.Auth != "" || cfg.Providers.Codex.APIKeyEnv != "" || slices.Contains(config.ProvidersInUse(cfg), string(provider.Codex))
+	if codexConfigured {
+		codexAuth, codexNotices, err = config.ResolveCodexAuth(cfg, codexAuthFlag, os.LookupEnv)
+		if err != nil {
+			return fail(err)
+		}
+	}
 	// The adapter learns the mode before anything runs claude - the version probe below
 	// included, which gets the same environment as a call (SPEC §7).
 	apiEnv := cfg.Providers.Claude.APIEnv
@@ -458,6 +484,11 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 	}
 	envLine, envNotices := claudeEnvReport(&auth, apiEnv, ignored, os.LookupEnv)
 	notices = append(notices, envNotices...)
+	if codexConfigured {
+		if err := applyCodexAuth(registry, codexAuth, os.LookupEnv); err != nil {
+			return fail(err)
+		}
+	}
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
 	if cfg.Test.Sandboxed() {
@@ -483,7 +514,34 @@ func loadAndValidateConfig(configPath, claudeAuthFlag string, registry *provider
 
 	reporter.ConfigValid()
 	reporter.ClaudeAuth(auth.Line(), envLine, notices)
-	return cfg, clis, org, auth, nil
+	if codexConfigured {
+		reporter.CodexAuth(codexAuth.Line(), codexNotices)
+	}
+	return cfg, clis, org, auth, codexAuth, nil
+}
+
+// applyCodexAuth hands the resolved mode to the Codex adapter. In API mode the key is read
+// from the configured environment variable here and is never placed in config, argv or run
+// artifacts. A test registry without the concrete adapter remains usable.
+func applyCodexAuth(registry *provider.Registry, auth domain.CodexAuth, lookup func(string) (string, bool)) error {
+	client, err := registry.Resolve(string(provider.Codex))
+	if err != nil {
+		return nil
+	}
+	adapter, ok := client.(*codex.Client)
+	if !ok {
+		return nil
+	}
+	key := ""
+	if auth.Mode == domain.CodexAuthAPI {
+		raw, _ := lookup(auth.KeyEnv)
+		key = strings.TrimSpace(raw)
+		if key == "" {
+			return apperr.NewConfigError(fmt.Sprintf("codex auth mode api: $%s is not set or empty", auth.KeyEnv), nil)
+		}
+	}
+	adapter.SetAuth(auth.Mode, key)
+	return nil
 }
 
 // applyClaudeAuth hands the resolved credential mode and providers.claude.api_env to the
@@ -668,11 +726,11 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 
 // runValidate checks the Jira variables whenever the section is present, so validate
 // answers "would run --jira work here?", and asks Jev whether it serves decision.model.
-func runValidate(ctx context.Context, configPath, claudeAuthFlag string, stdout, stderr io.Writer) error {
+func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag string, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
 	registry := newRegistry(executor)
-	cfg, clis, org, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, executor, reporter,
+	cfg, clis, org, _, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
 			return config.DependencyOptions{Jira: cfg.Jira != nil}
 		})
@@ -897,7 +955,7 @@ func runsReport(stdout io.Writer, dir string) error {
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty. With storyTaskFile (the
 // hidden run --story-task) the task is the one that file describes (specs/story/SPEC.md §11).
-func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -922,7 +980,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	// Fail fast (MVP.md §7): the whole validation chain runs before any decision client
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
-	cfg, clis, org, auth, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter,
+	cfg, clis, org, auth, codexAuth, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
 	if err != nil {
 		return err
@@ -1019,6 +1077,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	run.ProviderCLI = clis
 	run.OrgConfig = orgRef(org)
 	run.ClaudeAuth = &auth
+	if codexAuth.Mode != "" {
+		run.CodexAuth = &codexAuth
+	}
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	run.Options.Isolation = cfg.Execution.IsolationMode()

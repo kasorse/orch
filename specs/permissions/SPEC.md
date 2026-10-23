@@ -201,19 +201,13 @@ profile has a shell (P1).
 
 ### 6.4 codex and gemini (F9)
 
-Neither CLI is installed, so nothing about them can be verified. Both declare
-`Supports(...) == false` for every authority. Consequence: any route to them fails the
-fail-fast check with exit 2 and a message naming the action, the provider and the remedy
-(route to claude, or verify a translation). The intended translations, for whoever installs
-them, are recorded as comments in the adapters:
-
-- codex: `exec --sandbox read-only` (read), `--sandbox workspace-write` (edit; network is off
-  by default), `--ask-for-approval never`. Caveat: codex's read-only sandbox can read the
-  whole disk (e.g. `~/.ssh`) through its shell, and the model provider sees what it reads —
-  `read` is therefore **not** equivalent to claude's and needs its own analysis before
-  `Supports` may return true.
-- gemini: `--approval-mode default` plus a policy-engine deny for shell tools; its headless
-  policy handling has open issues (google-gemini/gemini-cli#20469). Same rule.
+Codex is integrated for the two workflow authorities its headless CLI exposes: `read` uses
+`exec --sandbox read-only`, and `edit` uses `exec --sandbox workspace-write`, both with
+`--ask-for-approval never`. The adapter also uses `--ignore-user-config`, `--ignore-rules`
+and JSONL output, and injects only the configured MCP servers through `-c` overrides.
+Codex does not provide a tool-free or web-only exec profile, so those authorities remain
+unsupported and fail closed. Gemini remains unsupported until its permission flags are
+verified against the real CLI.
 
 ### 6.5 Fail-fast position
 

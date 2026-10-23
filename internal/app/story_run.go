@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	storyRunUsage    = "usage: orchestrator story run <spec-dir> [--retry <ID>] [--mode auto] [--claude-auth auto|api|login]"
+	storyRunUsage    = "usage: orchestrator story run <spec-dir> [--retry <ID>] [--mode auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login]"
 	storyStatusUsage = "usage: orchestrator story status <spec-dir>"
 	storyUsage       = `usage: orchestrator story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"   or   ` +
 		`orchestrator story run <spec-dir> [--retry <ID>]   or   orchestrator story status <spec-dir>`
@@ -44,6 +44,7 @@ type storyRunOptions struct {
 	explicitConfig bool
 	mode           domain.RunMode
 	claudeAuth     string
+	codexAuth      string
 	// retry is the task --retry names, or "".
 	retry   string
 	verbose bool
@@ -106,7 +107,7 @@ func storyRun(ctx context.Context, dirArg string, opts storyRunOptions, stdin io
 	needJira := func(c config.Config) config.DependencyOptions {
 		return config.DependencyOptions{Jira: c.Jira != nil && c.Jira.Create != nil}
 	}
-	cfg, _, _, _, err := loadAndValidateConfig(configPath, opts.claudeAuth, registry, osExec, reporter, needJira)
+	cfg, _, _, _, _, err := loadAndValidateConfig(configPath, opts.claudeAuth, opts.codexAuth, registry, osExec, reporter, needJira)
 	if err != nil {
 		return err
 	}
@@ -527,11 +528,14 @@ func (r *storyRunner) halt(status story.Status) {
 	}
 }
 
-// child runs the orchestrator itself in dir, with the terminal's stdio and --claude-auth when
+// child runs the orchestrator itself in dir, with the terminal's stdio and auth overrides when
 // the operator gave it, and returns its exit code.
 func (r *storyRunner) child(dir string, args ...string) int {
 	if r.opts.claudeAuth != "" {
 		args = append([]string{"--claude-auth", r.opts.claudeAuth}, args...)
+	}
+	if r.opts.codexAuth != "" {
+		args = append([]string{"--codex-auth", r.opts.codexAuth}, args...)
 	}
 	code, err := runChild(r.ctx, r.exe, dir, args, r.stdin, r.stdout, r.stderr)
 	if err != nil {

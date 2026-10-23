@@ -10,7 +10,7 @@ import (
 	"orchestrator/internal/domain"
 )
 
-// ExtensionsConfig opts provider calls into the operator's own Claude extensions, which
+// ExtensionsConfig opts provider calls into the operator's own provider extensions, which
 // the orchestrator otherwise never loads (specs/permissions/SPEC.md §6.2): MCP servers such
 // as a code knowledge graph or a memory store, and the operator's user-level plugins,
 // skills and hooks. Everything here is off unless configured, and it never adds a shell or
@@ -140,8 +140,8 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 			}
 		}
 		for _, a := range s.ActionsFor() {
-			if p := providers[a]; p != "" && p != "claude" {
-				problems = append(problems, fmt.Sprintf("%s: action %s runs on %s; extensions are only supported with provider claude", key, a, p))
+			if p := providers[a]; p != "" && p != "claude" && p != "codex" {
+				problems = append(problems, fmt.Sprintf("%s: action %s runs on %s; extensions are only supported with provider claude or codex", key, a, p))
 			}
 		}
 	}
@@ -152,6 +152,13 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 	}
 	if len(e.UserSettingsActions) > 0 && !e.UserSettings {
 		problems = append(problems, "extensions.user_settings_actions is set but extensions.user_settings is false")
+	}
+	if e.UserSettings {
+		for _, a := range extensionActions {
+			if p := providers[a]; p == "codex" {
+				problems = append(problems, fmt.Sprintf("extensions.user_settings: action %s runs on codex; user settings are supported only with provider claude", a))
+			}
+		}
 	}
 	return problems
 }

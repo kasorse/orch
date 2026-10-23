@@ -25,7 +25,7 @@ import (
 // start - git fingerprint first - before anything runs git status. A worktree run resumes in
 // its worktree, verified before any git command runs there (specs/worktree/SPEC.md §11). Until
 // the operator approves, the persisted run is left exactly as it was found.
-func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, claudeAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	stderr = reporter.Wrap(stderr)
@@ -35,7 +35,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 
 	// The current config applies to everything that runs from now on (SPEC §10), so it
 	// goes through the same fail-fast chain as for run.
-	cfg, clis, org, auth, err := loadAndValidateConfig(configPath, claudeAuthFlag, registry, osExec, reporter, noJiraDependencies)
+	cfg, clis, org, auth, codexAuth, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, osExec, reporter, noJiraDependencies)
 	if err != nil {
 		return err
 	}
@@ -97,10 +97,14 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 		return err
 	}
 
+	resumeRecord := &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis, OrgConfig: orgRef(org), ClaudeAuth: &auth}
+	if codexAuth.Mode != "" {
+		resumeRecord.CodexAuth = &codexAuth
+	}
 	opts := tailOptions{
 		mode:        mode,
 		defaultMode: resumeDefaultMode(run.Mode),
-		resume:      &domain.Resume{FromStatus: run.Status, FromReason: run.FailureReason, ProviderCLI: clis, OrgConfig: orgRef(org), ClaudeAuth: &auth},
+		resume:      resumeRecord,
 		// execution.timeout is a fresh budget for this process's steps (SPEC §8); there
 		// is no decision phase to discount.
 		engineContext: func() (context.Context, context.CancelFunc) {
@@ -187,6 +191,11 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if w := claudeAuthChangeNotice(run, auth); w != "" {
 		logging.GapWarning(stderr, w)
 	}
+	if codexAuth.Mode != "" {
+		if w := codexAuthChangeNotice(run, codexAuth); w != "" {
+			logging.GapWarning(stderr, w)
+		}
+	}
 	if pathRulesChanged(run.Options.PathRules, cfg.PathRules()) {
 		logging.GapWarning(stderr, pathRulesChangedWarning)
 	}
@@ -220,6 +229,19 @@ func claudeAuthChangeNotice(run *domain.Run, now domain.ClaudeAuth) string {
 		return ""
 	}
 	return fmt.Sprintf("claude auth changed since the run started: %s → %s", last.Mode, now.Mode)
+}
+
+func codexAuthChangeNotice(run *domain.Run, now domain.CodexAuth) string {
+	last := run.CodexAuth
+	for _, r := range run.Resumes {
+		if r.CodexAuth != nil {
+			last = r.CodexAuth
+		}
+	}
+	if last == nil || last.Mode == now.Mode {
+		return ""
+	}
+	return fmt.Sprintf("codex auth changed since the run started: %s → %s", last.Mode, now.Mode)
 }
 
 // verifyWorkflow refuses a run without a workflow (nothing to continue; that is a new run)

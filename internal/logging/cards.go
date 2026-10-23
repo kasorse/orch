@@ -103,9 +103,11 @@ func (r *ConsoleReporter) usageCard(int) []string {
 	}
 	st := r.st()
 	u := r.runUsage
-	lines := []string{
-		fmt.Sprintf("%s in · %s out", tokens(u.PromptTokens()), tokens(u.OutputTokens)),
+	output := fmt.Sprintf("%s out", tokens(u.OutputTokens+u.ReasoningTokens))
+	if u.ReasoningTokens > 0 {
+		output += fmt.Sprintf(" (%s reasoning)", tokens(u.ReasoningTokens))
 	}
+	lines := []string{fmt.Sprintf("%s in · %s", tokens(u.PromptTokens()), output)}
 	if p := u.PromptTokens(); p > 0 {
 		lines = append(lines, st.gray("cache ")+pctColor(st, float64(u.CacheReadTokens)/float64(p), true)+
 			st.gray(fmt.Sprintf(" · %d turns", u.Turns)))
@@ -203,7 +205,7 @@ func (r *ConsoleReporter) compactStatus(run *domain.Run) string {
 	}
 	if r.hasUsage {
 		u := r.runUsage
-		parts = append(parts, st.gray(tokens(u.PromptTokens()+u.OutputTokens)+" tok"))
+		parts = append(parts, st.gray(tokens(u.PromptTokens()+u.OutputTokens+u.ReasoningTokens)+" tok"))
 		if u.CostUSD > 0 {
 			parts = append(parts, st.green(fmt.Sprintf("$%.3f", u.CostUSD)))
 		}

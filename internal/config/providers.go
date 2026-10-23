@@ -1,5 +1,5 @@
-// This file defines and validates the providers section (specs/claude-auth/SPEC.md §5): how the
-// claude CLI is authenticated. Validate includes these checks.
+// This file defines and validates the providers section: how the Claude and Codex CLIs are
+// authenticated. Validate includes these checks.
 package config
 
 import (
@@ -17,20 +17,28 @@ import (
 	"orchestrator/internal/secretscan"
 )
 
-// providers.claude.auth values. The empty string means auto.
+// providers.*.auth values. The empty string means auto.
 const (
 	ClaudeAuthAuto  = "auto"
 	ClaudeAuthAPI   = "api"
 	ClaudeAuthLogin = "login"
+	CodexAuthAuto   = "auto"
+	CodexAuthAPI    = "api"
+	CodexAuthLogin  = "login"
 )
 
 // DefaultClaudeAPIKeyEnv is the variable that holds the key when api_key_env is not set.
 const DefaultClaudeAPIKeyEnv = "ANTHROPIC_API_KEY"
 
-// ProvidersConfig is the providers section. Only claude exists: the other providers support no
-// authority, so any other key is refused by strict parsing.
+// DefaultCodexAPIKeyEnv is the variable operators normally use for an OpenAI API key.
+// The Codex adapter maps it to CODEX_API_KEY for non-interactive codex exec calls.
+const DefaultCodexAPIKeyEnv = "OPENAI_API_KEY"
+
+// ProvidersConfig is the providers section. Gemini has no credential-specific settings yet,
+// so a providers.gemini key is still rejected by strict parsing.
 type ProvidersConfig struct {
 	Claude ClaudeProviderConfig `yaml:"claude"`
+	Codex  CodexProviderConfig  `yaml:"codex"`
 }
 
 // ClaudeProviderConfig is providers.claude. Both keys are optional; read them through
@@ -47,6 +55,44 @@ type ClaudeProviderConfig struct {
 	// apiKeyLiteralSet records that a literal "api_key" was written, which Validate rejects:
 	// the key comes from the environment, never from a file that might end up committed.
 	apiKeyLiteralSet bool
+}
+
+// CodexProviderConfig is providers.codex. The key itself is always read from the
+// environment; Codex's own login state is used in login mode.
+type CodexProviderConfig struct {
+	Auth      string `yaml:"auth"`
+	APIKeyEnv string `yaml:"api_key_env"`
+
+	apiKeyLiteralSet bool
+}
+
+func (c *CodexProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Auth      string `yaml:"auth"`
+		APIKeyEnv string `yaml:"api_key_env"`
+		APIKey    string `yaml:"api_key"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	c.Auth = raw.Auth
+	c.APIKeyEnv = raw.APIKeyEnv
+	c.apiKeyLiteralSet = raw.APIKey != ""
+	return nil
+}
+
+func (c CodexProviderConfig) EffectiveAuth() string {
+	if c.Auth == "" {
+		return CodexAuthAuto
+	}
+	return c.Auth
+}
+
+func (c CodexProviderConfig) KeyEnv() string {
+	if env := strings.TrimSpace(c.APIKeyEnv); env != "" {
+		return env
+	}
+	return DefaultCodexAPIKeyEnv
 }
 
 // UnmarshalYAML captures whether a literal api_key field was present, without ever exposing
@@ -91,6 +137,15 @@ func ParseClaudeAuth(v string) (string, error) {
 		return v, nil
 	}
 	return "", fmt.Errorf("--claude-auth must be auto, api or login, got %q", v)
+}
+
+// ParseCodexAuth validates a --codex-auth value.
+func ParseCodexAuth(v string) (string, error) {
+	switch v {
+	case CodexAuthAuto, CodexAuthAPI, CodexAuthLogin:
+		return v, nil
+	}
+	return "", fmt.Errorf("--codex-auth must be auto, api or login, got %q", v)
 }
 
 // ResolveClaudeAuth turns the --claude-auth flag ("" if not given), providers.claude and the
@@ -148,6 +203,51 @@ func ResolveClaudeAuth(cfg Config, flag string, lookup func(string) (string, boo
 	return res, notices, nil
 }
 
+// ResolveCodexAuth applies the same precedence as Claude: command-line flag, config, auto.
+// Auto uses the API key when the configured variable is non-empty and otherwise uses the
+// Codex CLI's own login state.
+func ResolveCodexAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.CodexAuth, []string, error) {
+	c := cfg.Providers.Codex
+	res := domain.CodexAuth{Requested: c.EffectiveAuth(), DecidedBy: domain.CodexAuthByDefault, KeyEnv: c.KeyEnv()}
+	if flag != "" {
+		res.Requested, res.DecidedBy = flag, domain.CodexAuthByFlag
+	} else if c.Auth != "" {
+		res.DecidedBy = domain.CodexAuthByConfig
+	}
+
+	raw, set := lookup(res.KeyEnv)
+	key := strings.TrimSpace(raw)
+	var notices []string
+	if res.Requested == CodexAuthLogin {
+		res.Mode = CodexAuthLogin
+		if set {
+			notices = append(notices, fmt.Sprintf("%s is set but not used (--codex-auth login)", res.KeyEnv))
+		}
+		return res, notices, nil
+	}
+	if !set || key == "" {
+		if res.Requested == CodexAuthAPI {
+			if !set {
+				return domain.CodexAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf(
+					"codex auth is api but %s is not set; export the key or use --codex-auth login", res.KeyEnv)}
+			}
+			return domain.CodexAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf(
+				"codex auth is api but %s is empty; export the key or use --codex-auth login", res.KeyEnv)}
+		}
+		res.Mode = CodexAuthLogin
+		if set {
+			res.KeyBlank = true
+			notices = append(notices, fmt.Sprintf("warning: %s is set but empty; using the Codex CLI login", res.KeyEnv))
+		}
+		return res, notices, nil
+	}
+	if problem := domain.CodexKeyProblem(key); problem != "" {
+		return domain.CodexAuth{}, nil, &apperr.ConfigError{Msg: fmt.Sprintf("%s %s", res.KeyEnv, problem)}
+	}
+	res.Mode = CodexAuthAPI
+	return res, notices, nil
+}
+
 // claudeKeyProblem reports why a trimmed, non-empty key is unusable, without quoting it.
 func claudeKeyProblem(key string) string {
 	if strings.HasPrefix(key, "sk-ant-oat") {
@@ -161,7 +261,7 @@ func claudeKeyProblem(key string) string {
 	return ""
 }
 
-// providersProblems validates providers.claude.
+// providersProblems validates providers.claude and providers.codex.
 func providersProblems(cfg Config) []string {
 	var problems []string
 	c := cfg.Providers.Claude
@@ -183,7 +283,20 @@ func providersProblems(cfg Config) []string {
 		problems = append(problems, "providers.claude.api_key must not be set in the configuration file; "+
 			"name an environment variable via providers.claude.api_key_env instead")
 	}
-	return append(problems, apiEnvProblems(cfg)...)
+	problems = append(problems, apiEnvProblems(cfg)...)
+	codex := cfg.Providers.Codex
+	switch env := codex.KeyEnv(); {
+	case codex.Auth != "" && codex.Auth != CodexAuthAuto && codex.Auth != CodexAuthAPI && codex.Auth != CodexAuthLogin:
+		problems = append(problems, fmt.Sprintf("providers.codex.auth must be auto (the default), api or login, got %q", codex.Auth))
+	case codex.APIKeyEnv != "" && !envNameRE.MatchString(codex.APIKeyEnv):
+		problems = append(problems, fmt.Sprintf("providers.codex.api_key_env %q must be an environment variable name (letters, digits, _)", codex.APIKeyEnv))
+	case execution.IsParentSessionVar(env):
+		problems = append(problems, fmt.Sprintf("providers.codex.api_key_env %q belongs to the agent session that launched the orchestrator; no child process gets it", env))
+	}
+	if codex.apiKeyLiteralSet {
+		problems = append(problems, "providers.codex.api_key must not be set in the configuration file; name an environment variable via providers.codex.api_key_env instead")
+	}
+	return problems
 }
 
 // redactedRuleRE finds the rule secretscan.Redact names in its replacement.

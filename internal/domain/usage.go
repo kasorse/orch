@@ -11,8 +11,13 @@ import (
 // nothing decides anything from these numbers. A provider that reports nothing leaves the
 // call's Usage nil.
 type Usage struct {
-	InputTokens         int64   `json:"input_tokens"`
+	// InputTokens is uncached input. CacheReadTokens and CacheCreationTokens are
+	// separate parts of the provider's total input and are included in PromptTokens.
+	InputTokens int64 `json:"input_tokens"`
+	// OutputTokens is visible output. ReasoningTokens is the hidden reasoning part
+	// of the provider's total output.
 	OutputTokens        int64   `json:"output_tokens"`
+	ReasoningTokens     int64   `json:"reasoning_tokens,omitempty"`
 	CacheReadTokens     int64   `json:"cache_read_tokens,omitempty"`
 	CacheCreationTokens int64   `json:"cache_creation_tokens,omitempty"`
 	CostUSD             float64 `json:"cost_usd,omitempty"`
@@ -34,7 +39,7 @@ type Usage struct {
 // Validate checks a recorded usage read back from disk: no counter is negative and the
 // cost is a finite number.
 func (u Usage) Validate() error {
-	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadTokens < 0 || u.CacheCreationTokens < 0 || u.Turns < 0 {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.ReasoningTokens < 0 || u.CacheReadTokens < 0 || u.CacheCreationTokens < 0 || u.Turns < 0 {
 		return fmt.Errorf("negative counter")
 	}
 	if u.CostUSD < 0 || math.IsNaN(u.CostUSD) || math.IsInf(u.CostUSD, 0) {
@@ -58,6 +63,7 @@ func (u Usage) PromptTokens() int64 {
 func (u *Usage) Add(o Usage) {
 	u.InputTokens += o.InputTokens
 	u.OutputTokens += o.OutputTokens
+	u.ReasoningTokens += o.ReasoningTokens
 	u.CacheReadTokens += o.CacheReadTokens
 	u.CacheCreationTokens += o.CacheCreationTokens
 	u.CostUSD += o.CostUSD
