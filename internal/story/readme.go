@@ -8,16 +8,18 @@ import (
 // TaskStatus is where a task stands in a story run (SPEC §10.2). pending: not dispatched;
 // running: dispatched and its run not finished; done: its run completed with a commit;
 // failed, stopped: its run ended so and the next story run resumes it; blocked: its run
-// completed without a commit.
+// completed without a commit; conflict: its parents do not merge cleanly on the spec branch,
+// so it is not dispatched.
 type TaskStatus string
 
 const (
-	TaskPending TaskStatus = "pending"
-	TaskRunning TaskStatus = "running"
-	TaskDone    TaskStatus = "done"
-	TaskFailed  TaskStatus = "failed"
-	TaskBlocked TaskStatus = "blocked"
-	TaskStopped TaskStatus = "stopped"
+	TaskPending  TaskStatus = "pending"
+	TaskRunning  TaskStatus = "running"
+	TaskDone     TaskStatus = "done"
+	TaskFailed   TaskStatus = "failed"
+	TaskBlocked  TaskStatus = "blocked"
+	TaskStopped  TaskStatus = "stopped"
+	TaskConflict TaskStatus = "conflict"
 )
 
 // Status is the story's own status line (SPEC §14): planned until the first story run, then

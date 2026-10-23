@@ -198,10 +198,50 @@ func ancestors(byID map[string]Task, id string) map[string]bool {
 // repository's story base. One left: that task. More: an error, because the orchestrator
 // does not decide how to merge branches.
 func Base(tasks []Task, id string) (string, error) {
+	keep, err := Parents(tasks, id)
+	if err != nil {
+		return "", err
+	}
+	switch len(keep) {
+	case 0:
+		return "", nil
+	case 1:
+		return keep[0], nil
+	}
+	return "", fmt.Errorf("%s needs %s in %s on different branches; make one depend on the other", id, joinAnd(keep), indexTasks(tasks)[id].Repo)
+}
+
+// Ready is the tasks to dispatch now, in Order: those whose every dependency is TaskDone and
+// whose own state is neither TaskDone nor TaskRunning. A task with no entry in states is pending.
+func Ready(tasks []Task, states map[string]TaskStatus) []string {
+	byID := indexTasks(tasks)
+	var ready []string
+	for _, id := range Order(tasks) {
+		if s := states[id]; s == TaskDone || s == TaskRunning {
+			continue
+		}
+		ok := true
+		for _, dep := range byID[id].DependsOn {
+			if states[dep] != TaskDone {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			ready = append(ready, id)
+		}
+	}
+	return ready
+}
+
+// Parents are the tasks a task starts from in its repository: its ancestors there,
+// transitively and across repositories, minus each one that another of them depends on, sorted.
+// The error is only for an unknown ID.
+func Parents(tasks []Task, id string) ([]string, error) {
 	byID := indexTasks(tasks)
 	t, ok := byID[id]
 	if !ok {
-		return "", fmt.Errorf("task %s is not in the story", id)
+		return nil, fmt.Errorf("task %s is not in the story", id)
 	}
 
 	var same []string
@@ -226,13 +266,7 @@ func Base(tasks []Task, id string) (string, error) {
 		}
 	}
 
-	switch len(keep) {
-	case 0:
-		return "", nil
-	case 1:
-		return keep[0], nil
-	}
-	return "", fmt.Errorf("%s needs %s in %s on different branches; make one depend on the other", id, joinAnd(keep), t.Repo)
+	return keep, nil
 }
 
 func joinAnd(ids []string) string {

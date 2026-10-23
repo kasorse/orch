@@ -31,6 +31,55 @@ func TestOrder(t *testing.T) {
 	}
 }
 
+func TestParents(t *testing.T) {
+	tasks := []Task{
+		tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b", "RF01"),
+		tk("RF04", "a"), tk("RF05", "a", "RF04", "RF02"), tk("RF06", "a", "RF03"),
+	}
+	cases := []struct {
+		id   string
+		want []string
+	}{
+		{"RF01", nil},
+		{"RF02", []string{"RF01"}},
+		{"RF03", nil},
+		{"RF05", []string{"RF02", "RF04"}},
+		{"RF06", []string{"RF01"}},
+	}
+	for _, tc := range cases {
+		got, err := Parents(tasks, tc.id)
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parents(%s) = %v, %v; want %v", tc.id, got, err, tc.want)
+		}
+	}
+	if _, err := Parents(tasks, "RF99"); err == nil {
+		t.Error("unknown ID: want an error")
+	}
+}
+
+func TestReady(t *testing.T) {
+	tasks := []Task{tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b"), tk("RF04", "a", "RF02", "RF03")}
+	cases := []struct {
+		name   string
+		states map[string]TaskStatus
+		want   []string
+	}{
+		{"nothing started", nil, []string{"RF01", "RF03"}},
+		{"running and done are skipped", map[string]TaskStatus{"RF01": TaskDone, "RF03": TaskRunning}, []string{"RF02"}},
+		{"all dependencies done", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskDone, "RF03": TaskDone}, []string{"RF04"}},
+		{"retryable states", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskFailed, "RF03": TaskConflict}, []string{"RF02", "RF03"}},
+		{"blocked and stopped", map[string]TaskStatus{"RF01": TaskBlocked, "RF03": TaskStopped}, []string{"RF01", "RF03"}},
+		{"all done", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskDone, "RF03": TaskDone, "RF04": TaskDone}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Ready(tasks, tc.states); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Ready = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOrderDoesNotDependOnInputOrder(t *testing.T) {
 	a := []Task{tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b", "RF01"), tk("RF04", "a", "RF02", "RF03")}
 	b := []Task{a[3], a[2], a[1], a[0]}
