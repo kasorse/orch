@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"orchbench/internal/config"
@@ -182,6 +183,11 @@ func runOrchestrator(ctx context.Context, cfg config.Config, t task.Task, ws Wor
 	return classifyOrchestrator(out, t, ws.Dir, proc)
 }
 
+// authFailureLine is the detail line of the core's claude auth failure (apperr.FailureAuth,
+// MVP.md §46: a refused credential or the wrong one used), which exits 2 like a config error.
+// shortcut: parses the core's error wording; upgrade when run.json records the failure kind.
+var authFailureLine = regexp.MustCompile(`^detail: claude auth \((api|login)\)`)
+
 // classifyOrchestrator turns a finished orchestrator process and the run directory it left
 // into an Outcome or an *InfraError. The order is the rule: what is certainly not the model's
 // comes first, then the timeout, then the run's own record.
@@ -189,6 +195,9 @@ func classifyOrchestrator(out Outcome, t task.Task, workDir string, proc process
 	if !proc.TimedOut {
 		switch proc.ExitCode {
 		case exitConfigOrDependency:
+			if line, ok := matchLine([]*regexp.Regexp{authFailureLine}, proc.Stderr); ok {
+				return out, authError("the provider", line)
+			}
 			return out, infra("the orchestrator refused the config or a dependency is missing%s", tailNote(proc.Stderr))
 		case exitUserCancellation:
 			return out, infra("the orchestrator was cancelled from outside (exit %d)", proc.ExitCode)

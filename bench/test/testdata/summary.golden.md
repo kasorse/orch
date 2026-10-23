@@ -76,7 +76,7 @@ A task counts when both configs have a result for it. Difference of pass rates i
 
 B $0.10 per cell, C $0.10 per cell: B costs 1.00x C. Paired over 2 tasks: B − C = +$0.00 per task.
 
-## Stage choice (B, Bmock) vs expected_stages
+## Stage choice (B, C) vs expected_stages
 
 The chosen stages against expected_stages as sets, over the cells that have expected_stages.
 
@@ -84,11 +84,16 @@ The chosen stages against expected_stages as sets, over the cells that have expe
 
 no cell has expected_stages
 
-## Complexity (B, Bmock)
+### C
+
+no cell has expected_stages
+
+## Complexity (B, C)
 
 | config | complexity | cells | pass rate |
 | --- | --- | --- | --- |
 | B | medium | 4 | 0% |
+| C | medium | 4 | 50% |
 
 ## Translation (en/ru)
 

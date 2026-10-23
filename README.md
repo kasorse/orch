@@ -158,8 +158,9 @@ security:
   `gemini`) and a `model` string passed straight through to that provider's CLI — there's no
   automatic "best model" selection, fallback, or benchmarking. `timeout` optionally tightens
   that action's share of `execution.timeout`. A provider must be able to enforce the
-  action's authority: `codex` and `gemini` currently cannot, so routing an action (or the
-  translator, or the decision provider) to them fails validation with exit 2.
+  action's authority: Codex supports the `read` and `edit` workflow routes; its `none` and
+  `web` routes remain unavailable. Gemini is still refused until its permission flags are
+  verified.
 - `test.command` runs via `sh -c` in the target repository (the one place a shell is used —
   it's trusted operator configuration, not user input). It runs under bubblewrap unless
   `test.sandbox: none` — see [Sandboxing the test step](#sandboxing-the-test-step);
@@ -595,18 +596,42 @@ providers:
   credential names, a URL with a user or password, and values that look like a secret are
   config errors. Only claude gets these variables; the test command does not.
 
+## Running Codex on a subscription or API key
+
+Codex uses `codex exec` with the same `auto`, `api` and `login` choice. In API mode the
+configured key is passed to the child as `CODEX_API_KEY`; login mode uses the Codex CLI's
+saved ChatGPT login.
+
+```bash
+export OPENAI_API_KEY=...
+orchestrator --codex-auth api run "<task>"
+orchestrator --codex-auth login run "<task>"
+```
+
+```yaml
+providers:
+  codex:
+    auth: auto
+    api_key_env: OPENAI_API_KEY
+```
+
+`--codex-auth` overrides `providers.codex.auth`. The key is read from the environment,
+never from YAML or argv, and the resolved mode is recorded without the key. Codex read and
+edit actions use its `read-only` and `workspace-write` sandboxes. A direct API client is a
+separate TODO item.
+
 ## Usage
 
 ```
 orchestrator [--config path] version
-orchestrator [--config path] [--claude-auth m] validate
-orchestrator [--config path] [--claude-auth m] run [--verbose|-v] "<task description>"
+orchestrator [--config path] [--claude-auth m] [--codex-auth m] validate
+orchestrator [--config path] [--claude-auth m] [--codex-auth m] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
 orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID>]
 orchestrator [--config path] story status <spec_dir>/<slug>
-orchestrator [--config path] [--mode m] [--claude-auth m] resume <run-id>
+orchestrator [--config path] [--mode m] [--claude-auth m] [--codex-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
 orchestrator runs clean [--older-than <N>d] [--dry-run]
 orchestrator decisions report

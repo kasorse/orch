@@ -134,6 +134,9 @@ type InfraError struct {
 	// and runs again (run.Env.Exec). ResetsAt is when it resets, zero when nobody said.
 	UsageLimit bool
 	ResetsAt   time.Time
+	// Auth marks a credential the provider refused (or the wrong one used): no cell can pass
+	// until the operator fixes it, so the run stops (run.Env.Exec).
+	Auth bool
 }
 
 func (e *InfraError) Error() string {
@@ -159,6 +162,20 @@ func UsageLimit(err error) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return ie.ResetsAt, true
+}
+
+// AuthFailure reports whether err is, or wraps, an *InfraError of a refused credential.
+func AuthFailure(err error) bool {
+	var ie *InfraError
+	return errors.As(err, &ie) && ie.Auth
+}
+
+// authError is the infra error of a run whose credential was refused; what says why.
+func authError(who, what string) *InfraError {
+	return &InfraError{
+		Reason: fmt.Sprintf("%s refused the credential (%s): check ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN", who, what),
+		Auth:   true,
+	}
 }
 
 // limitError is the infra error of a run a provider refused with a rate limit: line is what it

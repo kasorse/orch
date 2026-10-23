@@ -344,6 +344,24 @@ func TestExecWaitsForAUsageLimitAndRunsAgain(t *testing.T) {
 	})
 }
 
+func TestExecStopsOnARefusedCredential(t *testing.T) {
+	testutil.RequireBwrap(t)
+	p := testutil.NewSHProject(t)
+	var calls atomic.Int32
+	env := newEnv(t, func(ctx context.Context, cfg config.Config, tk task.Task, ws runner.Workspace) (runner.Outcome, error) {
+		calls.Add(1)
+		return runner.Outcome{}, &runner.InfraError{Reason: "claude refused the credential", Auth: true}
+	})
+
+	fin, err := env.Exec(context.Background(), cellOf(p.Task("code")))
+	if !runner.AuthFailure(err) || fin.Record.Task != "" || calls.Load() != 1 {
+		t.Fatalf("finished %+v, err %v after %d calls; want no record, the auth error, one call", fin, err, calls.Load())
+	}
+	if workDirEntries(t, env) != 0 {
+		t.Error("a workspace was left behind")
+	}
+}
+
 func TestExecTreatsAFailedSetupAsInfrastructure(t *testing.T) {
 	testutil.RequireBwrap(t)
 	p := testutil.NewSHProject(t)

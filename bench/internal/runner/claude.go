@@ -33,6 +33,32 @@ type streamEvent struct {
 	// Raw, so an unexpected shape drops the reset time and not the whole event.
 	APIError       json.RawMessage `json:"api_error"`
 	APIErrorParams json.RawMessage `json:"api_error_params"`
+	// error is the category of an API error the CLI answered with (an assistant event) or is
+	// retrying (system/api_retry); api_error_status is the HTTP status of a result's error.
+	// Both are the CLI's own fields, never the model's text.
+	Error          json.RawMessage `json:"error"`
+	APIErrorStatus int             `json:"api_error_status"`
+}
+
+// authCategories are the error categories of a refused credential, as the core's claude
+// adapter knows them (internal/provider/claude authErrorCategories).
+var authCategories = map[string]bool{
+	"authentication_failed": true,
+	"oauth_org_not_allowed": true,
+	"account_on_hold":       true,
+	"billing_error":         true,
+}
+
+// authFailure is the category of a refused credential this event reports, "" for none.
+func (ev *streamEvent) authFailure() string {
+	var cat string
+	if json.Unmarshal(ev.Error, &cat) == nil && authCategories[cat] {
+		return cat
+	}
+	if ev.Type == "result" && ev.IsError && ev.APIErrorStatus == 401 {
+		return "HTTP 401"
+	}
+	return ""
 }
 
 // limitResets is when the usage limit that refused this event resets, zero when it is not one
@@ -87,6 +113,7 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 
 	var result *streamEvent
 	var resets time.Time
+	var authFailed string
 	// plain keeps the lines that are not stream-json events: the CLI's own messages. Tool
 	// output, test output among it, is always inside an event, so it never lands here.
 	plain := &tailBuffer{max: tailBytes}
@@ -105,6 +132,9 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 		}
 		if t := ev.limitResets(); !t.IsZero() {
 			resets = t
+		}
+		if cat := ev.authFailure(); cat != "" && authFailed == "" {
+			authFailed = cat
 		}
 		if ev.Type == "result" {
 			result = &ev
@@ -162,6 +192,9 @@ func runClaude(ctx context.Context, cfg config.Config, t task.Task, ws Workspace
 	// provider's own messages: stderr, stdout outside the events, and the result event's text
 	// when it reports an error. The transcript is never searched.
 	if result == nil || result.IsError || proc.ExitCode != 0 {
+		if authFailed != "" {
+			return Outcome{}, authError("claude", authFailed)
+		}
 		texts := []string{proc.Stderr, plain.String()}
 		if result != nil && result.IsError && result.Result != nil {
 			texts = append(texts, *result.Result)

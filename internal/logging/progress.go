@@ -262,6 +262,23 @@ func (r *ConsoleReporter) ClaudeAuth(line, envLine string, notices []string) {
 	}
 }
 
+// CodexAuth reports the resolved Codex credential mode. It deliberately has no environment
+// detail because Codex currently has no provider-specific api_env configuration.
+func (r *ConsoleReporter) CodexAuth(line string, notices []string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(line))
+		for _, n := range notices {
+			fmt.Fprintln(r.Out, st.red("⚠ "+n))
+		}
+		return
+	}
+	fmt.Fprintf(r.Out, "✓ %s\n", line)
+	for _, n := range notices {
+		fmt.Fprintf(r.Out, "Warning: %s\n", n)
+	}
+}
+
 // OrgConfig reports the org file the configuration was merged with, or "none" for an empty
 // path (validate only).
 func (r *ConsoleReporter) OrgConfig(path string) {

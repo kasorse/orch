@@ -173,9 +173,9 @@ func writeCostCompare(b *strings.Builder, r Report) {
 }
 
 func writeStages(b *strings.Builder, r Report) {
-	section(b, "Stage choice (B, Bmock) vs expected_stages")
+	section(b, "Stage choice (B, C) vs expected_stages")
 	if len(r.Stages) == 0 {
-		b.WriteString("no B or Bmock results yet\n")
+		b.WriteString("no B or C results yet\n")
 		return
 	}
 	b.WriteString("The chosen stages against expected_stages as sets, over the cells that have expected_stages.\n")
@@ -197,9 +197,9 @@ func writeStages(b *strings.Builder, r Report) {
 }
 
 func writeComplexity(b *strings.Builder, r Report) {
-	section(b, "Complexity (B, Bmock)")
+	section(b, "Complexity (B, C)")
 	if len(r.Stages) == 0 {
-		b.WriteString("no B or Bmock results yet\n")
+		b.WriteString("no B or C results yet\n")
 		return
 	}
 	t := newTable("config", "complexity", "cells", "pass rate")

@@ -399,13 +399,15 @@ template: `test.command = test_command`, `test.sandbox: bwrap` with the task's b
 | config | what | invocation |
 |---|---|---|
 | **A** bare Claude Code | the main competitor | `claude -p --model <m> --output-format stream-json --verbose --permission-mode acceptEdits --allowed-tools <Read,Grep,Glob,Edit,Write,Bash>` (exact flags verified in the task), prompt on stdin = task text + one line naming `test_command` (Q4) |
-| **B** orchestrator auto | the product | `orchestrator run --mode auto "<task>"`, `decision.provider: claude` (the LLM decision provider), policy thresholds from `orchestrator.example.yaml` unchanged |
-| **C** all stages | upper bound on the pipeline | `orchestrator run --mode auto --stage research --stage analysis --stage planning --stage development --stage testing --stage review "<task>"` |
-| **D** implement + test | the pipeline without planning or review | `orchestrator run --mode auto --stage development --stage testing "<task>"` |
-| **B′** auto, mock decision (optional) | decision quality vs a keyword heuristic, zero decision cost | B with `decision.provider: jev`, `decision.jev.mock: true` |
+| **B** the owner's configuration | the product as it is used | `orchestrator run --mode auto "<task>"` with the owner's own settings (`bench/configs/B.yaml`: decision on opus, `by_complexity`, `escalate`), minus what cannot work in a bench workspace |
+| **C** the defaults | the product as shipped | `orchestrator run --mode auto "<task>"`, `decision.provider: claude`, everything else from `orchestrator.example.yaml` unchanged |
+| **D** implement + test | the pipeline without the decision, planning or review | `orchestrator run --mode auto --stage development --stage testing "<task>"`, C's template |
 
-Config E (after Q1/Q2) is added later as another template; nothing in the runner is specific
-to A–D except A's invocation.
+Revised 2026-10-20 (owner): four configs only. The earlier C (every stage by `--stage`), B′ (the
+mock decision) and the one-change variants E–H (verify, `by_complexity`, escalation) are removed:
+a config per setting multiplied the runs. A setting is now measured by changing B. Every
+orchestrator config sets `execution.rate_limit_wait: 0s` (orchbench waits for a usage limit
+itself). Nothing in the runner is specific to A–D except A's invocation.
 
 ## 9. Result record
 
@@ -450,7 +452,7 @@ One JSON object per cell in `results.jsonl`:
 - **Paired B vs A** (and C vs A, D vs A): per task wins / ties / losses by majority over
   repetitions; difference in pass rate with a bootstrap 95% interval over tasks.
 - Decision overhead: share of B's cost and time spent in decision rounds; B vs C cost.
-- Stage choice (B, B′): exact match with `expected_stages`, and per-stage
+- Stage choice (B, C): exact match with `expected_stages`, and per-stage
   precision / recall; complexity distribution.
 - Translation: for each en/ru pair, whether B chose the same stages and whether both passed.
 
@@ -637,7 +639,7 @@ What one cell does is §7.1 and §7.5. Cells already in `results.jsonl` with `pa
 are skipped, `infra_error` ones are run again, so the same command continues an interrupted
 or partly failed run, and a larger `--reps` or a new `--configs` on the same `--out` adds
 only the missing cells. An infra error is retried once at once; if it persists the cell is
-left as `infra_error` and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error.
+left as `infra_error` and the run goes on. The account's usage limit (`usage_limit_reached`, "You've hit your session limit") is not an attempt: the cell prints when it will run again, waits for the reset the provider reported plus a minute (5 minutes when it reported none), and runs again in a fresh workspace, as often as it takes; the cost of the refused tries is counted. The orchestrator configs set `execution.rate_limit_wait: 0s`, so the orchestrator stops at once instead of waiting inside the task's timeout. A 429, an overloaded API or an empty balance stays an infra error. A refused credential (claude's `authentication_failed`, `billing_error`, …, a 401 result, or the orchestrator's `FailureAuth`) writes no line and stops the run, since every later cell would be refused too; fix the credential and run the same command again.
 Ctrl-C stops the current cell without writing its line. Output: one progress line per cell (example in §13.10) and a total.
 
 ### 13.6 `orchbench summarize` — the report
@@ -692,8 +694,8 @@ config: |                        # orchestrator config; {{...}} filled per task
 ```
 
 The config generated for a task is saved as `<out>/configs/<task>-<config>.yaml` and its hash
-goes into the result line. Adding config E later is adding `E.yaml` and running with
-`--configs E` on the same `--out`.
+goes into the result line. Another config is a new file and `--configs <name>` on the same
+`--out`; by the 2026-10-20 decision (§8) a setting is measured by changing B instead.
 
 ### 13.8 The results directory
 
@@ -825,7 +827,7 @@ on later.
 |---|---|
 | debug one task in one config | `orchbench run --tasks <t> --ids <id> --configs B --reps 1 --max-cost 5 --out /tmp/dbg --keep-workspaces -v`, then look at the kept workspace and `/tmp/dbg/logs/` |
 | more repetitions after the fact | the same `run` with `--reps 5` and the same `--out`: only reps 4 and 5 run |
-| measure a new config (E, after Q1/Q2) | add `bench/configs/E.yaml`, `run --configs E` on the same `--out`, then `summarize` |
+| measure another setting | change `bench/configs/B.yaml` and run into a new `--out` (a changed B is another config hash), then `summarize` |
 | a cell looks wrong (setup flaked, a fixed task) | `run --ids <id> --configs <c> --redo` on the same `--out` |
 | a new orchestrator build | a new `--out`: an old one refuses without `--allow-mixed`, so two builds are never averaged together |
 | progress during a long run | `orchbench summarize <out> --stdout` in another terminal |

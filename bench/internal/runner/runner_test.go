@@ -454,10 +454,9 @@ func TestOrchestratorMapsRunAndDecision(t *testing.T) {
 
 func TestOrchestratorPassesTheStages(t *testing.T) {
 	for name, want := range map[string][]string{
-		"C": {"--stage", "research", "--stage", "analysis", "--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review"},
+		"B": nil,
+		"C": nil,
 		"D": {"--stage", "development", "--stage", "testing"},
-		"E": {"--stage", "development", "--stage", "testing"},
-		"F": nil,
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t)
@@ -821,6 +820,44 @@ func TestUsageLimitIsMarked(t *testing.T) {
 			resets, usage := UsageLimit(err)
 			if usage != tc.usage || !resets.Equal(tc.resets) {
 				t.Errorf("UsageLimit = %v, %v; want %v, %v (%v)", resets, usage, tc.resets, tc.usage, err)
+			}
+		})
+	}
+}
+
+// TestAuthFailureIsMarked: a refused credential is an infra error marked Auth, from claude's
+// own fields (config A) or the core's FailureAuth (exit 2); other failures are not.
+func TestAuthFailureIsMarked(t *testing.T) {
+	authAnswer := `{"type":"assistant","message":{"id":"x","model":"<synthetic>","content":[{"type":"text","text":"Invalid API key"}]},"error":"authentication_failed","is_api_error_message":true}`
+	result401 := `{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Invalid API key","total_cost_usd":0}`
+	coreAuth := "provider execution failed\n\nfailure: auth (the CLI did not use the run's credential, or the credential was refused)\n" +
+		"detail: claude auth (api): authentication_failed. Check the Console account, or run with --claude-auth login\n"
+
+	cases := []struct {
+		name           string
+		config         string
+		stdout, stderr string
+		exit           string
+		auth           bool
+	}{
+		{name: "claude: auth error answer", config: "A", stdout: initEvent + "\n" + authAnswer + "\n" + result401, exit: "1", auth: true},
+		{name: "claude: a 401 result alone", config: "A", stdout: result401, exit: "1", auth: true},
+		{name: "claude: other API error", config: "A", stderr: "Credit balance is too low", exit: "1"},
+		{name: "orchestrator: FailureAuth", config: "B", stderr: "decision provider claude failed: " + coreAuth, exit: "2", auth: true},
+		{name: "orchestrator: config error", config: "B", stderr: "claude: executable not found", exit: "2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.set("FAKE_STDOUT", tc.stdout)
+			h.set("FAKE_STDERR", tc.stderr)
+			h.set("FAKE_EXIT", tc.exit)
+			_, err := h.run(tc.config, codeTask())
+			if !IsInfra(err) || AuthFailure(err) != tc.auth {
+				t.Fatalf("error = %v; want infra with Auth %v", err, tc.auth)
+			}
+			if _, usage := UsageLimit(err); usage {
+				t.Errorf("a refused credential is not a usage limit: %v", err)
 			}
 		})
 	}

@@ -33,12 +33,11 @@ const (
 	DefaultResamples = 10000
 )
 
-// The configs the decision sections look at (SPEC.md §8): B decides the stages itself, B′ is B
-// with the mock decision, C runs every stage.
+// The configs the decision sections look at (SPEC.md §8): both decide the stages themselves, B
+// with the owner's configuration, C with the defaults.
 const (
-	ConfigB     = "B"
-	ConfigBmock = "Bmock"
-	ConfigC     = "C"
+	ConfigB = "B"
+	ConfigC = "C"
 )
 
 // bootstrapStream is the second word of the bootstrap's PCG ("orchbenc"), fixed so that the
@@ -99,7 +98,7 @@ type Report struct {
 	Paired      Paired
 	Overhead    Overhead
 	CostCompare CostCompare
-	// Stages has B and B′, whichever has results.
+	// Stages has B and C, whichever has results.
 	Stages      []StageChoice
 	Translation Translation
 }
@@ -320,7 +319,7 @@ func Compute(recs []results.Record, opt Options) Report {
 
 	rep.Overhead = overhead(byConfig[ConfigB])
 	rep.CostCompare = costCompare(rep.Overall, tasks, perTask)
-	for _, c := range []string{ConfigB, ConfigBmock} {
+	for _, c := range []string{ConfigB, ConfigC} {
 		if len(byConfig[c]) > 0 {
 			rep.Stages = append(rep.Stages, stageChoice(c, byConfig[c]))
 		}

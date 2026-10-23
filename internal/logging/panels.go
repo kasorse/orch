@@ -121,7 +121,10 @@ func (r *ConsoleReporter) usageLine(u domain.Usage) string {
 	st := r.st()
 	parts := []string{
 		tokens(u.PromptTokens()) + st.gray(" in"),
-		tokens(u.OutputTokens) + st.gray(" out"),
+		tokens(u.OutputTokens+u.ReasoningTokens) + st.gray(" out"),
+	}
+	if u.ReasoningTokens > 0 {
+		parts = append(parts, tokens(u.ReasoningTokens)+st.gray(" reasoning"))
 	}
 	if p := u.PromptTokens(); p > 0 {
 		hit := float64(u.CacheReadTokens) / float64(p)

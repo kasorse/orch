@@ -1,30 +1,27 @@
-# B: the orchestrator as a user runs it: `run --mode auto`, the LLM decision provider
-# chooses the stages (SPEC.md §8). Everything not named in the template below is
-# orchestrator.example.yaml unchanged; the fields filled per task are {{.Model}},
-# {{.TestCommand}}, {{.RoBinds}}, {{.RwBinds}} and {{.Timeout}}. decision.on_failure is
-# `fail` here, not the example's `ask`: ask would wait for a person on stdin, and a benchmark
-# has none.
+# B: the orchestrator as the owner runs it (~/orchestrator_v2.yaml, 2026-10-20): `run --mode
+# auto`, the LLM decision provider on opus chooses the stages, by_complexity routes and escalates.
+# Left out because they are not about the pipeline or cannot work in a bench workspace: jira and
+# providers (the container gets one credential and no gateway), extensions.mcp.graphify (no graph
+# in a task's repository), auto_commit (the final check reads the working tree) and
+# security.secret_scan.allow_paths (paths of one repository). The fields filled per task are
+# {{.Model}}, {{.TestCommand}}, {{.RoBinds}}, {{.RwBinds}} and {{.Timeout}}; implement's base model
+# is {{.Model}}, the owner's sonnet.
 kind: orchestrator
 config: |
   version: 2
 
   decision:
     provider: claude
-    model: haiku
-    timeout: 60s
+    model: opus
+    timeout: 30s
+    on_failure: fail
     complexity:
       primary: choice
       shadow: true
-    on_failure: fail
-    jev:
-      base_url: https://api.typesafe.ai
-      api_key_env: JEV_API_KEY
-      max_retries: 1
-      mock: false
 
   translation:
     provider: claude
-    model: haiku
+    model: opus
     timeout: 60s
 
   policy:
@@ -33,10 +30,10 @@ config: |
     complexity:
       cuts: {medium: 1.24, complex: 1.48}
     stages:
-      thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+      thresholds: {research: 0.81, analysis: 0.86, development: 0.81}
       force:
         medium: [analysis, review]
-        complex: [analysis, planning, review]
+        complex: [planning, review]
 
   context:
     max_files: 20
@@ -46,21 +43,40 @@ config: |
   actions:
     research:
       provider: claude
-      model: sonnet
-      effort: medium
+      model: haiku
     analyze:
       provider: claude
       model: sonnet
+      effort: medium
+      by_complexity:
+        simple: {model: haiku, effort: xhigh}
+        complex: {model: sonnet, effort: high}
     plan:
       provider: claude
-      model: sonnet
+      model: opus
+      effort: medium
+      timeout: 5m
+      by_complexity:
+        simple: {model: sonnet, effort: high}
+        complex: {model: opus, effort: high}
     implement:
       provider: claude
       model: "{{.Model}}"
+      effort: high
+      by_complexity:
+        simple: {model: sonnet, effort: medium}
+        medium: {model: sonnet, effort: high, escalate: {model: opus}}
+        complex: {model: sonnet, effort: high, escalate: {model: opus, effort: high}}
+      escalate: true
+      timeout: 30m
     review:
       provider: claude
-      model: sonnet
-      timeout: 20m
+      model: opus
+      effort: medium
+      by_complexity:
+        simple: {model: sonnet, effort: high}
+        complex: {model: opus, effort: high}
+      timeout: 10m
 
   test:
     command: "{{.TestCommand}}"

@@ -109,10 +109,10 @@ codex
 gemini
 ```
 
-All three are accepted by the configuration and have adapters, but the MVP runs on
-**claude only**: codex and gemini support no authority until their permission flags are
-verified against the real CLI (§38.2), so `ValidateAuthorities` refuses any route to them
-(§7). Adopting either one is a separate specification of its own.
+All three are accepted by the configuration and have adapters. Claude supports the full
+authority table. Codex supports its read-only and workspace-write `exec` modes; it cannot
+serve the tool-free or web-only routes. Gemini remains refused until its permission flags
+are verified against the real CLI (§38.2).
 
 Do not integrate directly with provider HTTP APIs. There are two exceptions, both called
 with `net/http`:
@@ -272,12 +272,15 @@ translation:
   model: haiku
   timeout: 60s
 
-providers:                   # optional; absent = auth: auto, api_key_env: ANTHROPIC_API_KEY (§46)
+providers:                   # optional; absent = CLI login in both adapters
   claude:
     auth: auto               # auto | api | login; --claude-auth overrides it
     api_key_env: ANTHROPIC_API_KEY   # the variable that holds the key, never the key itself
     api_env:                 # optional: set for claude in api mode, removed in login (§46.3)
       ANTHROPIC_BASE_URL: https://ai-gateway.example.internal
+  codex:
+    auth: auto               # auto | api | login; --codex-auth overrides it
+    api_key_env: OPENAI_API_KEY # the variable that holds the key, never the key itself
 
 policy:
   context_depth:
@@ -302,7 +305,7 @@ actions:
   research:
     provider: claude
     model: sonnet
-    effort: medium           # optional, claude only: low|medium|high|xhigh|max (§15)
+    effort: medium           # optional for claude and codex: low|medium|high|xhigh|max (§15)
   analyze:
     provider: claude
     model: sonnet
@@ -523,16 +526,16 @@ fails the run with an `AuthorityError` (exit 2), e.g.:
 ```text
 configuration validation failed:
 
-provider "codex" cannot enforce the "read" authority required by "review"
+provider "gemini" cannot enforce the "read" authority required by "review"
 
 The orchestrator does not run a provider with authority it cannot enforce, rather than let it run with unknown authority (specs/permissions/SPEC.md §6).
 
 remedy: route review to a provider that supports it: claude (actions.review.provider: claude)
 ```
 
-codex and gemini currently support no authority (their flags are unverified, §38), so any
-route to them fails here even when their executable is installed. `orchestrator validate`
-runs the same chain.
+Gemini currently supports no authority (its flags are unverified, §38), so routes to it fail
+here even when its executable is installed. Codex routes requiring `none` or `web` fail for
+the same check. `orchestrator validate` runs the same chain.
 
 ### Claude credential resolution
 
@@ -1052,8 +1055,8 @@ The common orchestrator must not know how individual provider CLI syntax works.
 
 Each adapter must support:
 
-* configured model, and the configured `effort` where the CLI can apply it (claude
-  only; config validation rejects it for any other provider);
+* configured model, and the configured `effort` where the CLI can apply it (claude and
+  codex);
 * prompt;
 * working directory;
 * context cancellation;
@@ -1794,10 +1797,11 @@ execution:
   rate_limit_wait: 5m   # default; 0 fails the run at once
 ```
 
-A step the account's usage limit refused does not end the run. The claude adapter tells it
-from any other refusal by the CLI's `api_error: "usage_limit_reached"` (an org policy, a
-server throttle or a 429 on an API key carry none) and reports `FailureRateLimit` with the
-reset time from `api_error_params.rate_limit_info.resetsAt`. The shared tail
+A step the account's usage limit refused does not end the run. The Claude adapter recognizes
+`api_error: "usage_limit_reached"`; the Codex adapter recognizes its JSONL rate-limit error
+and `codex.rate_limits` events. A generic org policy, server throttle or ordinary API error
+is not converted to this retryable kind. The adapter reports `FailureRateLimit` with the
+reset time when the CLI provides one. The shared tail
 (`executeWorkflow`) then writes the run's outcome as failed - a process killed while waiting
 leaves a run `resume` continues - and sleeps until the reset plus one minute, or
 `rate_limit_wait` when the CLI gave no reset time. Nothing is called while it sleeps.
@@ -2315,8 +2319,8 @@ A decision CLI that hangs past a short `execution.timeout` fails promptly with
 
 ### Scenario 14 — unenforceable authority
 
-An action routed to an installed codex fails the fail-fast chain (exit 2) before any Jev
-request or CLI call (§7, §38).
+An action routed to an installed provider with an unsupported authority fails the fail-fast
+chain (exit 2) before any Jev request or CLI call (§7, §38).
 
 ### Scenario 15 — worktree guard
 
@@ -3063,7 +3067,11 @@ human sees and confirms between steps.
   then `--model`; the prompt goes on stdin (§41.1). The target repository's settings, hooks
   and MCP servers never load. The CLI's version must be inside the range these flags were
   verified on (§41.4).
-* codex and gemini support no authority until their flags are verified.
+* codex maps `read` to `exec --sandbox read-only` and `edit` to `exec --sandbox
+  workspace-write`, with `--ask-for-approval never`; `--json` supplies usage, activity,
+  tool calls and structured rate-limit errors. `none` and `web` remain unsupported because
+  Codex exec always exposes its coding tools. Gemini support remains disabled until its
+  flags are verified.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
 * There is no bypass: the codebase never passes a permission-skipping mode.
@@ -3482,11 +3490,10 @@ narrows or bounds.
 
 ## 41.1 Prompt delivery
 
-The claude adapter passes every prompt on stdin (`--input-format text`), never in argv:
+The claude and codex adapters pass every prompt on stdin, never in argv:
 Linux limits one argument to 128 KiB, and a prompt carrying a diff or a test log can exceed
-it. argv ends with `--model <model>`; a `ProviderError` shows the argv and
-`prompt: N bytes on stdin`, never the text. codex and gemini keep the prompt in argv until
-their own specs adopt stdin (they support no authority yet).
+it. Claude uses `--input-format text`; Codex uses `exec ... --json -`. A `ProviderError` shows the argv and
+`prompt: N bytes on stdin`, never the text. Gemini support remains disabled.
 
 ## 41.2 Bounded prompt content
 
@@ -3746,8 +3753,8 @@ numbers: they are a record, like `outcome` (§21).
 | Prompt size, cuts | the orchestrator, from the prompt it sent | exact |
 | Code change | `git diff --numstat` between trees, after the guard passed the step | exact |
 
-Only claude reports models, API time and tool calls; codex and gemini steps leave them
-empty. A call that ends before its final report (a timeout, a crash, a kill) is still
+Claude and Codex report models and tool calls; Codex does not currently report API time or
+cost. A call that ends before its final report (a timeout, a crash, a kill) is still
 counted: its usage is summed from the assistant messages it streamed until then and marked
 `partial` (§43.3).
 
@@ -3908,8 +3915,8 @@ have changed, records no diff; the next completed implement's `diff.run` covers 
 
 * An estimate of a partial call's cost or output tokens: no prices are kept in the
   orchestrator, and a guess would look like a measurement.
-* Models, API time and tool calls for codex and gemini: their CLIs do not report them in a
-  form the adapters read.
+* API time and cost for Codex, and provider metrics for Gemini: those CLIs do not report
+  them in a form the adapters read.
 * The changes a test command makes, and a diff for research/analyze/plan (read-only).
 * A machine-readable summary beyond `run.json` itself; `orchestrator runs report`
   aggregates over many runs.
@@ -4219,7 +4226,7 @@ review artifact `reviewers`. Logs gain `<NNN>-test.<check>.*`, `pre-run-test.<ch
 * **Parsed names as a gate.** Letting a run pass while "only old" tests fail would make success
   depend on parsed text (§31.4).
 * **A shell, parallel verify calls or any tool beyond `run_tests` and `run_check`**, and verify
-  for codex or gemini (no adapter is verified, §38.2).
+  for Gemini (Codex uses its configured MCP tool bridge; Gemini has no verified adapter).
 * **Model choice by anything but the decided complexity** (cost so far, failures).
 
 ---
@@ -4429,8 +4436,9 @@ strictly; `providers.claude.api_key` (a literal) is declared only to be rejected
 environment variable via providers.claude.api_key_env instead"). `api_key_env` must be an
 environment-variable name, not a parent-session variable, and joins
 `Config.CredentialEnvNames()`: every child process loses it through `ScrubbedEnv()` and
-`test.env_pass` refuses it; only the claude adapter puts the value back, as
-`ANTHROPIC_API_KEY`. There is no `providers.codex`/`providers.gemini` and no org-layer floor.
+`test.env_pass` refuses it; the matching adapter puts the value back under the provider's
+canonical variable. `providers.gemini` remains unsupported and there is no org-layer floor
+for provider credentials.
 
 `providers.claude.api_env` is a map of variables for claude in `api` mode (§46.3), for a key
 whose endpoint is a gateway with its own model names:
@@ -4502,8 +4510,9 @@ would get a different context depending on who pays.
 ## 46.5 `FailureAuth`
 
 The `apperr` failure kind `FailureAuth` (exit code 2) covers the mismatch of §46.4 and a call
-whose stream carries `system/api_retry` with `error` in `authentication_failed`,
-`oauth_org_not_allowed`, `account_on_hold` or `billing_error`. It is fatal everywhere: the
+whose stream carries `system/api_retry`, or an assistant API-error message, with `error` in
+`authentication_failed`, `oauth_org_not_allowed`, `account_on_hold` or `billing_error`. It is
+fatal everywhere: the
 translator does not fall back to the original text, the LLM decision provider does not lead to
 the manual choice whatever `on_failure` says, and a workflow step fails the run with no retry
 or fix loop. The message names the mode and what to try. Rate limits are not `FailureAuth`.
@@ -4528,9 +4537,23 @@ auth-category `api_retry`. The detail then ends with `stopped at the CLI's first
   run stops on the subscription's usage window or a `FailureAuth`, and
   `orchestrator resume --claude-auth api <id>` finishes it on the key.
 
-## 46.7 Not covered
+## 46.7 Codex credentials and CLI
 
-* A Messages API client in Go (TODO P12): it needs a change to §30.
+Codex workflow calls use `codex exec` with one credential mode per process. `api` reads a
+key from `providers.codex.api_key_env` (default `OPENAI_API_KEY`) and passes it to the child
+as `CODEX_API_KEY`. `login` removes API key environment variables and uses the Codex CLI's
+saved ChatGPT subscription login. `auto` selects `api` when the configured key is non-empty,
+otherwise `login`; `--codex-auth` overrides the config. The resolved mode and key variable
+name are recorded in `run.json` and each resume, never the key.
+
+Codex receives the prompt on stdin. Read and edit calls use `--sandbox read-only` and
+`--sandbox workspace-write` with `--ask-for-approval never`; `none` and `web` are refused
+because `codex exec` exposes its shell tool in those modes. A direct Codex API client is
+planned separately in TODO P13.
+
+## 46.8 Not covered
+
+* A direct Codex API client in Go (TODO P13): it needs a change to §30.
 * Gateway, Bedrock, Vertex and Foundry as modes of their own: they work under `login`.
 * An HTTP preflight of the key, a mode per action, and an org-layer floor for the mode.
 * `bench/` runs `claude` for its baseline itself with the operator's environment as is

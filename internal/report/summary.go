@@ -54,6 +54,11 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if authLine != "" {
 		row("Claude auth", authLine)
 	}
+	codexLine, codexLogin := codexAuthLine(run)
+	if codexLine != "" {
+		row("Codex auth", codexLine)
+	}
+	anyLogin = anyLogin || codexLogin
 	row("Decision", decisionLine(run, trace))
 	row("Steps", fmt.Sprintf("%d (fix iterations %d)", len(run.Executions), out.FixIterations))
 	row("Wall time", duration(out.DurationMS))
@@ -74,8 +79,12 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 		row("Decision cost", fmt.Sprintf("%s (%s)", money(out.DecisionOverhead.CostUSD, true), plural(out.DecisionOverhead.Calls, "call")))
 	}
 	u := out.Usage.Usage
-	row("Tokens", fmt.Sprintf("prompt %s (input %s, cache read %s, cache write %s), output %s",
-		tokens(u.PromptTokens()), tokens(u.InputTokens), tokens(u.CacheReadTokens), tokens(u.CacheCreationTokens), tokens(u.OutputTokens)))
+	tokenLine := fmt.Sprintf("prompt %s (input %s, cache read %s, cache write %s), output %s",
+		tokens(u.PromptTokens()), tokens(u.InputTokens), tokens(u.CacheReadTokens), tokens(u.CacheCreationTokens), tokens(u.OutputTokens+u.ReasoningTokens))
+	if u.ReasoningTokens > 0 {
+		tokenLine += fmt.Sprintf(", reasoning %s", tokens(u.ReasoningTokens))
+	}
+	row("Tokens", tokenLine)
 	row("Provider calls", fmt.Sprintf("%d", out.Usage.Calls))
 
 	if out.VerifyCalls > 0 {
@@ -192,6 +201,30 @@ func claudeAuthLine(run domain.Run) (line string, anyLogin bool) {
 			line += fmt.Sprintf("; resume %d: %s", i+1, describe(*r.ClaudeAuth))
 		}
 		prev = r.ClaudeAuth.Mode
+	}
+	return line, anyLogin
+}
+
+func codexAuthLine(run domain.Run) (line string, anyLogin bool) {
+	if run.CodexAuth == nil {
+		return "", false
+	}
+	describe := func(a domain.CodexAuth) string {
+		return strings.TrimPrefix(a.Line(), "codex auth: ")
+	}
+	line, anyLogin = describe(*run.CodexAuth), run.CodexAuth.Mode == domain.CodexAuthLogin
+	prev := run.CodexAuth.Mode
+	for i, r := range run.Resumes {
+		if r.CodexAuth == nil {
+			continue
+		}
+		if r.CodexAuth.Mode == domain.CodexAuthLogin {
+			anyLogin = true
+		}
+		if r.CodexAuth.Mode != prev {
+			line += fmt.Sprintf("; resume %d: %s", i+1, describe(*r.CodexAuth))
+		}
+		prev = r.CodexAuth.Mode
 	}
 	return line, anyLogin
 }

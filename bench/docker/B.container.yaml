@@ -7,21 +7,16 @@ version: 2
 
 decision:
   provider: claude
-  model: haiku
-  timeout: 60s
+  model: opus
+  timeout: 30s
+  on_failure: fail
   complexity:
     primary: choice
     shadow: true
-  on_failure: fail
-  jev:
-    base_url: https://api.typesafe.ai
-    api_key_env: JEV_API_KEY
-    max_retries: 1
-    mock: false
 
 translation:
   provider: claude
-  model: haiku
+  model: opus
   timeout: 60s
 
 policy:
@@ -30,10 +25,10 @@ policy:
   complexity:
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+    thresholds: {research: 0.81, analysis: 0.86, development: 0.81}
     force:
       medium: [analysis, review]
-      complex: [analysis, planning, review]
+      complex: [planning, review]
 
 context:
   max_files: 20
@@ -43,21 +38,40 @@ context:
 actions:
   research:
     provider: claude
-    model: sonnet
-    effort: medium
+    model: haiku
   analyze:
     provider: claude
     model: sonnet
+    effort: medium
+    by_complexity:
+      simple: {model: haiku, effort: xhigh}
+      complex: {model: sonnet, effort: high}
   plan:
     provider: claude
-    model: sonnet
+    model: opus
+    effort: medium
+    timeout: 5m
+    by_complexity:
+      simple: {model: sonnet, effort: high}
+      complex: {model: opus, effort: high}
   implement:
     provider: claude
     model: "sonnet"
+    effort: high
+    by_complexity:
+      simple: {model: sonnet, effort: medium}
+      medium: {model: sonnet, effort: high, escalate: {model: opus}}
+      complex: {model: sonnet, effort: high, escalate: {model: opus, effort: high}}
+    escalate: true
+    timeout: 30m
   review:
     provider: claude
-    model: sonnet
-    timeout: 20m
+    model: opus
+    effort: medium
+    by_complexity:
+      simple: {model: sonnet, effort: high}
+      complex: {model: opus, effort: high}
+    timeout: 10m
 
 test:
   command: "go version && python3 --version && node --version"
@@ -71,6 +85,8 @@ limits:
 
 execution:
   timeout: "30m0s"
+  isolation: inplace   # the bench's final check reads the workspace tree
+  rate_limit_wait: 0s  # fail at once on a usage limit: orchbench waits for the reset and reruns the cell
 
 security:
   require_clean_worktree: true

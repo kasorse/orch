@@ -497,10 +497,10 @@ func checkResults(t *testing.T, latest []results.Record) {
 	if b.OracleExit == 0 || b.Diff.Files != 0 || b.Complexity != "medium" || b.Decision.Calls != 2 || !slices.Equal(b.Stages, []string{"development", "testing"}) {
 		t.Errorf("e2e-fix B rep1: oracle exit %d, diff %+v, complexity %q, decision %+v, stages %v", b.OracleExit, b.Diff, b.Complexity, b.Decision, b.Stages)
 	}
-	// C: every stage by --stage, and the regression is the suite's.
+	// C: the decision chose the stages too (the defaults), and the regression is the suite's.
 	c := byCell[cell("e2e-fix", "C", 1)]
-	if c.OracleExit != 0 || c.SuiteExit == 0 || len(c.Stages) != 6 || c.ReviewVerdict != "pass" {
-		t.Errorf("e2e-fix C rep1: oracle exit %d, suite exit %d, stages %v, review %q", c.OracleExit, c.SuiteExit, c.Stages, c.ReviewVerdict)
+	if c.OracleExit != 0 || c.SuiteExit == 0 || !slices.Equal(c.Stages, []string{"development", "testing"}) {
+		t.Errorf("e2e-fix C rep1: oracle exit %d, suite exit %d, stages %v", c.OracleExit, c.SuiteExit, c.Stages)
 	}
 	// D of the fix task: both attempts ended in the orchestrator's exit 2, and cost nothing.
 	d := byCell[cell("e2e-fix", "D", 1)]
