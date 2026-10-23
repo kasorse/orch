@@ -3,7 +3,8 @@
 Status: **specified** (2026-10-23), nothing built. The owner's decisions are in §16 (taken
 2026-10-23 while scoping; D12–D15 the same day, on the branch name; D16–D20 the same day, on the
 worktree default and the end of a run, which replace D2, D3 and D5; D21 the same day, on a story
-task's branch name, which replaces D15), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
+task's branch name, which replaces D15; D22 the same day, on `specs/parallel-story`'s spec
+branch), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
 W4, W5. Builds on `specs/worktree/` (§47) and `specs/story/` (§48), both done.
 
 The spec touches these MVP.md sections:
@@ -353,7 +354,9 @@ Without the MR (a no to the third question) the same command without the `-o` op
 - argv, never `sh -c`; the full environment (the operator's credential helper, ssh agent), as
   every git call; never `--force`; bounded by a fixed 5 minutes (A10). `-u` records the upstream
   in the shared git config: the push is the last step that compares the fingerprint, so nothing
-  after it can take that for tampering.
+  after it can take that for tampering. **A story child pushes without `-u`** (D22): a sibling
+  task of the same repository may be running (`specs/parallel-story`), and its guard compares
+  that same config.
 - `run.json: mr {state: intent, remote, source, target}` is saved before the push. The push is
   never repeated by this run: one that timed out may have reached the remote.
 - **target**: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
@@ -443,6 +446,24 @@ the configured isolation is `worktree`.
   and the end table print it. A child that ends with exit 6 (no MR) is `completed` without an MR:
   the story **stops** before the next task that depends on it (its branch may not be on the
   remote), and continues independent tasks. `story run --retry <ID>` works as today.
+- **The spec branch** (`specs/parallel-story` §1, D22). A task with no parent, or with several,
+  targets `story/<slug>/spec`; a task with one parent targets that parent's branch. The parent
+  `story run` pushes the spec branch, so that it is on the remote before any merge request
+  targets it:
+  - when: once after the approval at the first start, before the first dispatch; then after
+    every merge Go makes on it, before the task that needs the merge is dispatched;
+  - how: from the repository's checkout, after its git fingerprint matched the one the pre-run
+    checks took, `git push --no-follow-tags <remote> refs/heads/story/<slug>/spec:refs/heads/story/<slug>/spec`:
+    argv, the full environment, no `-u`, no push options (no merge request for the spec
+    branch), never `--force`, the 5-minute bound;
+  - the remote: at the first push, `git ls-remote --heads` must show no such branch (§4.3);
+    later pushes are fast-forwards of the commit pushed before, and a rejected one (the remote
+    branch moved) stops the story;
+  - recorded: `story.json: bases.<repo>.spec_push {state: intent|pushed, sha, error?}`, the
+    intent saved before the push and never repeated blindly (§3, principle 4). A failed push stops the
+    story before the next dispatch, with the command to push it by hand.
+  - None of this happens before `specs/parallel-story` is built: until then a task without a
+    parent targets the story's base branch, as above.
 
 ### 9.1 A story task's branch name (D21)
 
@@ -634,6 +655,7 @@ All optional on load, strictly validated when present.
 | `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable ≤ 255 |
 | `executions[].diff.run_files[]` | ≤ 200 `{path (clean, repository-relative), insertions, deletions, binary}`, on an implement with `diff.run` only |
 | `story.json: tasks.<ID>.mr` | `{iid, url}` |
+| `story.json: bases.<repo>.spec_push` | `{state: intent\|pushed, sha (40 hex), error?}`; `error` one line ≤ 500 bytes, redacted; only with the spec branch (§9) |
 | `story.json: tasks.<ID>.branch` | no longer `story/<slug>/<ID>[.<n>]` only: §4.3's rules too; set from the child's `worktree.branch`, absent before the child's run is read |
 
 `worktree.branch` may be empty only on a run with `review_target`.
@@ -704,6 +726,7 @@ The steps and their results go into the As built of DL04 and DL05 and the README
 | D19 | The MR is opened with `glab mr create` or with GitLab's push options (`git push -u origin <branch> -o merge_request.create -o merge_request.target=main -o merge_request.title=…`); the owner accepted either (the author chose push options, A17). |
 | D20 | The worktree scope table (§6): worktree per task, own branch, CLI in the worktree, git status and diff, cleanup, kept on error now; parallel agents, review worktrees, merge conflict resolution, automatic integration, lifecycle over persistent state in the next version. |
 | D21 | A story task's branch is named by the same rules as any run (the instructions, then the config); `story/<slug>/<ID>` is only the fallback. Its merge request is pushed and opened like any run's under `--mode auto` (§7, §9). |
+| D22 | Delivery follows `specs/parallel-story`: tasks with no parent or several target the spec branch, which the parent `story run` pushes; a story child pushes without `-u` (§7.3, §9). |
 
 ## 17. Author's defaults (the owner may override any)
 

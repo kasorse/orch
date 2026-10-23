@@ -2,8 +2,10 @@
 
 Status: **specified** (2026-10-23; revised the same day: worktree by default, commit → push → MR
 at the end of every worktree run, asked unless `--mode auto`; and: a story task's branch named by
-its repository's rules, D21); nothing built. TODO.md W1 (the rest), W2, W3, W4, W5. Owner's
-decisions D1–D21 (D2, D3, D5, D15 replaced) and author's defaults A1–A24 in `SPEC.md` §16–§17.
+its repository's rules, D21; the spec branch of [`specs/parallel-story`](../parallel-story/SPEC.md)
+pushed by the parent and no `-u` in a story child, D22); nothing built. TODO.md W1 (the rest), W2,
+W3, W4, W5. Owner's decisions D1–D22 (D2, D3, D5, D15 replaced) and author's defaults A1–A24 in
+`SPEC.md` §16–§17.
 Builds on
 [`specs/worktree/`](../worktree/README.md) and [`specs/story/`](../story/README.md), both done.
 

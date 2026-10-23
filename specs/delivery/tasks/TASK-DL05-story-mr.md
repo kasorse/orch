@@ -31,6 +31,13 @@ dependency's branch (`SPEC.md` §9, §9.1).
   - `story_run.go`: the dependent's target, the "commit beyond its base" check of a blocked task,
     `knownBranches`, the README, As built and end table read the recorded name, never
     `StoryTaskBranch`; the plan prints the fallback with `or by <repo>'s rules`.
+- A story child's push has no `-u` (`SPEC.md` §7.3, D22).
+- The spec branch (`SPEC.md` §9, D22), once `specs/parallel-story` is built (whichever lands
+  second does this part): tasks with no parent or several target `story/<slug>/spec`; the parent
+  pushes it after the approval and after every merge on it, before the dispatch that needs it
+  (fingerprint first, no `-u`, no push options, never forced, `ls-remote` empty at the first
+  push); `story.json: bases.<repo>.spec_push` with the intent before the push; a failed or
+  rejected push stops the story before the next dispatch.
 
 ## Acceptance
 
@@ -43,6 +50,10 @@ dependency's branch (`SPEC.md` §9, §9.1).
   is `story/<slug>/<ID>.2`.
 - A with a failing review (no commit → exit 6): B blocked, an independent C runs.
 - A service without its remote: stops before the first dispatch.
+- A story child's push argv has no `-u`, and the shared git config is unchanged after it.
+- With `specs/parallel-story`: the spec branch reaches the remote before the first dispatch and
+  again after a merge on it; a task with two parents gets an MR targeting it; a spec branch that
+  moved on the remote stops the story, and nothing is forced.
 
 ## Gates
 
