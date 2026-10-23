@@ -19,7 +19,7 @@ endpoints.
 | 67 | non-auto answers: n at the commit → nothing; y/n → committed, not pushed; y/y/n → pushed without options; all exit 0 |
 | 68 | `--inplace`: §42 question, no push, no MR; no remote → exit 2 naming `--inplace` before the worktree, a workflow without implement still runs |
 | 69 | auto with `--jira`: comment and transition after the MR; a missing transition warns |
-| 70 | `story run`: two stacked MRs; the dependent blocked when the first has none |
+| 70 | `story run`: two stacked MRs; the dependent blocked when the first has none; with a service `worktree.branch.template` the branches follow it and B's MR targets A's templated branch |
 | 71 | `--output json`: one line on stdout for success, failure, pre-run error |
 | 72 | no terminal, no `--mode`: exit 2 at once |
 | 73 | `review --base main`: diff is `main...HEAD`, dirty tree untouched, verdict fail → exit 6 |

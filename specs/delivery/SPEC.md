@@ -2,7 +2,8 @@
 
 Status: **specified** (2026-10-23), nothing built. The owner's decisions are in §16 (taken
 2026-10-23 while scoping; D12–D15 the same day, on the branch name; D16–D20 the same day, on the
-worktree default and the end of a run, which replace D2, D3 and D5), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
+worktree default and the end of a run, which replace D2, D3 and D5; D21 the same day, on a story
+task's branch name, which replaces D15), the author's defaults in §17. TODO.md phase 3: W1 (the rest), W2, W3,
 W4, W5. Builds on `specs/worktree/` (§47) and `specs/story/` (§48), both done.
 
 The spec touches these MVP.md sections:
@@ -16,6 +17,8 @@ The spec touches these MVP.md sections:
 - §47.2: the branch name (instructions, a template, then `orchestrator/<run-id>`);
 - §47.5: commit, push and merge request at the end of a worktree run (§7);
 - §47.7 and §48.10: pushing and merge requests are no longer "not covered";
+- §48.4/§48.5: a story task's branch is named by its repository's rules, `story/<slug>/<ID>`
+  only the fallback (§9.1);
 - new §49: delivery.
 
 ---
@@ -124,7 +127,7 @@ Orchestrator-Decision: medium/analysis,planning,development,testing,review
 `<complexity>/<enabled stages in stage order>`; `manual/<stages>` for `run --stage` and a review
 run. Go builds it from `run.Decision`.
 
-### 4.3 The branch name (D12–D15)
+### 4.3 The branch name (D12–D14, D21)
 
 The branch of a worktree run is named **when the worktree is created** (§47.2: after the
 approval, before the restore point and any step) and never changes. Today it is always
@@ -170,8 +173,8 @@ not from the working tree, which the run does not use) contains `branch` or `в�
 | placeholder | value |
 |---|---|
 | `{id}` | the run ID |
-| `{key}` | the Jira key of a `run --jira` task; empty otherwise |
-| `{slug}` | the task's first line: Cyrillic transliterated (a fixed table in Go), lower case, every run of characters outside `[a-z0-9]` → `-`, trimmed, at most 40 bytes cut at a `-` |
+| `{key}` | the Jira key of a `run --jira` task, or a story task's child issue (§9.1); empty otherwise |
+| `{slug}` | the task's first line (a story task: its title, §9.1): Cyrillic transliterated (a fixed table in Go), lower case, every run of characters outside `[a-z0-9]` → `-`, trimmed, at most 40 bytes cut at a `-` |
 | `{date}` | `YYYYMMDD`, local time |
 
 An empty placeholder takes the separator after it (`-`, `_`, `/`) with it:
@@ -183,14 +186,14 @@ implement, and the name is fixed before it (D14).
 
 - `git check-ref-format --branch`; only `[A-Za-z0-9._/-]`; at most 100 bytes; no leading `-`
   or `/`, no `//`, no `..`, no `.lock` suffix;
-- not `HEAD`, not the base branch, not `delivery.target_branch`, not under `story/` (reserved for
-  §48), and not an existing local branch (`refs/heads/<name>`);
+- not `HEAD`, not the base branch, not `delivery.target_branch`, not under `story/` (the
+  fallback namespace of story tasks, §9.1), and not an existing local branch (`refs/heads/<name>`);
 - an existing branch with the template's name gets `-<last 6 of the run ID>` appended once, then
   is checked again; a model's name that exists is rejected (to the template).
 
-**Where it applies**: worktree runs only. A story task keeps `story/<slug>/<ID>` (D15): its name is
-computed before the run and stacking and `--retry` rely on it; `--story-task` ignores
-`worktree.branch`. A review run (§12) is detached and has no branch.
+**Where it applies**: worktree runs only, story tasks included (D21): a story task falls back to
+`story/<slug>/<ID>` instead of `orchestrator/<run-id>` (§9.1). A review run (§12) is detached and
+has no branch.
 
 **Recording and resume**: the name is in `run.json: worktree.branch`, as today. It is no longer
 derived from the run ID, so a resume checks it instead: the §4.3 character and format rules, and
@@ -428,17 +431,52 @@ the configured isolation is `worktree`.
 ## 9. `story run`
 
 - Children already run as `run --mode auto --story-task <file>` (§48.5), so every child runs the
-  §7 chain without questions; `story run`'s confirmation is the operator's yes. Branch
-  `story/<slug>/<ID>`; target the branch its base came from (the dependency's branch, else the
-  story's base branch), exactly the "target" `story run` prints today. The dependency's branch is
-  on the remote by then (its own child pushed it); GitLab retargets the stacked MR when the parent
-  MR merges and deletes its branch.
+  §7 chain without questions; `story run`'s confirmation is the operator's yes. The branch is
+  named by the task's repository's rules (§9.1); the target is the branch its base came from (the
+  dependency's branch as `story.json` recorded it, else the story's base branch), exactly the
+  "target" `story run` prints today. The dependency's branch is on the remote by then (its own
+  child pushed it); GitLab retargets the stacked MR when the parent MR merges and deletes its
+  branch.
 - The per-service `orchestrator validate` that `story run` makes before the first dispatch
   (§48.6) includes §8's checks: a service without its remote stops the story before anything runs.
 - `story.json` records each task's `mr` (url, iid) read from the child's `run.json`; `story status`
   and the end table print it. A child that ends with exit 6 (no MR) is `completed` without an MR:
   the story **stops** before the next task that depends on it (its branch may not be on the
   remote), and continues independent tasks. `story run --retry <ID>` works as today.
+
+### 9.1 A story task's branch name (D21)
+
+A story task's branch is named as any worktree run's (§4.3): from the instructions of the task's
+repository, else from that repository's `worktree.branch.template`, else `story/<slug>/<ID>` (a
+retry `story/<slug>/<ID>.<n>`), which takes the place of `orchestrator/<run-id>` as the fallback.
+
+- **Where**: in the child, when its worktree is created, by the same code as any run, with the
+  child repository's own config (its `worktree.branch`, as every other key of a service, §48.1)
+  and its instruction files read from the task's `base_ref` (A22). `story run` names no branch.
+- **Inputs**: `{key}` and the call's Jira key are the task's child issue (the task input's
+  `jira`, created before the first dispatch, §48.7), empty without one; `{slug}` and the call's
+  task line are the task's title, from a new task-input field `title` (the task file's heading,
+  one line, at most 200 runes, validated like the other fields); `{id}` is the child's run ID.
+- **The task input's `branch`** is the fallback: still `story/<slug>/<ID>[.<n>]` and validated by
+  the story pattern; that it does not exist is checked only when it is the name used.
+- **Checks**: §4.3's, for both sources. A name from the instructions or the template is never
+  under `story/`, so the pre-run check that refuses an unknown `story/<slug>/…` branch still
+  covers every fallback name, and a rule name cannot collide with one.
+- **Recorded**: the child's `run.json: worktree.branch` and `branch_naming`, as any run;
+  `task.source.branch` keeps the fallback it was given. `story run` copies `worktree.branch` into
+  `story.json: tasks.<ID>.branch` when it reads the child's run - after the child ends, or when it
+  settles the run of a `story run` that died (§48.6). Before that the field is absent.
+- **Readers of the recorded name**: a dependent's MR target (§9 above), the check that counts a
+  blocked task done once its branch has a commit beyond its base (§48.6), the known-branch set of
+  the pre-run checks, the README, the As built and the end table.
+- **The plan** before `[Y/n]` prints the fallback with `or by <repo>'s rules` (A23): the name is
+  fixed only when the worktree is created, and the Jira key a template may use exists only after
+  the approval.
+- **`--retry`**: the attempt's fallback gains `.<n>` as today; a template name the abandoned
+  attempt already holds gets §4.3's `-<6>` suffix; an instructions name that exists is rejected to
+  the template (A24).
+- **Cost**: the naming call is the child's and counts in its `outcome.usage`, so
+  `story.max_cost_usd` counts it.
 
 ## 10. Jira write-back (W3)
 
@@ -587,14 +625,16 @@ All optional on load, strictly validated when present.
 | field | rule |
 |---|---|
 | `options.isolation` | unchanged; a run started without `--inplace` and without `isolation: inplace` now records `worktree` |
-| `branch_naming` | `{source: instructions\|template\|default, proposed?, rejected?, usage?, call?}`; `proposed` ≤ 255 printable bytes, `rejected` one line ≤ 500 bytes; absent for an inplace, story or review run |
-| `worktree.branch` | no longer `orchestrator/<run-id>` only: any name that passes §4.3's character and format rules (a story task: its story pattern, as today) |
+| `branch_naming` | `{source: instructions\|template\|default, proposed?, rejected?, usage?, call?}`; `proposed` ≤ 255 printable bytes, `rejected` one line ≤ 500 bytes; absent for an inplace or review run |
+| `worktree.branch` | no longer `orchestrator/<run-id>` only: any name that passes §4.3's character and format rules (a story task: those, or its fallback's story pattern) |
+| story task input `title` | one line, 1–200 runes, printable; required |
 | `options.jira_write` | `{comment: bool, transition: string}`, copied from `jira.write` at run start |
 | `mr` | `{state: intent\|pushed\|created, remote, source, target, iid?, url?, skipped?, error?}`; `iid`/`url` only with `created`; `url` https on the remote's host, ending `/-/merge_requests/<iid>`; `skipped` and `error` one line, ≤ 500 bytes, redacted; `skipped` alone (no `state`) when the chain stopped before the push |
 | `jira_write` | `{comment: {state, id?}, transition: {name, state: done\|missing\|failed\|unchanged}}` |
 | `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable ≤ 255 |
 | `executions[].diff.run_files[]` | ≤ 200 `{path (clean, repository-relative), insertions, deletions, binary}`, on an implement with `diff.run` only |
 | `story.json: tasks.<ID>.mr` | `{iid, url}` |
+| `story.json: tasks.<ID>.branch` | no longer `story/<slug>/<ID>[.<n>]` only: §4.3's rules too; set from the child's `worktree.branch`, absent before the child's run is read |
 
 `worktree.branch` may be empty only on a run with `review_target`.
 
@@ -630,7 +670,8 @@ repository whose `origin` is that project, pushable with the operator's credenti
    worktree kept.
 3. Without `--mode auto`: `y` to the commit, `y` to the push, `n` to the MR → the branch on the
    remote, no MR, `mr.state: pushed`, exit 0.
-4. A two-task story in that repository → two MRs, the second targeting the first's branch.
+4. A two-task story in that repository, with `worktree.branch.template` set → two MRs on
+   templated branches, the second targeting the first's branch.
 5. A run whose `origin` is a GitHub repository → `the receiving end does not support push
    options`, `mr.error`, the manual command, exit 6.
 
@@ -656,12 +697,13 @@ The steps and their results go into the As built of DL04 and DL05 and the README
 | D12 | The branch name format is configurable, from the config or from the repository's instructions; `orchestrator/<id>` is only the fallback. |
 | D13 | "The repository's instructions" are the prose of CLAUDE.md / AGENTS.md (and CONTRIBUTING.md): a model reads them and proposes a name, Go checks it. |
 | D14 | The name is fixed when the worktree is created and never renamed; the instructions win over the config template. |
-| D15 | Story tasks keep `story/<slug>/<ID>`. |
+| ~~D15~~ | ~~Story tasks keep `story/<slug>/<ID>`.~~ Replaced by D21. |
 | D16 | Every task runs in its own worktree by default; a flag (`--inplace`) cancels it. Reverses the 2026-10-18 default. |
 | D17 | After all the stages of a worktree run: commit, push, merge request. Always: no opt-in flag. |
 | D18 | Commit, push and MR are automatic only under `--mode auto`; in a manual mode each of them is asked. |
 | D19 | The MR is opened with `glab mr create` or with GitLab's push options (`git push -u origin <branch> -o merge_request.create -o merge_request.target=main -o merge_request.title=…`); the owner accepted either (the author chose push options, A17). |
 | D20 | The worktree scope table (§6): worktree per task, own branch, CLI in the worktree, git status and diff, cleanup, kept on error now; parallel agents, review worktrees, merge conflict resolution, automatic integration, lifecycle over persistent state in the next version. |
+| D21 | A story task's branch is named by the same rules as any run (the instructions, then the config); `story/<slug>/<ID>` is only the fallback. Its merge request is pushed and opened like any run's under `--mode auto` (§7, §9). |
 
 ## 17. Author's defaults (the owner may override any)
 
@@ -685,6 +727,9 @@ The steps and their results go into the As built of DL04 and DL05 and the README
 | A19 | `auto_commit` has no effect in a worktree run | `--mode auto` is the yes in advance for all three steps |
 | A20 | The remote, target and scan checks run after the workflow is approved, before the worktree, not before the decision | a workflow without `implement` runs in place and needs no remote |
 | A21 | No `review --mr`: CI reviews the MR by `CI_MERGE_REQUEST_DIFF_BASE_SHA`/`CI_COMMIT_SHA` and posts the note in its own job script | without an API client the orchestrator cannot read an MR or post a note |
+| A22 | A story task's branch is named in the child at worktree creation, with the service's config and instructions, not by `story run` at the start | one implementation (§4.3); each service's own rules apply (§48.1); the child issue's key exists only after the approval; the name stays fixed at creation (D14) |
+| A23 | The plan before `[Y/n]` shows the fallback and `or by <repo>'s rules`, not the final name | the final name does not exist yet (A22); `story status` shows it once known |
+| A24 | Names from the rules are never under `story/`; a retry under a template gets the `-<6>` suffix, an existing instructions name falls to the template | the unknown-branch check keeps scanning one prefix; §4.3's collision rules unchanged |
 
 A4, A5 and A9 (the project check, reusing an open MR, refusing forks in `review --mr`) went with
 D3 and D5.
@@ -702,8 +747,9 @@ D3 and D5.
 - A retry command for a push or MR that failed at the end of a completed run (it is a printed
   `git push` and the GitLab UI).
 - An org-level floor that forbids or forces delivery or `inplace`.
-- Renaming a branch after implement (`{type}`, a name from `summary_short`); a template for story
-  branches; a branch name for an `inplace` run (it commits on the current branch, §42).
+- Renaming a branch after implement (`{type}`, a name from `summary_short`); a branch name for an
+  `inplace` run (it commits on the current branch, §42); naming a story's branches up front, in
+  the plan or in the spec (A22, A23).
 - The next version of the worktree feature (D20): parallel agents, a separate worktree for
   review, resolving merge conflicts, integrating changes automatically, a lifecycle manager over
   persistent state (beyond `run.json`, resume and `runs clean`).

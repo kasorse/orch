@@ -1,6 +1,6 @@
 # DL13 — The branch name: instructions, template, fallback
 
-**Size** M (2.5 d) · **Depends on** — · **Blocks** DL11
+**Size** M (2.5 d) · **Depends on** — · **Blocks** DL05, DL11
 
 ## Goal
 
@@ -26,7 +26,9 @@ instructions (a tool-less call), else from `worktree.branch.template`, else
   that need git (`check-ref-format --branch`, not HEAD/base/target, not an existing local branch),
   the template fallback with the one `-<6>` suffix, the default; the warning; `run.json:
   branch_naming`; `logs/branch-name.*`; usage into `outcome.usage` and `decision_overhead`.
-- `--story-task` and the review run skip all of it.
+- The review run skips all of it. The naming takes its inputs (key, task line, fallback) as
+  parameters, so DL05 can call it for `--story-task` with the task's key, title and
+  `story/<slug>/<ID>` fallback (`SPEC.md` §9.1).
 - Resume: `verifyRunWorktree` checks the recorded branch with `ValidBranchName` and against
   `git worktree list` (the path stays derived).
 - `internal/report/summary.go`: the Worktree row says where the name came from.
@@ -41,7 +43,7 @@ instructions (a tool-less call), else from `worktree.branch.template`, else
   CLAUDE.md ignored.
 - A resumed run with a templated branch continues; a `run.json` whose branch was edited to another
   worktree's branch is refused.
-- A story task's branch is unchanged with `worktree.branch` set.
+- Unit: a name from either source under `story/` is rejected.
 
 ## Gates
 

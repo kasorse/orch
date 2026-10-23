@@ -1,9 +1,10 @@
 # Delivery — from a finished run to a merge request (phase 3)
 
 Status: **specified** (2026-10-23; revised the same day: worktree by default, commit → push → MR
-at the end of every worktree run, asked unless `--mode auto`); nothing built. TODO.md W1 (the
-rest), W2, W3, W4, W5. Owner's decisions D1–D20 (D2, D3, D5 replaced) and author's defaults
-A1–A21 in `SPEC.md` §16–§17. Builds on
+at the end of every worktree run, asked unless `--mode auto`; and: a story task's branch named by
+its repository's rules, D21); nothing built. TODO.md W1 (the rest), W2, W3, W4, W5. Owner's
+decisions D1–D21 (D2, D3, D5, D15 replaced) and author's defaults A1–A24 in `SPEC.md` §16–§17.
+Builds on
 [`specs/worktree/`](../worktree/README.md) and [`specs/story/`](../story/README.md), both done.
 
 | document | role |
@@ -33,7 +34,7 @@ person"), a Dockerfile and a GitLab CI example; and adds `orchestrator review` f
 | [DL02](tasks/TASK-DL02-report.md) | `report.md`, `diff.run_files`, Markdown escaping | W1.3–4 | M | — |
 | [DL03](tasks/TASK-DL03-worktree-default.md) | worktree by default, `delivery` config, the checks before the worktree | W2.1 | S–M | — |
 | [DL04](tasks/TASK-DL04-deliver.md) | commit → push → MR (push options), the questions, `run.json: mr`, resume, exit 6 | W2.2–4 | M | DL02, DL03 |
-| [DL05](tasks/TASK-DL05-story-mr.md) | `story run`: an MR per task, `story.json` MR, stop on a missing MR | W2 | S | DL04 |
+| [DL05](tasks/TASK-DL05-story-mr.md) | `story run`: an MR per task, the task's branch by its repository's rules, `story.json` MR and branch, stop on a missing MR | W2 | M | DL04, DL13 |
 | [DL06](tasks/TASK-DL06-jira-write.md) | `jira.write`: comment, transition, intents | W3 | M | DL04 |
 | [DL07](tasks/TASK-DL07-headless.md) | no terminal, `--output json`, the exit code table | W4.1–2 | S–M | DL04 |
 | [DL08](tasks/TASK-DL08-review-local.md) | `orchestrator review --base/--head`: detached worktree, `ReviewDiff` base | W5 | M | DL02 |
@@ -44,14 +45,14 @@ person"), a Dockerfile and a GitLab CI example; and adds `orchestrator review` f
 
 ```
 commit    DL01 ─────────────────────────────┐
-branch    DL13 ─────────────────────────────┤
+branch    DL13 ─────────────────────────────┤        (DL13 also before DL05)
 report    DL02 ─┬─ DL08 ───────────┐        │
 worktree  DL03 ─┴─ DL04 ─┬─ DL05   │        ├─ DL11 ─ DL12
                          ├─ DL06   │        │
                          └─ DL07 ──┴─ DL10 ─┘
 ```
 
-Estimate: 21–24 engineering days, plus the live check on gitlab.com (`SPEC.md` §15). DL01, DL02,
+Estimate: 22–25 engineering days, plus the live check on gitlab.com (`SPEC.md` §15). DL01, DL02,
 DL03 and DL13 can start on day one. Recommended order for one person: DL03 → DL01 → DL13 → DL02 → DL04 →
 DL07 → DL08 → DL05 → DL06 → DL10 → DL11 → DL12. With DL02, DL03, DL04 and DL07 done, the main loop
 (task → worktree → MR, in a terminal or in CI) already works.
