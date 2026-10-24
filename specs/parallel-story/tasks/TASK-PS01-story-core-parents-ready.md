@@ -46,3 +46,10 @@ status. Only additions: no caller changes yet, and `story run` behaves exactly a
 ## Notes
 
 Do not edit anything under `specs/parallel-story/` (story run writes its README and As built).
+
+## As built (2026-10-24)
+
+Run `8b31ae5b-9ca6-4604-a820-56c6b03d7123` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/parallel-story/PS01` on `spec/parallel-story` @ c9751c6, commit f943a30.
+Cost $0.35. Implementation summary: Add story Parents, Ready and the conflict task status.
+Conflicts with spec/parallel-story: none.

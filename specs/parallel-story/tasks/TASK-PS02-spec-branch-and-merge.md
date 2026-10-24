@@ -59,8 +59,8 @@ operator has merged (SPEC.md §1, §3). Still one task at a time: the parallel l
   `IsAncestor` in both directions; option-like refs are refused without running git.
 - Story (`internal/app` tests with fake executables): A and B independent, C depends on both, all
   in one repository. C's task input carries a `base_ref` that is a merge commit on
-  `story/<slug>/spec` whose parents include A's and B's commits. The spec branch exists from the
-  first start, at the base commit.
+  `story/<slug>/spec` whose parents include A's and B's commits.
+- In the same story, the spec branch exists from the first start, at the base commit.
 - The same with A and B changing one line differently: C is `conflict`, the story is `blocked`,
   the files are printed, and nothing is dispatched for C. After the test merges them on the spec
   branch by hand, the next `story run` dispatches C from that tip.
@@ -75,3 +75,10 @@ operator has merged (SPEC.md §1, §3). Still one task at a time: the parallel l
 
 Do not edit anything under `specs/parallel-story/` (story run writes its README and As built).
 Leave MVP.md, CLAUDE.md, TODO.md and README.md to PS04.
+
+## As built (2026-10-24)
+
+Run `b49742af-1329-407f-b964-4b92edc7dc53` in orche: completed, 2 fix iterations, tests passed, review pass.
+Branch `story/parallel-story/PS02` on `story/parallel-story/PS01` @ f943a30, commit 3fab419.
+Cost $4.07. Implementation summary: Merge several story parents on the spec branch and add conflict.
+Conflicts with spec/parallel-story: none.

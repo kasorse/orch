@@ -52,9 +52,9 @@ With one slot nothing changes (SPEC.md §2).
 
 - One slot: every existing story test passes unchanged.
 - Two slots, two independent tasks: both children are running at the same time. Prove it with
-  fake children that each wait, with a timeout, for a file the other writes when it starts. Run
-  it once with the two tasks in two repositories and once with both in one repository: both
-  commit on their own branches, and the guard reports nothing.
+  fake children that each wait, with a timeout, for a file the other writes when it starts.
+- The two-slot test runs once with the two tasks in two repositories and once with both in one
+  repository: both commit on their own branches, and the guard reports nothing.
 - Two slots, A fails while B runs: B runs to its end and is settled, no third task starts, the
   story is `failed`, and A's hints are printed.
 - The budget reached while one child runs: nothing new starts, and the story stops after it.
@@ -72,3 +72,10 @@ With one slot nothing changes (SPEC.md §2).
 
 Do not edit anything under `specs/parallel-story/` (story run writes its README and As built).
 Leave MVP.md, CLAUDE.md, TODO.md, README.md and orchestrator.example.yaml to PS04.
+
+## As built (2026-10-24)
+
+Run `33eb929e-5b1c-4c26-a4a0-4838362918c9` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/parallel-story/PS03` on `story/parallel-story/PS02` @ 3fab419, commit b14c16d.
+Cost $6.04. Implementation summary: Run ready story tasks in parallel slots with one owner of the state.
+Conflicts with spec/parallel-story: none.

@@ -57,3 +57,10 @@ config agree with it (SPEC.md, all sections).
 
 Do not edit anything under `specs/parallel-story/` (story run writes its README and As built).
 This is the only task of the story that edits the shared documents.
+
+## As built (2026-10-24)
+
+Run `24bdde6b-335c-41dd-aa72-6de6ddf6cec3` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/parallel-story/PS04` on `story/parallel-story/PS03` @ b14c16d, commit ecc0411.
+Cost $1.75. Implementation summary: Add parallel story scenarios and document max_parallel and spec branch.
+Conflicts with spec/parallel-story: none.
