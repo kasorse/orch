@@ -629,7 +629,7 @@ orchestrator [--config path] [--claude-auth m] [--codex-auth m] run [--verbose|-
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
 orchestrator [--config path] story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
-orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID>]
+orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID>] [--parallel <N>]
 orchestrator [--config path] story status <spec_dir>/<slug>
 orchestrator [--config path] [--mode m] [--claude-auth m] [--codex-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
@@ -965,6 +965,7 @@ story:
   spec_dir: specs           # in the repository you run the commands in (the story home)
   max_tasks: 12
   max_cost_usd: 20          # optional; the whole story
+  max_parallel: 1           # 1..8; ready tasks run at once; --parallel N overrides it
   jira_issue_types: [Epic]  # run --jira on these refuses and points to story plan
 ```
 
@@ -981,11 +982,21 @@ story:
 3. **Run.** `orchestrator story run specs/<slug>` is the approval. Go orders the tasks from
    their `depends_on`, shows the plan and asks once at a terminal; then each task runs as
    `orchestrator run` in its repository, in a worktree on `story/<slug>/<ID>`, stacked on the
-   branch of the same-repository task it needs. Your checkouts are not touched. When a task is
-   done Go appends `## As built` to its file and updates the spec's `README.md`. A failure
-   stops the story; run `story run` again to resume it, or `--retry <ID>` to start a failed
-   task over on a new branch. A task whose run completed without a commit (a failing review,
-   a secret warning) blocks the story until you commit in its worktree or drop the work.
+   branch of the same-repository task it needs, or, when it needs several tasks of one
+   repository, on `story/<slug>/spec`, the story's own branch (Go creates it in each
+   repository at the first start), where Go merges their commits first. Your checkouts and
+   branches are not touched. `--parallel N` (or `story.max_parallel`, 1 to 8, default 1) runs up
+   to N ready tasks at once, each its own run in its own worktree; with more than one, each
+   task's output goes to `.orchestrator/stories/<slug>/logs/task-<ID>.<attempt>.log` and the
+   console gets one line per start and end. Tests of tasks of one service that run at once may
+   share ports, databases or files outside the worktree: keep one slot for such a service. When
+   a task is done Go appends `## As built` to its file and updates the spec's `README.md`. A
+   failure stops the story after the tasks already running end; run `story run` again to resume
+   it, or `--retry <ID>` to start a failed task over on a new branch. A task whose run completed
+   without a commit (a failing review, a secret warning) blocks the story until you commit in
+   its worktree or drop the work. A task whose parents do not merge cleanly on the spec branch
+   is `conflict`: Go lists the files and the story blocks until you merge the parents' branches
+   on `story/<slug>/spec` yourself (in a worktree of it) and run `story run` again.
    `story status specs/<slug>` prints the table.
 4. **Merge.** Each branch is the result; merge them in order, rebasing the stack yourself after
    a review. Pushing and merge requests are not done by the orchestrator.
@@ -1158,7 +1169,9 @@ This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). 
   decision providers.
 - Stages cannot yet be edited before a run (approve or cancel only); the decision thresholds
   are calibrated for Jev and shared with LLM decision providers.
-- No parallel or multi-agent workflows — one task, one sequential workflow, one run at a time.
+- No parallel or multi-agent workflows — one task, one sequential workflow per run. The one
+  exception is a story, which can run its ready tasks at once (`story.max_parallel`,
+  `story run --parallel N`), each as its own run.
 - No web UI, REST API, or IDE plugin — CLI only.
 - No GitHub/GitLab integration or remote repository execution — operates on the local working
   directory only. Jira is read-only and limited to one issue, plus the child issues of an

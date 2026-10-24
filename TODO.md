@@ -659,6 +659,14 @@ shadow-вопрос `scope.story` в классификации, ничего н
 завершённой story с ветками и As built.
 **⚠ спека:** §30 (запись в Jira), §39, новый §48.
 
+### [x] W6a. Параллельная story: готовые задачи одновременно, несколько родителей на spec-ветке — P2 · L (после W6)
+**Сделано** (PS01–PS04, 2026-10-24; нормативно MVP.md §48.4, §48.6, §30, §4; дизайн —
+[`specs/parallel-story/`](specs/parallel-story/README.md)). `story run` запускает до
+`story.max_parallel` (`--parallel N`, 1..8, по умолчанию 1) готовых задач одновременно, каждая —
+свой run в своём worktree, вывод в `logs/task-<ID>.<attempt>.log`; несколько родителей одной
+задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
+`conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`), не сделано.
+
 ---
 
 ## Фаза 4 — Управление для команд (за это платят)

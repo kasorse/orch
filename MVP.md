@@ -174,6 +174,9 @@ orchestrator run --jira <KEY|URL> ["notes"]
 orchestrator run --stage <name> [--stage <name> ...] "<task>"
 orchestrator run --allow-red-tests "<task>"
 orchestrator resume <run-id>
+orchestrator story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
+orchestrator story run <spec_dir>/<slug> [--retry <ID>] [--parallel N]
+orchestrator story status <spec_dir>/<slug>
 orchestrator validate
 orchestrator version
 orchestrator runs report [--dir <path>]
@@ -217,6 +220,9 @@ only with `run`, and combines with `--jira`. Details in §40.
 `run --allow-red-tests` is for a task that is about making failing tests pass: the tests
 already failing before any change do not stop the run (§41.5). Valid only with `run`; it
 combines with `--stage` and `--jira`.
+
+`story run --parallel N` (1..8; a usage error otherwise, and with any other command) is how many
+ready tasks of a story run at once; it overrides `story.max_parallel`. Details in §48.6.
 
 Support configuration file selection, for example:
 
@@ -2412,7 +2418,8 @@ model benchmarking
 automatic model selection
 cost optimization
 automatic provider fallback
-parallel workflows (a story runs its tasks one at a time, §48)
+parallel workflows (a story runs up to `story.max_parallel` ready tasks at once, each its own
+  run, and one run's workflow stays sequential, §48.6)
 multi-agent parallel execution
 Web UI
 REST API
@@ -4675,7 +4682,9 @@ decisions and the plan as built are `specs/story/` (`SPEC.md`, `tasks/`).
 **A model proposes; Go validates and orders; the operator approves.** The decomposition is
 written to files. Nothing runs until the operator runs `story run` on them, and no model ever
 picks what runs next, where, on which branch or with which stages. A story task is never a story.
-A spec is a list of tasks, not a workflow language (§30). Tasks run one at a time (§30).
+A spec is a list of tasks, not a workflow language (§30). Ready tasks run at once, up to
+`story.max_parallel` (§48.6); each is its own run, and a run's workflow stays sequential (§30).
+The design record of the parallel story is `specs/parallel-story/`.
 
 ## 48.1 Vocabulary and configuration
 
@@ -4691,6 +4700,7 @@ story:
   spec_dir: specs                 # in the story home
   max_tasks: 12                   # 2..30
   max_cost_usd: 20                # optional; the whole story, every call and run
+  max_parallel: 1                 # 1..8; ready tasks run at once; story run --parallel N overrides
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
 jira:
   create:                         # absent: story run creates nothing in Jira
@@ -4757,13 +4767,44 @@ status changes. A spec written by hand runs too.
 
 * **Order**: Kahn's algorithm over `depends_on`, the smallest ID first among the ready tasks. A
   cycle, a missing dependency, or a `repo` that is not a service is a spec error naming the tasks.
-* **Base** of task T in repository R: of T's ancestors (transitively, across repositories) that
-  are in R, keep those no other such ancestor depends on. None: R's story base, the commit of the
-  branch checked out in R at the first start. One: that ancestor's commit, as recorded in
-  `story.json` when it was done, so T is stacked on it. More than one: a spec error (make one
-  depend on the other). A dependency in another repository gives order and context, not code.
-* **Branch**: `story/<slug>/<ID>`, a retry adds `.<n>`. A merge request targets the base's
-  branch. Rebasing a stack after review is the operator's, with git.
+* **Parents** of task T in repository R: of T's ancestors (transitively, across repositories)
+  that are in R, those no other such ancestor depends on. None: T starts from R's story base, the
+  commit of the branch checked out in R at the first start (`bases.<repo>.sha`), not from the
+  spec branch's tip, so its base does not depend on which merges landed first. One: that
+  parent's commit, as recorded in `story.json` when it was done, so T is stacked on it. Several:
+  their commits are merged on the spec branch (below) and T starts from its tip. A dependency
+  in another repository gives order and context, not code.
+* **The spec branch** `story/<slug>/spec` is the story's own branch in each repository the story
+  touches. Go creates it at the first start, at the story base commit, after the approval and
+  before the Jira children and the first dispatch, and records `bases.<repo>.spec_branch`; a
+  continued story whose record lacks it gets it at `bases.<repo>.sha` before anything is
+  dispatched, and a recorded branch that git lacks stops the story. Go never writes the
+  operator's branch (the story base branch). `spec` is not a task ID, so the name cannot clash
+  with `story/<slug>/<ID>`; the unknown-branch check of §48.6 knows it.
+* **The merge** of several parents is made by `story run` in R's checkout, just before T is
+  dispatched, one merge at a time, the parents in ID order, each: already an ancestor of the spec
+  tip: nothing; the spec tip an ancestor of the parent's commit: fast-forward with `git
+  update-ref refs/heads/<spec> <new> <old>`; otherwise `git merge-tree --write-tree` (objects
+  only: no checkout, no hooks), and when it is clean `git commit-tree <tree> -p <tip> -p
+  <parent>` with the message `Merge <parent's branch> for <ID>`, the trailer
+  `Orchestrator-Story: <slug>/<ID>` and the operator's git identity (without one the story stops
+  with git's message), then the same `update-ref`. Before the first `merge-tree` in a repository
+  in one `story run` its git fingerprint (§47.5) must equal the one the pre-run checks took:
+  configured merge drivers run code. T's `base_ref` is the spec tip after the merges; its
+  `base_branch` stays the story base branch. The As built and the plan name the base as
+  `story/<slug>/spec (RF01 + RF02)`.
+* **Conflict.** When a merge does not go through, nothing is written; T is `conflict`, not
+  dispatched (no attempt, no run), and the story is `blocked`. `story.json` records
+  `tasks.<ID>.conflict {parents, files}` (at most 50 repository-relative paths). Go prints the
+  files and the manual merge: a worktree of the spec branch, `git merge` of the parents'
+  branches, a commit, `git worktree remove`, then `orchestrator story run <dir>` again. The next
+  run, before the dispatch, requires the spec tip to descend from `bases.<repo>.sha`; if every
+  parent's recorded commit is then an ancestor of the tip (the operator merged), T is dispatched
+  from that tip; otherwise the merge is tried again and conflicts again. Go resolves nothing.
+* **Branch**: `story/<slug>/<ID>`, a retry adds `.<n>`. The branch a task's merge request
+  targets: with one parent, the parent's branch; with none or several, the spec branch. Rebasing
+  a stack after review is the operator's, with git. Pushing the spec branch is not done (TODO
+  W2).
 
 ## 48.5 The child run
 
@@ -4794,33 +4835,65 @@ directory; the state is flocked by the one `story run` that owns it.
    `jira.create` is set); every task file parsed and validated; on a continued story each
    dispatched task's file (up to `## As built`) must match its recorded sha256; for every service
    the pending tasks name - a git checkout with a commit and no `.gitmodules`, the story base
-   branch present, no unknown `story/<slug>/<ID>` branch, and `orchestrator validate` exiting 0
-   there; `story.max_cost_usd` not reached.
+   branch present, no unknown `story/<slug>/<ID>` branch (`story/<slug>/spec` is known), and
+   `orchestrator validate` exiting 0 there; `story.max_cost_usd` not reached. Before all of
+   it: a task recorded as `running` whose run directory is locked by a live process (a child of
+   an earlier `story run` still working) stops the story run (`RF02: run <id> is still
+   running`); any other `running` task is settled from its run, as after a crash.
 2. **First start**: the bases are recorded and the plan (order, repository, base, branch, Jira
    key) printed; at a terminal `Run 6 tasks in 2 repositories? [Y/n]` is asked once. `--mode
    auto` and a non-terminal stdin go on. That answer and the command are the approval
-   (`approved_at`).
-3. **Children in Jira** (§48.7), then each task in Go's order: done → skipped; failed → its run
-   resumed (`orchestrator resume <id> --mode auto` in its repository); pending → the task input
-   is written to `tasks/<ID>.json`, the file's sha256 recorded (the task is frozen from now) and
-   `<orchestrator> run --mode auto --story-task <file>` run as a child process in the task's
-   repository, its output under `── RF02 · gateway · 2/6 ──`. The child's run is found by its
-   `task.source`; none found (the child failed its own fail-fast chain) means the task `failed`.
+   (`approved_at`). Then the spec branches are created (§48.4).
+3. **Children in Jira** (§48.7), then the tasks, in Go's order, **up to `slots` at once**, where
+   `slots` is `--parallel N` else `story.max_parallel` (1..8, default 1). A task is **ready**
+   when every `depends_on` task is done and it is itself pending, failed or stopped with a run,
+   blocked or `conflict`; done and running tasks are not. Whenever a slot is free the next ready
+   task in the story's order is started: done → skipped; failed or stopped with a run → that run
+   resumed (`orchestrator resume <id> --mode auto` in its repository); blocked → looked at again
+   (step 4); `conflict` → its parents merged again (§48.4); pending → its parents merged on the
+   spec branch if there are several (§48.4), the task input written to `tasks/<ID>.json`, the
+   file's sha256 recorded (the task is frozen from now) and `<orchestrator> run --mode auto
+   --story-task <file>` run as a child process in the task's repository. Two tasks of one
+   repository may run at once, each in its own worktree on its own branch; while children run no
+   git call of `story run` writes the shared `.git/config` or the hooks, because each child's
+   guard (§47.5) fingerprints them. The child's run is found by its `task.source`; none found
+   (the child failed its own fail-fast chain) means the task `failed`.
+   * **One state owner.** Only the `story run` goroutine reads and writes `story.json`, the
+     README, the task files and the console; each child is a goroutine that runs the process and
+     reports its exit, and the loop settles it, one at a time, as a lone child would be. A run
+     directory another process holds locked is a sibling in progress: settling and the budget
+     lookup skip it without a warning.
+   * **One slot**: the child has the terminal and its output is printed under `── RF02 · gateway
+     · 2/6 ──`, exactly as when tasks ran one at a time.
+   * **More than one slot**: a child has no stdin (`/dev/null`; children run `--mode auto`) and
+     its stdout and stderr go to `.orchestrator/stories/<slug>/logs/task-<ID>.<attempt>.log`
+     (0600, appended when the run is resumed). The console gets `▶ RF02 · gateway · 2/6 · log
+     <path>` when the task starts, and its result line (`RF02: done`) when it ends.
+   * **Ctrl-C**: every running child gets SIGINT, each is waited for and settled, and the story
+     is `stopped`.
 4. A task is **done** when its run is `completed` and has a `commit`. `completed` without a commit
    (a failing review, a secret warning, `approval: manual`) makes the task and the story
    `blocked`: the operator commits in the kept worktree or drops the work, and runs `story run`
    again, which counts the task done once its branch has a commit beyond its base. `failed` or
    `stopped` stops the story. `story run --retry RF02` abandons a failed task's run (its branch
    stays) and dispatches the task again on `story/<slug>/RF02.<n>`, re-reading its file: the one
-   way to edit a dispatched task.
+   way to edit a dispatched task. A task whose parents do not merge is `conflict` (§48.4).
+   **When a task does not end done** (failed, stopped, blocked or `conflict`) nothing new is
+   started; the children still running are not killed, they run to their end and are settled;
+   then the story stops with the status of the first task in the story's order that is not done,
+   and the hints of every such task are printed. Tasks that were independent of it and not yet
+   started wait for the next `story run`.
 5. **After each task** Go appends `## As built (<date>)` to the task file - run, outcome, branch
    and base, commit, cost, the run's `summary_short`, conflicts with the base branch - and
    rewrites `README.md`. Nothing a model wrote goes there except `summary_short`, as data.
 6. **Budget**: before every dispatch `story.max_cost_usd` is checked against the recorded total
-   (the planning calls and every child's `outcome.usage`), failing closed; a finished run without
-   an outcome stops the story when a budget is set.
+   (the planning calls and every child's `outcome.usage`) plus what each running child's run has
+   cost so far (the executions in its `run.json`, found by `task.source`), failing closed; when
+   it is not under the limit nothing new is started, the running children are drained and the
+   story stops, so the overshoot is at most the steps in flight. A finished run without an
+   outcome stops the story when a budget is set.
 7. Every task done: the story is `completed`; per task the repository, branch, the branch its
-   merge request targets, commit, Jira key and conflicts are printed. Pushing and merge requests
+   merge request targets (§48.4), commit, Jira key and conflicts are printed. Pushing and merge requests
    are TODO W2. A `story run` that dies between a child's end and the save of its result is
    settled by the next one before anything is dispatched, from the run it finds.
 
@@ -4848,11 +4921,15 @@ dispatch. Issue links between children, transitions and comments are not created
 ## 48.8 Persistence and security
 
 `.orchestrator/stories/<slug>/`: `story.json` (slug, spec dir, `jira_parent`, `approved_at`,
-`services`, `bases`, `status`, per task: status, `file_sha256`, attempt, `run_id`, repo, branch,
-`base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`, `abandoned_cost_usd`; the planning
-calls' usage), `ticket.json`, `artifacts/`, `logs/`, `tasks/<ID>.json`. All of it is validated
-strictly on load: paths are derived, never read; run IDs and SHAs by format; a task's `run_id`
-only from its repository's runs directory; a dispatched task needs `approved_at`.
+`services`, `bases` (per repository: `branch`, `sha`, `spec_branch`), `status`, per task: status
+(`conflict` among them, with `conflict {parents, files}` present only then), `file_sha256`,
+attempt, `run_id`, repo, branch, `base_ref`, `commit`, `jira`, `jira_intent`, `cost_usd`,
+`abandoned_cost_usd`; the planning calls' usage), `ticket.json`, `artifacts/`, `logs/` (with
+`task-<ID>.<attempt>.log` of the children when several run at once), `tasks/<ID>.json`. All of it
+is validated strictly on load: paths are derived, never read; run IDs and SHAs by format; a
+task's `run_id` only from its repository's runs directory; a dispatched task needs
+`approved_at`; `spec_branch` is exactly `story/<slug>/spec`; a merged task's `base_ref` is a
+commit on the spec branch.
 
 * Authorities stay fixed in Go: survey `read` in one repository, specify `none`, a child run as
   any run. No call reads two repositories.
@@ -4862,7 +4939,10 @@ only from its repository's runs directory; a dispatched task needs `approved_at`
 * Slug, prefix, IDs and branch names are checked by pattern before they reach git; the base by
   SHA. Child processes are the orchestrator binary itself (`os.Executable`, symlinks resolved)
   with argv only, each running its own fail-fast chain, guard and sandbox.
-* The operator's checkouts are never touched: every task runs in a worktree.
+* The operator's checkouts and branches are never touched: every task runs in a worktree, and
+  the spec branch is merged with `merge-tree` and `commit-tree`, never in a tree.
+* Tests of tasks of one service that run at once may share ports, databases or files outside
+  the worktree; the operator chooses `max_parallel` (one slot for such a service).
 
 ## 48.9 The scope question (shadow)
 
@@ -4876,8 +4956,10 @@ re-checked once enough new decisions exist.
 ## 48.10 Not covered
 
 * Pushing and merge requests (TODO W2); Jira transitions, comments and issue links (W3).
-* Parallel tasks (§30); rebasing a stack after review; re-planning; a model editing the spec
-  after approval.
+* Resolving a merge conflict automatically; pushing the spec branch (TODO W2); more than 8
+  slots, a limit per repository, killing running siblings after a failure, isolating the test
+  resources of tasks that run at once; rebasing a stack after review; re-planning; a model
+  editing the spec after approval.
 * Nested stories; a story task without a code change; submodules (as for §47).
 * The benchmark: story tasks are not in `bench/`.
 * Calibrating and using the scope probability (a later spec, on data).

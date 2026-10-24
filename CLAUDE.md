@@ -328,11 +328,19 @@ history, otherwise the state the history and the transition table give (MVP.md �
   plan` writes a spec of tasks as files and runs nothing; `story run` is the approval. Go finds
   the services the task names under `story.roots` (no model call), validates the model's
   answer strictly, orders the tasks from `depends_on` (Kahn, smallest ID first) and computes
-  each task's base and branch (`story/<slug>/<ID>`, stacked on the same-repository task it
-  needs); no model output picks what runs next, where, or with which stages. A story task is an
+  each task's base and branch (`story/<slug>/<ID>`: stacked on the same-repository task it
+  needs, or, with several such parents, on the tip of the story's spec branch
+  `story/<slug>/spec` where Go merged them with `merge-tree` and `commit-tree`, never in a tree;
+  a merge that conflicts makes the task `conflict` and stops the story for a manual merge); no
+  model output picks what runs next, where, or with which stages. A story task is an
   ordinary worktree run started as a child process (`run --story-task`, hidden), with
   development forced on and research, analysis and planning off (the task file is the plan),
-  the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer; stories do not nest and tasks run one at a time. A
+  the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer;
+  stories do not nest. `story run` runs up to `story.max_parallel` (`--parallel N`, 1..8, default
+  1) ready tasks at once, each its own child run, with one goroutine owning `story.json`, the
+  README, the task files and the console (the children's goroutines only run a process); while
+  children run no git call writes `.git/config` or the hooks (every child's guard fingerprints
+  them), and nothing new starts after a task that did not end done. A
   dispatched task's file is frozen up to `## As built`, which only Go appends. The scope
   question is shadow data: nothing reads `scope.story` to decide.
 - **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11). The one write is
@@ -349,7 +357,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
 No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
 decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
-model selection/routing/fallback, no parallel or multi-agent workflows, no Web UI/REST
+model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
+story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
 API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue and creating
 the child issues of an approved story (no comments, transitions or JQL), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
@@ -450,9 +459,12 @@ removed when a resume reads the artifact back), `logs/<NNN>-<action>.{stdout,std
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`
 reason on development and `scope.story` to `decision.json`. The story itself lives in the story
-home under `.orchestrator/stories/<slug>/` (MVP.md §48.8): `story.json` (the services, the bases,
-the status and, per task, the run, branch, commit, Jira key and intent, cost), `ticket.json` for
+home under `.orchestrator/stories/<slug>/` (MVP.md §48.8): `story.json` (the services, the bases
+with `bases.<repo>.spec_branch`, the status and, per task, the run, branch, commit, Jira key and
+intent, cost; a task whose parents do not merge cleanly is `conflict` with `conflict {parents,
+files}`), `ticket.json` for
 `story plan --jira`, `artifacts/survey-<repo>.json` and `artifacts/specify.json` (the prompts as
-sent and the answers), `logs/survey-<repo>.*` and `logs/specify.*`, and `tasks/<ID>.json` (a
+sent and the answers), `logs/survey-<repo>.*` and `logs/specify.*`, `logs/task-<ID>.<attempt>.log`
+(a child's output when more than one task runs at once), and `tasks/<ID>.json` (a
 child's task input); a plan that reaches no spec leaves `.plan-<id>`. The spec itself is in
 `<spec_dir>/<slug>/` (committed by the operator), with `## As built` appended to each task file by Go.

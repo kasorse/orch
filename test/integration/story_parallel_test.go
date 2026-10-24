@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -322,4 +323,298 @@ func TestStoryRun_ParallelUsageErrors(t *testing.T) {
 		assertConfigError(t, err, "--parallel")
 	}
 	f.assertNothingStarted(t)
+}
+
+// The end-to-end scenarios of the parallel story (specs/parallel-story/tasks/TASK-PS04-scenarios-and-docs.md).
+// Two repositories and four tasks:
+//
+//	RF01 billing                   based on billing's story base
+//	RF02 billing                   based on billing's story base
+//	RF03 billing  RF01 and RF02    based on story/refunds/spec, where their commits are merged
+//	RF04 gateway                   based on gateway's story base
+//
+// Each task adds a file of its own (FAKE_IMPLEMENT_BRANCH_DIR), so merging RF01 and RF02 is clean,
+// or writes the same file (FAKE_IMPLEMENT_BRANCH_FILE), so it conflicts.
+
+var storyDiamondTasks = []story.Task{
+	{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
+	{ID: "RF02", Repo: "billing", Title: "Round the refunded amount"},
+	{ID: "RF03", Repo: "billing", Title: "Report the refunded amounts", DependsOn: []string{"RF01", "RF02"}},
+	{ID: "RF04", Repo: "gateway", Title: "Accept an amount in the API"},
+}
+
+func newDiamondFixture(t *testing.T) *storyRunFixture {
+	t.Helper()
+	f := newStoryRunFixture(t, withTasks(storyDiamondTasks))
+	f.writePlanRecord(t)
+	writeResponse(t, f.responses, "implement", storyMergeImplement)
+	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "")
+	t.Setenv("FAKE_IMPLEMENT_BRANCH_DIR", ".")
+	return f
+}
+
+// assertMergeOf asserts that ref, a commit of the repository, is a merge of exactly the commits
+// parents, in that order.
+func (f *storyRunFixture) assertMergeOf(t *testing.T, repo, ref string, parents ...string) {
+	t.Helper()
+	got := strings.Fields(f.git(t, repo, "rev-list", "--parents", "-n", "1", ref))
+	if len(got) != len(parents)+1 || strings.Join(got[1:], " ") != strings.Join(parents, " ") {
+		t.Errorf("%s has the parents %v, want %v", ref, got[1:], parents)
+	}
+}
+
+// assertAfter asserts that stdout has each of befores ahead of after.
+func assertAfter(t *testing.T, stdout, after string, befores ...string) {
+	t.Helper()
+	at := strings.Index(stdout, after)
+	if at < 0 {
+		t.Errorf("stdout lacks %q:\n%s", after, stdout)
+		return
+	}
+	for _, before := range befores {
+		if i := strings.Index(stdout, before); i < 0 || i > at {
+			t.Errorf("%q is at %d in stdout, want it before %q at %d:\n%s", before, i, after, at, stdout)
+		}
+	}
+}
+
+// Scenario 1: RF01, RF02 and RF04 run at once - each implement call waits for the other two's -
+// RF03 starts after RF01 and RF02 are done, from the merge commit the parent made on the spec
+// branch, and the story completes. Every target in the end table is the spec branch.
+func TestStoryRun_ParallelDiamondRunsAtOnceAndMergesTheParents(t *testing.T) {
+	f := newDiamondFixture(t)
+	before := f.checkouts(t)
+	bases := map[string]string{"billing": f.head(t, "billing"), "gateway": f.head(t, "gateway")}
+	t.Setenv("FAKE_RENDEZVOUS_DIR", t.TempDir())
+	t.Setenv("FAKE_RENDEZVOUS_ACTION", "implement")
+	t.Setenv("FAKE_RENDEZVOUS_COUNT", "3")
+
+	stdout, stderr, err := f.run(t, "--parallel", "3")
+	mustSucceed(t, stdout, stderr, err)
+
+	rec := f.record(t)
+	if rec.Status != story.StatusCompleted {
+		t.Fatalf("status = %s, want completed\n%s", rec.Status, stdout)
+	}
+	for _, task := range storyDiamondTasks {
+		if rt := rec.Tasks[task.ID]; rt.Status != story.TaskDone || rt.Commit == "" {
+			t.Errorf("tasks.%s = %+v, want done with a commit", task.ID, rt)
+		}
+	}
+	// The spec branch is in both repositories; gateway's has nothing merged on it.
+	for name, sha := range bases {
+		if b := rec.Bases[name]; b.SpecBranch != specBranch || b.SHA != sha {
+			t.Errorf("bases.%s = %+v, want the spec branch %s on the base %s", name, b, specBranch, sha)
+		}
+	}
+	if tip := f.git(t, "gateway", "rev-parse", specBranch); tip != bases["gateway"] {
+		t.Errorf("gateway's %s is at %s, want its base %s", specBranch, tip, bases["gateway"])
+	}
+
+	// A task without a parent starts from the story base, not from the spec tip.
+	for _, id := range []string{"RF01", "RF02", "RF04"} {
+		if in := f.input(t, id); in.BaseRef != bases[rec.Tasks[id].Repo] {
+			t.Errorf("%s base_ref = %s, want the story base %s", id, in.BaseRef, bases[rec.Tasks[id].Repo])
+		}
+	}
+	// RF03 starts from the merge commit of its parents' commits.
+	rf01, rf02 := rec.Tasks["RF01"].Commit, rec.Tasks["RF02"].Commit
+	in := f.input(t, "RF03")
+	if tip := f.git(t, "billing", "rev-parse", specBranch); in.BaseRef != tip || rec.Tasks["RF03"].BaseRef != tip {
+		t.Errorf("RF03 base_ref = %s (record %s), want the tip of %s: %s", in.BaseRef, rec.Tasks["RF03"].BaseRef, specBranch, tip)
+	}
+	f.assertMergeOf(t, "billing", in.BaseRef, rf01, rf02)
+	if parent := f.git(t, "billing", "rev-parse", rec.Tasks["RF03"].Commit+"^"); parent != in.BaseRef {
+		t.Errorf("RF03's commit has the parent %s, want the merge commit %s", parent, in.BaseRef)
+	}
+	if in.BaseBranch != f.baseBranch(t, "billing") {
+		t.Errorf("RF03 base_branch = %s, want the story base branch %s", in.BaseBranch, f.baseBranch(t, "billing"))
+	}
+
+	// RF03 was started after RF01 and RF02 were done, and the three at once were started in order.
+	assertAfter(t, stdout, "▶ RF03 · billing · 3/4 · log ", "RF01: done", "RF02: done")
+	assertAfter(t, stdout, "▶ RF04 · gateway · 4/4 · log ", "▶ RF01 · billing · 1/4 · log ", "▶ RF02 · billing · 2/4 · log ")
+	assertContains(t, "stdout", stdout, "✓ Story completed: all 4 tasks done",
+		"RF01 · billing · story/refunds/RF01 → story/refunds/spec",
+		"RF02 · billing · story/refunds/RF02 → story/refunds/spec",
+		"RF03 · billing · story/refunds/RF03 → story/refunds/spec",
+		"RF04 · gateway · story/refunds/RF04 → story/refunds/spec")
+	assertContains(t, "RF03 As built", story.AsBuiltText([]byte(readFile(t, f.taskPath("RF03")))), "on `story/refunds/spec (RF01 + RF02)`")
+	f.assertCheckoutsUnchanged(t, before)
+}
+
+// Scenario 2: RF01 and RF02 conflict. RF04 is done, RF03 is conflict and not started, the story is
+// blocked and the hint names the files. After a manual merge on the spec branch the next story run
+// completes the story, running RF03 only.
+func TestStoryRun_ParallelConflictThenAManualMerge(t *testing.T) {
+	f := newDiamondFixture(t)
+	t.Setenv("FAKE_IMPLEMENT_BRANCH_DIR", "")
+	t.Setenv("FAKE_IMPLEMENT_BRANCH_FILE", "shared.txt") // RF01 and RF02 add it with different content
+
+	stdout, stderr, err := f.run(t, "--parallel", "2")
+	if err == nil {
+		t.Fatalf("a story with parents that conflict succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	assertWorkflowError(t, err)
+	rec := f.record(t)
+	rt := rec.Tasks["RF03"]
+	if rec.Status != story.StatusBlocked || rt.Status != story.TaskConflict || rt.Conflict == nil {
+		t.Fatalf("status = %s, RF03 = %+v; want a blocked story and a conflict task", rec.Status, rt)
+	}
+	if strings.Join(rt.Conflict.Parents, ",") != "RF01,RF02" || strings.Join(rt.Conflict.Files, ",") != "shared.txt" {
+		t.Errorf("RF03's conflict = %+v, want RF01 and RF02 in shared.txt", *rt.Conflict)
+	}
+	for _, id := range []string{"RF01", "RF02", "RF04"} {
+		if st := rec.Tasks[id].Status; st != story.TaskDone {
+			t.Errorf("tasks.%s is %s, want done: the conflict stops only what is not started", id, st)
+		}
+	}
+	if rt.RunID != "" || rt.Attempt != 0 || strings.Contains(stdout, "▶ RF03") {
+		t.Errorf("RF03 = %+v was started:\n%s", rt, stdout)
+	}
+	if _, err := os.Stat(filepath.Join(f.storyDir, "tasks", "RF03.json")); !os.IsNotExist(err) {
+		t.Errorf("RF03 has an input (err=%v)", err)
+	}
+	assertContains(t, "stdout", stdout, "RF03: conflict (RF01 + RF02 do not merge cleanly on story/refunds/spec)", "shared.txt",
+		"git merge story/refunds/RF01", "git merge story/refunds/RF02", "orchestrator story run")
+	assertContains(t, "README.md", readFile(t, filepath.Join(f.specDir, "README.md")), "Status: **blocked**", "| conflict |")
+	implements := implementCalls(t, f)
+	if implements != 3 {
+		t.Fatalf("%d implement calls, want RF01's, RF02's and RF04's", implements)
+	}
+
+	// The operator's merge, as the hint says: a worktree of the spec branch, git merge, a commit.
+	wt := filepath.Join(t.TempDir(), "spec")
+	gitRun(t, f.repos["billing"], "worktree", "add", "-q", wt, specBranch)
+	gitRun(t, wt, "merge", "story/refunds/RF01") // already in the spec branch
+	merge := exec.Command("git", "merge", "story/refunds/RF02")
+	merge.Dir = wt
+	if out, err := merge.CombinedOutput(); err == nil {
+		t.Fatalf("git merge of the conflicting parents succeeded:\n%s", out)
+	}
+	writeStoryFile(t, filepath.Join(wt, "shared.txt"), []byte("resolved\n"))
+	gitRun(t, wt, "add", "-A")
+	gitRun(t, wt, "commit", "-q", "-m", "merge RF01 and RF02 by hand")
+	gitRun(t, f.repos["billing"], "worktree", "remove", wt)
+	merged := f.git(t, "billing", "rev-parse", specBranch)
+
+	stdout, stderr, err = f.run(t, "--parallel", "2")
+	mustSucceed(t, stdout, stderr, err)
+	rec = f.record(t)
+	rt = rec.Tasks["RF03"]
+	if rec.Status != story.StatusCompleted || rt.Status != story.TaskDone || rt.Conflict != nil {
+		t.Fatalf("status = %s, RF03 = %+v; want completed with RF03 done", rec.Status, rt)
+	}
+	if in := f.input(t, "RF03"); in.BaseRef != merged || rt.BaseRef != merged {
+		t.Errorf("RF03 base_ref = %s (record %s), want the operator's merge %s", in.BaseRef, rt.BaseRef, merged)
+	}
+	if got := implementCalls(t, f); got != implements+1 {
+		t.Errorf("%d implement calls, want %d: only RF03 runs after the merge", got, implements+1)
+	}
+	assertContains(t, "stdout", stdout, "✓ Story completed: all 4 tasks done", "RF03 · billing · story/refunds/RF03 → story/refunds/spec")
+}
+
+// Scenario 3: RF02 fails while RF01 runs. RF01 is settled, RF03 and RF04 are never started and the
+// story is failed. The next story run resumes RF02's run, and starts RF03 only once RF02 is done.
+func TestStoryRun_ParallelFailureThenResumeRunsTheMergeTask(t *testing.T) {
+	f := newDiamondFixture(t)
+	t.Setenv("FAKE_FAIL_ACTION", "implement")
+	t.Setenv("FAKE_FAIL_BRANCH", "story/"+storyRunSlug+"/RF02")
+	// RF01 waits in its review until RF02 is recorded failed, so RF01 is still running then.
+	released := holdReview(t, f, "RF01", func(rec persistence.StoryRecord) bool { return rec.Tasks["RF02"].Status == story.TaskFailed })
+
+	stdout, stderr, err := f.run(t, "--parallel", "2")
+	if err == nil {
+		t.Fatalf("a story with a failing task succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	assertWorkflowError(t, err)
+	if at, ok := released(); !ok || at.Tasks["RF01"].Status != story.TaskRunning {
+		t.Fatalf("RF01 was not running when RF02 was recorded failed (seen %v): %+v", ok, at.Tasks["RF01"])
+	}
+	rec := f.record(t)
+	failed := rec.Tasks["RF02"]
+	if rec.Status != story.StatusFailed || failed.Status != story.TaskFailed || failed.RunID == "" || rec.Tasks["RF01"].Status != story.TaskDone {
+		t.Fatalf("status = %s, RF01 = %+v, RF02 = %+v; want a failed story, RF01 done and RF02 failed with its run", rec.Status, rec.Tasks["RF01"], failed)
+	}
+	assertNotStarted(t, f, rec, stdout, "RF03")
+	assertNotStarted(t, f, rec, stdout, "RF04")
+	assertContains(t, "stdout", stdout, "RF01: done", "RF02: failed", "resumes run "+failed.RunID)
+	rf01 := rec.Tasks["RF01"]
+	runs := f.runCount(t)
+
+	// The next run resumes RF02's run, with nothing failing any more.
+	t.Setenv("FAKE_FAIL_ACTION", "")
+	t.Setenv("FAKE_SLEEP_ACTION", "")
+	stdout, stderr, err = f.run(t, "--parallel", "2")
+	mustSucceed(t, stdout, stderr, err)
+	rec = f.record(t)
+	if rec.Status != story.StatusCompleted {
+		t.Fatalf("status = %s, want completed\n%s", rec.Status, stdout)
+	}
+	if rt := rec.Tasks["RF02"]; rt.Status != story.TaskDone || rt.RunID != failed.RunID || rt.Attempt != 1 {
+		t.Errorf("RF02 = %+v, want done on the same run %s and attempt 1", rt, failed.RunID)
+	}
+	if rt := rec.Tasks["RF01"]; rt.RunID != rf01.RunID || rt.Commit != rf01.Commit {
+		t.Errorf("RF01 = %+v, was %+v: a done task must not run again", rt, rf01)
+	}
+	// RF03 and RF04 made the only new runs: RF02 was resumed, RF01 not touched.
+	if got := f.runCount(t); got != runs+2 {
+		t.Errorf("%d runs, want %d", got, runs+2)
+	}
+	if resumed := f.runRecord(t, "billing", "RF02", 1); resumed.Status != domain.RunCompleted || len(resumed.Resumes) != 1 {
+		t.Errorf("RF02's run = %s with %d resumes, want completed with one", resumed.Status, len(resumed.Resumes))
+	}
+	f.assertMergeOf(t, "billing", f.input(t, "RF03").BaseRef, rec.Tasks["RF01"].Commit, rec.Tasks["RF02"].Commit)
+	assertAfter(t, stdout, "▶ RF03 · billing · 3/4 · log ", "RF02: done")
+	assertContains(t, "stdout", stdout, "✓ Story completed: all 4 tasks done")
+}
+
+// Scenario 4: with one slot the story of TestStoryRun_OrderStackingAsBuiltAndTheEnd prints and
+// stacks as before - the children under their headers, no start lines, no logs - apart from the
+// spec branch, which is made in each repository and is the target of the tasks without a parent.
+func TestStoryRun_OneSlotIsAsBefore(t *testing.T) {
+	f := newStoryRunFixture(t)
+	f.writePlanRecord(t)
+	bases := map[string]string{"billing": f.head(t, "billing"), "gateway": f.head(t, "gateway")}
+
+	stdout, stderr, err := f.run(t, "--parallel", "1")
+	mustSucceed(t, stdout, stderr, err)
+
+	rec := f.record(t)
+	if rec.Status != story.StatusCompleted {
+		t.Fatalf("status = %s, want completed\n%s", rec.Status, stdout)
+	}
+	if in := f.input(t, "RF01"); in.BaseRef != bases["billing"] {
+		t.Errorf("RF01 base_ref = %s, want billing's base %s", in.BaseRef, bases["billing"])
+	}
+	if in := f.input(t, "RF02"); in.BaseRef != rec.Tasks["RF01"].Commit {
+		t.Errorf("RF02 base_ref = %s, want RF01's commit %s", in.BaseRef, rec.Tasks["RF01"].Commit)
+	}
+	if in := f.input(t, "RF03"); in.BaseRef != bases["gateway"] {
+		t.Errorf("RF03 base_ref = %s, want gateway's base %s", in.BaseRef, bases["gateway"])
+	}
+	if in := f.input(t, "RF04"); in.BaseRef != rec.Tasks["RF02"].Commit {
+		t.Errorf("RF04 base_ref = %s, want RF02's commit %s", in.BaseRef, rec.Tasks["RF02"].Commit)
+	}
+	for name, sha := range bases {
+		if tip := f.git(t, name, "rev-parse", specBranch); tip != sha || rec.Bases[name].SpecBranch != specBranch {
+			t.Errorf("%s's %s is at %s (record %q), want its base %s: nothing is merged on it", name, specBranch, tip, rec.Bases[name].SpecBranch, sha)
+		}
+	}
+	if merges := f.git(t, "billing", "rev-list", "--merges", "--all"); merges != "" {
+		t.Errorf("a story without several parents made merge commits: %s", merges)
+	}
+
+	assertContains(t, "stdout", stdout, "Story plan: 4 tasks in 2 repositories", "── RF01 · billing · 1/4 ──", "── RF02 · billing · 2/4 ──",
+		"── RF03 · gateway · 3/4 ──", "── RF04 · billing · 4/4 ──", "✓ Story completed: all 4 tasks done",
+		"RF01 · billing · story/refunds/RF01 → story/refunds/spec",
+		"RF02 · billing · story/refunds/RF02 → story/refunds/RF01",
+		"RF03 · gateway · story/refunds/RF03 → story/refunds/spec",
+		"RF04 · billing · story/refunds/RF04 → story/refunds/RF02")
+	if strings.Contains(stdout, "▶ RF0") {
+		t.Errorf("a start line with one slot:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(f.storyDir, "logs")); !os.IsNotExist(err) {
+		t.Errorf("logs/ exists with one slot (err=%v): the children print on the console", err)
+	}
 }
