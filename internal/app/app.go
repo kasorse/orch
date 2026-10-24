@@ -52,7 +52,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -80,6 +80,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cli.retry != "" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--retry is only valid with story run"}
+	}
+	if cli.parallel != 0 && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--parallel is only valid with story run"}
 	}
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
@@ -137,7 +140,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			return storyRun(ctx, rest[2], storyRunOptions{
 				configPath: cli.configPath, explicitConfig: cli.configGiven, mode: cli.mode, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth,
-				retry: cli.retry, verbose: cli.verbose,
+				retry: cli.retry, parallel: cli.parallel, verbose: cli.verbose,
 			}, stdin, stdout, stderr)
 		case "status":
 			if len(rest) != 3 {
@@ -316,6 +319,9 @@ type cliArgs struct {
 	// retry is --retry's value, a task ID: story run abandons that task's run and dispatches it
 	// again on the next attempt's branch (specs/story/SPEC.md §10.2).
 	retry string
+	// parallel is --parallel's value, 1..8: how many ready tasks story run runs at once, in place
+	// of story.max_parallel; 0 if not given (specs/parallel-story/SPEC.md §2).
+	parallel int
 	// rest are the positional arguments.
 	rest []string
 }
@@ -433,6 +439,19 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--retry requires a task ID (two capital letters and two digits, like RF02), got %q", v)
 			}
 			cli.retry = v
+		case arg == "--parallel" || strings.HasPrefix(arg, "--parallel="):
+			if cli.parallel != 0 {
+				return cliArgs{}, fmt.Errorf("--parallel given twice")
+			}
+			v, err := value(&i, "--parallel")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n < config.MinStoryMaxParallel || n > config.MaxStoryMaxParallel {
+				return cliArgs{}, fmt.Errorf("--parallel requires a number from %d to %d, got %q", config.MinStoryMaxParallel, config.MaxStoryMaxParallel, v)
+			}
+			cli.parallel = n
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":

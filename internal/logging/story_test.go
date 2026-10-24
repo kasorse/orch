@@ -72,6 +72,23 @@ func TestStoryRunLines(t *testing.T) {
 	}
 }
 
+func TestStoryTaskStarted(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewConsoleReporter(&buf)
+	r.StoryTaskStarted("PS02", "orche", 2, 4, ".orchestrator/stories/p/logs/task-PS02.1.log")
+	want := "▶ PS02 · orche · 2/4 · log .orchestrator/stories/p/logs/task-PS02.1.log\n"
+	if buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+
+	buf.Reset()
+	pretty := &ConsoleReporter{Out: &buf, Pretty: true}
+	pretty.StoryTaskStarted("PS02", "orche", 2, 4, "logs/task-PS02.1.log")
+	if !strings.Contains(buf.String(), "▶ PS02 · orche · 2/4 · log logs/task-PS02.1.log") {
+		t.Errorf("the pretty line lacks the start text:\n%s", buf.String())
+	}
+}
+
 func TestStoryConflict(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)

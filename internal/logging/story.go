@@ -216,6 +216,17 @@ func (r *ConsoleReporter) StoryTaskHeader(id, repo string, n, total int) {
 	fmt.Fprintf(r.Out, "\n%s\n", line)
 }
 
+// StoryTaskStarted is the one line of a task started beside others, whose output goes to a log
+// file instead of the console: "▶ RF02 · gateway · 2/6 · log <path>".
+func (r *ConsoleReporter) StoryTaskStarted(id, repo string, n, total int, log string) {
+	r.stopSpin()
+	line := fmt.Sprintf("▶ %s · %s · %d/%d · log %s", id, repo, n, total, log)
+	if r.Pretty {
+		line = r.st().bold(r.st().accent(line))
+	}
+	fmt.Fprintf(r.Out, "%s\n", line)
+}
+
 // StoryResume says that the run of a failed or stopped task is continued instead of a new one
 // being started.
 func (r *ConsoleReporter) StoryResume(id, runID string) {

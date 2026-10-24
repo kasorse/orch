@@ -26,6 +26,39 @@ func TestStoryConfig_Defaults(t *testing.T) {
 	}
 }
 
+// story.max_parallel is 1 to 8 and defaults to 1.
+func TestStoryConfig_MaxParallel(t *testing.T) {
+	cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Story.MaxParallel != 1 {
+		t.Errorf("default max_parallel = %d, want 1", cfg.Story.MaxParallel)
+	}
+	for _, n := range []string{"1", "8"} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n  max_parallel: "+n+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := validConfig()
+		valid.Story = cfg.Story
+		if err := Validate(valid); err != nil {
+			t.Errorf("max_parallel %s: %v", n, err)
+		}
+	}
+	for _, n := range []string{"0", "9", "-1"} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n  max_parallel: "+n+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		invalid := validConfig()
+		invalid.Story = cfg.Story
+		if err := Validate(invalid); err == nil || !strings.Contains(err.Error(), "story.max_parallel must be between 1 and 8") {
+			t.Errorf("max_parallel %s: err = %v, want a config error", n, err)
+		}
+	}
+}
+
 func TestStoryConfig_AbsentIsNil(t *testing.T) {
 	cfg, err := loadStoryConfig(t, "")
 	if err != nil {

@@ -15,11 +15,17 @@ const (
 	DefaultStoryMaxServices = 5
 	DefaultStorySpecDir     = "specs"
 	DefaultStoryMaxTasks    = 12
+	// DefaultStoryMaxParallel is one slot: the tasks run one at a time.
+	DefaultStoryMaxParallel = 1
 
 	minStoryMaxServices = 1
 	maxStoryMaxServices = 20
 	minStoryMaxTasks    = 2
 	maxStoryMaxTasks    = 30
+
+	// MinStoryMaxParallel and MaxStoryMaxParallel bound story.max_parallel and story run --parallel.
+	MinStoryMaxParallel = 1
+	MaxStoryMaxParallel = 8
 )
 
 // StoryConfig is the story section. Absent keys take their defaults; an explicit 0 stays 0 and
@@ -32,6 +38,8 @@ type StoryConfig struct {
 	// SpecDir is where the spec of a story is written, relative to the story home.
 	SpecDir  string
 	MaxTasks int
+	// MaxParallel is how many ready tasks story run runs at once.
+	MaxParallel int
 	// MaxCostUSD bounds the whole story, every call and run; nil means no budget.
 	MaxCostUSD *float64
 	// JiraIssueTypes are the Jira issue types run --jira refuses in favour of story plan.
@@ -45,6 +53,7 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxServices    *int     `yaml:"max_services"`
 		SpecDir        *string  `yaml:"spec_dir"`
 		MaxTasks       *int     `yaml:"max_tasks"`
+		MaxParallel    *int     `yaml:"max_parallel"`
 		MaxCostUSD     *float64 `yaml:"max_cost_usd"`
 		JiraIssueTypes []string `yaml:"jira_issue_types"`
 	}
@@ -56,6 +65,7 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxServices:    DefaultStoryMaxServices,
 		SpecDir:        DefaultStorySpecDir,
 		MaxTasks:       DefaultStoryMaxTasks,
+		MaxParallel:    DefaultStoryMaxParallel,
 		MaxCostUSD:     raw.MaxCostUSD,
 		JiraIssueTypes: raw.JiraIssueTypes,
 	}
@@ -67,6 +77,9 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 	if raw.MaxTasks != nil {
 		s.MaxTasks = *raw.MaxTasks
+	}
+	if raw.MaxParallel != nil {
+		s.MaxParallel = *raw.MaxParallel
 	}
 	return nil
 }
@@ -125,6 +138,10 @@ func validateStory(s StoryConfig) []string {
 	if s.MaxTasks < minStoryMaxTasks || s.MaxTasks > maxStoryMaxTasks {
 		problems = append(problems, fmt.Sprintf("story.max_tasks must be between %d and %d, got %d",
 			minStoryMaxTasks, maxStoryMaxTasks, s.MaxTasks))
+	}
+	if s.MaxParallel < MinStoryMaxParallel || s.MaxParallel > MaxStoryMaxParallel {
+		problems = append(problems, fmt.Sprintf("story.max_parallel must be between %d and %d, got %d",
+			MinStoryMaxParallel, MaxStoryMaxParallel, s.MaxParallel))
 	}
 	if v := s.MaxCostUSD; v != nil && (*v <= 0 || math.IsNaN(*v) || math.IsInf(*v, 0)) {
 		problems = append(problems, fmt.Sprintf("story.max_cost_usd must be positive and finite, got %v", *v))

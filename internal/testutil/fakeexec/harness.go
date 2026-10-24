@@ -53,7 +53,17 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_SLEEP_ACTION / FAKE_SLEEP_SECONDS: if FAKE_SLEEP_ACTION matches the
 //     resolved action (including "translate" and "decide-*"), the script sleeps for FAKE_SLEEP_SECONDS
 //     (default 1) before doing anything else - simulates a hung provider call for
-//     timeout scenarios.
+//     timeout scenarios. With FAKE_SLEEP_UNTIL_FILE set, the sleep ends early once that path
+//     exists, so a test can let a call go on at a moment of its choosing.
+//   - FAKE_SLEEP_BRANCH / FAKE_FAIL_BRANCH: if set, FAKE_SLEEP_ACTION (FAKE_FAIL_ACTION)
+//     applies only to a call whose working directory has this branch checked out (a story
+//     task's worktree: story/<slug>/<ID>), so two tasks that run at once can behave differently.
+//   - FAKE_RENDEZVOUS_DIR /FAKE_RENDEZVOUS_ACTION / FAKE_RENDEZVOUS_COUNT: if the resolved
+//     action is FAKE_RENDEZVOUS_ACTION, the call creates a file named by its process ID in
+//     FAKE_RENDEZVOUS_DIR and waits until FAKE_RENDEZVOUS_COUNT (default 2) files are there,
+//     at most 30 seconds, then fails: calls that run at the same time meet, calls that run one
+//     after the other do not - proof that tasks ran in parallel. The meeting comes before
+//     FAKE_SLEEP_ACTION's sleep.
 //   - FAKE_PROMPTS_DIR: if set, the prompt of each call is saved to
 //     <dir>/<action>.txt (the last call of an action wins), so tests can assert what
 //     text a step was given. With FAKE_STATE_DIR also set, it is saved to
@@ -182,11 +192,43 @@ fi
 if [ -n "${FAKE_CWD_DIR:-}" ]; then
   pwd -P > "$FAKE_CWD_DIR/$action.cwd"
 fi
-if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
-  sleep "${FAKE_SLEEP_SECONDS:-1}"
+current_branch=""
+if [ -n "${FAKE_SLEEP_BRANCH:-}" ] || [ -n "${FAKE_FAIL_BRANCH:-}" ]; then
+  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+fi
+sleep_ok=1
+if [ -n "${FAKE_SLEEP_BRANCH:-}" ] && [ "$current_branch" != "$FAKE_SLEEP_BRANCH" ]; then
+  sleep_ok=0
+fi
+fail_ok=1
+if [ -n "${FAKE_FAIL_BRANCH:-}" ] && [ "$current_branch" != "$FAKE_FAIL_BRANCH" ]; then
+  fail_ok=0
+fi
+if [ -n "${FAKE_RENDEZVOUS_DIR:-}" ] && [ "${FAKE_RENDEZVOUS_ACTION:-}" = "$action" ]; then
+  : > "$FAKE_RENDEZVOUS_DIR/$$"
+  waited=0
+  while [ "$(ls "$FAKE_RENDEZVOUS_DIR" | wc -l)" -lt "${FAKE_RENDEZVOUS_COUNT:-2}" ]; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 150 ]; then
+      echo "fakeexec: the other calls did not arrive in 30 seconds" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+fi
+if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ] && [ "$sleep_ok" = 1 ]; then
+  if [ -n "${FAKE_SLEEP_UNTIL_FILE:-}" ]; then
+    waited=0
+    while [ ! -e "$FAKE_SLEEP_UNTIL_FILE" ] && [ "$waited" -lt $(( ${FAKE_SLEEP_SECONDS:-1} * 5 )) ]; do
+      waited=$((waited + 1))
+      sleep 0.2
+    done
+  else
+    sleep "${FAKE_SLEEP_SECONDS:-1}"
+  fi
 fi
 
-if [ -n "${FAKE_FAIL_ACTION:-}" ] && [ "$FAKE_FAIL_ACTION" = "$action" ]; then
+if [ -n "${FAKE_FAIL_ACTION:-}" ] && [ "$FAKE_FAIL_ACTION" = "$action" ] && [ "$fail_ok" = 1 ]; then
   if [ -n "${FAKE_FAIL_STDERR:-}" ]; then
     printf '%s\n' "$FAKE_FAIL_STDERR" >&2
   fi
