@@ -43,6 +43,10 @@ func (b ClarifyBy) Valid() bool {
 	return b == ClarifyByOperator || b == ClarifyByDocs || b == ClarifyByAssumption
 }
 
+// FailureTaskNeedsInput is the failure_reason of a run that stopped because the task stayed unclear
+// (specs/clarify, Approach §4). Such a run has no decision and no workflow, and resume refuses it.
+const FailureTaskNeedsInput = "task needs input"
+
 // Bounds of a Clarification, enforced when run.json is read back. A clarify answer is cut to
 // the same numbers before it gets here.
 const (
@@ -196,6 +200,26 @@ func (c *Clarification) Open() []ClarifyPoint {
 		}
 	}
 	return open
+}
+
+// NeedsInputText is what the console says when the task stays unclear: the last P(clear) against
+// the threshold and the points no round answered (specs/clarify, Approach §4).
+func (c *Clarification) NeedsInputText() string {
+	if c == nil || len(c.Checks) == 0 {
+		return "The task is not clear enough."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "The task is not clear enough: P(clear) %.2f < %.2f.", c.Checks[len(c.Checks)-1], c.Threshold)
+	if open := c.Open(); len(open) > 0 {
+		b.WriteString("\nOpen points:")
+		for _, p := range open {
+			b.WriteString("\n  - " + oneLine(p.Question))
+		}
+	} else {
+		b.WriteString("\nNo point is left open, but the task is still rated unclear.")
+	}
+	b.WriteString("\n\nAdd what is missing to the task and start a new run.")
+	return b.String()
 }
 
 // Render is the clarification as text, the one rendering the stage prompts, the re-check's

@@ -531,8 +531,8 @@ func TestScopeAnswerChangesNothingButItself(t *testing.T) {
 	}
 }
 
-// The pre-check's P(clear) is compared with the threshold and recorded; nothing else follows
-// from it yet (specs/clarify): the run is classified whatever it is, with no extra provider call.
+// A task the pre-check rates at or above the threshold is classified with no extra provider call
+// and no clarify step; the check is recorded.
 func TestClassify_RecordsTheClarityCheck(t *testing.T) {
 	for _, tt := range []struct {
 		pClear float64
@@ -540,10 +540,12 @@ func TestClassify_RecordsTheClarityCheck(t *testing.T) {
 	}{
 		{0.95, domain.ClarityClear},
 		{0.80, domain.ClarityClear}, // inclusive
-		{0.79, domain.ClarityUnclear},
-		{0.05, domain.ClarityUnclear},
+		// With the clarify step off the question is recorded and the run goes on whatever it is.
+		{0.79, domain.ClarityDisabled},
+		{0.05, domain.ClarityDisabled},
 	} {
 		f := newFixture(0.9)
+		f.svc.ClarifyDisabled = tt.status == domain.ClarityDisabled
 		f.provider.depth.PClear = tt.pClear
 		res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
 		if err != nil {

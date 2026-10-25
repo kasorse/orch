@@ -340,6 +340,44 @@ func TestEngine_BudgetCountsAResumedRunsHistory(t *testing.T) {
 	}
 }
 
+// The clarify step and the clarity re-checks are paid from the same budget (specs/clarify): when
+// they used it up, no step runs.
+func TestEngine_BudgetCountsTheClarifyCalls(t *testing.T) {
+	exec := budgetExecutor(domain.Usage{CostUSD: 1})
+	run := newRun(budgetWorkflow())
+	engine := &Engine{
+		Executor:      exec,
+		Limits:        domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 2},
+		DecisionCalls: []domain.Usage{{CostUSD: 1.5}, {CostUSD: 0.5}},
+	}
+
+	err := engine.Run(context.Background(), run)
+
+	var limitErr *apperr.LimitExceededError
+	if !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	if want := "budget exceeded: $2.00 of $2.00"; run.FailureReason != want {
+		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
+	}
+	if len(exec.calls) != 0 {
+		t.Errorf("expected no step to run, got %v", exec.calls)
+	}
+
+	// Under the budget, they still count: the first step overshoots it and the second never starts.
+	exec = budgetExecutor(domain.Usage{CostUSD: 1})
+	run = newRun(budgetWorkflow())
+	engine = &Engine{
+		Executor:      exec,
+		Limits:        domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 2},
+		DecisionCalls: []domain.Usage{{CostUSD: 1.5}},
+	}
+	if err := engine.Run(context.Background(), run); !errors.As(err, &limitErr) {
+		t.Fatalf("expected *apperr.LimitExceededError, got %T: %v", err, err)
+	}
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch})
+}
+
 func TestEngine_HardErrorEndsRunImmediately(t *testing.T) {
 	wf := domain.Workflow{Steps: []domain.Step{
 		{Action: domain.ActionImplement}, {Action: domain.ActionReview},

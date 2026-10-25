@@ -112,12 +112,12 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 	out.ApprovalRequired = len(ManualApprovalMatches(LastImplementPathRules(run))) > 0
 
 	if trace != nil {
-		// A manual decision asked nothing but the clarity question (run --stage), so only that
-		// call is counted.
+		// A manual decision asked nothing but the clarity question and the clarify step
+		// (run --stage), so only those calls are counted.
 		if trace.Usage != nil {
 			calls := trace.Usage.Calls()
 			if trace.Source == DecisionSourceManual {
-				calls = trace.Usage.ClarityRecheck
+				calls = trace.Usage.ClarifyCalls()
 			}
 			for _, u := range calls {
 				out.Usage.Usage.Add(u)

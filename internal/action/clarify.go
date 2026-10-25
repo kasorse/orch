@@ -1,6 +1,7 @@
 package action
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider"
 )
 
 // The clarify step's prompt and answer (specs/clarify, Approach §3, Contracts: Clarify answer).
@@ -112,6 +114,34 @@ func clarifyRules(rules []string) string {
 		}
 	}
 	return b.String()
+}
+
+// ClarifyResult is what a clarify call gave, as far as it got: the prompt as sent, the raw output
+// (also when it is refused, for the run's logs) and the usage (nil when the CLI reported none or
+// the call did not run).
+type ClarifyResult struct {
+	Answer ClarifyAnswer
+	Prompt string
+	Output string
+	Usage  *domain.Usage
+}
+
+// Clarify makes the one call of the clarify step: the prompt of in on call's route with
+// domain.AuthorityNone, passed explicitly like the translator's and never through AuthorityFor, so
+// the model has no tools. n (from 1) numbers its logs, logs/clarify-<n>.*. Any failure, a
+// credential problem included, is the caller's to turn into a failed run: an unclear task never
+// goes on unclarified. An answer that holds no JSON object or breaks a rule is an
+// *apperr.InvalidResponseError naming the field; the raw output is in the result either way.
+func Clarify(ctx context.Context, call PlanningCall, in ClarifyPromptInput, n int) (ClarifyResult, error) {
+	res := ClarifyResult{Prompt: BuildClarifyPrompt(in)}
+	kind := planningKind{action: "clarify", log: fmt.Sprintf("clarify-%d", n), timeout: "clarify.timeout"}
+	var err error
+	res.Output, res.Usage, err = call.run(ctx, kind, provider.Request{Prompt: res.Prompt, Authority: domain.AuthorityNone})
+	if err != nil {
+		return res, err
+	}
+	res.Answer, err = ParseClarify(res.Output, in.Mode)
+	return res, err
 }
 
 // ClarifyBasis says what a point's answer rests on.

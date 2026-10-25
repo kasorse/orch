@@ -34,6 +34,9 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("task.source: %w", err)
 		}
 	}
+	if err := run.Task.Clarification.Validate(); err != nil {
+		return fmt.Errorf("task.clarification: %w", err)
+	}
 	if len(run.Task.Acceptance) > 0 {
 		if run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceStory {
 			return fmt.Errorf("task.acceptance on a task that is not a story task")
@@ -561,13 +564,22 @@ func validateDecisionUsage(u *domain.DecisionUsage) error {
 	calls := []struct {
 		name  string
 		usage *domain.Usage
-	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification}}
+	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification},
+		{"translation_clarified", u.TranslationClarified}}
 	for _, c := range calls {
 		if c.usage == nil {
 			continue
 		}
 		if err := c.usage.Validate(); err != nil {
 			return fmt.Errorf("usage.%s: %w", c.name, err)
+		}
+	}
+	if n := len(u.Clarify); n > 1 {
+		return fmt.Errorf("usage.clarify: %d entries, at most 1", n)
+	}
+	for i, c := range u.Clarify {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("usage.clarify[%d]: %w", i, err)
 		}
 	}
 	if n := len(u.ClarityRecheck); n > domain.MaxClarityChecks {

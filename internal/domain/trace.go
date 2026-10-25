@@ -171,24 +171,38 @@ type DecisionUsage struct {
 	Translation    *Usage `json:"translation,omitempty"`
 	ContextDepth   *Usage `json:"context_depth,omitempty"`
 	Classification *Usage `json:"classification,omitempty"`
+	// TranslationClarified is the second translation, of the request followed by its
+	// clarification (specs/clarify), made only after a clarification was added.
+	TranslationClarified *Usage `json:"translation_clarified,omitempty"`
+	// Clarify is the usage of the clarify step's call that reported any (at most one per run).
+	Clarify []Usage `json:"clarify,omitempty"`
 	// ClarityRecheck is the usage of each clarity re-check that reported any, in order.
 	ClarityRecheck []Usage `json:"clarity_recheck,omitempty"`
 }
 
 // Empty reports whether no round recorded usage.
 func (u DecisionUsage) Empty() bool {
-	return u.Translation == nil && u.ContextDepth == nil && u.Classification == nil && len(u.ClarityRecheck) == 0
+	return u.Translation == nil && u.ContextDepth == nil && u.Classification == nil &&
+		u.TranslationClarified == nil && len(u.Clarify) == 0 && len(u.ClarityRecheck) == 0
 }
 
-// Calls returns the usage of every decision call that reported any, in the order they ran.
+// Calls returns the usage of every decision call that reported any: the rounds of the decision
+// proper, then the clarify step's call and the clarity re-checks.
 func (u DecisionUsage) Calls() []Usage {
 	var out []Usage
-	for _, c := range []*Usage{u.Translation, u.ContextDepth, u.Classification} {
+	for _, c := range []*Usage{u.Translation, u.ContextDepth, u.Classification, u.TranslationClarified} {
 		if c != nil {
 			out = append(out, *c)
 		}
 	}
+	out = append(out, u.Clarify...)
 	return append(out, u.ClarityRecheck...)
+}
+
+// ClarifyCalls returns the usage of the calls a manual decision (run --stage) makes: the clarify
+// step's and the clarity re-checks. They are also the decision calls limits.max_cost_usd counts.
+func (u DecisionUsage) ClarifyCalls() []Usage {
+	return append(append([]Usage(nil), u.Clarify...), u.ClarityRecheck...)
 }
 
 // ManualTrace is decision.json for stages the operator named with --stage

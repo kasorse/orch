@@ -152,7 +152,7 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "fix Add in fixture.go, check the env settings too")
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j, withClarify("claude")), "run", "fix Add in fixture.go, check the env settings too")
 	mustSucceed(t, stdout, stderr, err)
 
 	for i, body := range j.Bodies() {
@@ -465,6 +465,7 @@ func TestDecision_LLMProvider(t *testing.T) {
 
 	opts := defaultConfigOptions()
 	opts.providers.Decision = "claude"
+	opts.providers.Clarify = "claude"
 	stdout, stderr, err := runOrchestrator(t, repoDir, writeConfig(t, t.TempDir(), opts), "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 	assertAuthorities(t, repoDir, argsDir, stdout)

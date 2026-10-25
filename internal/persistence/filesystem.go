@@ -147,6 +147,31 @@ func (s *Store) SaveArtifact(runID string, stepIndex int, actionType domain.Acti
 	return relPath, nil
 }
 
+// ClarifyArtifactRelPath is where SaveClarifyArtifact writes the artifact of the clarify call
+// number n (from 1), relative to the run directory. A call outside the workflow's steps has no
+// step index, as with its logs (AppendCallLog).
+func ClarifyArtifactRelPath(n int) string {
+	return filepath.Join("artifacts", fmt.Sprintf("clarify-%d.json", n))
+}
+
+// SaveClarifyArtifact writes artifacts/clarify-<n>.json: the clarify call's parsed answer and what
+// it was given, with the prompt as sent as the last field. It is a record for the operator; nothing
+// reads it back, so it is not a resume input.
+func (s *Store) SaveClarifyArtifact(runID string, n int, artifact any, prompt string) (string, error) {
+	if !isRunID(runID) {
+		return "", fmt.Errorf("save clarify artifact: %q is not a run ID", runID)
+	}
+	relPath := ClarifyArtifactRelPath(n)
+	data, err := marshalArtifact(artifact, prompt)
+	if err == nil {
+		err = writeFileAtomic(filepath.Join(s.runDir(runID), relPath), data, 0o644)
+	}
+	if err != nil {
+		return "", fmt.Errorf("save clarify artifact: %w", err)
+	}
+	return relPath, nil
+}
+
 // artifactPromptKey is the field SaveArtifact adds and ReadArtifact removes.
 const artifactPromptKey = "prompt"
 

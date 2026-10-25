@@ -89,6 +89,9 @@ type Engine struct {
 	Gate     Gate
 	Persist  PersistFunc
 	Limits   domain.LimitsView
+	// DecisionCalls is the usage of the calls made before the workflow that limits.max_cost_usd
+	// counts with the steps: the clarify step's and the clarity re-checks' (specs/clarify).
+	DecisionCalls []domain.Usage
 }
 
 // Run drives the workflow state machine to completion, failure, or a limit being hit.
@@ -154,7 +157,7 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 
 		// The budget is read before the gate, so the user is not asked to approve a step that
 		// will not run. The sum comes from the persisted executions, so a resume counts it all.
-		if reason := budgetReason(run, e.Limits); reason != "" {
+		if reason := budgetReason(run, e.DecisionCalls, e.Limits); reason != "" {
 			run.Status = domain.RunStopped
 			run.FailureReason = reason
 			e.persist(run)
@@ -286,29 +289,34 @@ func (e *Engine) Run(ctx context.Context, run *domain.Run) error {
 	}
 }
 
-// spentUSD sums the cost the run's steps reported, and counts the calls that ended before the
-// CLI's final report: those record no cost, so the sum is then only a lower bound. An extra
-// reviewer's calls are already in its step's usage.
-func spentUSD(run *domain.Run) (spent float64, partial int) {
-	for _, exec := range run.Executions {
-		if exec.Usage == nil {
-			continue
-		}
-		spent += exec.Usage.CostUSD
-		if exec.Usage.Partial {
+// spentUSD sums the cost the run's steps and the decision calls the budget counts reported, and
+// counts the calls that ended before the CLI's final report: those record no cost, so the sum is
+// then only a lower bound. An extra reviewer's calls are already in its step's usage.
+func spentUSD(run *domain.Run, decisionCalls []domain.Usage) (spent float64, partial int) {
+	add := func(u domain.Usage) {
+		spent += u.CostUSD
+		if u.Partial {
 			partial++
+		}
+	}
+	for _, u := range decisionCalls {
+		add(u)
+	}
+	for _, exec := range run.Executions {
+		if exec.Usage != nil {
+			add(*exec.Usage)
 		}
 	}
 	return spent, partial
 }
 
-// budgetReason is the failure reason of a run whose steps have cost limits.MaxCostUSD or more,
-// "" while it is under budget or has none (0).
-func budgetReason(run *domain.Run, limits domain.LimitsView) string {
+// budgetReason is the failure reason of a run whose steps and counted decision calls have cost
+// limits.MaxCostUSD or more, "" while it is under budget or has none (0).
+func budgetReason(run *domain.Run, decisionCalls []domain.Usage, limits domain.LimitsView) string {
 	if limits.MaxCostUSD <= 0 {
 		return ""
 	}
-	spent, partial := spentUSD(run)
+	spent, partial := spentUSD(run, decisionCalls)
 	if spent < limits.MaxCostUSD {
 		return ""
 	}

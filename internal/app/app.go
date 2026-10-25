@@ -1150,13 +1150,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
-		out, err = decideManual(decideCtx, cfg, registry, store, run.ID, stages, task.Description, reporter, stream, stderr)
+		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
+			reporter, prompter, interactive, stream, stderr)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
 			reporter, prompter, interactive, storyIn != nil, stream, stderr)
 	}
 	if err != nil {
-		return failRun(store, run, err)
+		return stopUndecided(store, run, out, err)
 	}
 
 	wf, err := workflow.Build(out.decision.Stages)
@@ -1519,6 +1520,11 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		Observer: observer,
 		Persist:  store.SaveRun,
 		Limits:   limitsView(*cfg),
+	}
+	// The clarify step and the clarity re-checks are paid from limits.max_cost_usd too
+	// (specs/clarify). They are read from decision.json, so a resume counts them as well.
+	if trace := loadTrace(store, run.ID); trace != nil && trace.Usage != nil {
+		engine.DecisionCalls = trace.Usage.ClarifyCalls()
 	}
 
 	if mode == domain.ModeManual {
@@ -1888,12 +1894,18 @@ func failRun(store *persistence.Store, run *domain.Run, err error) error {
 // loader refuses) the outcome leaves the decision calls out rather than failing a run that
 // already ended.
 func writeOutcome(store *persistence.Store, run *domain.Run) error {
+	return writeOutcomeWith(store, run, loadTrace(store, run.ID))
+}
+
+// writeOutcomeWith is writeOutcome with the decision trace given: a run that ended before its
+// decision.json was written passes the trace its decision step had so far, so the decision calls
+// it made are counted in its outcome all the same.
+func writeOutcomeWith(store *persistence.Store, run *domain.Run, trace *domain.DecisionTrace) error {
 	switch run.Status {
 	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
 	default:
 		return nil
 	}
-	trace := loadTrace(store, run.ID)
 	outcome := domain.ComputeOutcome(*run, trace)
 	run.Outcome = &outcome
 	if err := store.SaveRun(run); err != nil {

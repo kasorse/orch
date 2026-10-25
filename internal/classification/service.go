@@ -45,6 +45,12 @@ type Service struct {
 	// AskOnFailure is decision.on_failure == ask: a provider failure leads to the
 	// manual choice. Otherwise the failure is returned.
 	AskOnFailure bool
+	// Clarify is the clarify loop an unclear task goes through (specs/clarify). It may be nil only
+	// with ClarifyDisabled: a task below the threshold then has no step to go to.
+	Clarify *ClarifyLoop
+	// ClarifyDisabled is clarify.enabled: false: the clarity question is asked and recorded, and
+	// the run goes on whatever P(clear) is.
+	ClarifyDisabled bool
 }
 
 // Request is one classification.
@@ -86,8 +92,12 @@ type Result struct {
 	Depth          *domain.ContextDepthDecision
 	Classification *domain.TaskClassification
 	// Clarity is the trace of the clarity checks (the pre-check's P(clear) against the
-	// threshold); nil when the pre-check failed and for a story task.
+	// threshold, then each re-check's); nil when the pre-check failed and for a story task.
 	Clarity *domain.ClarityTrace
+	// Clarification is what the clarify step agreed about an unclear task, run.json's
+	// task.clarification; nil when the task was clear at the first check, the step was off, and
+	// when a re-check failed. It is set also when the result comes with a *NeedsInputError.
+	Clarification *domain.Clarification
 	// Project is exactly what was sent to the provider; nil for depth none or a
 	// failed collection.
 	Project *domain.ProjectContext
@@ -125,20 +135,54 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	}
 	res.Depth = &depth
 	selectedDepth := policy.SelectContextDepth(depth, s.Policy)
-	// P(clear) came in the same call. It is recorded and decides nothing yet (specs/clarify);
-	// a story task has its plan in the task file and is not asked.
+
+	// The text the decision provider and the Context Manager see: the request, and after a
+	// clarification the request followed by the rendered clarification.
+	text, query, queryEN := tr.Text, req.Text, ""
+	if tr.Translated {
+		queryEN = tr.Text
+	}
+
+	// P(clear) came in the same call. A story task has its plan in the task file and is not asked.
 	if !req.StoryTask {
 		clarity := policy.Clarity([]float64{depth.PClear}, s.Policy)
 		res.Clarity = &clarity
+		switch {
+		case s.ClarifyDisabled:
+			// res.Clarity points at clarity.
+			clarity.Status, clarity.Reason = domain.ClarityDisabled, "clarify.enabled is false"
+		case clarity.Status == domain.ClarityUnclear:
+			recheckErr, err := s.clarify(ctx, req, &res, tr)
+			if err != nil {
+				return res, err
+			}
+			if recheckErr != nil {
+				return s.manual(ctx, req, res, recheckErr)
+			}
+			if rendered := res.Clarification.Render(); rendered != "" {
+				// The decision is made on the request and what was agreed about it, translated again
+				// when the translator applies to the whole.
+				query = req.Text + "\n\n" + rendered
+				start = time.Now()
+				tr2, err := s.Translator.Prepare(ctx, req.RunID, query)
+				res.Timings.Translation += time.Since(start)
+				res.Usage.TranslationClarified = tr2.Usage
+				if err != nil {
+					return res, err
+				}
+				tr2.Original = req.Text
+				res.Translation = tr2
+				text, queryEN = tr2.Text, ""
+				if tr2.Translated {
+					queryEN = tr2.Text
+				}
+			}
+		}
 	}
 
 	if selectedDepth == domain.ContextDepthProject {
-		requestEN := ""
-		if tr.Translated {
-			requestEN = tr.Text
-		}
 		start = time.Now()
-		project, err := s.Context.Build(ctx, req.Text, requestEN)
+		project, err := s.Context.Build(ctx, query, queryEN)
 		res.Timings.Context = time.Since(start)
 		switch {
 		case ctx.Err() != nil:
@@ -154,7 +198,7 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 
 	start = time.Now()
 	tc, err := s.Decisions.Classify(ctx, domain.ClassificationInput{
-		Request:        tr.Text,
+		Request:        text,
 		ContextDepth:   selectedDepth,
 		ContextLimited: res.ContextLimited,
 		Project:        res.Project,
@@ -176,6 +220,40 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
+// clarify sends an unclear task through the clarify loop and records what it did on res: the
+// usage, the operator's time, the clarity trace with every check, and the clarification. recheckErr
+// is a re-check that failed, which takes the provider-failure path; err ends the run - a failed
+// clarify call, a cancellation, and a *NeedsInputError when the task stays unclear.
+func (s *Service) clarify(ctx context.Context, req Request, res *Result, tr translate.Result) (recheckErr, err error) {
+	if s.Clarify == nil {
+		return nil, &apperr.WorkflowError{Msg: "the task is unclear but no clarify step is configured"}
+	}
+	requestEN := ""
+	if tr.Translated {
+		requestEN = tr.Text
+	}
+	out, err := s.Clarify.Run(ctx, ClarifyInput{
+		RunID: req.RunID, Request: req.Text, RequestEN: requestEN, CheckText: tr.Text,
+		First: res.Depth.PClear, UserCtx: req.UserCtx,
+	})
+	res.Usage.Clarify = out.Usage.Clarify
+	res.Usage.ClarityRecheck = out.Usage.ClarityRecheck
+	res.Timings.ManualChoice += out.Operator
+	if err != nil {
+		return nil, err
+	}
+	clarity := policy.Clarity(out.Checks, s.Policy)
+	res.Clarity = &clarity
+	if out.RecheckErr != nil {
+		return out.RecheckErr, nil
+	}
+	res.Clarification = out.Clarification
+	if out.NeedsInput {
+		return nil, &NeedsInputError{Clarification: out.Clarification}
+	}
+	return nil, nil
+}
+
 // manual handles a provider failure: the manual choice when allowed, else the error.
 // Cancellation and an authentication failure never offer a choice - the user already said stop - and neither does
 // the run's own deadline expiring: there would be no time left to run the stages.
@@ -194,7 +272,8 @@ func (s *Service) manual(ctx context.Context, req Request, res Result, cause err
 	}
 	start := time.Now()
 	choice, err := s.Chooser.Choose(userCtx, cause, res.Project, s.Policy)
-	res.Timings.ManualChoice = time.Since(start)
+	// The operator's time answering the clarify step, if any, is already in it.
+	res.Timings.ManualChoice += time.Since(start)
 	if err != nil {
 		return res, err
 	}

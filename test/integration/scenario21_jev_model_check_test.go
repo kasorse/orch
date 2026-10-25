@@ -136,7 +136,7 @@ func TestScenario21_StageRunAsksOnlyTheClarityQuestion(t *testing.T) {
 	decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "investigation", "explain Add")
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j, withClarify("claude")), "run", "--stage", "investigation", "explain Add")
 	mustSucceed(t, stdout, stderr, err)
 	if bodies := j.Bodies(); j.ModelRequests() != 0 || len(bodies) != 1 || !clarityOnly(bodies[0]) {
 		t.Errorf("run --stage contacted Jev: %d model requests, decision requests %v; want the clarity question alone", j.ModelRequests(), bodies)
@@ -151,8 +151,9 @@ func TestScenario21_StageRunAsksOnlyTheClarityQuestion(t *testing.T) {
 	}
 }
 
-// An unclear task changes nothing in a --stage run: the stages are the operator's.
-func TestScenario21_StageRunWithAnUnclearTaskRunsAsBefore(t *testing.T) {
+// With the clarify step off, an unclear task changes nothing in a --stage run: the stages are the
+// operator's, and the trace says the check was disabled.
+func TestScenario21_StageRunWithAnUnclearTaskAndClarifyOffRunsAsBefore(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	script := scriptBugfixMedium()
@@ -169,7 +170,7 @@ func TestScenario21_StageRunWithAnUnclearTaskRunsAsBefore(t *testing.T) {
 	if d.Source != "manual" || !equalStrings(d.Workflow, []string{"investigate"}) {
 		t.Errorf("decision = %+v", d)
 	}
-	if d.Clarity == nil || d.Clarity.Status != "unclear" || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.42 {
-		t.Errorf("decision.json clarity = %+v, want one unclear check of 0.42", d.Clarity)
+	if d.Clarity == nil || d.Clarity.Status != "disabled" || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.42 {
+		t.Errorf("decision.json clarity = %+v, want one disabled check of 0.42", d.Clarity)
 	}
 }

@@ -331,7 +331,8 @@ type LimitsConfig struct {
 	// explicit false still means false; read it through StopsWithoutProgress.
 	StopWithoutProgress *bool `yaml:"stop_without_progress"`
 	// MaxCostUSD is the budget of the workflow steps (specs/governance/SPEC.md §5): optional,
-	// nil means no budget. Only the steps' cost counts, not the decision phase's.
+	// nil means no budget. The steps' cost counts, and of the decision phase only the clarify
+	// step and the clarity re-checks (specs/clarify).
 	MaxCostUSD *float64 `yaml:"max_cost_usd"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
