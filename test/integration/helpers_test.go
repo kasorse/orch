@@ -26,6 +26,9 @@ type providerSet struct {
 	Research, Investigate, Implement, Review, Translation string
 	// Decision is "jev" or a CLI provider (TASKS.md T22).
 	Decision string
+	// Clarify is the provider of the clarify step; "" writes `clarify: {enabled: false}`, which
+	// keeps every scenario that is not about clarifying as it was.
+	Clarify string
 }
 
 func defaultProviderSet() providerSet {
@@ -254,6 +257,10 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	if isolation == "" {
 		isolation = "inplace"
 	}
+	clarifyYAML := "clarify: {enabled: false}\n"
+	if p.Clarify != "" {
+		clarifyYAML = fmt.Sprintf("clarify:\n  provider: %s\n  model: fake\n  timeout: 10s\n", p.Clarify)
+	}
 	content := fmt.Sprintf(`version: 2
 
 decision:
@@ -274,6 +281,7 @@ translation:
   model: fake
   timeout: 10s
 
+%s
 policy:
   context_depth:
     project_threshold: 0.5
@@ -306,7 +314,7 @@ limits:
 execution:
   timeout: %s
   isolation: %s
-%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation,
+%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation, clarifyYAML,
 		opts.pathRulesYAML(), opts.actionsYAML(),
 		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, isolation, opts.extraYAML)
 	content += opts.tailYAML()

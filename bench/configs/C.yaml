@@ -27,6 +27,8 @@ config: |
     model: haiku
     timeout: 60s
 
+  clarify: {enabled: false}
+
   policy:
     context_depth:
       project_threshold: 0.5

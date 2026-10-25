@@ -40,6 +40,7 @@ func validConfig() Config {
 			ProviderModel: ProviderModel{Provider: "claude", Model: "haiku"},
 			Timeout:       60 * time.Second,
 		},
+		Clarify: &ClarifyConfig{Enabled: boolPtr(false)},
 		Policy: PolicyConfig{
 			ContextDepth: ContextDepthPolicyConfig{ProjectThreshold: float64Ptr(0.5)},
 			Clarify:      ClarifyPolicyConfig{Threshold: float64Ptr(0.80)},
@@ -548,6 +549,10 @@ func TestValidate_AllowedModels(t *testing.T) {
 			"actions.investigate: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 		"translator without a model": {func(c *Config) { c.Translation.Model = "" },
 			"translation: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+		"clarify step": {func(c *Config) { c.Clarify = clarifyRoute(); c.Clarify.Model = "tiny" },
+			"clarify: model tiny is not in allowed_models (" + org + ")"},
+		"clarify step without a model": {func(c *Config) { c.Clarify = clarifyRoute(); c.Clarify.Model = "" },
+			"clarify: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := allowedConfig()

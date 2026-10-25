@@ -17,7 +17,7 @@ type AuthorityChecker interface {
 }
 
 // ValidateAuthorities verifies that every configured route - each action, the translator,
-// and an LLM decision provider - is routed to a provider that can enforce the authority
+// the clarify step and an LLM decision provider - is routed to a provider that can enforce the authority
 // that route runs with (specs/permissions/SPEC.md §6.5). It runs right after
 // ValidateDependencies, so a route that would run with authority it cannot enforce stops
 // the run before any AI call. Authority does not depend on the run mode, so this one check
@@ -64,8 +64,8 @@ type authorityRoute struct {
 }
 
 // authorityRoutes lists every provider call the config can make, with the authority it
-// runs under: workflow actions from domain.AuthorityFor, and the translator and an LLM
-// decision provider with AuthorityNone, since they only read the request text.
+// runs under: workflow actions from domain.AuthorityFor, and the translator, the clarify step
+// and an LLM decision provider with AuthorityNone, since they only read the request text.
 func authorityRoutes(cfg Config) []authorityRoute {
 	var routes []authorityRoute
 	for _, pm := range cfg.actionProviderModels() {

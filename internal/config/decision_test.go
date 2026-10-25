@@ -13,6 +13,8 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestValidateDecision_Valid(t *testing.T) {
 	if err := Validate(validConfig()); err != nil {
 		t.Fatalf("expected valid config to pass, got: %v", err)
@@ -361,16 +363,16 @@ func TestValidateDecision_Context(t *testing.T) {
 
 func TestValidateClarifyDocs(t *testing.T) {
 	hundred, ok := 100, 4096
+	off := boolPtr(false)
 	tests := []struct {
 		name    string
 		clarify *ClarifyConfig
 		wantErr string
 	}{
-		{"absent", nil, ""},
-		{"defaults", &ClarifyConfig{}, ""},
-		{"valid", &ClarifyConfig{Docs: []string{"docs/**/*.md"}, MaxBytes: &ok}, ""},
-		{"invalid glob", &ClarifyConfig{Docs: []string{"docs/["}}, "clarify.docs[0]"},
-		{"max_bytes too small", &ClarifyConfig{MaxBytes: &hundred}, "clarify.max_bytes must be between 1024 and 131072, got 100"},
+		{"defaults", &ClarifyConfig{Enabled: off}, ""},
+		{"valid", &ClarifyConfig{Enabled: off, Docs: []string{"docs/**/*.md"}, MaxBytes: &ok}, ""},
+		{"invalid glob", &ClarifyConfig{Enabled: off, Docs: []string{"docs/["}}, "clarify.docs[0]"},
+		{"max_bytes too small", &ClarifyConfig{Enabled: off, MaxBytes: &hundred}, "clarify.max_bytes must be between 1024 and 131072, got 100"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -385,6 +387,66 @@ func TestValidateClarifyDocs(t *testing.T) {
 	var c *ClarifyConfig
 	if g := c.DocGlobs(); len(g) != 1 || g[0] != "**/*.md" || c.InstructionBytes() != 16384 {
 		t.Errorf("defaults = %v, %d", g, c.InstructionBytes())
+	}
+}
+
+// clarifyRoute is an enabled clarify section: a route and a timeout.
+func clarifyRoute() *ClarifyConfig {
+	return &ClarifyConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}, Timeout: 2 * time.Minute}
+}
+
+func TestValidateClarifySection(t *testing.T) {
+	rounds := func(n int) *int { return &n }
+	tests := []struct {
+		name    string
+		clarify func() *ClarifyConfig
+		wantErr string
+	}{
+		{"absent", func() *ClarifyConfig { return nil }, "clarify is required"},
+		{"disabled alone", func() *ClarifyConfig { return &ClarifyConfig{Enabled: boolPtr(false)} }, ""},
+		{"disabled with a route", func() *ClarifyConfig { c := clarifyRoute(); c.Enabled = boolPtr(false); return c }, ""},
+		{"disabled needs no valid route", func() *ClarifyConfig {
+			return &ClarifyConfig{Enabled: boolPtr(false), ProviderModel: ProviderModel{Provider: "openrouter"}}
+		}, ""},
+		{"enabled by default needs a route", func() *ClarifyConfig { return &ClarifyConfig{} }, "clarify.provider is required"},
+		{"enabled explicitly", func() *ClarifyConfig { c := clarifyRoute(); c.Enabled = boolPtr(true); return c }, ""},
+		{"a route", clarifyRoute, ""},
+		{"no model", func() *ClarifyConfig { c := clarifyRoute(); c.Model = ""; return c }, "clarify.model is required"},
+		{"unsupported provider", func() *ClarifyConfig { c := clarifyRoute(); c.Provider = "openrouter"; return c },
+			`clarify.provider "openrouter" is not a supported provider`},
+		{"no timeout", func() *ClarifyConfig { c := clarifyRoute(); c.Timeout = 0; return c }, "clarify.timeout must be a positive duration"},
+		{"unknown effort", func() *ClarifyConfig { c := clarifyRoute(); c.Effort = "extreme"; return c }, "clarify.effort"},
+		{"effort", func() *ClarifyConfig { c := clarifyRoute(); c.Effort = "medium"; return c }, ""},
+		{"max_rounds 0", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(0); return c }, ""},
+		{"max_rounds 5", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(5); return c }, ""},
+		{"max_rounds 6", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(6); return c },
+			"clarify.max_rounds must be between 0 and 5, got 6"},
+		{"max_rounds negative", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(-1); return c },
+			"clarify.max_rounds must be between 0 and 5, got -1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Clarify = tt.clarify()
+			err := Validate(cfg)
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("Validate() = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	var absent *ClarifyConfig
+	if absent.Active() || absent.AdditionRounds() != 2 {
+		t.Errorf("an absent section: Active %t, rounds %d", absent.Active(), absent.AdditionRounds())
+	}
+	if c := clarifyRoute(); !c.Active() || c.AdditionRounds() != 2 {
+		t.Errorf("a route: Active %t, rounds %d", c.Active(), c.AdditionRounds())
+	}
+	if c := (&ClarifyConfig{Enabled: boolPtr(false)}); c.Active() {
+		t.Error("enabled: false is active")
+	}
+	if c := (&ClarifyConfig{MaxRounds: rounds(0)}); c.AdditionRounds() != 0 {
+		t.Errorf("max_rounds 0 reads as %d", c.AdditionRounds())
 	}
 }
 

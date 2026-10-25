@@ -176,6 +176,15 @@ func TestPrompts_Golden(t *testing.T) {
 				GitDiff: goldenDiff, DiffPartial: true,
 			})
 		}},
+		{"clarify_interactive", func() string {
+			return BuildClarifyPrompt(ClarifyPromptInput{Task: goldenClarifyTask, Instructions: goldenInstructions(), Mode: domain.ClarifyInteractive})
+		}},
+		{"clarify_auto", func() string {
+			return BuildClarifyPrompt(ClarifyPromptInput{
+				Task: goldenClarifyTask, Instructions: goldenInstructions(), Mode: domain.ClarifyAuto,
+				Clarification: goldenClarification,
+			})
+		}},
 		{"survey", func() string { return BuildSurveyPrompt(goldenStoryRequest, "billing") }},
 		{"specify", func() string {
 			return BuildSpecifyPrompt(goldenStoryRequest, goldenSurveys(), []string{"gateway", "billing"}, 12)

@@ -43,6 +43,14 @@ func TestScenario456_MissingExecutable(t *testing.T) {
 				return p
 			},
 		},
+		{
+			name:      "missing gemini for the clarify step",
+			installed: []string{"claude", "codex"},
+			missingAction: func(p providerSet) providerSet {
+				p.Clarify = "gemini" // only the clarify step needs gemini
+				return p
+			},
+		},
 	}
 
 	for _, tc := range cases {

@@ -297,20 +297,77 @@ type ContextConfig struct {
 	ExtraDeny []string `yaml:"extra_deny"`
 }
 
-// Defaults and bounds of clarify.docs and clarify.max_bytes.
+// Defaults and bounds of the clarify section.
 const (
 	defaultClarifyMaxBytes = 16384
 	minClarifyMaxBytes     = 1024
 	maxClarifyMaxBytes     = 131072
+	defaultClarifyRounds   = 2
+	maxClarifyRounds       = 5
 )
 
-// ClarifyConfig is the clarify section (specs/clarify). Only the instruction selection is
-// declared so far: the route and the rounds come with the step itself.
+// ClarifyConfig is the clarify section (specs/clarify): whether the clarify step runs, the route
+// of its one call, how many additions the operator may make after a re-check, and which files
+// supply its instructions. The section is required: a route, or `clarify: {enabled: false}`
+// written out. Like TranslationConfig, the route needs a positive timeout, and a nil
+// *ClarifyConfig is a section that is absent.
 type ClarifyConfig struct {
+	// Enabled is a pointer so an absent key (nil, which means true) can be told from false; read
+	// it through Active.
+	Enabled *bool
+	// ProviderModel is the route, with the optional effort; read only while the step is active.
+	ProviderModel
+	// Timeout bounds the clarify call.
+	Timeout time.Duration
 	// Docs are the globs, with "**", over the git-listed files that supply the instructions.
-	Docs []string `yaml:"docs"`
+	Docs []string
 	// MaxBytes caps the rules and excerpts together; nil means the default.
-	MaxBytes *int `yaml:"max_bytes"`
+	MaxBytes *int
+	// MaxRounds is how many additions the operator may make after a re-check, 0 to 5; nil means
+	// the default.
+	MaxRounds *int
+}
+
+func (c *ClarifyConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Enabled   *bool    `yaml:"enabled"`
+		Provider  string   `yaml:"provider"`
+		Model     string   `yaml:"model"`
+		Effort    string   `yaml:"effort"`
+		Timeout   string   `yaml:"timeout"`
+		Docs      []string `yaml:"docs"`
+		MaxBytes  *int     `yaml:"max_bytes"`
+		MaxRounds *int     `yaml:"max_rounds"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	timeout, err := parseDurationField("clarify.timeout", raw.Timeout)
+	if err != nil {
+		return err
+	}
+	*c = ClarifyConfig{
+		Enabled:       raw.Enabled,
+		ProviderModel: ProviderModel{Provider: raw.Provider, Model: raw.Model, Effort: raw.Effort},
+		Timeout:       timeout,
+		Docs:          raw.Docs,
+		MaxBytes:      raw.MaxBytes,
+		MaxRounds:     raw.MaxRounds,
+	}
+	return nil
+}
+
+// Active reports whether the clarify step runs: the section is there and enabled is not false.
+func (c *ClarifyConfig) Active() bool {
+	return c != nil && (c.Enabled == nil || *c.Enabled)
+}
+
+// AdditionRounds returns clarify.max_rounds, 2 when absent.
+func (c *ClarifyConfig) AdditionRounds() int {
+	if c == nil || c.MaxRounds == nil {
+		return defaultClarifyRounds
+	}
+	return *c.MaxRounds
 }
 
 // DocGlobs returns clarify.docs, "**/*.md" when absent.
@@ -331,9 +388,19 @@ func (c *ClarifyConfig) InstructionBytes() int {
 
 func clarifyProblems(c *ClarifyConfig) []string {
 	if c == nil {
-		return nil
+		return []string{"clarify is required: write a route (provider, model, timeout) for the clarify step, " +
+			"or `clarify: {enabled: false}` to turn it off (specs/clarify)"}
 	}
 	var problems []string
+	if c.Active() {
+		problems = append(problems, validateProviderModel("clarify", c.ProviderModel)...)
+		if c.Timeout <= 0 {
+			problems = append(problems, "clarify.timeout must be a positive duration")
+		}
+	}
+	if c.MaxRounds != nil && (*c.MaxRounds < 0 || *c.MaxRounds > maxClarifyRounds) {
+		problems = append(problems, fmt.Sprintf("clarify.max_rounds must be between 0 and %d, got %d", maxClarifyRounds, *c.MaxRounds))
+	}
 	for i, g := range c.Docs {
 		if err := domain.ValidateGlob(g); err != nil {
 			problems = append(problems, fmt.Sprintf("clarify.docs[%d] %q: %v", i, g, err))
@@ -640,10 +707,13 @@ func jevKeyProblems(d DecisionConfig) []string {
 }
 
 // decisionProviderModels lists the CLIs the decision flow calls: translation always
-// (fail-fast must not depend on the request's language), and the decision provider
-// when it is an LLM.
+// (fail-fast must not depend on the request's language), the clarify step when it is on, and the
+// decision provider when it is an LLM.
 func decisionProviderModels(cfg Config) []namedProviderModel {
 	pms := []namedProviderModel{{Action: "translation", ProviderModel: cfg.Translation.ProviderModel}}
+	if cfg.Clarify.Active() {
+		pms = append(pms, namedProviderModel{Action: "clarify", ProviderModel: cfg.Clarify.ProviderModel})
+	}
 	if !cfg.Decision.UsesJev() {
 		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: cfg.Decision.Provider, Model: cfg.Decision.Model}})
 	}

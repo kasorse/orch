@@ -22,6 +22,21 @@ translation:
   model: haiku
   timeout: 60s
 
+# Required: a route, or `clarify: {enabled: false}` written out. A task whose P(clear) is under
+# policy.clarify.threshold (below) goes through one call that has no tools and cannot read the
+# code: it finds what is unclear and answers what the repository's rules and documentation say
+# (specs/clarify). The call runs before the decision and counts in limits.max_cost_usd; an
+# operator at a terminal answers the rest, `--mode auto` takes the model's assumptions.
+clarify:
+  enabled: true              # false: no clarify step; the clarity question is still asked and recorded
+  provider: claude
+  model: sonnet
+  # effort: medium           # optional, claude and codex
+  timeout: 120s
+  docs: ["**/*.md"]          # globs over the files git lists; the deny list applies first
+  max_bytes: 16384           # rules + excerpts sent with the task; 1024..131072
+  max_rounds: 2              # additions the operator may make after a re-check; 0..5
+
 # Optional: how the claude and codex CLIs are authenticated. api: a provider API key from the
 # variable api_key_env names, billed per token; login: the CLI's own login; auto (default):
 # api when that variable is set. --claude-auth/--codex-auth overrides the matching auth.

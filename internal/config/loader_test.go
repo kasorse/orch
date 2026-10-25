@@ -79,11 +79,22 @@ limits:
 
 execution:
   timeout: 15m
+
+clarify:
+  provider: claude
+  model: sonnet
+  effort: medium
+  timeout: 120s
+  max_rounds: 3
 `)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if c := cfg.Clarify; !c.Active() || c.Provider != "claude" || c.Model != "sonnet" || c.Effort != "medium" ||
+		c.Timeout != 2*time.Minute || c.AdditionRounds() != 3 {
+		t.Errorf("clarify = %+v", c)
 	}
 	if cfg.Version != 2 {
 		t.Errorf("expected version 2, got %d", cfg.Version)
@@ -232,6 +243,7 @@ actions:
 test: {command: "go test ./..."}
 limits: {max_steps: 12, max_fix_iterations: 2}
 execution: {timeout: 15m}
+clarify: {enabled: false}
 ` + extra
 }
 
@@ -330,12 +342,48 @@ func TestLoad_ClarifyThreshold(t *testing.T) {
 	}
 }
 
+// The clarify section is required: a route, or `clarify: {enabled: false}` written out.
+func TestLoad_ClarifySectionIsRequired(t *testing.T) {
+	const section = "clarify: {enabled: false}\n"
+	tests := []struct{ name, replace, want string }{
+		{"absent", "", "clarify is required"},
+		{"null", "clarify:\n", "clarify is required"},
+		{"empty", "clarify: {}\n", "clarify.provider is required"},
+		{"disabled alone", section, ""},
+		{"enabled, no key", "clarify: {enabled: true}\n", "clarify.provider is required"},
+		{"a route", "clarify: {provider: claude, model: sonnet, timeout: 2m}\n", ""},
+		{"a route without a timeout", "clarify: {provider: claude, model: sonnet}\n", "clarify.timeout must be a positive duration"},
+		{"max_rounds out of range", "clarify: {enabled: false, max_rounds: 9}\n", "clarify.max_rounds must be between 0 and 5, got 9"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), section, tc.replace, 1)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			err = Validate(cfg)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Errorf("Validate = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	_, err := Load(writeTempConfig(t, strings.Replace(validV2(""), section, "clarify: {enabled: false, docs: [a.md], max_byte: 5}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "max_byte") {
+		t.Errorf("an undeclared key in clarify must fail to load, got %v", err)
+	}
+	_, err = Load(writeTempConfig(t, strings.Replace(validV2(""), section, "clarify: {provider: claude, model: sonnet, timeout: soon}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "clarify.timeout") {
+		t.Errorf("a malformed clarify.timeout must fail to load, got %v", err)
+	}
+}
+
 func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		yaml string
 		want []string
 	}{
-		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 25: exectuion"}},
+		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 26: exectuion"}},
 		// actions, translation and jira decode through their own UnmarshalYAML: strictness
 		// must reach inside those too.
 		"inside an action": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
@@ -343,8 +391,10 @@ func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 		"translation effort": {strings.Replace(validV2(""), "model: haiku,", "model: haiku, effort: high,", 1),
 			[]string{"line 9: effort"}},
 		"inside jira": {validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: basic\n  email_env: E\n  token_env: T\n  timeuot: 5s\n"),
-			[]string{"line 30: timeuot"}},
-		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 25: limit", "line 26: securty"}},
+			[]string{"line 31: timeuot"}},
+		"inside clarify": {strings.Replace(validV2(""), "clarify: {enabled: false}", "clarify: {enabled: false, max_round: 3}", 1),
+			[]string{"line 25: max_round"}},
+		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 26: limit", "line 27: securty"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tc.yaml))

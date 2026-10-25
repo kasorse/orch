@@ -189,6 +189,54 @@ func TestValidateDependencies_DecisionTranslationExecutableMissing(t *testing.T)
 	}
 }
 
+// With clarify enabled its executable is checked before any provider call, like translation's; a
+// disabled step is not checked.
+func TestValidateDependencies_ClarifyExecutable(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	cfg := validConfig()
+	cfg.Clarify = clarifyRoute()
+	cfg.Clarify.Provider = "gemini"
+	cfg.Translation.Provider = "claude"
+	cfg.Actions.Research.Provider = "claude"
+	missing := FakeDependencyChecker{Missing: map[string]bool{"gemini": true}}
+
+	err := ValidateDependencies(cfg, missing, DependencyOptions{})
+	var depErr *apperr.DependencyError
+	if !errors.As(err, &depErr) || !strings.Contains(err.Error(), `provider "gemini" is configured for action "clarify"`) {
+		t.Fatalf("a missing clarify executable must fail validation: %v", err)
+	}
+
+	cfg.Clarify.Enabled = boolPtr(false)
+	if err := ValidateDependencies(cfg, missing, DependencyOptions{}); err != nil {
+		t.Errorf("a disabled clarify step needs no executable: %v", err)
+	}
+}
+
+func TestValidateDependencies_ClarifyUnderABudget(t *testing.T) {
+	t.Setenv("JEV_API_KEY", "test-key")
+	cfg := validConfig()
+	cfg.Actions.Research.Provider = "claude"
+	cfg.Actions.Review.Provider = "claude"
+	cfg.Limits.MaxCostUSD = float64Ptr(5)
+	installed := FakeDependencyChecker{Missing: map[string]bool{}}
+
+	cfg.Clarify = clarifyRoute()
+	if err := ValidateDependencies(cfg, installed, DependencyOptions{Cost: onlyClaudeReportsCost{}}); err != nil {
+		t.Fatalf("a clarify step on claude reports its cost: %v", err)
+	}
+
+	cfg.Clarify.Provider = "codex"
+	err := ValidateDependencies(cfg, installed, DependencyOptions{Cost: onlyClaudeReportsCost{}})
+	if err == nil || !strings.Contains(err.Error(), "limits.max_cost_usd cannot be enforced: codex (clarify) reports no cost") {
+		t.Errorf("a clarify step that reports no cost must be refused under a budget: %v", err)
+	}
+
+	cfg.Clarify.Enabled = boolPtr(false)
+	if err := ValidateDependencies(cfg, installed, DependencyOptions{Cost: onlyClaudeReportsCost{}}); err != nil {
+		t.Errorf("a disabled clarify step is not in the budget: %v", err)
+	}
+}
+
 func TestValidateDependencies_DecisionDoesNotCheckAPIKeyWhenEnvNameIsBlank(t *testing.T) {
 	// ValidateDecisionConfig (structural) is responsible for flagging a blank
 	// api_key_env; ValidateDecisionConfigDependencies must not also report a
