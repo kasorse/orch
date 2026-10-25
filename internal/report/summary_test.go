@@ -164,6 +164,22 @@ func TestRunSummary_Verify(t *testing.T) {
 	if want := "| Verify | 5 calls, 3 passed |"; !strings.Contains(got, want) {
 		t.Errorf("summary lacks %q\n%s", want, got)
 	}
+	if strings.Contains(got, "| Replace |") {
+		t.Errorf("a run without replace calls has no Replace row\n%s", got)
+	}
+
+	// Replace calls get their own row and never count as verify runs; a dry run changed nothing.
+	run.Executions[1].VerifyCalls = append(run.Executions[1].VerifyCalls,
+		domain.VerifyCall{Tool: domain.VerifyToolReplace, Success: true, Files: 4, Replacements: 9},
+		domain.VerifyCall{Tool: domain.VerifyToolReplace, Success: true, Files: 2, Replacements: 2, DryRun: true},
+		domain.VerifyCall{Tool: domain.VerifyToolReplace, Refused: "invalid arguments: old is required"},
+	)
+	got = RunSummary(run, nil)
+	for _, want := range []string{"| Verify | 5 calls, 3 passed |", "| Replace | 3 calls, 9 occurrences in 4 files |"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summary lacks %q\n%s", want, got)
+		}
+	}
 }
 
 // A run recorded before the call report existed still renders: the configured model

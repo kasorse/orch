@@ -107,6 +107,13 @@ type CostReporter interface {
 	ReportsCost() bool
 }
 
+// MCPSupporter is implemented by adapters that pass Extensions.MCPConfig to their CLI. A call
+// to any other adapter gets no MCP server, so the orchestrator's own tools are not offered to
+// it.
+type MCPSupporter interface {
+	SupportsMCP() bool
+}
+
 // ID identifies one of the fixed, supported provider CLIs.
 type ID string
 

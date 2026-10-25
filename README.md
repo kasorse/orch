@@ -417,7 +417,7 @@ extensions:
   mcp:
     graphify:                     # a code knowledge graph instead of grep-only search
       command: graphify-mcp
-      args: ["{repo}/graphify-out/graph.json"]   # {repo} = the repository root
+      args: ["{source}/graphify-out/graph.json"] # {source} = your repository, {repo} = where the step works (a worktree run's worktree)
       tools: [query_graph, get_node, get_neighbors, shortest_path]   # or ["*"]
       actions: [analyze, plan, implement, review]                    # default: analyze, plan, review
   user_settings: true             # ~/.claude/settings.json: plugins, skills, hooks

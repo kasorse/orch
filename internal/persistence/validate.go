@@ -248,8 +248,8 @@ func validateVerifyCalls(exec domain.StepExecution) error {
 	if exec.Action != domain.ActionImplement {
 		return fmt.Errorf("recorded on a %s step", exec.Action)
 	}
-	if len(calls) > domain.MaxVerifyCalls {
-		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxVerifyCalls)
+	if len(calls) > domain.MaxRecordedCalls {
+		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxRecordedCalls)
 	}
 	for i, c := range calls {
 		if err := c.Validate(); err != nil {

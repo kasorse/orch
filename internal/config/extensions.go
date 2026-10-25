@@ -20,7 +20,7 @@ import (
 //	  mcp:
 //	    graphify:
 //	      command: graphify-mcp
-//	      args: ["{repo}/graphify-out/graph.json"]
+//	      args: ["{source}/graphify-out/graph.json"]
 //	      tools: [query_graph, get_node, get_neighbors, shortest_path]
 //	      actions: [analyze, plan, implement, review]
 //	  user_settings: false
@@ -41,7 +41,9 @@ type ExtensionsConfig struct {
 // orchestrator's allowlist of its tools and the actions it is offered to.
 type MCPServerConfig struct {
 	// Command and Args start a stdio server; URL (with Type "http" or "sse") names a remote
-	// one. "{repo}" in Command, Args or URL is replaced with the repository root.
+	// one. "{repo}" in Command, Args or URL is replaced with the root the step works in (a
+	// worktree run's worktree), "{source}" with the operator's repository, which keeps the
+	// files git does not carry into a worktree, such as an ignored generated graph.
 	Command string            `yaml:"command"`
 	Args    []string          `yaml:"args"`
 	Env     map[string]string `yaml:"env"`

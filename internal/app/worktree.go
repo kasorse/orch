@@ -170,6 +170,7 @@ func switchToWorktree(s *session, wt *repository.Repository) {
 	s.operator = s.repo
 	s.repo = wt
 	s.dispatcher.Repo = wt
+	s.dispatcher.SourceDir = s.operator.Dir
 	s.runsRel = ""
 	s.dispatcher.RunsDir = ""
 	s.worktree = s.run.Worktree

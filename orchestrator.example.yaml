@@ -262,7 +262,9 @@ security:
 #   mcp:
 #     graphify:
 #       command: graphify-mcp
-#       args: ["{repo}/graphify-out/graph.json"]
+#       # {source}: your repository, where the ignored graph lies; {repo}: where the step works,
+#       # which in a worktree run is the worktree, without ignored files
+#       args: ["{source}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
 #       actions: [analyze, plan, implement, review]   # default: analyze, plan, review
 #   user_settings: true                               # plugins, skills, hooks

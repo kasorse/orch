@@ -201,3 +201,55 @@ func TestRun_MCPVerifyRefusesAfterAProtectedChange(t *testing.T) {
 		t.Errorf("violation = %q, %v", data, err)
 	}
 }
+
+// TestRun_MCPVerifyReplaceOverARealRepository: replace alone, with the real guard and git's
+// file list: tracked and untracked files are rewritten, an ignored one is not.
+func TestRun_MCPVerifyReplaceOverARealRepository(t *testing.T) {
+	repoDir, dir := mcpRepo(t)
+	for name, content := range map[string]string{
+		"main.go":    "package main\n\nvar OldName = 1\nvar OldNameX = 2\n",
+		"new.go":     "package main\n\nvar _ = OldName\n",
+		".gitignore": "ignored.go\n",
+		"ignored.go": "OldName\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repoDir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spec, err := verify.ReadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.TestCommand, spec.Checks, spec.Sandbox, spec.TestEnv = "", nil, nil, nil
+	spec.Replace = &verify.ReplaceSpec{}
+	if err := verify.WriteSpec(dir, spec); err != nil {
+		t.Fatal(err)
+	}
+
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"replace","arguments":{"old":"OldName","new":"NewName","word":true}}}`,
+	}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"mcp-verify", "--dir", dir}, strings.NewReader(input), &stdout, &stderr); err != nil {
+		t.Fatalf("Run = %v (%s)", err, stderr.String())
+	}
+	msgs := decodeLines(t, stdout.String())
+	if tools := msgs[0]["result"].(map[string]any)["tools"].([]any); len(tools) != 1 {
+		t.Errorf("tools = %v, want replace alone", tools)
+	}
+	result, _ := msgs[1]["result"].(map[string]any)
+	text, _ := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	if result["isError"] != false || !strings.Contains(text, "replaced 2 occurrences in 2 files") {
+		t.Errorf("reply = %v", msgs[1])
+	}
+	for name, want := range map[string]string{
+		"main.go":    "package main\n\nvar NewName = 1\nvar OldNameX = 2\n",
+		"new.go":     "package main\n\nvar _ = NewName\n",
+		"ignored.go": "OldName\n",
+	} {
+		if got, _ := os.ReadFile(filepath.Join(repoDir, name)); string(got) != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}

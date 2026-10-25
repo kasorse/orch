@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/config"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/verify"
@@ -16,12 +17,12 @@ import (
 )
 
 // prepareVerify writes the server's input into dir and returns the extension that starts it.
-func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardState) (provider.Extensions, error) {
+func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardState, replace bool) (provider.Extensions, error) {
 	// MkdirTemp creates the directory 0700 already; the server's files are only for us.
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return provider.Extensions{}, err
 	}
-	spec, err := d.verifySpec(run, before)
+	spec, err := d.verifySpec(run, before, replace)
 	if err != nil {
 		return provider.Extensions{}, err
 	}
@@ -32,7 +33,17 @@ func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardStat
 	if err != nil {
 		return provider.Extensions{}, err
 	}
-	return verifyExtensions(dir, exe, len(spec.Checks) > 0), nil
+	return verifyExtensions(dir, exe, spec.ToolNames()), nil
+}
+
+// supportsMCP reports whether the provider of pm passes an MCP server to its CLI.
+func (d *Dispatcher) supportsMCP(pm config.ProviderModel) bool {
+	client, err := d.Registry.Resolve(pm.Provider)
+	if err != nil {
+		return false
+	}
+	s, ok := client.(provider.MCPSupporter)
+	return ok && s.SupportsMCP()
 }
 
 // executeImplement always reports OutcomeSuccess if the provider process exits 0 -
@@ -63,22 +74,33 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to snapshot protected paths before implement", Err: err}
 	}
 
-	// With verify on, the session gets the orch MCP server over a private directory that
-	// holds its input and, afterwards, its record of the calls. The directory is removed on
-	// every way out of this function.
+	// The session gets the orch MCP server over a private directory that holds its input and,
+	// afterwards, its record of the calls: always with replace when the provider speaks MCP,
+	// with run_tests and run_check when verify is on. The directory is removed on every way
+	// out of this function.
+	pm, source := d.route(run, domain.ActionImplement)
+	verifyOn := d.Config.Actions.Implement.Verify
+	replace := d.supportsMCP(pm)
 	var builtin provider.Extensions
 	verifyDir := ""
-	if d.Config.Actions.Implement.Verify {
+	if verifyOn || replace {
 		dir, err := os.MkdirTemp("", "orch-verify-")
 		if err != nil {
 			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to create the verify directory", Err: err}
 		}
 		defer os.RemoveAll(dir)
-		verifyDir = dir
-		if builtin, err = d.prepareVerify(dir, run, before); err != nil {
+		builtin, err = d.prepareVerify(dir, run, before, replace)
+		switch {
+		case err != nil && verifyOn:
 			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to set up the verify tools", Err: err}
+		case err != nil:
+			// replace alone is a convenience: without it the model edits file by file.
+			d.warn(domain.ActionImplement, "the replace tool is not available in this step: "+err.Error())
+			builtin = provider.Extensions{}
+		default:
+			verifyDir = dir
+			in.Verify, in.VerifyChecks, in.Replace = verifyOn, verifyOn && len(d.Config.Checks) > 0, replace
 		}
-		in.Verify, in.VerifyChecks = true, len(d.Config.Checks) > 0
 	}
 
 	// The working tree as a git tree, to count what the step changes. Best effort: without
@@ -102,7 +124,6 @@ func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (wor
 		d.stepTruncated = append(d.stepTruncated, domain.PromptTestOutput)
 	}
 
-	pm, source := d.route(run, domain.ActionImplement)
 	result, ref, err := d.call(ctx, run, pm, source, domain.ActionImplement, prompt, builtin)
 	// Read on every path: the calls are recorded in a step that failed as well.
 	var verified verifyOutput

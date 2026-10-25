@@ -249,6 +249,26 @@ one `api_retry` (`retry_delay_ms: 572`), then the stop, 1.5 s in all.
 **Not observed.** A 401 from api.anthropic.com itself. The CLI derives the category from the
 status, so the shape is expected to match, but that is not recorded here.
 
+## D18 — Replace is an edit, always on
+
+**Decision.** Every implement session whose adapter speaks MCP gets `mcp__orch__replace` from
+the orchestrator's `orch` server (`specs/quality/SPEC.md` §6.11), with no config key: one call
+rewrites a literal string across the files git lists. `--tools` stays
+`Read,Grep,Glob,Edit,Write`; only the tool name joins `--allowed-tools`. D6 stands.
+
+**Why.** A rename across a hundred files took the model hundreds of Edit calls, one per
+occurrence, and a story task ran into `execution.timeout`. A shell (`sed`) would have done it
+in one, but D6 rules out any Bash. Replace gives the effect without a command: the model
+chooses two literal strings (no regex), whole-identifier matching and a file filter. It
+writes only what Edit could, never a file the secret deny list or a protected pattern names,
+never a symlink, an ignored, binary or large file, never outside the repository, and it runs
+no process. The guard checks the before-state before every call, as for verify (D16).
+
+**Live check.** Not run yet: the unit and end-to-end tests (`internal/verify`,
+`internal/app` `TestRun_MCPVerifyReplaceOverARealRepository`) use the real server and git, not
+the real CLI. Left to the operator: a session prompted to rename an identifier calls
+`mcp__orch__replace` and the argv keeps `--tools Read,Grep,Glob,Edit,Write`.
+
 ## Fate of v1
 
 | v1 | fate in v2 |

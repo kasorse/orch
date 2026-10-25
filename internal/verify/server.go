@@ -115,20 +115,23 @@ type toolDef struct {
 }
 
 func (s *Server) toolsList() (json.RawMessage, *rpcError) {
-	tools := []toolDef{{
-		Name: domain.VerifyToolRunTests,
-		Description: "Run the project's test command and return its exit code and bounded output. " +
-			"An optional filter narrows the run when the project's test command supports one. " +
-			"Only the orchestrator's own run afterwards counts.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"filter": map[string]any{"type": "string", "pattern": domain.VerifyFilterPattern},
+	tools := []toolDef{}
+	if s.Tools.Offers(domain.VerifyToolRunTests) {
+		tools = append(tools, toolDef{
+			Name: domain.VerifyToolRunTests,
+			Description: "Run the project's test command and return its exit code and bounded output. " +
+				"An optional filter narrows the run when the project's test command supports one. " +
+				"Only the orchestrator's own run afterwards counts.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"filter": map[string]any{"type": "string", "pattern": domain.VerifyFilterPattern},
+				},
+				"additionalProperties": false,
 			},
-			"additionalProperties": false,
-		},
-	}}
-	if names := s.Tools.CheckNames(); len(names) > 0 {
+		})
+	}
+	if names := s.Tools.CheckNames(); s.Tools.Offers(domain.VerifyToolRunCheck) {
 		tools = append(tools, toolDef{
 			Name:        domain.VerifyToolRunCheck,
 			Description: "Run one of the project's configured checks (vet, lint, ...) and return its exit code and bounded output.",
@@ -138,6 +141,29 @@ func (s *Server) toolsList() (json.RawMessage, *rpcError) {
 					"name": map[string]any{"type": "string", "enum": names},
 				},
 				"required":             []string{"name"},
+				"additionalProperties": false,
+			},
+		})
+	}
+	if s.Tools.Offers(domain.VerifyToolReplace) {
+		tools = append(tools, toolDef{
+			Name: domain.VerifyToolReplace,
+			Description: "Replace every occurrence of a literal string in the repository's text files in one call: " +
+				"use it for a rename across many files instead of one Edit per occurrence. " +
+				"old and new are literal text, not patterns. word: only where old is not part of a longer identifier. " +
+				"paths: only these files, directories or globs (a glob without a slash matches file names, e.g. *.go). " +
+				"dry_run: count the occurrences without writing. Secret files on the deny list, protected paths, " +
+				"binary files and files over 1 MiB are never touched. Check the result with Grep or Read.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"old":     map[string]any{"type": "string", "minLength": 1, "maxLength": maxReplaceText},
+					"new":     map[string]any{"type": "string", "maxLength": maxReplaceText},
+					"paths":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": maxReplacePaths},
+					"word":    map[string]any{"type": "boolean"},
+					"dry_run": map[string]any{"type": "boolean"},
+				},
+				"required":             []string{"old", "new"},
 				"additionalProperties": false,
 			},
 		})

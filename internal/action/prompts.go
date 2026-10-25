@@ -45,6 +45,12 @@ const implementConventionsRule = `Finish the change the way ` + conventionsFiles
 	`update the documentation the change makes out of date, and the task tracking they require ` +
 	`(for example marking the task done), as part of this change.`
 
+// implementParallelRule asks for independent tool calls in one turn: every turn resends the
+// whole session, so a step of hundreds of one-call turns grows slow and costly as it goes.
+const implementParallelRule = `Make independent tool calls together, in one message: read all the files you need at once, ` +
+	`run several searches at once, and edit different files in one message when no edit depends on the result of another. ` +
+	`One call per message is only for a call that needs the previous result.`
+
 // reviewConventionsRule asks review to check the same, and says what a miss weighs.
 const reviewConventionsRule = `Also check the change against ` + conventionsFiles + `. ` +
 	`A documentation or task-tracking update they require for this change and the diff lacks is a missed requirement of the task (high). ` +
@@ -233,7 +239,15 @@ type ImplementPromptInput struct {
 	// (actions.implement.verify; specs/quality/SPEC.md §6.1), and VerifyChecks when it also
 	// has run_check, that is when the config lists checks.
 	Verify, VerifyChecks bool
+	// Replace is true when the session has the orchestrator's replace tool.
+	Replace bool
 }
+
+// implementReplaceRule points a session with the replace tool at it for edits that repeat
+// across files.
+const implementReplaceRule = "For a change that repeats across many files - a rename, a moved import path - " +
+	"use the tool `mcp__orch__replace`: one call rewrites every occurrence in the repository (`word: true` for whole identifiers, " +
+	"`paths` to narrow it, `dry_run: true` to count first), instead of one Edit per occurrence."
 
 // implementVerifyRule tells a session with the verify tools to use them. The tests it runs
 // are the operator's test command, so the closing sentence keeps the final run authoritative.
@@ -254,8 +268,12 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	b.WriteString(implementSummaryShortRule + "\n\n")
 	b.WriteString(implementConventionsRule + "\n\n")
 	b.WriteString(implementOperatorRule + "\n\n")
+	b.WriteString(implementParallelRule + "\n\n")
 	if in.Verify {
 		b.WriteString(implementVerifyRule(in.VerifyChecks) + "\n\n")
+	}
+	if in.Replace {
+		b.WriteString(implementReplaceRule + "\n\n")
 	}
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")

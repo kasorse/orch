@@ -16,7 +16,7 @@ func TestExtensionsFor(t *testing.T) {
 		"memory":   {URL: "https://mem.example/mcp", Tools: []string{"*"}, Actions: []string{"implement"}},
 	}, UserSettings: true, UserSettingsActions: []string{"implement"}}
 
-	analyze := extensionsFor(cfg, domain.ActionAnalyze, "/work/repo")
+	analyze := extensionsFor(cfg, domain.ActionAnalyze, "/work/repo", "/work/repo")
 	if analyze.UserSettings {
 		t.Error("user settings were opted in for implement only")
 	}
@@ -36,14 +36,20 @@ func TestExtensionsFor(t *testing.T) {
 		t.Errorf("analyze mcp config = %s", analyze.MCPConfig)
 	}
 
-	impl := extensionsFor(cfg, domain.ActionImplement, "/work/repo")
+	impl := extensionsFor(cfg, domain.ActionImplement, "/work/repo", "/work/repo")
 	if !impl.UserSettings || strings.Join(impl.MCPTools, ",") != "mcp__memory" || !strings.Contains(impl.MCPConfig, `"type":"http"`) {
 		t.Errorf("implement = %+v", impl)
 	}
-	if research := extensionsFor(cfg, domain.ActionResearch, "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
+	// In a worktree run, {source} is the operator's repository, where an ignored graph lies.
+	cfg.MCP["graphify"] = config.MCPServerConfig{Command: "graphify-mcp", Args: []string{"{source}/graphify-out/graph.json", "{repo}"}, Tools: []string{"query_graph"}}
+	wt := extensionsFor(cfg, domain.ActionAnalyze, "/state/worktrees/x/run", "/work/repo")
+	if !strings.Contains(wt.MCPConfig, `"args":["/work/repo/graphify-out/graph.json","/state/worktrees/x/run"]`) {
+		t.Errorf("worktree mcp config = %s", wt.MCPConfig)
+	}
+	if research := extensionsFor(cfg, domain.ActionResearch, "/r", "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
 		t.Errorf("research must get nothing: %+v", research)
 	}
-	if got := withExtensionsHint("ACTION: analyze\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionAnalyze, "/r")); got != "ACTION: analyze\nbody" {
+	if got := withExtensionsHint("ACTION: analyze\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionAnalyze, "/r", "/r")); got != "ACTION: analyze\nbody" {
 		t.Errorf("no extensions, no hint: %q", got)
 	}
 	// The hint comes right after the first line, which stays "ACTION: <name>".
@@ -70,7 +76,7 @@ func parseMCPDoc(t *testing.T, s string) mcpDoc {
 }
 
 func TestVerifyExtensions(t *testing.T) {
-	ext := verifyExtensions("/tmp/orch-verify-1", "/usr/bin/orchestrator", false)
+	ext := verifyExtensions("/tmp/orch-verify-1", "/usr/bin/orchestrator", []string{domain.VerifyToolRunTests})
 	if want := `{"mcpServers":{"orch":{"args":["mcp-verify","--dir","/tmp/orch-verify-1"],"command":"/usr/bin/orchestrator"}}}`; ext.MCPConfig != want {
 		t.Errorf("MCPConfig = %s, want %s", ext.MCPConfig, want)
 	}
@@ -80,9 +86,9 @@ func TestVerifyExtensions(t *testing.T) {
 	if ext.UserSettings {
 		t.Error("the verify server does not load user settings")
 	}
-	ext = verifyExtensions("/d", "/x", true)
-	if got := strings.Join(ext.MCPTools, ","); got != "mcp__orch__run_tests,mcp__orch__run_check" {
-		t.Errorf("tools with checks = %s", got)
+	ext = verifyExtensions("/d", "/x", []string{domain.VerifyToolRunTests, domain.VerifyToolRunCheck, domain.VerifyToolReplace})
+	if got := strings.Join(ext.MCPTools, ","); got != "mcp__orch__run_tests,mcp__orch__run_check,mcp__orch__replace" {
+		t.Errorf("tools with checks and replace = %s", got)
 	}
 }
 
@@ -90,8 +96,8 @@ func TestMergeExtensions(t *testing.T) {
 	cfg := config.ExtensionsConfig{MCP: map[string]config.MCPServerConfig{
 		"graphify": {Command: "graphify-mcp", Args: []string{"g.json"}, Tools: []string{"query_graph"}, Actions: []string{"implement"}},
 	}, UserSettings: true}
-	operator := extensionsFor(cfg, domain.ActionImplement, "/r")
-	builtin := verifyExtensions("/tmp/d", "/usr/bin/orchestrator", true)
+	operator := extensionsFor(cfg, domain.ActionImplement, "/r", "/r")
+	builtin := verifyExtensions("/tmp/d", "/usr/bin/orchestrator", []string{domain.VerifyToolRunTests, domain.VerifyToolRunCheck})
 
 	t.Run("empty sides", func(t *testing.T) {
 		got, err := mergeExtensions(provider.Extensions{}, provider.Extensions{})

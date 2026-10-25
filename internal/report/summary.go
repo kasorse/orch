@@ -87,17 +87,29 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	row("Tokens", tokenLine)
 	row("Provider calls", fmt.Sprintf("%d", out.Usage.Calls))
 
-	if out.VerifyCalls > 0 {
-		// A refused call ran nothing, so it never passed.
-		passed := 0
-		for _, e := range run.Executions {
-			for _, c := range e.VerifyCalls {
-				if c.Refused == "" && c.Success {
-					passed++
+	// verify_calls holds the test tools' calls and replace's; each gets its own row. A refused
+	// call ran nothing, so it never passed and changed nothing.
+	var verifyCalls, passed, replaceCalls, files, replacements int
+	for _, e := range run.Executions {
+		for _, c := range e.VerifyCalls {
+			if c.Tool == domain.VerifyToolReplace {
+				replaceCalls++
+				if !c.DryRun {
+					files, replacements = files+c.Files, replacements+c.Replacements
 				}
+				continue
+			}
+			verifyCalls++
+			if c.Refused == "" && c.Success {
+				passed++
 			}
 		}
-		row("Verify", fmt.Sprintf("%s, %d passed", plural(out.VerifyCalls, "call"), passed))
+	}
+	if verifyCalls > 0 {
+		row("Verify", fmt.Sprintf("%s, %d passed", plural(verifyCalls, "call"), passed))
+	}
+	if replaceCalls > 0 {
+		row("Replace", fmt.Sprintf("%s, %s in %s", plural(replaceCalls, "call"), plural(replacements, "occurrence"), plural(files, "file")))
 	}
 
 	tests := "not run"

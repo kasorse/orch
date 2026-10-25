@@ -672,3 +672,26 @@ func TestWorktree_FlagOverridesInplaceConfig(t *testing.T) {
 		t.Errorf("the change landed in the operator's tree: %v", err)
 	}
 }
+
+// In a worktree run "{source}" in extensions.mcp names the operator's repository, where an
+// ignored file such as a generated knowledge graph lies, and "{repo}" the worktree.
+func TestWorktree_SourceNamesTheOperatorsRepository(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, argsDir, _ := newWorktreeRun(t, repoDir, func(o *configOptions) {
+		o.extraYAML += "extensions:\n  mcp:\n    graph:\n      command: true\n" +
+			"      args: [\"{source}/graphify-out/graph.json\", \"{repo}\"]\n" +
+			"      tools: [query_graph]\n      actions: [implement]\n"
+	})
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Worktree == nil {
+		t.Fatal("the run has no worktree")
+	}
+	args := readTrimmed(t, filepath.Join(argsDir, "implement.args"))
+	want, _ := json.Marshal([]string{filepath.Join(repoDir, "graphify-out", "graph.json"), run.Worktree.Path})
+	if !strings.Contains(args, `"args":`+string(want)) {
+		t.Errorf("implement's --mcp-config does not name the operator's graph and the worktree %s:\n%s", want, args)
+	}
+}

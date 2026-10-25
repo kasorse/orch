@@ -3046,6 +3046,12 @@ boundary here.
 No call has both repository access and a way out (network, shell). An action without an
 entry in `domain.AuthorityFor` gets `none`.
 
+**Replace (always on, §44.3, D18).** Under `edit`, when the adapter speaks MCP (claude, codex),
+the session also gets `mcp__orch__replace` from the same `orch` server: one call rewrites a
+literal string across the files git lists, never a deny-listed, protected, ignored, binary or
+large file and never outside the repository. It runs no process; the guard checks the
+before-state before every call.
+
 **Verify tools (opt-in, `actions.implement.verify: true`, §44.3).** Under `edit` the session
 gets two more tools from an MCP server named `orch` that the orchestrator itself serves,
 `mcp__orch__run_tests` and `mcp__orch__run_check`. This is not a shell and does not change the
@@ -3793,7 +3799,8 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Decision cost | The part of the cost spent deciding the workflow, and how many decision calls reported usage. |
 | Tokens | Summed over every call: `prompt` is every input token (`input` uncached + `cache read` + `cache write`); `output` the generated tokens. |
 | Provider calls | Calls that reported usage (`outcome.usage.calls`); each extra reviewer's call (§44.4) counts. |
-| Verify | Only when the implement session made verify calls (§44.3): how many (`outcome.verify_calls`) and how many of them ran and passed; a refused call never passed. |
+| Verify | Only when the implement session made `run_tests` or `run_check` calls (§44.3): how many and how many of them ran and passed; a refused call never passed. |
+| Replace | Only when the implement session called `replace` (§44.3): how many calls, and the occurrences and files they rewrote (dry runs and refused calls rewrote nothing). |
 | Tests (last run) | The last test step's result: `passed`, `failed`, `failed (check <name>)` when a check failed and the tests did not run (§44.2), or `not run`. |
 | Failing tests | Only when the run started red (`--allow-red-tests`) and the last failed test step and the pre-run test have parsed names in the same format: `N failing before the run, M new` (§44.7). A hint. |
 | Review verdict | The last review's authoritative verdict (`ReviewResult.Decide`: any critical or high issue, or any unmet acceptance criterion, fails). |
@@ -3882,7 +3889,7 @@ implement step only).
 | `outcome.active_ms` | Sum of the steps' durations. |
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
-| `outcome.verify_calls` | The verify calls of the whole run (§44.3), 0 and absent when there were none. |
+| `outcome.verify_calls` | The calls of the whole run to the `orch` tools, replace included (§44.3), 0 and absent when there were none. |
 | `outcome.approval_required` | `true` when the last implement matched a `policy.paths` rule with `approval: manual` (an earlier implement's matches do not count); absent otherwise. A CI job can read it: the change was not committed by the orchestrator. |
 | `options.path_rules` | A copy of `policy.paths` made when the run is created: `{match, require_stages, approval}` in file order. A resume applies these and never the current config's; if the config's rules differ, it prints `Warning: policy.paths changed since the run started; this run keeps the rules it started with`. Absent without rules. Each rule is validated as in the config. |
 | `executions[].path_rules` | On an implement that passed the guard and the secret scan: `{match, files, require_stages, missing, approval}` for each rule that matched a file of the run's net diff (`pre_run_ref` against the tree after the step; the step's own diff without a restore point; the runs directory excluded). `files` holds at most 50 clean repository-relative paths; `missing` is always present and a subset of `require_stages`. Recorded also when the step failed because of it. On an implement step only. |
@@ -4043,8 +4050,8 @@ subcommand claude starts over stdio):
   repository, writes `verify.json` (version 1: the repository root, `test.command`, the checks,
   `pre_run_ref`, the sandbox, the computed test environment, the guard's before-state, the
   limits) and merges the `orch` server into the step's `--mcp-config` with the two tool
-  names in `--allowed-tools`; the adapter's `--tools` is unchanged. The server reads nothing
-  but `verify.json` and its stdin, opens no run directory, makes no network call, and writes only
+  names in `--allowed-tools`; the adapter's `--tools` is unchanged. The server reads no input
+  but `verify.json` and its stdin (replace, below, reads and writes the repository's files), opens no run directory, makes no network call, and writes only
   `calls.jsonl`, `violation` and per-call logs inside the directory. The directory is removed
   when the step ends, and a start of `run` or `resume` removes your own `orch-verify-*`
   directories older than a day.
@@ -4065,6 +4072,19 @@ subcommand claude starts over stdio):
   the orchestrator runs the tests again and only that run counts.
 * The server speaks a JSON-RPC 2.0 subset over newline-delimited stdio (`initialize`,
   `notifications/initialized`, `tools/list`, `tools/call`, `ping`), with the standard library only.
+
+**Replace (always on).** Every implement session whose adapter speaks MCP (claude, codex) gets
+`mcp__orch__replace` from the same `orch` server, with or without `verify` and with no config
+key; a provider without MCP support gets no server. Arguments: `old` and `new` (literal,
+at most 1000 bytes), `word` (whole identifiers only), `paths` (files, directories or globs;
+`*.go` matches file names) and `dry_run`. It rewrites, in Go and without starting a process,
+the files git lists (ignored ones never), skipping the secret deny list and the protected
+paths unread, and symlinks, binary files, files over 1 MiB and anything resolving outside the
+repository. The guard compares the before-state before each call as for the test tools; at
+most 50 replace calls per step, apart from `max_calls_per_step`. Each call is a
+`verify_calls` entry with `files` and `replacements`, never the text, and `summary.md` shows
+it in a `Replace` row. When replace alone cannot be set up, the step warns and runs without
+it. The implement prompt names the tool. Design: `specs/quality/SPEC.md` §6.11, D18.
 
 ## 44.4 Review
 
@@ -4213,7 +4233,7 @@ actions:
 | `checks[]` | `test_result`, `pre_run_test` | `{name, exit_code, success, duration}` of each command that ran; names valid per §44.2; a failed check is the last entry |
 | `failed_check` | `test_result`, `pre_run_test` | the name of the failing `checks[]` entry; absent when every check passed |
 | `failed_tests`, `report_format` | `test_result`, `pre_run_test` | §44.7; a failed result only, a known format, at most 200 names of 1 to 300 bytes without control characters |
-| `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused}`; `tool` is `run_tests` or `run_check`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 50 |
+| `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused, files, replacements, dry_run}`; `tool` is `run_tests`, `run_check` or `replace`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; `files`, `replacements` (at least `files`) and `dry_run` only on `replace`, whose `exit_code` is 0, or 1 for a write that failed part way; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 100 |
 | `tree_after` | implement executions | the git tree of the working tree after the step; 40 or 64 hex characters |
 | `provider.model_source` | executions | `base`, `by_complexity.{simple,medium,complex}`, `by_complexity.<level>.escalate` or `escalated.{medium,complex}` (§44.8) |
 | `review_result.criteria[]` | review executions | `{index, criterion, met, evidence}`; indexes `1…N` unique; evidence at most 500 bytes |
@@ -4232,7 +4252,7 @@ review artifact `reviewers`. Logs gain `<NNN>-test.<check>.*`, `pre-run-test.<ch
   with their own specs.
 * **Parsed names as a gate.** Letting a run pass while "only old" tests fail would make success
   depend on parsed text (§31.4).
-* **A shell, parallel verify calls or any tool beyond `run_tests` and `run_check`**, and verify
+* **A shell, parallel verify calls or any tool beyond `run_tests`, `run_check` and `replace`**, and verify
   for Gemini (Codex uses its configured MCP tool bridge; Gemini has no verified adapter).
 * **Model choice by anything but the decided complexity** (cost so far, failures).
 

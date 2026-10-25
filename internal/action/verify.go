@@ -58,16 +58,24 @@ func (d *Dispatcher) executable() (string, error) {
 	return exe, nil
 }
 
-// verifySpec is the server's input (specs/quality/SPEC.md §6.4). It fails closed: the
-// sandbox is the one the test step uses, and without it nothing is written, since the model
-// triggers these runs.
-func (d *Dispatcher) verifySpec(run *domain.Run, before GuardState) (*verify.Spec, error) {
-	if d.Runner == nil || d.Runner.Sandbox == nil {
-		return nil, errors.New("no sandbox is configured for the test runner, and verify never runs unsandboxed")
-	}
+// verifySpec is the server's input (specs/quality/SPEC.md §6.4): the test tools with
+// actions.implement.verify, replace when replace is true. It fails closed: the sandbox is the
+// one the test step uses, and without it nothing is written, since the model triggers the
+// test runs.
+func (d *Dispatcher) verifySpec(run *domain.Run, before GuardState, replace bool) (*verify.Spec, error) {
 	root, err := filepath.Abs(d.Repo.Dir)
 	if err != nil {
 		return nil, err
+	}
+	spec := &verify.Spec{Version: verify.SpecVersion, RepoRoot: root, Before: before}
+	if replace {
+		spec.Replace = &verify.ReplaceSpec{ExtraDeny: append([]string{}, d.Config.Context.ExtraDeny...)}
+	}
+	if !d.Config.Actions.Implement.Verify {
+		return spec, nil
+	}
+	if d.Runner == nil || d.Runner.Sandbox == nil {
+		return nil, errors.New("no sandbox is configured for the test runner, and verify never runs unsandboxed")
 	}
 	checks := make([]verify.Check, len(d.Config.Checks))
 	for i, c := range d.Config.Checks {
@@ -81,19 +89,11 @@ func (d *Dispatcher) verifySpec(run *domain.Run, before GuardState) (*verify.Spe
 		}
 	}
 	v := d.Config.Limits.Verify
-	return &verify.Spec{
-		Version:     verify.SpecVersion,
-		RepoRoot:    root,
-		TestCommand: d.Config.Test.Command,
-		Checks:      checks,
-		PreRunRef:   run.PreRunRef,
-		Sandbox:     d.Runner.Sandbox,
-		TestEnv:     env,
-		Before:      before,
-		MaxCalls:    v.MaxCalls(),
-		CallTimeout: v.Timeout(),
-		OutputBytes: d.Config.Limits.Prompt.TestOutputBytes(),
-	}, nil
+	spec.TestCommand, spec.Checks, spec.PreRunRef = d.Config.Test.Command, checks, run.PreRunRef
+	spec.Sandbox, spec.TestEnv = d.Runner.Sandbox, env
+	spec.MaxCalls, spec.CallTimeout = v.MaxCalls(), v.Timeout()
+	spec.OutputBytes = d.Config.Limits.Prompt.TestOutputBytes()
+	return spec, nil
 }
 
 // openVerifyFile opens a regular file of dir for reading without following a symlink or

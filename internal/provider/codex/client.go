@@ -132,6 +132,8 @@ func (c *Client) Supports(a domain.Authority) bool {
 	return a == domain.AuthorityRead || a == domain.AuthorityEdit
 }
 
+func (c *Client) SupportsMCP() bool { return true }
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	if !c.Supports(req.Authority) {
 		return provider.Result{}, &apperr.AuthorityError{

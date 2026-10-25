@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -49,6 +50,12 @@ type Guard interface {
 	Changed(ctx context.Context, before guard.State) ([]string, error)
 }
 
+// FileLister lists the files git considers part of the project, slash-separated and relative
+// to the repository root.
+type FileLister interface {
+	ListFiles(ctx context.Context) ([]string, error)
+}
+
 // Result is the answer to one tools/call: the text block of the MCP result, and isError.
 type Result struct {
 	Text    string
@@ -64,9 +71,16 @@ type Tools struct {
 	// Log gets diagnostics; nil discards them.
 	Log io.Writer
 
+	// Files lists the repository's files for replace; *repository.Repository is the real one.
+	// Without it replace refuses every call.
+	Files FileLister
+
 	mu sync.Mutex
 	// count is the calls received, refused ones included; it numbers the call logs.
 	count int
+	// testCalls and replaceCalls split count by limit: run_tests and run_check share
+	// Spec.MaxCalls, replace has domain.MaxReplaceCalls.
+	testCalls, replaceCalls int
 	// recorded is the lines in calls.jsonl.
 	recorded int
 	// violated is true once dir/violation exists.
@@ -90,8 +104,16 @@ func NewTools(spec *Spec, dir string, runner Runner, g Guard) (*Tools, error) {
 		return nil, err
 	default:
 		for _, line := range strings.Split(string(data), "\n") {
-			if strings.TrimSpace(line) != "" {
-				t.count++
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			t.count++
+			// A line that does not decode counts against the test limit, the stricter one.
+			var c struct{ Tool string }
+			if json.Unmarshal([]byte(line), &c) == nil && c.Tool == domain.VerifyToolReplace {
+				t.replaceCalls++
+			} else {
+				t.testCalls++
 			}
 		}
 		t.recorded = t.count
@@ -108,16 +130,8 @@ func (t *Tools) CheckNames() []string {
 	return names
 }
 
-// Offers reports whether tool is one the server serves: run_check only with checks.
-func (t *Tools) Offers(tool string) bool {
-	switch tool {
-	case domain.VerifyToolRunTests:
-		return true
-	case domain.VerifyToolRunCheck:
-		return len(t.Spec.Checks) > 0
-	}
-	return false
-}
+// Offers reports whether tool is one the server serves (Spec.ToolNames).
+func (t *Tools) Offers(tool string) bool { return slices.Contains(t.Spec.ToolNames(), tool) }
 
 // request is a validated call: the command to run and what the model chose.
 type request struct {
@@ -134,8 +148,17 @@ func (t *Tools) Call(ctx context.Context, tool string, args json.RawMessage) Res
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	// The server answers an unknown tool before this; a tool the spec turned off must never
+	// reach the runner, which has no sandbox without a test command.
+	if !t.Offers(tool) {
+		return Result{Text: "refused: unknown tool", IsError: true}
+	}
 	t.count++
 	k := t.count
+	if tool == domain.VerifyToolReplace {
+		return t.replace(ctx, args)
+	}
+	t.testCalls++
 	// parseArgs is pure; doing it first only lets every record, refused or not, name the
 	// check or filter the model chose when that was valid.
 	req, reason, hint := t.parseArgs(tool, args)
@@ -146,30 +169,14 @@ func (t *Tools) Call(ctx context.Context, tool string, args json.RawMessage) Res
 		return Result{Text: "refused: " + text, IsError: true}
 	}
 
-	if k > t.Spec.MaxCalls {
+	if t.testCalls > t.Spec.MaxCalls {
 		return refuse("limit reached", fmt.Sprintf("limit reached: at most %d calls per step", t.Spec.MaxCalls))
 	}
 	if reason != "" {
 		return refuse("invalid arguments: "+reason, "invalid arguments: "+reason+hint)
 	}
-	if t.violated {
-		return refuse("protected files changed earlier",
-			"an earlier call found protected files changed; nothing more is run in this step")
-	}
-
-	changed, err := t.Guard.Changed(ctx, t.Spec.Before)
-	switch {
-	case ctx.Err() != nil && err != nil:
-		// The session is ending; that is not a violation.
-		return refuse("canceled", "the server is shutting down")
-	case err != nil:
-		// Fail closed: a check that cannot tell is treated as a change.
-		t.markViolation("the guard check failed: " + oneLine(err.Error()))
-		return refuse("guard check failed",
-			"the check for protected-file changes failed, so nothing is run in this step: "+oneLine(err.Error()))
-	case len(changed) > 0:
-		t.markViolation(strings.Join(changed, "\n"))
-		return refuse("protected files changed", "protected files changed: "+listPaths(changed))
+	if reason, text := t.checkGuard(ctx); reason != "" {
+		return refuse(reason, text)
 	}
 
 	env := []string{"ORCH_BASE_REF=" + t.Spec.PreRunRef}
@@ -207,11 +214,36 @@ func (t *Tools) Call(ctx context.Context, tool string, args json.RawMessage) Res
 	t.writeLog(LogFile(k, "stdout"), res.Stdout)
 	t.writeLog(LogFile(k, "stderr"), res.Stderr)
 
-	return Result{Text: t.answer(k, req, res, stdout, stderr)}
+	return Result{Text: t.answer(req, res, stdout, stderr)}
+}
+
+// checkGuard refuses a call after an earlier violation, or when the guard finds protected
+// files changed or cannot tell; it returns the record's reason and the answer's text, both
+// empty when the call may go on.
+func (t *Tools) checkGuard(ctx context.Context) (reason, text string) {
+	if t.violated {
+		return "protected files changed earlier",
+			"an earlier call found protected files changed; nothing more is run in this step"
+	}
+	changed, err := t.Guard.Changed(ctx, t.Spec.Before)
+	switch {
+	case ctx.Err() != nil && err != nil:
+		// The session is ending; that is not a violation.
+		return "canceled", "the server is shutting down"
+	case err != nil:
+		// Fail closed: a check that cannot tell is treated as a change.
+		t.markViolation("the guard check failed: " + oneLine(err.Error()))
+		return "guard check failed",
+			"the check for protected-file changes failed, so nothing is run in this step: " + oneLine(err.Error())
+	case len(changed) > 0:
+		t.markViolation(strings.Join(changed, "\n"))
+		return "protected files changed", "protected files changed: " + listPaths(changed)
+	}
+	return "", ""
 }
 
 // answer is the text block of SPEC §6.1.
-func (t *Tools) answer(k int, req request, res domain.TestResult, stdout, stderr string) string {
+func (t *Tools) answer(req request, res domain.TestResult, stdout, stderr string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "exit code: %d\n", res.ExitCode)
 	fmt.Fprintf(&b, "command: %s\n", req.command)
@@ -222,7 +254,7 @@ func (t *Tools) answer(k int, req request, res domain.TestResult, stdout, stderr
 		fmt.Fprintf(&b, "filter: %s\n", req.filter)
 	}
 	fmt.Fprintf(&b, "duration: %s\n", roundDuration(res.Duration))
-	fmt.Fprintf(&b, "calls left in this step: %d\n", t.Spec.MaxCalls-k)
+	fmt.Fprintf(&b, "calls left in this step: %d\n", t.Spec.MaxCalls-t.testCalls)
 	b.WriteString("--- output (bounded) ---\n")
 	b.WriteString(stdout)
 	if stdout != "" && !strings.HasSuffix(stdout, "\n") && stderr != "" {
@@ -312,10 +344,10 @@ func (t *Tools) markViolation(content string) {
 }
 
 // record appends one line to calls.jsonl and syncs it, so a killed server loses nothing.
-// The file holds at most domain.MaxVerifyCalls lines: later calls are refused and counted
+// The file holds at most domain.MaxRecordedCalls lines: later calls are refused and counted
 // but not recorded.
 func (t *Tools) record(rec domain.VerifyCall) {
-	if t.recorded >= domain.MaxVerifyCalls {
+	if t.recorded >= domain.MaxRecordedCalls {
 		return
 	}
 	data, err := json.Marshal(rec)

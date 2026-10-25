@@ -158,6 +158,8 @@ func (c *Client) Supports(a domain.Authority) bool {
 // a provider.CostReporter.
 func (c *Client) ReportsCost() bool { return true }
 
+func (c *Client) SupportsMCP() bool { return true }
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	// Backstop for config.ValidateAuthorities: a call path that skipped it, or a call site
 	// that forgot to set an authority, must not reach the CLI.

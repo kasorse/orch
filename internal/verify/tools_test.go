@@ -352,19 +352,21 @@ func TestCall_ARefusedCallCountsAgainstTheLimit(t *testing.T) {
 	}
 }
 
-func TestCall_CallsJSONLHoldsAtMostFiftyLines(t *testing.T) {
+func TestCall_CallsJSONLHoldsAtMostMaxRecordedLines(t *testing.T) {
 	spec := testSpec(t)
 	spec.MaxCalls = 50
+	spec.Replace = &ReplaceSpec{}
 	runner := &fakeRunner{}
 	tools, dir := newTools(t, spec, runner, &fakeGuard{})
 	for range 60 {
 		tools.Call(context.Background(), domain.VerifyToolRunTests, nil)
+		tools.Call(context.Background(), domain.VerifyToolReplace, nil)
 	}
 	if len(runner.calls) != 50 {
 		t.Errorf("runner called %d times, want 50", len(runner.calls))
 	}
-	if calls := readCalls(t, dir); len(calls) != domain.MaxVerifyCalls {
-		t.Errorf("calls.jsonl has %d lines, want %d", len(calls), domain.MaxVerifyCalls)
+	if calls := readCalls(t, dir); len(calls) != domain.MaxRecordedCalls {
+		t.Errorf("calls.jsonl has %d lines, want %d", len(calls), domain.MaxRecordedCalls)
 	}
 }
 

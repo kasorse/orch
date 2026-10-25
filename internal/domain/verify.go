@@ -7,10 +7,12 @@ import (
 	"time"
 )
 
-// The two tools of the in-session verify server (specs/quality/SPEC.md §6.1).
+// The tools of the in-session verify server (specs/quality/SPEC.md §6.1): run_tests and
+// run_check with actions.implement.verify, replace with actions.implement.replace.
 const (
 	VerifyToolRunTests = "run_tests"
 	VerifyToolRunCheck = "run_check"
+	VerifyToolReplace  = "replace"
 )
 
 // VerifyFilterPattern is the filter a run_tests call may carry, as the JSON Schema of the
@@ -24,6 +26,13 @@ var VerifyFilterRE = regexp.MustCompile(`^[A-Za-z0-9_./:-]{1,200}\z`)
 
 // MaxVerifyCalls is the most calls per step limits.verify.max_calls_per_step may allow.
 const MaxVerifyCalls = 50
+
+// MaxReplaceCalls is the most replace calls per step; it is fixed, not configured.
+const MaxReplaceCalls = 50
+
+// MaxRecordedCalls is the most lines calls.jsonl holds, and so the most verify_calls entries
+// an implement step records: both limits together.
+const MaxRecordedCalls = MaxVerifyCalls + MaxReplaceCalls
 
 // VerifyCall is one tools/call the verify server answered or refused, one JSON line of its
 // calls.jsonl (specs/quality/SPEC.md §6.8). A refused call ran nothing: Refused holds the
@@ -41,6 +50,11 @@ type VerifyCall struct {
 	// files keep everything.
 	OutputCut bool   `json:"output_cut,omitempty"`
 	Refused   string `json:"refused,omitempty"`
+	// Files and Replacements are what a replace call changed (or, with DryRun, would have):
+	// the files and the occurrences. Neither the text replaced nor its replacement is kept.
+	Files        int  `json:"files,omitempty"`
+	Replacements int  `json:"replacements,omitempty"`
+	DryRun       bool `json:"dry_run,omitempty"`
 }
 
 // maxVerifyRefusedBytes bounds the reason of a refused call; the server's own reasons are
@@ -67,6 +81,14 @@ func (c VerifyCall) Validate() error {
 		if c.Filter != "" {
 			return fmt.Errorf("filter on a %s call", c.Tool)
 		}
+	case VerifyToolReplace:
+		if c.Check != "" || c.Filter != "" {
+			return fmt.Errorf("check or filter on a %s call", c.Tool)
+		}
+		// Exit code 1 is a write that failed part way; there is no command.
+		if c.ExitCode != 0 && c.ExitCode != 1 || c.OutputCut {
+			return fmt.Errorf("a %s call carries a command result", c.Tool)
+		}
 	default:
 		return fmt.Errorf("unknown tool %q", c.Tool)
 	}
@@ -76,11 +98,17 @@ func (c VerifyCall) Validate() error {
 	if c.Duration < 0 {
 		return fmt.Errorf("duration is %s", c.Duration)
 	}
+	if c.Tool != VerifyToolReplace && (c.Files != 0 || c.Replacements != 0 || c.DryRun) {
+		return fmt.Errorf("a %s call carries a replace result", c.Tool)
+	}
+	if c.Files < 0 || c.Replacements < c.Files {
+		return fmt.Errorf("inconsistent replace result (%d files, %d replacements)", c.Files, c.Replacements)
+	}
 	if c.Refused != "" {
 		switch {
 		case len(c.Refused) > maxVerifyRefusedBytes || strings.ContainsAny(c.Refused, "\r\n"):
 			return fmt.Errorf("refused is not a short single line")
-		case c.ExitCode != 0 || c.Success || c.Duration != 0 || c.OutputCut:
+		case c.ExitCode != 0 || c.Success || c.Duration != 0 || c.OutputCut || c.Files != 0 || c.Replacements != 0:
 			return fmt.Errorf("a refused call carries a result")
 		}
 		return nil

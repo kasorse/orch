@@ -60,9 +60,10 @@ workflow package also defines its own `StepExecutor` interface). `internal/actio
 composition point that implements `StepExecutor` using config/provider/repository/testexec;
 `internal/app` is the composition root for everything. `internal/verify` is the in-session
 verify server behind the hidden `orchestrator mcp-verify --dir <dir>` (specs/quality §6): it
-speaks MCP with the standard library only, reads nothing but `<dir>/verify.json`, and imports
-`guard`, `testexec` and `domain`, never `action`. `action` is its one client: with
-`actions.implement.verify` it writes the `verify.json` of a private `orch-verify-*` directory,
+speaks MCP with the standard library only, reads no input but `<dir>/verify.json` (replace
+reads and writes the repository's files), and imports `guard`, `testexec`, `projectctx` (the
+deny list replace honours) and `domain`, never `action`. `action` is its one client: for every
+implement whose adapter speaks MCP, and with `actions.implement.verify`, it writes the `verify.json` of a private `orch-verify-*` directory,
 merges the `orch` server into the step's `--mcp-config`, and reads `calls.jsonl` and `violation`
 back as untrusted input (`action/verify.go`). `internal/testreport` is a leaf (standard library
 only, enforced by a test): it reads failing test names out of a failed test step's output into
@@ -235,7 +236,11 @@ history, otherwise the state the history and the transition table give (MVP.md �
   before-state before **every** call, and the `violation` marker the server writes fails the
   step even if the tree looks clean afterwards. The server reads only `verify.json`; `action`
   reads `calls.jsonl` and `violation` back as untrusted input. The server name `orch` and any
-  name with `__` are reserved.
+  name with `__` are reserved. `mcp__orch__replace` is always on, with no config key, for an
+  implement whose adapter is a `provider.MCPSupporter` (MVP.md §44.3, D18): two literal
+  strings and a file filter, rewritten in Go over the files git lists, never a deny-listed,
+  protected, ignored, binary or large file, a symlink or a path outside the repository; the
+  same guard before every call, and neither string is recorded.
 - **Go decides the quality loop, from config and the persisted run** (MVP.md §44). The
   no-progress stop, `review.fix_medium` (read from `options.review_fix_medium` on the run, never
   from the current config), the extra reviewers' merge and the `by_complexity` route are Go code
