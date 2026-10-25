@@ -13,9 +13,10 @@ import (
 
 func (d *Dispatcher) executeInvestigate(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	prompt := BuildInvestigatePrompt(InvestigatePromptInput{
-		Task:        run.Task.Description,
-		Research:    d.lastResearch,
-		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionInvestigate),
+		Task:          run.Task.Description,
+		Clarification: run.Task.Clarification.Render(),
+		Research:      d.lastResearch,
+		FinalAnswer:   isFinalReadOnlyStep(run, domain.ActionInvestigate),
 	})
 
 	pm, source := d.route(run, domain.ActionInvestigate)

@@ -92,9 +92,27 @@ const reviewOperatorRule = `Implement can only read and edit files: it cannot ru
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
+// clarificationBlock is the rendered clarification (domain.Clarification.Render) as a fenced
+// block, written after the task; "" when there is none, so such a prompt does not change.
+func clarificationBlock(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return fence("clarification", "the clarification agreed before the run", text)
+}
+
+// writeClarificationAfterTask writes the block after a task block that ends the prompt so far.
+func writeClarificationAfterTask(b *strings.Builder, text string) {
+	if block := clarificationBlock(text); block != "" {
+		b.WriteString("\n" + block)
+	}
+}
+
 type ResearchPromptInput struct {
-	Task        string
-	FinalAnswer bool
+	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification string
+	FinalAnswer   bool
 }
 
 func BuildResearchPrompt(in ResearchPromptInput) string {
@@ -105,13 +123,15 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
+	writeClarificationAfterTask(&b, in.Clarification)
 	return b.String()
 }
 
 type InvestigatePromptInput struct {
-	Task        string
-	Research    *domain.ResearchArtifact
-	FinalAnswer bool
+	Task          string
+	Clarification string
+	Research      *domain.ResearchArtifact
+	FinalAnswer   bool
 }
 
 func BuildInvestigatePrompt(in InvestigatePromptInput) string {
@@ -124,6 +144,7 @@ func BuildInvestigatePrompt(in InvestigatePromptInput) string {
 	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
+	writeClarificationAfterTask(&b, in.Clarification)
 	writeResearch(&b, in.Research)
 	return b.String()
 }
@@ -187,7 +208,9 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 // review failure, ReviewIssues carries the structured issues and UnmetCriteria the
 // acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
-	Task                   string
+	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification          string
 	Plan                   *domain.InvestigationArtifact
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
@@ -240,6 +263,9 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	}
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
+	if block := clarificationBlock(in.Clarification); block != "" {
+		b.WriteString(block + "\n")
+	}
 
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
@@ -435,6 +461,8 @@ func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owne
 
 type ReviewPromptInput struct {
 	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification string
 	// Acceptance are the task's own acceptance criteria (domain.Task.Acceptance, a story
 	// task's): they come first in the numbered list, ahead of the plan's.
 	Acceptance     []string
@@ -527,6 +555,9 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	b.WriteString(reviewOperatorRule)
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
+	if block := clarificationBlock(in.Clarification); block != "" {
+		b.WriteString(block + "\n")
+	}
 
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)

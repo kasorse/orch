@@ -117,6 +117,12 @@ func TestPrompts_Golden(t *testing.T) {
 		{"implement_first", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan()})
 		}},
+		{"investigate_clarified", func() string {
+			return BuildInvestigatePrompt(InvestigatePromptInput{Task: goldenTask, Clarification: goldenClarification})
+		}},
+		{"implement_clarified", func() string {
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Clarification: goldenClarification, Plan: goldenPlan()})
+		}},
 		{"implement_verify", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan(), Verify: true})
 		}},

@@ -41,6 +41,7 @@ func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardStat
 func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	in := ImplementPromptInput{
 		Task:                   run.Task.Description,
+		Clarification:          run.Task.Clarification.Render(),
 		Plan:                   d.lastInvestigation,
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,

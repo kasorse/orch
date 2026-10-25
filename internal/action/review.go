@@ -62,6 +62,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	}
 	prompt := BuildReviewPrompt(ReviewPromptInput{
 		Task:           run.Task.Description,
+		Clarification:  run.Task.Clarification.Render(),
 		Acceptance:     run.Task.Acceptance,
 		Plan:           d.lastInvestigation,
 		Implementation: d.lastImpl,
