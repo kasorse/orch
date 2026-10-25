@@ -664,7 +664,7 @@ never whole files, except the ones the request names:
 
 Files come from `git ls-files --cached --others --exclude-standard`, so `.gitignore` is
 honoured. Before anything is read, a deny list (`.env`, `.env.*`, `*.pem`, `*.key`,
-`credentials*`, `secrets*`, plus `context.extra_deny`) is applied to every path segment;
+`credentials*`, plus `context.extra_deny`) is applied to every path segment;
 binaries, files over 256 KB, symlinks, `.git/` and `.orchestrator/` are never read. The
 `max_files`/`max_bytes` budget drops doc excerpts first, then the least relevant files,
 then rules, and marks the context `truncated`.

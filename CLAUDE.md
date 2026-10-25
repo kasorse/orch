@@ -267,7 +267,7 @@ history, otherwise the state the history and the transition table give (MVP.md Â
   from `run.Executions`) runs on the `by_complexity` entry one level up, or on the decided
   level's own `by_complexity.<level>.escalate` when it has one, derivable on resume.
 - **Secrets never leave the machine**: the Context Manager applies its deny list (`.env*`,
-  `*.pem`, `*.key`, `credentials*`, `secrets*`, `context.extra_deny`, to every path segment)
+  `*.pem`, `*.key`, `credentials*`, `context.extra_deny`, to every path segment)
   before reading anything, lists files only via git (honouring `.gitignore`), and never reads
   binaries, large files or symlinks. The Jev API key comes only from the environment
   (`decision.jev.api_key_env`), is read in `app`, passed only to the client's constructor,

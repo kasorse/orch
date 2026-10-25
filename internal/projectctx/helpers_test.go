@@ -13,25 +13,25 @@ import (
 func TestDenyList(t *testing.T) {
 	d := newDenyList([]string{"*.sqlite", "deploy/prod/*"})
 	cases := map[string]bool{
-		".env":                   true,
-		".ENV":                   true,
-		".env.production":        true,
-		"config/.env.local":      true,
-		"certs/server.pem":       true,
-		"certs/server.KEY":       true,
-		"credentials.json":       true,
-		"aws/Credentials":        true,
-		"secrets.yaml":           true,
-		"secrets/db.txt":         true, // a denied directory hides everything under it
-		".git/config":            true,
-		".orchestrator/runs/x":   true,
-		"data/app.sqlite":        true,
-		"deploy/prod/values.yml": true,
-		"deploy/staging/values":  false,
-		"internal/keys.go":       false,
-		"docs/env.md":            false,
-		"environment.go":         false,
-		"secret_santa.go":        false,
+		".env":                            true,
+		".ENV":                            true,
+		".env.production":                 true,
+		"config/.env.local":               true,
+		"certs/server.pem":                true,
+		"certs/server.KEY":                true,
+		"credentials.json":                true,
+		"aws/Credentials":                 true,
+		"credentials/db.txt":              true,  // a denied directory hides everything under it
+		"internal/action/secrets_test.go": false, // secrets* left the list: it hid source files from implement
+		".git/config":                     true,
+		".orchestrator/runs/x":            true,
+		"data/app.sqlite":                 true,
+		"deploy/prod/values.yml":          true,
+		"deploy/staging/values":           false,
+		"internal/keys.go":                false,
+		"docs/env.md":                     false,
+		"environment.go":                  false,
+		"secret_santa.go":                 false,
 	}
 	for p, want := range cases {
 		if got := d.denied(p); got != want {

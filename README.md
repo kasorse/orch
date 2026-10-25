@@ -310,7 +310,7 @@ before any call, rather than risk flags that silently mean something else. Run
   environment or in Claude Code's credentials keeps working; if yours depends on `env` or
   `apiKeyHelper` in user settings, export the variable instead.
 - The file tools cannot read the secret deny list — `.env`, `.env.*`, `*.pem`, `*.key`,
-  `credentials*`, `secrets*` and `context.extra_deny` — the same list the Context Manager
+  `credentials*` and `context.extra_deny` — the same list the Context Manager
   applies. The match is case-sensitive (`.ENV` is not covered).
 
 Around `implement` the orchestrator itself guards the result, for any provider:
@@ -524,7 +524,7 @@ With `decision.provider: jev`, two requests per run go to `decision.jev.base_url
   rules, doc excerpts, dependency names, test layout, git branch and changed paths.
 
 Never sent: file contents beyond those summaries, anything matching the deny list
-(`.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, `secrets*`, plus `context.extra_deny` —
+(`.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, plus `context.extra_deny` —
 matched against every path segment), files ignored by `.gitignore`, binaries, files over
 256 KB, symlinks, `.git/`, `.orchestrator/`. `project_context.json` in the run directory is
 exactly what was sent. Per Jev's documentation, customer data is not used for training, and

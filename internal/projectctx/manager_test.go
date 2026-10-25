@@ -37,7 +37,7 @@ var fixtureFiles = map[string]string{
 	".gitignore":                           "build/\n",
 	".env":                                 envSecret + "\n",
 	"certs/x.key":                          keySecret + "\n",
-	"config/secrets.yaml":                  secretsYAML + "\n",
+	"config/credentials.yaml":              secretsYAML + "\n",
 	"build/output.txt":                     ignoredMarker + "\n",
 	"internal/product/product_catalog.bin": binaryMarker + "\x00\x01\x02",
 }
@@ -111,11 +111,11 @@ func TestBuild_NeverLeaksSecretsIgnoredOrBinaryFiles(t *testing.T) {
 	dir := fixtureRepo(t)
 	m := newFixtureManager(t, dir, Options{MaxFiles: 20, MaxBytes: 1 << 20})
 	// Name every sensitive file in the request to make sure matching can't pull them in.
-	_, raw := buildJSON(t, m, "добавь кэш в ProductRepository", "add a cache to ProductRepository; check env key secrets yaml build output product catalog bin")
+	_, raw := buildJSON(t, m, "добавь кэш в ProductRepository", "add a cache to ProductRepository; check env key credentials yaml build output product catalog bin")
 
 	for _, forbidden := range []string{
 		envSecret, keySecret, secretsYAML, ignoredMarker, binaryMarker,
-		".env", "x.key", "secrets.yaml", "build/output.txt", "product_catalog.bin",
+		".env", "x.key", "credentials.yaml", "build/output.txt", "product_catalog.bin",
 	} {
 		if strings.Contains(raw, forbidden) {
 			t.Errorf("context contains %q:\n%s", forbidden, raw)
@@ -253,7 +253,7 @@ func indexOf(ss []string, s string) int {
 func TestBuild_NamedFileCarriesItsContent(t *testing.T) {
 	dir := fixtureRepo(t)
 	m := newFixtureManager(t, dir, Options{MaxFiles: 20, MaxBytes: 1 << 20})
-	pc, raw := buildJSON(t, m, "implement the task in `internal/order/order.go`; see .env and config/secrets.yaml", "")
+	pc, raw := buildJSON(t, m, "implement the task in `internal/order/order.go`; see .env and config/credentials.yaml", "")
 
 	if got := pc.RelevantFiles[0]; got.Path != "internal/order/order.go" || got.Content != fixtureFiles["internal/order/order.go"] {
 		t.Errorf("first relevant file = %+v, want order.go with its content", got)
