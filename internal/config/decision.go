@@ -175,6 +175,13 @@ type ContextDepthPolicyConfig struct {
 	ProjectThreshold *float64 `yaml:"project_threshold"`
 }
 
+// ClarifyPolicyConfig is policy.clarify (specs/clarify): the task is clear enough when the
+// decision provider's P(clear) is at least Threshold.
+type ClarifyPolicyConfig struct {
+	// Threshold is a pointer so an omitted value (nil) is an error, not a threshold of 0.
+	Threshold *float64 `yaml:"threshold"`
+}
+
 // ComplexityPolicyConfig configures the cuts on a complexity distribution's size
 // (specs/decision-shape/SPEC.md §5.2). Complex and Medium, the probability thresholds
 // before it, are declared only so strict decoding accepts them and the validator can name
@@ -207,6 +214,7 @@ type StagePolicyConfig struct {
 // component (internal/policy) that consumes it.
 type PolicyConfig struct {
 	ContextDepth ContextDepthPolicyConfig `yaml:"context_depth"`
+	Clarify      ClarifyPolicyConfig      `yaml:"clarify"`
 	Complexity   ComplexityPolicyConfig   `yaml:"complexity"`
 	Stages       StagePolicyConfig        `yaml:"stages"`
 	// Paths are the path rules, applied in file order (specs/governance/SPEC.md §4.1).
@@ -332,6 +340,11 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 		projectThreshold = *c.Policy.ContextDepth.ProjectThreshold
 	}
 
+	clarityThreshold := 0.0
+	if c.Policy.Clarify.Threshold != nil {
+		clarityThreshold = *c.Policy.Clarify.Threshold
+	}
+
 	var explore *domain.ExploreSettings
 	if c.Policy.Explore != nil {
 		explore = &domain.ExploreSettings{Band: c.Policy.Explore.Band, Rate: c.Policy.Explore.Rate}
@@ -339,6 +352,7 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: projectThreshold,
+		ClarityThreshold:        clarityThreshold,
 		ComplexityCuts:          cuts,
 		StageThreshold:          stageThreshold,
 		ForceStages:             forceStages,
@@ -499,6 +513,13 @@ func validatePolicyConfig(p PolicyConfig) []string {
 		problems = append(problems, "policy.context_depth.project_threshold is required")
 	} else if v := *p.ContextDepth.ProjectThreshold; v < 0 || v > 1 {
 		problems = append(problems, fmt.Sprintf("policy.context_depth.project_threshold must be in [0, 1], got %v", v))
+	}
+
+	// Written as a negated range so a NaN is rejected too. 0 is refused: every task would pass.
+	if p.Clarify.Threshold == nil {
+		problems = append(problems, "policy.clarify.threshold is required")
+	} else if v := *p.Clarify.Threshold; !(v > 0 && v <= 1) {
+		problems = append(problems, fmt.Sprintf("policy.clarify.threshold must be in (0, 1], got %v", v))
 	}
 
 	problems = append(problems, validateComplexityPolicy(p.Complexity)...)

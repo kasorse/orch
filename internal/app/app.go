@@ -1150,7 +1150,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
-		out, err = decideManual(stages, task.Description, reporter)
+		out, err = decideManual(decideCtx, cfg, registry, store, run.ID, stages, task.Description, reporter, stream, stderr)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
 			reporter, prompter, interactive, storyIn != nil, stream, stderr)
@@ -1762,7 +1762,7 @@ func worktreeRel(ctx context.Context, repo *repository.Repository, p string) str
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over
 // HTTP, its offline mock, or a CLI provider. The Jev API key is read from the
 // environment here and handed only to the client's constructor.
-func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, stream, stderr io.Writer) (decision.Provider, error) {
+func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, label string, stream, stderr io.Writer) (decision.Provider, error) {
 	d := cfg.Decision
 	sources := d.Complexity.Sources()
 
@@ -1787,7 +1787,7 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 	}
 	return &llm.Provider{
 		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
-		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Deciding the workflow"}, Stream: stream,
+		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: label}, Stream: stream,
 	}, nil
 }
 

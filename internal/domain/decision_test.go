@@ -224,10 +224,50 @@ func TestContextDepthDecision_Validate(t *testing.T) {
 		{Probabilities: map[ContextDepth]float64{ContextDepthProject: 1}, Confidence: 1},
 		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.6, ContextDepthProject: 0.6}, Confidence: 0.2},
 		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: -0.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: 1.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: -0.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: math.NaN()},
 	}
 	for i, d := range invalid {
 		if err := d.Validate(); err == nil {
 			t.Errorf("invalid decision %d accepted", i)
+		}
+	}
+}
+
+func TestClarityDecision_Validate(t *testing.T) {
+	for _, p := range []float64{0, 0.42, 0.8, 1} {
+		if err := (ClarityDecision{PClear: p}).Validate(); err != nil {
+			t.Errorf("P(clear) %v rejected: %v", p, err)
+		}
+	}
+	for _, p := range []float64{-0.01, 1.01, math.NaN(), math.Inf(1)} {
+		if err := (ClarityDecision{PClear: p}).Validate(); err == nil {
+			t.Errorf("P(clear) %v accepted", p)
+		}
+	}
+}
+
+func TestClarityTrace_Validate(t *testing.T) {
+	valid := ClarityTrace{Threshold: 0.8, Checks: []float64{0.42, 0.86}, Status: ClarityClear, Reason: "p=0.86 >= 0.80"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid trace rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(c *ClarityTrace){
+		"zero threshold":    func(c *ClarityTrace) { c.Threshold = 0 },
+		"threshold above 1": func(c *ClarityTrace) { c.Threshold = 1.1 },
+		"NaN threshold":     func(c *ClarityTrace) { c.Threshold = math.NaN() },
+		"no checks":         func(c *ClarityTrace) { c.Checks = nil },
+		"too many checks":   func(c *ClarityTrace) { c.Checks = make([]float64, MaxClarityChecks+1) },
+		"check above 1":     func(c *ClarityTrace) { c.Checks = []float64{1.5} },
+		"check below 0":     func(c *ClarityTrace) { c.Checks = []float64{0.5, -0.5} },
+		"unknown status":    func(c *ClarityTrace) { c.Status = "maybe" },
+		"empty status":      func(c *ClarityTrace) { c.Status = "" },
+	} {
+		c := valid
+		mutate(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: accepted %+v", name, c)
 		}
 	}
 }

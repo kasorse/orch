@@ -277,6 +277,8 @@ translation:
 policy:
   context_depth:
     project_threshold: 0.5
+  clarify:
+    threshold: 0.80
   complexity:
     cuts: {medium: 0.50, complex: 1.40}
   stages:

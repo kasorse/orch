@@ -170,12 +170,17 @@ func levelText(raw json.RawMessage) string {
 }
 
 // mockRequestText extracts the request text from state: {"request": "..."} as the
-// provider sends it, or a bare string state.
+// provider sends it (followed by its "clarification", when a clarity re-check sends one), or a
+// bare string state.
 func mockRequestText(state json.RawMessage) string {
 	var obj struct {
-		Request string `json:"request"`
+		Request       string `json:"request"`
+		Clarification string `json:"clarification"`
 	}
 	if err := json.Unmarshal(state, &obj); err == nil && obj.Request != "" {
+		if obj.Clarification != "" {
+			return obj.Request + "\n" + obj.Clarification
+		}
 		return obj.Request
 	}
 	var s string
@@ -194,11 +199,20 @@ type requestSignals struct {
 	feature    bool // asks for new behaviour
 	research   bool // asks about external knowledge
 	docsOnly   bool // touches only text: typos, comments, docs
+	clear      bool // clear enough to act on (the clarity question)
 	complexity int  // 0 simple, 1 medium, 2 complex
 }
 
+// mockClearWords is how many words a request needs to be rated clear, unless it names
+// something.
+const mockClearWords = 8
+
 var (
 	identifierRe = regexp.MustCompile(`\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b|\b[a-z]+_[a-z_]+\b|\w+\.(go|py|ts|js|java|rs|yaml|yml|json|md)\b`)
+
+	// namedRe is what makes a short request clear: an identifier, a file, a function call or an
+	// error message.
+	namedRe = regexp.MustCompile(`\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b|\b[a-z]+_[a-z_]+\b|\w+\.(go|py|ts|js|java|rs|yaml|yml|json|md)\b|\w+\(\)|"[^"]{4,}"|(?i:error|panic|exception|fatal):`)
 
 	questionWords = []string{"what", "why", "how", "explain", "which", "difference", "что", "почему", "как ", "объясни", "чем "}
 	codeWords     = []string{"code", "file", "function", "method", "package", "module", "class", "endpoint", "handler", "repo", "codebase", "project", "config", "struct", "interface", "cli", "код", "файл", "функци", "метод", "пакет", "проект"}
@@ -207,6 +221,7 @@ var (
 	featureWords  = []string{"add", "implement", "support", "introduce", "new ", "feature", "добав", "реализ", "поддерж", "нов"}
 	researchWords = []string{"compare", "comparison", "library", "libraries", "alternative", "approach", "best practice", "research", "which tool", "vs ", "сравни", "библиотек", "альтернатив", "подход"}
 	docsWords     = []string{"typo", "comment", "readme", "docs", "documentation", "spelling", "опечат", "коммент", "документац"}
+	verbWords     = []string{"explain", "show", "make", "find", "check", "investigate", "describe", "handle", "return", "use ", "test", "run ", "build", "list", "print", "log ", "stop", "start", "allow", "prevent", "ensure", "should", "must", "need", "want", "покажи", "найди", "проверь", "сделай"}
 	simpleWords   = []string{"typo", "rename", "comment", "log message", "spelling", "readme", "bump", "small", "minor", "one-line", "constant", "опечат", "переимен", "коммент", "мелк"}
 	complexWords  = []string{"architecture", "redesign", "migrate", "migration", "rewrite", "distributed", "concurrency", "across", "entire", "whole", "system-wide", "framework", "архитектур", "перепиш", "миграц", "весь ", "всю "}
 )
@@ -233,6 +248,11 @@ func analyzeRequest(text string) requestSignals {
 	}
 	s.bug = s.bug && !s.docsOnly // "fix a typo" is an edit, not a defect to analyse
 	s.codeRef = s.codeRef || s.change || s.bug
+
+	// A request under about 8 words or without a verb is unclear; a named file, function or
+	// error message makes it clear.
+	hasVerb := s.change || s.question || has(verbWords)
+	s.clear = namedRe.MatchString(text) || (len(strings.Fields(text)) >= mockClearWords && hasVerb)
 
 	switch {
 	case has(complexWords):
@@ -295,10 +315,16 @@ func (s requestSignals) scoreDistribution(n int) []float64 {
 	return probs
 }
 
-// noul answers the stage_<name> questions and the shadow scope question (always weak: the
-// mock has no signal for it); unknown ids get an undecided 0.5.
+// noul answers the stage_<name> questions, the clarity question, and the shadow scope question
+// (always weak: the mock has no signal for it); unknown ids get an undecided 0.5.
 func (s requestSignals) noul(id string) float64 {
 	if id == decision.QuestionScopeStory {
+		return mockWeak
+	}
+	if id == decision.QuestionClarity {
+		if s.clear {
+			return mockStrong
+		}
 		return mockWeak
 	}
 	var yes bool

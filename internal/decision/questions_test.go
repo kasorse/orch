@@ -104,6 +104,41 @@ func TestScopeQuestion_IsNotAStageQuestion(t *testing.T) {
 	}
 }
 
+func TestClarityQuestion_IsNotAStageQuestion(t *testing.T) {
+	q := ClarityQuestion()
+	if q.ID != "clarity" || q.Stage != "" {
+		t.Errorf("ClarityQuestion = %s/%q, want clarity with no stage", q.ID, q.Stage)
+	}
+	if q.Instructions == "" || q.True == "" || q.False == "" {
+		t.Errorf("clarity question is incomplete: %+v", q)
+	}
+	if !strings.Contains(q.Instructions, "`request`") {
+		t.Error("clarity instructions must refer to the `request` state field")
+	}
+	for _, sq := range StageQuestions() {
+		if sq.ID == q.ID {
+			t.Errorf("StageQuestions returns the clarity question %q", sq.ID)
+		}
+	}
+}
+
+func TestQuestionsHash_CoversTheClarityQuestion(t *testing.T) {
+	h := QuestionsHash()
+	saved := clarityQuestion
+	t.Cleanup(func() { clarityQuestion = saved })
+	for name, change := range map[string]func(*YesNoQuestion){
+		"instructions": func(q *YesNoQuestion) { q.Instructions += " " },
+		"yes":          func(q *YesNoQuestion) { q.True += " " },
+		"no":           func(q *YesNoQuestion) { q.False += " " },
+	} {
+		clarityQuestion = saved
+		change(&clarityQuestion)
+		if QuestionsHash() == h {
+			t.Errorf("changing the clarity question's %s text did not change the hash", name)
+		}
+	}
+}
+
 func TestQuestionsHash_CoversTheScopeQuestion(t *testing.T) {
 	// The hash as it was before the scope question joined it: the shared questions alone.
 	data, err := json.Marshal(struct {

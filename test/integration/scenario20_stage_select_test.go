@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -28,12 +29,26 @@ func newStageRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) s
 	return stageRun{repoDir: repoDir, cfg: jevConfig(t, j, mutate...), invocationsLog: invocationsLog, promptsDir: promptsDir, jev: j}
 }
 
-// noDecisionLayer asserts nothing was asked of Jev or the translator, and no project
-// context was collected.
+// clarityOnly reports whether a Jev request body asks the clarity question alone
+// (specs/clarify): the one thing a --stage run asks the decision provider.
+func clarityOnly(body string) bool {
+	var req struct {
+		Questions map[string]json.RawMessage `json:"questions"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return false
+	}
+	_, ok := req.Questions["clarity"]
+	return ok && len(req.Questions) == 1
+}
+
+// noDecisionLayer asserts the decision layer did not run: Jev was asked the clarity question
+// and nothing else, the translator was not called, and no project context was collected.
 func (r stageRun) noDecisionLayer(t *testing.T) {
 	t.Helper()
-	if n := len(r.jev.Bodies()); n != 0 {
-		t.Errorf("Jev got %d requests, want 0", n)
+	bodies := r.jev.Bodies()
+	if len(bodies) != 1 || !clarityOnly(bodies[0]) {
+		t.Errorf("Jev got %d requests %v, want the clarity question alone, once", len(bodies), bodies)
 	}
 	for _, name := range invocations(t, r.invocationsLog) {
 		if strings.HasPrefix(name, "translate") || strings.HasPrefix(name, "decide") {
@@ -276,8 +291,8 @@ func TestScenario20h_StageWithJira(t *testing.T) {
 	if n := len(r.jira.Requests()); n != 1 {
 		t.Errorf("Jira got %d requests, want 1", n)
 	}
-	if n := len(r.jev.Bodies()); n != 0 {
-		t.Errorf("Jev got %d requests, want 0", n)
+	if bodies := r.jev.Bodies(); len(bodies) != 1 || !clarityOnly(bodies[0]) {
+		t.Errorf("Jev got %d requests, want the clarity question alone, once", len(bodies))
 	}
 	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"review"}) {
 		t.Errorf("invocations = %v", got)

@@ -43,6 +43,8 @@ translation:
 policy:
   context_depth:
     project_threshold: 0.5
+  clarify:
+    threshold: 0.80
   complexity:
     cuts: {medium: 0.50, complex: 1.40}
   stages:
@@ -217,6 +219,7 @@ decision:
 translation: {provider: claude, model: haiku, timeout: 60s}
 policy:
   context_depth: {project_threshold: 0.5}
+  clarify: {threshold: 0.80}
   complexity: {cuts: {medium: 0.50, complex: 1.40}}
   stages:
     thresholds: {research: 0.70, development: 0.60}
@@ -289,21 +292,59 @@ func TestValidate_RefusesTheKeysAnalysisLeft(t *testing.T) {
 	}
 }
 
+// policy.clarify.threshold is required and in (0, 1]: loaded from a file, a missing key and a 0
+// are config errors, and a key inside policy.clarify nobody declared is an unknown one.
+func TestLoad_ClarifyThreshold(t *testing.T) {
+	const withThreshold = "  clarify: {threshold: 0.80}\n"
+	cfg, err := Load(writeTempConfig(t, validV2("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Policy.Clarify.Threshold == nil || *cfg.Policy.Clarify.Threshold != 0.80 {
+		t.Fatalf("threshold = %v, want 0.80", cfg.Policy.Clarify.Threshold)
+	}
+	if got := cfg.DecisionPolicy().ClarityThreshold; got != 0.80 {
+		t.Errorf("DecisionPolicy().ClarityThreshold = %v, want 0.80", got)
+	}
+
+	for name, tc := range map[string]struct{ replace, want string }{
+		"missing": {"", "policy.clarify.threshold is required"},
+		"zero":    {"  clarify: {threshold: 0}\n", "policy.clarify.threshold must be in (0, 1]"},
+		"above 1": {"  clarify: {threshold: 1.2}\n", "policy.clarify.threshold must be in (0, 1]"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), withThreshold, tc.replace, 1)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			err = Validate(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+
+	_, err = Load(writeTempConfig(t, strings.Replace(validV2(""), withThreshold, "  clarify: {threshold: 0.8, treshold: 0.7}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "treshold") {
+		t.Errorf("an undeclared key in policy.clarify must fail to load, got %v", err)
+	}
+}
+
 func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		yaml string
 		want []string
 	}{
-		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 24: exectuion"}},
+		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 25: exectuion"}},
 		// actions, translation and jira decode through their own UnmarshalYAML: strictness
 		// must reach inside those too.
 		"inside an action": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
-			"review: {provider: claude, model: sonnet, timout: 20m}", 1), []string{"line 20: timout"}},
+			"review: {provider: claude, model: sonnet, timout: 20m}", 1), []string{"line 21: timout"}},
 		"translation effort": {strings.Replace(validV2(""), "model: haiku,", "model: haiku, effort: high,", 1),
 			[]string{"line 9: effort"}},
 		"inside jira": {validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: basic\n  email_env: E\n  token_env: T\n  timeuot: 5s\n"),
-			[]string{"line 29: timeuot"}},
-		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 24: limit", "line 25: securty"}},
+			[]string{"line 30: timeuot"}},
+		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 25: limit", "line 26: securty"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tc.yaml))

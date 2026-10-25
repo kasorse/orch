@@ -200,6 +200,58 @@ func TestMock_ScopeAnswersWeakWhateverTheRequest(t *testing.T) {
 	}
 }
 
+// A request under about 8 words or without a verb is unclear; a named file, function or error
+// message makes it clear.
+func TestMock_Clarity(t *testing.T) {
+	cases := []struct {
+		request string
+		want    bool
+	}{
+		{"make it faster", false},
+		{"Add a cache", false},
+		{"The performance of the whole orders service lately somehow", false}, // long, but no verb
+		{"Add pagination support to the list endpoint of the orders service", true},
+		{"Fix Add in fixture.go", true},
+		{"Fix the panic: index out of range in the dispatcher", true},
+		{`Fix the error "connection reset by peer" on upload`, true},
+		{"Call Reset() after use", true},
+	}
+	q := decision.ClarityQuestion()
+	for _, tc := range cases {
+		request, want := tc.request, tc.want
+		a := mustDecide(t, systemOneRequest{
+			Model:     "jev-1.13.0",
+			State:     decision.PreCheckState{Request: request},
+			Questions: map[string]question{q.ID: yesNoQuestion(q)},
+		}).Answers[q.ID]
+		if a.Type != questionNoul || a.Noul == nil {
+			t.Fatalf("%q: clarity answer = %+v", request, a)
+		}
+		if got := *a.Noul >= 0.5; got != want {
+			t.Errorf("%q: P(clear) = %v, want clear = %v", request, *a.Noul, want)
+		}
+	}
+}
+
+// The re-check sends the clarification with the request, and the mock reads both.
+func TestMock_ClarityReadsTheClarification(t *testing.T) {
+	q := decision.ClarityQuestion()
+	ask := func(clarification string) float64 {
+		a := mustDecide(t, systemOneRequest{
+			Model:     "jev-1.13.0",
+			State:     decision.ClarityState{Request: "make it faster", Clarification: clarification},
+			Questions: map[string]question{q.ID: yesNoQuestion(q)},
+		}).Answers[q.ID]
+		return *a.Noul
+	}
+	if got := ask(""); got >= 0.5 {
+		t.Errorf("P(clear) without a clarification = %v, want unclear", got)
+	}
+	if got := ask("- Which call is slow? Save in internal/repository/product.go  [operator]"); got < 0.5 {
+		t.Errorf("P(clear) with a clarification naming a file = %v, want clear", got)
+	}
+}
+
 func TestMock_Deterministic(t *testing.T) {
 	req := classificationRequest("Add pagination support to the list endpoint")
 	if a, b := mustDecide(t, req), mustDecide(t, req); !reflect.DeepEqual(a, b) {

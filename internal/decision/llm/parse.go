@@ -18,7 +18,16 @@ import (
 // distribution is normalised to sum to exactly 1.
 const sumTolerance = 0.05
 
-type contextAnswer map[string]map[string]float64
+// contextAnswer is the pre-check's answer: the depth distribution and P(clear).
+type contextAnswer struct {
+	ContextDepth map[string]float64 `json:"context_depth"`
+	Clarity      *float64           `json:"clarity"`
+}
+
+// clarityAnswer is a clarity re-check's answer.
+type clarityAnswer struct {
+	Clarity *float64 `json:"clarity"`
+}
 
 type classifyAnswer struct {
 	Complexity      map[string]float64 `json:"complexity"`
@@ -33,19 +42,61 @@ func parseContextDepth(output string) (domain.ContextDepthDecision, error) {
 		return domain.ContextDepthDecision{}, err
 	}
 	var ans contextAnswer
-	if err := json.Unmarshal([]byte(raw), &ans); err != nil {
-		return domain.ContextDepthDecision{}, fmt.Errorf("decode answer: %w", err)
+	if err := decodeStrict(raw, &ans); err != nil {
+		return domain.ContextDepthDecision{}, err
 	}
 	q := decision.ContextDepthQuestion()
-	probs, err := distribution(q.ID, ans[q.ID], optionValues(q))
+	probs, err := distribution(q.ID, ans.ContextDepth, optionValues(q))
 	if err != nil {
 		return domain.ContextDepthDecision{}, err
 	}
-	d := domain.ContextDepthDecision{Probabilities: map[domain.ContextDepth]float64{}, Confidence: maxOf(probs)}
+	pClear, err := yesProbability(decision.QuestionClarity, ans.Clarity)
+	if err != nil {
+		return domain.ContextDepthDecision{}, err
+	}
+	d := domain.ContextDepthDecision{Probabilities: map[domain.ContextDepth]float64{}, Confidence: maxOf(probs), PClear: pClear}
 	for k, p := range probs {
 		d.Probabilities[domain.ContextDepth(k)] = p
 	}
 	return d, d.Validate()
+}
+
+func parseClarity(output string) (domain.ClarityDecision, error) {
+	raw, err := extractJSON(output)
+	if err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	var ans clarityAnswer
+	if err := decodeStrict(raw, &ans); err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	p, err := yesProbability(decision.QuestionClarity, ans.Clarity)
+	if err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	d := domain.ClarityDecision{PClear: p}
+	return d, d.Validate()
+}
+
+// decodeStrict decodes the one JSON object an answer is, refusing keys nobody asked for.
+func decodeStrict(raw string, into any) error {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(into); err != nil {
+		return fmt.Errorf("decode answer: %w", err)
+	}
+	return nil
+}
+
+// yesProbability checks the answer to a yes/no question: present and in [0, 1].
+func yesProbability(id string, p *float64) (float64, error) {
+	if p == nil {
+		return 0, fmt.Errorf("answer %q is missing", id)
+	}
+	if math.IsNaN(*p) || *p < 0 || *p > 1 {
+		return 0, fmt.Errorf("%s probability %v outside [0, 1]", id, *p)
+	}
+	return *p, nil
 }
 
 func parseClassification(output string, input domain.ClassificationInput, sources []domain.ComplexitySource, providerID, model string) (domain.TaskClassification, error) {

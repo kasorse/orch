@@ -46,6 +46,8 @@ translation:
 policy:
   context_depth:
     project_threshold: 0.5   # P(project) >= threshold -> collect project context
+  clarify:
+    threshold: 0.80          # P(clear) >= threshold -> the task is clear enough; in (0, 1]
   complexity:
     # size = P(medium) + 2·P(complex), in [0, 2]: size >= complex -> complex, >= medium -> medium,
     # else simple (specs/decision-shape/SPEC.md §5). The cuts are the 50/35/15 quantiles of 43

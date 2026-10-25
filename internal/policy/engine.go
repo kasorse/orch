@@ -24,6 +24,28 @@ func SelectContextDepth(d domain.ContextDepthDecision, p domain.DecisionPolicy) 
 	return domain.ContextDepthNone
 }
 
+// ClearEnough reports whether P(clear) p reaches pol's ClarityThreshold (policy.clarify.threshold,
+// specs/clarify). The comparison is inclusive, like SelectContextDepth's.
+func ClearEnough(p float64, pol domain.DecisionPolicy) bool {
+	return p >= pol.ClarityThreshold
+}
+
+// Clarity is the trace of the clarity checks made so far: checks holds P(clear) of the
+// pre-check and then of each re-check, and the status is that of the last one. It panics on no
+// checks: there is nothing to trace before the first.
+func Clarity(checks []float64, pol domain.DecisionPolicy) domain.ClarityTrace {
+	last := checks[len(checks)-1]
+	t := domain.ClarityTrace{Threshold: pol.ClarityThreshold, Checks: append([]float64(nil), checks...)}
+	if ClearEnough(last, pol) {
+		t.Status = domain.ClarityClear
+		t.Reason = fmt.Sprintf("p=%.2f >= %.2f", last, pol.ClarityThreshold)
+	} else {
+		t.Status = domain.ClarityUnclear
+		t.Reason = fmt.Sprintf("p=%.2f < %.2f", last, pol.ClarityThreshold)
+	}
+	return t
+}
+
 // SelectComplexity cuts d's Size by p.ComplexityCuts (specs/decision-shape/SPEC.md §5):
 // complex at or above the complex cut, otherwise medium at or above the medium cut,
 // otherwise simple. Both comparisons are inclusive.

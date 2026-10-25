@@ -220,6 +220,45 @@ func usageNear(a, b OutcomeUsage) bool {
 }
 
 // The outcome is derived: computing it neither changes the run nor the trace.
+// The clarity re-checks are decision calls: counted in the decision overhead and the run's
+// usage, also for a manual decision (run --stage), where they are the only decision call.
+func TestComputeOutcome_CountsTheClarityRechecks(t *testing.T) {
+	recheck := []Usage{{InputTokens: 30, OutputTokens: 1, CostUSD: 0.01}, {InputTokens: 40, OutputTokens: 1, CostUSD: 0.02}}
+
+	llm := ComputeOutcome(Run{Status: RunCompleted}, &DecisionTrace{
+		Source: DecisionSourceLLM,
+		Usage:  &DecisionUsage{Classification: &Usage{InputTokens: 5, CostUSD: 0.03}, ClarityRecheck: recheck},
+	})
+	if d := llm.DecisionOverhead; d.Calls != 3 || math.Abs(d.CostUSD-0.06) > 1e-9 {
+		t.Errorf("decision overhead = %+v, want 3 calls costing 0.06", d)
+	}
+	if llm.Usage.Calls != 3 || llm.Usage.InputTokens != 75 {
+		t.Errorf("usage = %+v, want the re-checks counted", llm.Usage)
+	}
+
+	manual := ComputeOutcome(Run{Status: RunCompleted}, &DecisionTrace{
+		Source: DecisionSourceManual,
+		Usage:  &DecisionUsage{ClarityRecheck: recheck[:1]},
+	})
+	if d := manual.DecisionOverhead; d.Calls != 1 || math.Abs(d.CostUSD-0.01) > 1e-9 || d.MS != 0 {
+		t.Errorf("manual decision overhead = %+v, want the one clarity call and no time", d)
+	}
+}
+
+func TestDecisionUsage_EmptyAndCalls(t *testing.T) {
+	if !(DecisionUsage{}).Empty() || (DecisionUsage{ClarityRecheck: []Usage{{}}}).Empty() {
+		t.Error("a re-check's usage makes a DecisionUsage non-empty, and only that")
+	}
+	u := DecisionUsage{Translation: &Usage{InputTokens: 1}, Classification: &Usage{InputTokens: 3}, ClarityRecheck: []Usage{{InputTokens: 4}}}
+	var got []int64
+	for _, c := range u.Calls() {
+		got = append(got, c.InputTokens)
+	}
+	if len(got) != 3 || got[0] != 1 || got[1] != 3 || got[2] != 4 {
+		t.Errorf("Calls = %v, want the translation, the classification and the re-check in order", got)
+	}
+}
+
 func TestComputeOutcome_DoesNotMutate(t *testing.T) {
 	u := &Usage{InputTokens: 5, CostUSD: 0.1}
 	run := Run{Status: RunCompleted, Executions: []StepExecution{{Action: ActionInvestigate, Usage: u}}}

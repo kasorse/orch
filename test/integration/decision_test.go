@@ -107,6 +107,15 @@ type decisionJSON struct {
 	Scope *struct {
 		Story float64 `json:"story"`
 	} `json:"scope"`
+	Clarity *struct {
+		Threshold float64   `json:"threshold"`
+		Checks    []float64 `json:"checks"`
+		Status    string    `json:"status"`
+		Reason    string    `json:"reason"`
+	} `json:"clarity"`
+	Usage *struct {
+		ClarityRecheck []json.RawMessage `json:"clarity_recheck"`
+	} `json:"usage"`
 	Workflow []string `json:"workflow"`
 }
 
@@ -162,6 +171,13 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	// The shadow scope question is asked and its probability recorded (specs/story/SPEC.md §13).
 	if d.Scope == nil || d.Scope.Story != 0.15 {
 		t.Errorf("decision.json scope = %+v, want story 0.15", d.Scope)
+	}
+	// The clarity question rides in the pre-check's call: one value, no extra request.
+	if d.Clarity == nil || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.95 || d.Clarity.Threshold != 0.8 || d.Clarity.Status != "clear" {
+		t.Errorf("decision.json clarity = %+v, want one check of 0.95 against 0.8, clear", d.Clarity)
+	}
+	if n := len(j.Bodies()); n != 2 {
+		t.Errorf("Jev got %d requests, want the pre-check and the classification", n)
 	}
 	if !equalStrings(d.Workflow, []string{"investigate", "implement", "test", "review"}) || d.ContextDepth.Selected != "project" {
 		t.Errorf("decision = %+v", d)
@@ -435,7 +451,7 @@ func TestDecision_LLMProvider(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, promptsDir := decisionEnv(t, repoDir)
 	responsesDir := os.Getenv("FAKE_RESPONSES_DIR")
-	writeResponse(t, responsesDir, "decide-context", `{"context_depth": {"none": 0.1, "project": 0.9}}`)
+	writeResponse(t, responsesDir, "decide-context", `{"context_depth": {"none": 0.1, "project": 0.9}, "clarity": 0.9}`)
 	writeResponse(t, responsesDir, "decide-classify", `{
   "complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
   "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
@@ -461,6 +477,9 @@ func TestDecision_LLMProvider(t *testing.T) {
 	if d.Source != "llm" || d.Provider != "claude" || d.Model != "fake" ||
 		!equalStrings(d.Workflow, []string{"investigate", "implement", "test", "review"}) {
 		t.Errorf("decision = %+v", d)
+	}
+	if d.Clarity == nil || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.9 || d.Clarity.Status != "clear" {
+		t.Errorf("decision.json clarity = %+v, want one check of 0.9, clear", d.Clarity)
 	}
 	prompt, _ := os.ReadFile(filepath.Join(promptsDir, "decide-classify.txt"))
 	if !strings.Contains(string(prompt), `"project_context_available": true`) || !strings.Contains(string(prompt), "fixture.go") {

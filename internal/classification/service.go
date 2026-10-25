@@ -85,6 +85,9 @@ type Result struct {
 	// failed or never ran.
 	Depth          *domain.ContextDepthDecision
 	Classification *domain.TaskClassification
+	// Clarity is the trace of the clarity checks (the pre-check's P(clear) against the
+	// threshold); nil when the pre-check failed and for a story task.
+	Clarity *domain.ClarityTrace
 	// Project is exactly what was sent to the provider; nil for depth none or a
 	// failed collection.
 	Project *domain.ProjectContext
@@ -122,6 +125,12 @@ func (s *Service) Classify(ctx context.Context, req Request) (Result, error) {
 	}
 	res.Depth = &depth
 	selectedDepth := policy.SelectContextDepth(depth, s.Policy)
+	// P(clear) came in the same call. It is recorded and decides nothing yet (specs/clarify);
+	// a story task has its plan in the task file and is not asked.
+	if !req.StoryTask {
+		clarity := policy.Clarity([]float64{depth.PClear}, s.Policy)
+		res.Clarity = &clarity
+	}
 
 	if selectedDepth == domain.ContextDepthProject {
 		requestEN := ""
@@ -290,6 +299,11 @@ func (r Result) Trace(wf domain.Workflow) domain.DecisionTrace {
 			Confidence:          r.Depth.Confidence,
 			ContextDepthOutcome: r.Decision.ContextDepth,
 		}
+	}
+	if r.Clarity != nil {
+		clarity := *r.Clarity
+		clarity.Checks = append([]float64(nil), clarity.Checks...)
+		t.Clarity = &clarity
 	}
 	for _, step := range wf.Steps {
 		t.Workflow = append(t.Workflow, step.Action)

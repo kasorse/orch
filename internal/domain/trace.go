@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"math"
 )
 
 // PolicyHash is the lowercase hex sha256 of the JSON of p. encoding/json writes map keys in
@@ -51,6 +53,10 @@ type DecisionTrace struct {
 	ContextDepth   *ContextDepthTrace `json:"context_depth,omitempty"`
 	ContextLimited bool               `json:"context_limited"`
 	ContextError   string             `json:"context_error,omitempty"`
+	// Clarity is the clarity question's answers and what Go made of them (specs/clarify). It is
+	// recorded and decides nothing yet. Absent after a failed pre-check, for a story task and in
+	// a trace written before the question existed.
+	Clarity *ClarityTrace `json:"clarity,omitempty"`
 
 	Complexity ComplexityOutcome `json:"complexity"`
 	Stages     []StageOutcome    `json:"stages"`
@@ -98,6 +104,57 @@ type ContextDepthTrace struct {
 	ContextDepthOutcome
 }
 
+// ClarityStatus is how the clarity checks of a run ended.
+type ClarityStatus string
+
+const (
+	// ClarityClear: the last check reached the threshold.
+	ClarityClear ClarityStatus = "clear"
+	// ClarityUnclear: the last check stayed below the threshold.
+	ClarityUnclear ClarityStatus = "unclear"
+	// ClarityDisabled: clarify.enabled is false; the question is asked and recorded, and the
+	// run goes on whatever P(clear) is.
+	ClarityDisabled ClarityStatus = "disabled"
+)
+
+// Valid reports whether s is a status decision.json may record.
+func (s ClarityStatus) Valid() bool {
+	return s == ClarityClear || s == ClarityUnclear || s == ClarityDisabled
+}
+
+// ClarityTrace is decision.json: clarity (specs/clarify). Checks holds P(clear) of the
+// pre-check and then of every re-check, in order; Threshold is policy.clarify.threshold. Status
+// is the outcome of the last check, and Reason says it the way a stage's reason does.
+type ClarityTrace struct {
+	Threshold float64       `json:"threshold"`
+	Checks    []float64     `json:"checks"`
+	Status    ClarityStatus `json:"status"`
+	Reason    string        `json:"reason,omitempty"`
+}
+
+// MaxClarityChecks bounds Checks of a decision.json read back: the pre-check, and a re-check
+// after each of at most clarify.max_rounds (5) additions and the clarify step itself.
+const MaxClarityChecks = 8
+
+// Validate checks a ClarityTrace read back from decision.json.
+func (c ClarityTrace) Validate() error {
+	if math.IsNaN(c.Threshold) || c.Threshold <= 0 || c.Threshold > 1 {
+		return fmt.Errorf("threshold %v outside (0, 1]", c.Threshold)
+	}
+	if n := len(c.Checks); n < 1 || n > MaxClarityChecks {
+		return fmt.Errorf("%d checks, want 1 to %d", n, MaxClarityChecks)
+	}
+	for i, p := range c.Checks {
+		if err := validateUnit(fmt.Sprintf("checks[%d]", i), p); err != nil {
+			return err
+		}
+	}
+	if !c.Status.Valid() {
+		return fmt.Errorf("unknown status %q", c.Status)
+	}
+	return nil
+}
+
 // DecisionLatency is each classification step's duration in milliseconds; a step that
 // did not run is 0. ManualChoiceMS is the user's thinking time, not the provider's.
 type DecisionLatency struct {
@@ -114,11 +171,24 @@ type DecisionUsage struct {
 	Translation    *Usage `json:"translation,omitempty"`
 	ContextDepth   *Usage `json:"context_depth,omitempty"`
 	Classification *Usage `json:"classification,omitempty"`
+	// ClarityRecheck is the usage of each clarity re-check that reported any, in order.
+	ClarityRecheck []Usage `json:"clarity_recheck,omitempty"`
 }
 
 // Empty reports whether no round recorded usage.
 func (u DecisionUsage) Empty() bool {
-	return u.Translation == nil && u.ContextDepth == nil && u.Classification == nil
+	return u.Translation == nil && u.ContextDepth == nil && u.Classification == nil && len(u.ClarityRecheck) == 0
+}
+
+// Calls returns the usage of every decision call that reported any, in the order they ran.
+func (u DecisionUsage) Calls() []Usage {
+	var out []Usage
+	for _, c := range []*Usage{u.Translation, u.ContextDepth, u.Classification} {
+		if c != nil {
+			out = append(out, *c)
+		}
+	}
+	return append(out, u.ClarityRecheck...)
 }
 
 // ManualTrace is decision.json for stages the operator named with --stage

@@ -276,8 +276,8 @@ func TestLoad_ProvidersStrictKeys(t *testing.T) {
 		extra string
 		want  string
 	}{
-		"other provider": {"providers:\n  gemini:\n    auth: api\n", "line 25: gemini"},
-		"unknown claude": {"providers:\n  claude:\n    autho: api\n", "line 26: autho"},
+		"other provider": {"providers:\n  gemini:\n    auth: api\n", "line 26: gemini"},
+		"unknown claude": {"providers:\n  claude:\n    autho: api\n", "line 27: autho"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, validV2(tc.extra)))

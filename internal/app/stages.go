@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -54,17 +55,29 @@ func parseStageFlags(values []string) ([]domain.Stage, error) {
 	return out, nil
 }
 
-// decideManual builds the decision for stages named with --stage. It constructs no
-// decision provider, translator or Context Manager and calls nothing.
-func decideManual(stages []domain.Stage, task string, reporter *logging.ConsoleReporter) (decisionOutcome, error) {
+// decideManual builds the decision for stages named with --stage. It constructs no translator
+// or Context Manager, and the decision stays manual. The one thing it asks of the decision
+// provider is the clarity question, on the request as typed (specs/clarify): the answer is
+// recorded beside the decision and decides nothing.
+func decideManual(ctx context.Context, cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string,
+	stages []domain.Stage, task string, reporter *logging.ConsoleReporter, stream, stderr io.Writer) (decisionOutcome, error) {
 	dec, err := domain.ManualDecision(stages)
 	if err != nil {
 		return decisionOutcome{}, &apperr.ConfigError{Msg: err.Error()}
 	}
+	clarity, usage, err := askClarity(ctx, cfg, registry, store, runID, task, reporter, stream, stderr)
+	if err != nil {
+		return decisionOutcome{}, err
+	}
 	return decisionOutcome{
 		decision: dec,
 		trace: func(wf domain.Workflow) domain.DecisionTrace {
-			return domain.ManualTrace(task, dec, wf)
+			t := domain.ManualTrace(task, dec, wf)
+			t.Clarity = clarity
+			if usage != nil {
+				t.Usage = &domain.DecisionUsage{ClarityRecheck: []domain.Usage{*usage}}
+			}
+			return t
 		},
 		announce: func(wf domain.Workflow, stderr io.Writer) {
 			reporter.ManualStages(dec.Stages.EnabledStages())
@@ -75,13 +88,41 @@ func decideManual(stages []domain.Stage, task string, reporter *logging.ConsoleR
 	}, nil
 }
 
+// askClarity asks the decision provider the clarity question alone, on task, and compares P(clear)
+// with policy.clarify.threshold. The stages are the operator's, so an unanswered question is a
+// warning, not a failed run: the trace then has no clarity. Only a cancelled run stops here. The
+// call's usage is returned whenever it was reported, a failed call's included.
+func askClarity(ctx context.Context, cfg config.Config, registry *provider.Registry, store *persistence.Store, runID, task string,
+	reporter *logging.ConsoleReporter, stream, stderr io.Writer) (*domain.ClarityTrace, *domain.Usage, error) {
+	decisions, err := newDecisionProvider(cfg, registry, store, runID, reporter, "Checking the task", stream, stderr)
+	if err != nil {
+		fmt.Fprintf(stderr, "Warning: the clarity of the task was not checked: %v\n", err)
+		return nil, nil, nil
+	}
+	d, err := decisions.Clarity(ctx, task, "")
+	if err != nil {
+		var derr *apperr.DecisionError
+		var usage *domain.Usage
+		if errors.As(err, &derr) {
+			usage = derr.Usage
+		}
+		if ctx.Err() != nil || (derr != nil && derr.Kind == apperr.DecisionCancelled) {
+			return nil, usage, err
+		}
+		fmt.Fprintf(stderr, "Warning: the clarity of the task was not checked: %v\n", err)
+		return nil, usage, nil
+	}
+	trace := policy.Clarity([]float64{d.PClear}, cfg.DecisionPolicy())
+	return &trace, d.Usage, nil
+}
+
 // decideWithProvider is the decision layer: translation, pre-check, project context and
 // classification (MVP.md §8-§9). storyTask is run --story-task: development is then forced on
 // after the policy.
 func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registry *provider.Registry, store *persistence.Store,
 	repo *repository.Repository, cwd string, run *domain.Run, text string, reporter *logging.ConsoleReporter,
 	prompter interaction.Prompter, interactive, storyTask bool, stream, stderr io.Writer) (decisionOutcome, error) {
-	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, stream, stderr)
+	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, "Deciding the workflow", stream, stderr)
 	if err != nil {
 		return decisionOutcome{}, err
 	}

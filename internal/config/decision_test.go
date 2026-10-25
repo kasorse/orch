@@ -221,6 +221,11 @@ func TestValidateDecision_Policy(t *testing.T) {
 		{"missing project_threshold", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = nil }, "policy.context_depth.project_threshold is required"},
 		{"project_threshold above 1", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(1.5) }, "project_threshold must be in [0, 1]"},
 		{"project_threshold negative", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(-0.1) }, "project_threshold must be in [0, 1]"},
+		{"missing clarify.threshold", func(c *Config) { c.Policy.Clarify.Threshold = nil }, "policy.clarify.threshold is required"},
+		{"clarify.threshold at 0", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(0) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold negative", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(-0.1) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold above 1", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(1.01) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold NaN", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(math.NaN()) }, "policy.clarify.threshold must be in (0, 1]"},
 		{"missing complexity.cuts", func(c *Config) { c.Policy.Complexity.Cuts = nil }, "policy.complexity.cuts is required"},
 		{"missing cuts.complex", func(c *Config) { c.Policy.Complexity.Cuts.Complex = nil }, "policy.complexity.cuts.complex is required"},
 		{"missing cuts.medium", func(c *Config) { c.Policy.Complexity.Cuts.Medium = nil }, "policy.complexity.cuts.medium is required"},
@@ -280,6 +285,14 @@ func TestValidateDecision_Policy(t *testing.T) {
 	cfg.Policy.Stages.Thresholds["research"] = 0
 	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
+	}
+
+	// The clarity threshold is in (0, 1]: 1 is a deliberate (if extreme) choice, 0 would pass
+	// every task.
+	cfg = validConfig()
+	cfg.Policy.Clarify.Threshold = float64Ptr(1)
+	if err := Validate(cfg); err != nil {
+		t.Errorf("clarify.threshold of exactly 1 rejected: %v", err)
 	}
 }
 
@@ -379,6 +392,9 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 
 	if p.ProjectContextThreshold != 0.5 {
 		t.Errorf("ProjectContextThreshold = %v, want 0.5", p.ProjectContextThreshold)
+	}
+	if p.ClarityThreshold != 0.80 {
+		t.Errorf("ClarityThreshold = %v, want 0.80", p.ClarityThreshold)
 	}
 	if got := len(p.StageThreshold); got != 2 {
 		t.Fatalf("StageThreshold has %d entries, want 2", got)

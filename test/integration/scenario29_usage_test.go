@@ -68,7 +68,7 @@ func usageEnv(t *testing.T, repoDir string) {
 		cost float64
 	}{
 		"translate":      {"Fix Add() in fixture.go so that it adds instead of subtracting", 0.01},
-		"decide-context": {`{"context_depth": {"none": 0.9, "project": 0.1}}`, 0.02},
+		"decide-context": {`{"context_depth": {"none": 0.9, "project": 0.1}, "clarity": 0.9}`, 0.02},
 		"decide-classify": {`{"complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
  "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
  "stages": {"research": 0.05, "development": 0.95},

@@ -4,6 +4,14 @@
     "request": "Add a cache to ProductRepository"
   },
   "questions": {
+    "clarity": {
+      "type": "noul",
+      "instructions": "Is `request` clear enough to act on: is it stated what has to be achieved, where, and how to tell that it is done?",
+      "criteria": {
+        "false": "Something essential is missing or ambiguous: the goal, the affected part, the expected behaviour or result, or a choice the request leaves open.",
+        "true": "A competent engineer new to the task could start without asking anything: the goal, the part of the system it concerns and the expected result are stated or follow unambiguously."
+      }
+    },
     "context_depth": {
       "type": "choice",
       "instructions": "To estimate the complexity and required workflow stages of `request`, is it necessary to inspect the current code repository?",

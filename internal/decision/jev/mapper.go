@@ -17,21 +17,45 @@ import (
 // the right type and exactly our options, and any deviation is an InvalidResponse. The
 // `choice` field of a choice answer is ignored - the policy chooses, not Jev.
 
+// mapContextDepth maps the pre-check's answers: the depth distribution and P(clear). An answer
+// without clarity is an InvalidResponse, like any other missing answer.
 func mapContextDepth(resp systemOneResponse) (domain.ContextDepthDecision, error) {
 	q := decision.ContextDepthQuestion()
-	if err := checkEnvelope(resp, []string{q.ID}); err != nil {
+	clarityQ := decision.ClarityQuestion()
+	if err := checkEnvelope(resp, []string{q.ID, clarityQ.ID}); err != nil {
 		return domain.ContextDepthDecision{}, err
 	}
 	probs, conf, err := choiceDistribution(resp.Answers[q.ID], q)
 	if err != nil {
 		return domain.ContextDepthDecision{}, invalid(err)
 	}
-	d := domain.ContextDepthDecision{Probabilities: make(map[domain.ContextDepth]float64, len(probs)), Confidence: conf}
+	pClear, err := noulProbability(resp.Answers[clarityQ.ID], clarityQ.ID)
+	if err != nil {
+		return domain.ContextDepthDecision{}, invalid(err)
+	}
+	d := domain.ContextDepthDecision{Probabilities: make(map[domain.ContextDepth]float64, len(probs)), Confidence: conf, PClear: pClear}
 	for k, p := range probs {
 		d.Probabilities[domain.ContextDepth(k)] = p
 	}
 	if err := d.Validate(); err != nil {
 		return domain.ContextDepthDecision{}, invalid(err)
+	}
+	return d, nil
+}
+
+// mapClarity maps the answer to the clarity question asked alone.
+func mapClarity(resp systemOneResponse) (domain.ClarityDecision, error) {
+	q := decision.ClarityQuestion()
+	if err := checkEnvelope(resp, []string{q.ID}); err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	p, err := noulProbability(resp.Answers[q.ID], q.ID)
+	if err != nil {
+		return domain.ClarityDecision{}, invalid(err)
+	}
+	d := domain.ClarityDecision{PClear: p}
+	if err := d.Validate(); err != nil {
+		return domain.ClarityDecision{}, invalid(err)
 	}
 	return d, nil
 }

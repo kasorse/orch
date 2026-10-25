@@ -570,6 +570,28 @@ func validateDecisionUsage(u *domain.DecisionUsage) error {
 			return fmt.Errorf("usage.%s: %w", c.name, err)
 		}
 	}
+	if n := len(u.ClarityRecheck); n > domain.MaxClarityChecks {
+		return fmt.Errorf("usage.clarity_recheck: %d entries, at most %d", n, domain.MaxClarityChecks)
+	}
+	for i, c := range u.ClarityRecheck {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("usage.clarity_recheck[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// validateDecisionClarity checks decision.json's clarity (specs/clarify): when present, a
+// threshold in (0, 1], one to domain.MaxClarityChecks probabilities in [0, 1] and a known
+// status. It is absent after a failed pre-check, for a story task and in a trace written before
+// the question existed.
+func validateDecisionClarity(c *domain.ClarityTrace) error {
+	if c == nil {
+		return nil
+	}
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("clarity: %w", err)
+	}
 	return nil
 }
 
