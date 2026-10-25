@@ -43,19 +43,11 @@ func TestBuildResearchPrompt(t *testing.T) {
 	}
 }
 
-func TestBuildAnalyzeAndPlanPrompts_CarryEarlierStages(t *testing.T) {
+func TestBuildPlanPrompt_CarriesResearch(t *testing.T) {
 	research := &domain.ResearchArtifact{Summary: "Redis fits", Findings: []string{"TTL support"}, Recommendation: "use Redis"}
-	analysis := &domain.AnalysisArtifact{Summary: "no cache yet", RootCause: "n/a", Recommendation: "wrap the repository"}
 
-	a := BuildAnalyzePrompt(AnalyzePromptInput{Task: "add a cache", Research: research})
-	for _, want := range []string{"ACTION: analyze\n", readOnlyRule, "Research:\nRedis fits", "- TTL support", "Recommendation: use Redis"} {
-		if !strings.Contains(a, want) {
-			t.Errorf("analyze prompt lacks %q:\n%s", want, a)
-		}
-	}
-
-	p := BuildPlanPrompt(PlanPromptInput{Task: "add a cache", Research: research, Analysis: analysis})
-	for _, want := range []string{"ACTION: plan\n", readOnlyRule, "Research:\nRedis fits", "Analysis:\nno cache yet", "Recommendation: wrap the repository"} {
+	p := BuildPlanPrompt(PlanPromptInput{Task: "add a cache", Research: research})
+	for _, want := range []string{"ACTION: plan\n", readOnlyRule, "Research:\nRedis fits", "- TTL support", "Recommendation: use Redis"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("plan prompt lacks %q:\n%s", want, p)
 		}
@@ -72,11 +64,11 @@ func TestIsFinalReadOnlyStep(t *testing.T) {
 		want   bool
 	}{
 		{workflowOf(domain.ActionResearch), domain.ActionResearch, true},
-		{workflowOf(domain.ActionResearch, domain.ActionAnalyze), domain.ActionResearch, false},
-		{workflowOf(domain.ActionResearch, domain.ActionAnalyze), domain.ActionAnalyze, true},
-		{workflowOf(domain.ActionAnalyze, domain.ActionPlan, domain.ActionReview), domain.ActionPlan, true},
-		{workflowOf(domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest), domain.ActionAnalyze, false},
-		{nil, domain.ActionAnalyze, false},
+		{workflowOf(domain.ActionResearch, domain.ActionPlan), domain.ActionResearch, false},
+		{workflowOf(domain.ActionResearch, domain.ActionPlan), domain.ActionPlan, true},
+		{workflowOf(domain.ActionPlan, domain.ActionReview), domain.ActionPlan, true},
+		{workflowOf(domain.ActionPlan, domain.ActionImplement, domain.ActionTest), domain.ActionPlan, false},
+		{nil, domain.ActionPlan, false},
 	}
 	for i, tc := range cases {
 		if got := isFinalReadOnlyStep(&domain.Run{Workflow: tc.wf}, tc.action); got != tc.want {
@@ -85,12 +77,12 @@ func TestIsFinalReadOnlyStep(t *testing.T) {
 	}
 }
 
-func TestExecuteResearch_RoutesAndFeedsAnalysis(t *testing.T) {
+func TestExecuteResearch_RoutesAndFeedsPlan(t *testing.T) {
 	client := &fakeClient{output: `{"summary":"Redis fits","findings":["TTL"],"options":["Redis","Memcached"],"recommendation":"Redis","references":[],"answer":"Use Redis."}`}
 	d := newDispatcher(client)
 	writer := &fakeArtifactWriter{}
 	d.Artifacts = writer
-	run := &domain.Run{ID: "r", Task: domain.Task{Description: "сравни Redis и Memcached"}, Workflow: workflowOf(domain.ActionResearch, domain.ActionAnalyze)}
+	run := &domain.Run{ID: "r", Task: domain.Task{Description: "сравни Redis и Memcached"}, Workflow: workflowOf(domain.ActionResearch, domain.ActionPlan)}
 
 	if _, err := d.Execute(context.Background(), domain.ActionResearch, run); err != nil {
 		t.Fatal(err)
@@ -109,17 +101,17 @@ func TestExecuteResearch_RoutesAndFeedsAnalysis(t *testing.T) {
 	}
 
 	client.output = `{"summary":"s","answer":"Use Redis."}`
-	if _, err := d.Execute(context.Background(), domain.ActionAnalyze, run); err != nil {
+	if _, err := d.Execute(context.Background(), domain.ActionPlan, run); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(client.lastReq.Prompt, "Research:\nRedis fits") {
-		t.Errorf("analysis did not get the research:\n%s", client.lastReq.Prompt)
+		t.Errorf("plan did not get the research:\n%s", client.lastReq.Prompt)
 	}
 	if !strings.Contains(client.lastReq.Prompt, finalAnswerRule) {
-		t.Error("analysis is the final read-only step and must ask for the reply")
+		t.Error("plan is the final read-only step and must ask for the reply")
 	}
-	if d.lastAnalysis.Answer != "Use Redis." {
-		t.Errorf("answer not parsed: %+v", d.lastAnalysis)
+	if d.lastPlan.Answer != "Use Redis." {
+		t.Errorf("answer not parsed: %+v", d.lastPlan)
 	}
 }
 
@@ -133,7 +125,7 @@ func TestExecuteResearch_MalformedOutputFallsBackToSummary(t *testing.T) {
 	}
 }
 
-func TestResearchThenAnalysis_LeavesGitClean(t *testing.T) {
+func TestResearchThenPlan_LeavesGitClean(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
@@ -152,9 +144,9 @@ func TestResearchThenAnalysis_LeavesGitClean(t *testing.T) {
 	registry := provider.NewRegistry()
 	registry.Register(provider.Claude, &fakeClient{output: `{"summary":"s"}`})
 	d := New(testConfig(), registry, repo, nil)
-	run := &domain.Run{ID: "r", Task: domain.Task{Description: "compare"}, Workflow: workflowOf(domain.ActionResearch, domain.ActionAnalyze)}
+	run := &domain.Run{ID: "r", Task: domain.Task{Description: "compare"}, Workflow: workflowOf(domain.ActionResearch, domain.ActionPlan)}
 
-	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionAnalyze} {
+	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionPlan} {
 		if _, err := d.Execute(context.Background(), a, run); err != nil {
 			t.Fatal(err)
 		}
@@ -168,15 +160,15 @@ func TestResearchThenAnalysis_LeavesGitClean(t *testing.T) {
 func TestFinalAnswer(t *testing.T) {
 	d := newDispatcher(&fakeClient{})
 	d.lastResearch = &domain.ResearchArtifact{Answer: "from research"}
-	d.lastAnalysis = &domain.AnalysisArtifact{Answer: "from analysis"}
+	d.lastPlan = &domain.PlanArtifact{Answer: "from plan"}
 
 	cases := []struct {
 		wf   *domain.Workflow
 		want string
 	}{
-		{workflowOf(domain.ActionResearch, domain.ActionAnalyze), "from analysis"},
+		{workflowOf(domain.ActionResearch, domain.ActionPlan), "from plan"},
 		{workflowOf(domain.ActionResearch, domain.ActionReview), "from research"},
-		{workflowOf(domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest), ""},
+		{workflowOf(domain.ActionPlan, domain.ActionImplement, domain.ActionTest), ""},
 		{workflowOf(domain.ActionTest), ""},
 		{nil, ""},
 	}

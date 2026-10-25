@@ -101,7 +101,7 @@ func TestPolicyHash_IgnoresExplore(t *testing.T) {
 }
 
 func TestManualTraceHasNoPolicyHash(t *testing.T) {
-	d, err := ManualDecision([]Stage{StageAnalysis})
+	d, err := ManualDecision([]Stage{StagePlanning})
 	if err != nil {
 		t.Fatal(err)
 	}

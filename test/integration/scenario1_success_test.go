@@ -8,7 +8,7 @@ import (
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// Scenario 1 (MVP.md §29): classification -> analyze -> implement -> tests pass ->
+// Scenario 1 (MVP.md §29): classification -> plan -> implement -> tests pass ->
 // review pass -> completed.
 func TestScenario1_SuccessfulBugfix(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
@@ -19,7 +19,7 @@ func TestScenario1_SuccessfulBugfix(t *testing.T) {
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 	fixedContent := writeFixedFixtureFile(t)
 
-	writeResponse(t, responsesDir, "analyze", analyzeResponse)
+	writeResponse(t, responsesDir, "plan", readOnlyResponse)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
 
@@ -40,8 +40,8 @@ func TestScenario1_SuccessfulBugfix(t *testing.T) {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
-		t.Errorf("invocations = %v, want [analyze implement review]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+		t.Errorf("invocations = %v, want [plan implement review]", got)
 	}
 
 	if !strings.Contains(stdout, "Run completed successfully.") {

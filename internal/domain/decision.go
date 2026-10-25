@@ -147,7 +147,7 @@ type ProbabilityDecision struct {
 // askedStages are the stages a decision provider is asked about (specs/decision-shape/SPEC.md
 // §6.1), in stage order: facts about the task that its size does not already carry. Planning,
 // testing and review come from the level and from development instead.
-var askedStages = []Stage{StageResearch, StageAnalysis, StageDevelopment}
+var askedStages = []Stage{StageResearch, StageDevelopment}
 
 // AskedStages returns the stages a decision provider answers a probability for.
 func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
@@ -156,7 +156,6 @@ func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
 // was not asked is nil.
 type StageDecisions struct {
 	Research    *ProbabilityDecision `json:"research,omitempty"`
-	Analysis    *ProbabilityDecision `json:"analysis,omitempty"`
 	Planning    *ProbabilityDecision `json:"planning,omitempty"`
 	Development *ProbabilityDecision `json:"development,omitempty"`
 	Testing     *ProbabilityDecision `json:"testing,omitempty"`
@@ -168,8 +167,6 @@ func (s *StageDecisions) field(stage Stage) **ProbabilityDecision {
 	switch stage {
 	case StageResearch:
 		return &s.Research
-	case StageAnalysis:
-		return &s.Analysis
 	case StagePlanning:
 		return &s.Planning
 	case StageDevelopment:

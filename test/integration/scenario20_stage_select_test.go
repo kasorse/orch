@@ -216,8 +216,8 @@ func TestScenario20e_FixLoop(t *testing.T) {
 	})
 }
 
-// f: planning alone: the plan is the answer, and the missing analysis is a warning.
-func TestScenario20f_PlanningWarnsAboutMissingAnalysis(t *testing.T) {
+// f: planning alone: the plan is the answer, and nothing is missing before it.
+func TestScenario20f_PlanningAlone(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
 
 	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "plan", "plan the fix")
@@ -225,8 +225,8 @@ func TestScenario20f_PlanningWarnsAboutMissingAnalysis(t *testing.T) {
 	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan"}) {
 		t.Errorf("invocations = %v", got)
 	}
-	if !strings.Contains(stderr, "planning runs without analysis") {
-		t.Errorf("stderr lacks the gap warning:\n%s", stderr)
+	if strings.Contains(stderr, "runs without") {
+		t.Errorf("stderr has a gap warning for planning alone:\n%s", stderr)
 	}
 	if !strings.Contains(stdout, "fix the operator") {
 		t.Errorf("stdout lacks the plan as the answer:\n%s", stdout)
@@ -238,13 +238,29 @@ func TestScenario20f_PlanningWarnsAboutMissingAnalysis(t *testing.T) {
 func TestScenario20g_AliasesCollapse(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
 
-	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "analyze", "--stage", "analysis", "explain Add")
+	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "plan", "--stage", "planning", "explain Add")
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"analyze"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan"}) {
 		t.Errorf("invocations = %v", got)
 	}
-	if n := strings.Count(stdout, "Stages (manual): analysis"); n != 1 {
+	if n := strings.Count(stdout, "Stages (manual): planning"); n != 1 {
 		t.Errorf("the stage line appears %d times:\n%s", n, stdout)
+	}
+}
+
+// g2: analysis and analyze are not stages any more (specs/clarify): --stage refuses both by
+// name, before any call.
+func TestScenario20g2_AnalysisStageIsRefused(t *testing.T) {
+	r := newStageRun(t, fakeexec.InitGitFixture(t))
+
+	for _, name := range []string{"analysis", "analyze"} {
+		_, _, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", name, "explain Add")
+		if err == nil || !strings.Contains(err.Error(), "specs/clarify") {
+			t.Errorf("--stage %s: err = %v, want a refusal naming specs/clarify", name, err)
+		}
+	}
+	if got := invocations(t, r.invocationsLog); len(got) != 0 {
+		t.Errorf("a refused stage called %v", got)
 	}
 }
 

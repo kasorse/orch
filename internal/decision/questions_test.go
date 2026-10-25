@@ -72,6 +72,20 @@ func TestStageQuestions_OnePerAskedStageInOrder(t *testing.T) {
 	}
 }
 
+// analysis is no longer a stage (specs/clarify): research and development are the only questions.
+func TestStageQuestions_AskOnlyResearchAndDevelopment(t *testing.T) {
+	var got []domain.Stage
+	for _, q := range StageQuestions() {
+		got = append(got, q.Stage)
+	}
+	if len(got) != 2 || got[0] != domain.StageResearch || got[1] != domain.StageDevelopment {
+		t.Errorf("StageQuestions asks %v, want research and development", got)
+	}
+	if _, ok := stageQuestions[domain.Stage("analysis")]; ok {
+		t.Error("the analysis question is still defined")
+	}
+}
+
 func TestScopeQuestion_IsNotAStageQuestion(t *testing.T) {
 	q := ScopeQuestion()
 	if q.ID != "scope_story" || q.Stage != "" {
@@ -115,11 +129,11 @@ func TestQuestionsHash(t *testing.T) {
 	if again := QuestionsHash(); again != h {
 		t.Errorf("QuestionsHash is not stable: %q then %q", h, again)
 	}
-	saved := stageQuestions[domain.StageAnalysis]
-	t.Cleanup(func() { stageQuestions[domain.StageAnalysis] = saved })
+	saved := stageQuestions[domain.StageResearch]
+	t.Cleanup(func() { stageQuestions[domain.StageResearch] = saved })
 	reworded := saved
 	reworded.Instructions += " "
-	stageQuestions[domain.StageAnalysis] = reworded
+	stageQuestions[domain.StageResearch] = reworded
 	if QuestionsHash() == h {
 		t.Error("rewording a stage question did not change the hash")
 	}

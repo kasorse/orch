@@ -189,7 +189,7 @@ func TestProvider_ClassifyMapsFixture(t *testing.T) {
 		t.Errorf("score = %+v", score)
 	}
 
-	want := map[domain.Stage]float64{domain.StageResearch: 0.05, domain.StageAnalysis: 0.92, domain.StageDevelopment: 0.99}
+	want := map[domain.Stage]float64{domain.StageResearch: 0.05, domain.StageDevelopment: 0.99}
 	for st, p := range want {
 		if got, _ := tc.Stages.Get(st); got.Probability != p {
 			t.Errorf("stage %s = %v, want %v", st, got.Probability, p)
@@ -220,8 +220,8 @@ func TestProvider_ScopeIsAskedUnlessSkipped(t *testing.T) {
 	if _, ok := stub.got.Questions[decision.QuestionScopeStory]; ok {
 		t.Error("the scope question was sent although it is skipped")
 	}
-	if len(stub.got.Questions) != 5 {
-		t.Errorf("got %d questions, want the 5 others", len(stub.got.Questions))
+	if len(stub.got.Questions) != 4 {
+		t.Errorf("got %d questions, want the 4 others", len(stub.got.Questions))
 	}
 }
 
@@ -266,9 +266,12 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	cases := map[string]func(r *systemOneResponse){
 		"no model":             func(r *systemOneResponse) { r.Model = "" },
-		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_analysis") },
+		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_research") },
 		"answer to a stage no longer asked": func(r *systemOneResponse) {
 			r.Answers["stage_review"] = answer{Type: questionNoul, Noul: f(0.7)}
+		},
+		"answer to stage_analysis, which specs/clarify removed": func(r *systemOneResponse) {
+			r.Answers["stage_analysis"] = answer{Type: questionNoul, Noul: f(0.92)}
 		},
 		"missing complexity": func(r *systemOneResponse) { delete(r.Answers, "complexity") },
 		"unexpected answer":  func(r *systemOneResponse) { r.Answers["stage_deploy"] = answer{Type: questionNoul, Noul: f(0.5)} },

@@ -116,7 +116,7 @@ func TestComputeOutcome(t *testing.T) {
 		{
 			"no test step",
 			Run{Status: RunCompleted, Executions: []StepExecution{
-				exec(ActionAnalyze, 0, time.Second, nil),
+				exec(ActionPlan, 0, time.Second, nil),
 			}},
 			nil,
 			Outcome{Status: RunCompleted, DurationMS: 1000},
@@ -172,7 +172,7 @@ func TestComputeOutcome(t *testing.T) {
 		{
 			"a clock that went backwards gives no duration",
 			Run{Status: RunCompleted, Executions: []StepExecution{
-				exec(ActionAnalyze, time.Minute, 0, nil),
+				exec(ActionPlan, time.Minute, 0, nil),
 			}},
 			nil,
 			Outcome{Status: RunCompleted},
@@ -180,7 +180,7 @@ func TestComputeOutcome(t *testing.T) {
 		{
 			"an execution without a finish time falls back to the last finished one",
 			Run{Status: RunFailed, Executions: []StepExecution{
-				exec(ActionAnalyze, 0, 2*time.Second, nil),
+				exec(ActionPlan, 0, 2*time.Second, nil),
 				{Action: ActionImplement, Status: StepFailed, StartedAt: t0.Add(2 * time.Second)},
 			}},
 			nil,
@@ -222,7 +222,7 @@ func usageNear(a, b OutcomeUsage) bool {
 // The outcome is derived: computing it neither changes the run nor the trace.
 func TestComputeOutcome_DoesNotMutate(t *testing.T) {
 	u := &Usage{InputTokens: 5, CostUSD: 0.1}
-	run := Run{Status: RunCompleted, Executions: []StepExecution{{Action: ActionAnalyze, Usage: u}}}
+	run := Run{Status: RunCompleted, Executions: []StepExecution{{Action: ActionPlan, Usage: u}}}
 	tr := &DecisionTrace{Usage: &DecisionUsage{Classification: &Usage{InputTokens: 7}}}
 	ComputeOutcome(run, tr)
 	ComputeOutcome(run, tr)

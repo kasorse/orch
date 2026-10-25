@@ -33,7 +33,7 @@ const storiesDir = ".orchestrator/stories"
 var _ action.PlanningLogger = (*persistence.StoryPlan)(nil)
 
 // storyService is one of a story's services with what its survey runs on: its own
-// orchestrator.yaml's actions.analyze route and timeout, and its deny list.
+// orchestrator.yaml's actions.plan route and timeout, and its deny list.
 type storyService struct {
 	serviceCandidate
 	survey  action.SurveyRepo
@@ -266,12 +266,12 @@ func loadStoryService(ctx context.Context, s serviceCandidate, home string, home
 		}
 		cfg = loaded
 	}
-	analyze := cfg.Actions.Analyze
+	plan := cfg.Actions.Plan
 	return storyService{
 		serviceCandidate: s,
 		survey:           action.SurveyRepo{Name: s.Name, Dir: s.Path, ExtraDeny: cfg.Context.ExtraDeny, RunsDir: runsBaseDir},
-		route:            analyze.ProviderModel,
-		timeout:          analyze.Timeout,
+		route:            plan.ProviderModel,
+		timeout:          plan.Timeout,
 	}, nil
 }
 

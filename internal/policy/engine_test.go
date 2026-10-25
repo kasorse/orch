@@ -8,20 +8,19 @@ import (
 )
 
 // testPolicy: the asked stages' thresholds of specs/JEV integration/TASKS.md T02 (research
-// 0.70, analysis 0.60, development 0.60), the example's template (medium: analysis, review;
-// complex: analysis, planning, review) and size cuts 0.5 and 1.4.
+// 0.70, development 0.60), the example's template (medium: planning, review; complex:
+// planning, review) and size cuts 0.5 and 1.4.
 func testPolicy() domain.DecisionPolicy {
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: 0.5,
 		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold: map[domain.Stage]float64{
 			domain.StageResearch:    0.70,
-			domain.StageAnalysis:    0.60,
 			domain.StageDevelopment: 0.60,
 		},
 		ForceStages: map[domain.Complexity][]domain.Stage{
-			domain.ComplexityMedium:  {domain.StageAnalysis, domain.StageReview},
-			domain.ComplexityComplex: {domain.StageAnalysis, domain.StagePlanning, domain.StageReview},
+			domain.ComplexityMedium:  {domain.StagePlanning, domain.StageReview},
+			domain.ComplexityComplex: {domain.StagePlanning, domain.StageReview},
 		},
 	}
 }
@@ -103,21 +102,20 @@ func TestSelectComplexity_SizeSeparatesWhatArgmaxMerges(t *testing.T) {
 	}
 }
 
-func stageDecisions(research, analysis, development float64) domain.StageDecisions {
+func stageDecisions(research, development float64) domain.StageDecisions {
 	var d domain.StageDecisions
 	d.Set(domain.StageResearch, domain.ProbabilityDecision{Probability: research})
-	d.Set(domain.StageAnalysis, domain.ProbabilityDecision{Probability: analysis})
 	d.Set(domain.StageDevelopment, domain.ProbabilityDecision{Probability: development})
 	return d
 }
 
 func TestSelectStages_ThresholdBoundary(t *testing.T) {
 	p := testPolicy()
-	if sel := SelectStages(stageDecisions(0, 0.59, 0.99), domain.ComplexitySimple, p); enabled(sel, domain.StageAnalysis) {
-		t.Error("analysis at p=0.59 (threshold 0.60) should be disabled")
+	if sel := SelectStages(stageDecisions(0, 0.59), domain.ComplexitySimple, p); enabled(sel, domain.StageDevelopment) {
+		t.Error("development at p=0.59 (threshold 0.60) should be disabled")
 	}
-	if sel := SelectStages(stageDecisions(0, 0.60, 0.99), domain.ComplexitySimple, p); !enabled(sel, domain.StageAnalysis) {
-		t.Error("analysis at p=0.60 (threshold 0.60) should be enabled")
+	if sel := SelectStages(stageDecisions(0, 0.60), domain.ComplexitySimple, p); !enabled(sel, domain.StageDevelopment) {
+		t.Error("development at p=0.60 (threshold 0.60) should be enabled")
 	}
 }
 
@@ -125,20 +123,20 @@ func TestSelectStages_ThresholdBoundary(t *testing.T) {
 // question.
 func TestSelectStages_Shape(t *testing.T) {
 	p := testPolicy()
-	a, pl, r, d, te, rv := domain.StageAnalysis, domain.StagePlanning, domain.StageResearch, domain.StageDevelopment, domain.StageTesting, domain.StageReview
+	pl, r, d, te, rv := domain.StagePlanning, domain.StageResearch, domain.StageDevelopment, domain.StageTesting, domain.StageReview
 	for _, tc := range []struct {
 		name       string
 		decisions  domain.StageDecisions
 		complexity domain.Complexity
 		want       []domain.Stage
 	}{
-		{"simple change, place known", stageDecisions(0.1, 0.3, 0.99), domain.ComplexitySimple, []domain.Stage{d, te}},
-		{"simple change, cause unknown", stageDecisions(0.1, 0.9, 0.99), domain.ComplexitySimple, []domain.Stage{a, d, te}},
-		{"medium change", stageDecisions(0.1, 0.3, 0.99), domain.ComplexityMedium, []domain.Stage{a, d, te, rv}},
-		{"complex change", stageDecisions(0.1, 0.3, 0.99), domain.ComplexityComplex, []domain.Stage{a, pl, d, te, rv}},
-		{"complex change that needs research", stageDecisions(0.8, 0.3, 0.99), domain.ComplexityComplex, []domain.Stage{r, a, pl, d, te, rv}},
-		{"a question", stageDecisions(0.1, 0.9, 0.1), domain.ComplexitySimple, []domain.Stage{a}},
-		{"a design question keeps the plan, drops review", stageDecisions(0.1, 0.9, 0.1), domain.ComplexityComplex, []domain.Stage{a, pl}},
+		{"simple change", stageDecisions(0.1, 0.99), domain.ComplexitySimple, []domain.Stage{d, te}},
+		{"medium change", stageDecisions(0.1, 0.99), domain.ComplexityMedium, []domain.Stage{pl, d, te, rv}},
+		{"complex change", stageDecisions(0.1, 0.99), domain.ComplexityComplex, []domain.Stage{pl, d, te, rv}},
+		{"complex change that needs research", stageDecisions(0.8, 0.99), domain.ComplexityComplex, []domain.Stage{r, pl, d, te, rv}},
+		{"a simple question that needs research", stageDecisions(0.8, 0.1), domain.ComplexitySimple, []domain.Stage{r}},
+		{"a simple question falls back to planning", stageDecisions(0.1, 0.1), domain.ComplexitySimple, []domain.Stage{pl}},
+		{"a design question keeps the plan, drops review", stageDecisions(0.1, 0.1), domain.ComplexityComplex, []domain.Stage{pl}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			wantStages(t, SelectStages(tc.decisions, tc.complexity, p).EnabledStages(), tc.want...)
@@ -149,7 +147,7 @@ func TestSelectStages_Shape(t *testing.T) {
 func TestSelectStages_Reasons(t *testing.T) {
 	p := testPolicy()
 
-	sel := SelectStages(stageDecisions(0.1, 0.3, 0.99), domain.ComplexitySimple, p)
+	sel := SelectStages(stageDecisions(0.1, 0.99), domain.ComplexitySimple, p)
 	if out := outcomeFor(sel, domain.StageTesting); !out.Enabled || out.Reason != "with development" || out.Probability != nil || out.Threshold != nil {
 		t.Errorf("testing = %+v, want enabled with development and no probability", out)
 	}
@@ -157,41 +155,41 @@ func TestSelectStages_Reasons(t *testing.T) {
 		t.Errorf("planning = %+v", out)
 	}
 
-	sel = SelectStages(stageDecisions(0.1, 0.9, 0.1), domain.ComplexityComplex, p)
+	sel = SelectStages(stageDecisions(0.9, 0.1), domain.ComplexityComplex, p)
 	if out := outcomeFor(sel, domain.StageReview); out.Enabled || !out.Forced || out.Reason != "dropped: no code change" {
 		t.Errorf("review = %+v, want forced but dropped without development", out)
 	}
 	if out := outcomeFor(sel, domain.StagePlanning); !out.Enabled || out.Reason != "forced: complexity=complex" {
 		t.Errorf("planning = %+v", out)
 	}
-	if out := outcomeFor(sel, domain.StageAnalysis); !strings.Contains(out.Reason, "0.90") || !strings.Contains(out.Reason, "forced") {
-		t.Errorf("analysis Reason = %q, want it to mention both the probability and forced", out.Reason)
+	if out := outcomeFor(sel, domain.StageResearch); !out.Enabled || !strings.Contains(out.Reason, "0.90") {
+		t.Errorf("research = %+v, want it on with its probability in the reason", out)
 	}
 }
 
 // TestSelectStages_EmptyFallback is TASKS.md В6: nothing clears its threshold and
-// nothing is forced (complexity=simple has no force list) - analysis alone is
+// nothing is forced (complexity=simple has no force list) - planning alone is
 // enabled rather than an empty workflow.
 func TestSelectStages_EmptyFallback(t *testing.T) {
 	p := testPolicy()
-	sel := SelectStages(stageDecisions(0.01, 0.02, 0.01), domain.ComplexitySimple, p)
+	sel := SelectStages(stageDecisions(0.01, 0.01), domain.ComplexitySimple, p)
 
 	got := sel.EnabledStages()
-	if len(got) != 1 || got[0] != domain.StageAnalysis {
-		t.Fatalf("EnabledStages() = %v, want [analysis]", got)
+	if len(got) != 1 || got[0] != domain.StagePlanning {
+		t.Fatalf("EnabledStages() = %v, want [planning]", got)
 	}
-	out := outcomeFor(sel, domain.StageAnalysis)
+	out := outcomeFor(sel, domain.StagePlanning)
 	if out.Forced {
 		t.Error("the В6 fallback stage should not be reported as forced by complexity")
 	}
-	if !strings.Contains(out.Reason, "defaulting to analysis") {
-		t.Errorf("Reason = %q, want it to explain the fallback", out.Reason)
+	if want := "forced: no stage cleared its threshold, defaulting to planning"; out.Reason != want {
+		t.Errorf("Reason = %q, want %q", out.Reason, want)
 	}
 }
 
 func TestSelectStages_Deterministic(t *testing.T) {
 	p := testPolicy()
-	d := stageDecisions(0.72, 0.91, 0.99)
+	d := stageDecisions(0.72, 0.99)
 
 	a := SelectStages(d, domain.ComplexityMedium, p)
 	b := SelectStages(d, domain.ComplexityMedium, p)
@@ -211,7 +209,7 @@ func TestApplyForced(t *testing.T) {
 
 	sel := ApplyForced(domain.ComplexityComplex, []domain.Stage{domain.StageDevelopment, domain.StageTesting}, nil, p)
 
-	for _, st := range []domain.Stage{domain.StageAnalysis, domain.StagePlanning, domain.StageReview} {
+	for _, st := range []domain.Stage{domain.StagePlanning, domain.StageReview} {
 		out := outcomeFor(sel, st)
 		if !out.Enabled || !out.Forced {
 			t.Errorf("%s should be forced-enabled, got %+v", st, out)
@@ -253,7 +251,7 @@ func TestApplyForced_ExcludedForcedStage(t *testing.T) {
 	if out.Enabled || !out.Forced || !strings.Contains(out.Reason, "excluded by user") {
 		t.Errorf("review = %+v, want forced but disabled by the user", out)
 	}
-	if !enabled(sel, domain.StageAnalysis) || !enabled(sel, domain.StageDevelopment) || enabled(sel, domain.StageResearch) {
+	if !enabled(sel, domain.StagePlanning) || !enabled(sel, domain.StageDevelopment) || enabled(sel, domain.StageResearch) {
 		t.Errorf("other stages changed: %+v", sel.EnabledStages())
 	}
 }
@@ -269,7 +267,7 @@ func TestEvaluate(t *testing.T) {
 			domain.ComplexitySourceChoice: complexityDist(0.05, 0.63, 0.32),
 			domain.ComplexitySourceScore:  complexityDist(0.05, 0.60, 0.35),
 		},
-		Stages:   stageDecisions(0.31, 0.92, 0.99),
+		Stages:   stageDecisions(0.31, 0.99),
 		Provider: "jev",
 		Model:    "jev-1.13.0",
 	}
@@ -303,7 +301,7 @@ func TestEvaluate(t *testing.T) {
 	if c := dec.Complexity.Cuts; c == nil || *c != p.ComplexityCuts {
 		t.Errorf("Cuts = %v, want the policy's %v", c, p.ComplexityCuts)
 	}
-	wantStages(t, dec.Stages.EnabledStages(), domain.StageAnalysis, domain.StageDevelopment, domain.StageTesting, domain.StageReview)
+	wantStages(t, dec.Stages.EnabledStages(), domain.StagePlanning, domain.StageDevelopment, domain.StageTesting, domain.StageReview)
 }
 
 func TestEvaluate_ShadowDisagreement(t *testing.T) {
@@ -315,7 +313,7 @@ func TestEvaluate_ShadowDisagreement(t *testing.T) {
 			domain.ComplexitySourceChoice: complexityDist(0.10, 0.60, 0.30), // -> medium
 			domain.ComplexitySourceScore:  complexityDist(0.05, 0.15, 0.80), // -> complex
 		},
-		Stages:   stageDecisions(0, 0.6, 0),
+		Stages:   stageDecisions(0, 0.6),
 		Provider: "jev",
 	}
 
@@ -342,7 +340,7 @@ func TestEvaluate_PrimaryNotAsked(t *testing.T) {
 		Complexity: map[domain.ComplexitySource]domain.ComplexityDecision{
 			domain.ComplexitySourceScore: complexityDist(0.9, 0.1, 0),
 		},
-		Stages: stageDecisions(0, 0.6, 0),
+		Stages: stageDecisions(0, 0.6),
 	}
 
 	_, err := Evaluate(depth, classification, domain.ComplexitySourceChoice, p)

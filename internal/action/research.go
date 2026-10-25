@@ -34,7 +34,7 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 	}, nil
 }
 
-// parseResearch is lenient, matching parseAnalysis - see its comment.
+// parseResearch is lenient, matching parsePlan - see its comment.
 func parseResearch(output string) domain.ResearchArtifact {
 	var artifact domain.ResearchArtifact
 	if obj := extractJSONObject(output); obj != "" {
@@ -48,7 +48,6 @@ func parseResearch(output string) domain.ResearchArtifact {
 // readOnlyActions are the stages that inspect without changing the repository.
 var readOnlyActions = map[domain.ActionType]bool{
 	domain.ActionResearch: true,
-	domain.ActionAnalyze:  true,
 	domain.ActionPlan:     true,
 }
 
@@ -84,11 +83,6 @@ func (d *Dispatcher) FinalAnswer(run *domain.Run) string {
 		case domain.ActionPlan:
 			if d.lastPlan != nil {
 				return d.lastPlan.Answer
-			}
-			return ""
-		case domain.ActionAnalyze:
-			if d.lastAnalysis != nil {
-				return d.lastAnalysis.Answer
 			}
 			return ""
 		case domain.ActionResearch:

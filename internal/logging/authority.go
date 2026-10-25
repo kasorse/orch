@@ -25,7 +25,7 @@ const notSandboxed = "— NOT sandboxed: network, $HOME and your files are reach
 
 // RenderAuthority renders the authority line, e.g.
 //
-//	authority: analyze=read, implement=edit, review=read; test runs: go test ./...
+//	authority: plan=read, implement=edit, review=read; test runs: go test ./...
 //
 // The test step makes no AI call - the orchestrator runs the command itself - so it is
 // shown as the command, not as an authority, marked "(sandboxed)" under the sandbox and

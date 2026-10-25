@@ -14,7 +14,7 @@ type StepOutcome struct {
 	Outcome      Outcome
 	Provider     *domain.ProviderRef
 	ArtifactPath string
-	// Artifact is the structured result saved at ArtifactPath (research, analyze, plan,
+	// Artifact is the structured result saved at ArtifactPath (research, plan,
 	// implement), for display; test and review carry theirs in TestResult/ReviewResult.
 	Artifact     any
 	TestResult   *domain.TestResult

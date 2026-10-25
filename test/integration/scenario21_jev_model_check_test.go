@@ -134,7 +134,7 @@ func TestScenario21_StageRunAsksNothing(t *testing.T) {
 	decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "analysis", "explain Add")
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "planning", "explain Add")
 	mustSucceed(t, stdout, stderr, err)
 	if j.ModelRequests() != 0 || len(j.Bodies()) != 0 {
 		t.Errorf("run --stage contacted Jev: %d model, %d decision requests", j.ModelRequests(), len(j.Bodies()))

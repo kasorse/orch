@@ -199,10 +199,10 @@ func TestLoadLayered_Force(t *testing.T) {
 	runOrgRows(t, []orgRow{
 		{name: "per complexity union keeps order",
 			repo: "policy:\n  stages:\n    force:\n      complex: [planning, review]\n      medium: [testing]\n",
-			org:  "policy:\n  stages:\n    force:\n      complex: [review, analysis]\n      simple: [testing]\n",
+			org:  "policy:\n  stages:\n    force:\n      complex: [review, research]\n      simple: [testing]\n",
 			check: func(t *testing.T, cfg Config) {
 				want := map[string][]string{
-					"complex": {"review", "analysis", "planning"},
+					"complex": {"review", "research", "planning"},
 					"medium":  {"testing"},
 					"simple":  {"testing"},
 				}
@@ -211,6 +211,18 @@ func TestLoadLayered_Force(t *testing.T) {
 				}
 			}},
 	})
+}
+
+// The org file's template is checked on its own, before any merge: analysis is refused there
+// as in a repository file, naming specs/clarify.
+func TestOrgProblems_RefusesAnalysisInTheTemplate(t *testing.T) {
+	org := OrgConfig{Policy: OrgPolicy{Stages: OrgStages{Force: map[string][]string{"complex": {"analysis", "review"}}}}}
+	got := strings.Join(orgProblems(org), "\n")
+	for _, want := range []string{"policy.stages.force.complex: analysis is not a stage any more", "specs/clarify"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("orgProblems lacks %q:\n%s", want, got)
+		}
+	}
 }
 
 func TestLoadLayered_MaxCostUSD(t *testing.T) {

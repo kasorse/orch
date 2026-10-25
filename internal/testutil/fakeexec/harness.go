@@ -36,7 +36,7 @@ func PrependPath(t *testing.T, dir string) {
 //     which kind), including "no further AI call happened after X".
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
 //     action ("translate.json", "decide-context.json", "decide-classify.json",
-//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json", and
+//     "research.json", "plan.json", "implement.json", "review.json", and
 //     a story's planning calls, "survey.json" and "specify.json").
 //     For "review" and "implement", a numbered override
 //     "review_<N>.json" / "implement_<N>.json" (N = 1-based call count of that
@@ -147,7 +147,6 @@ for arg in "$prompt" "$@"; do
     "ACTION: decide-context"*)  action="decide-context" ;;
     "ACTION: decide-classify"*) action="decide-classify" ;;
     "ACTION: research"*)        action="research" ;;
-    "ACTION: analyze"*)         action="analyze" ;;
     "ACTION: plan"*)            action="plan" ;;
     "ACTION: implement"*)       action="implement" ;;
     "ACTION: review"*)          action="review" ;;

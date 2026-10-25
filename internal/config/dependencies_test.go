@@ -55,7 +55,7 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Review.Provider = "claude"
 	cfg.Actions.Review.Model = "sonnet"
-	// claude now backs analyze, plan, implement, review, and translation.
+	// claude now backs plan, implement, review, and translation.
 
 	checker := FakeDependencyChecker{Missing: map[string]bool{"claude": true}}
 	err := ValidateDependencies(cfg, checker, DependencyOptions{})
@@ -66,8 +66,8 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 	if !strings.Contains(msg, `provider "claude" is required by actions [`) {
 		t.Errorf("expected aggregated multi-action message, got: %s", msg)
 	}
-	if !strings.Contains(msg, "review") || !strings.Contains(msg, "analyze") {
-		t.Errorf("expected aggregated actions to include review and analyze, got: %s", msg)
+	if !strings.Contains(msg, "review") || !strings.Contains(msg, "plan") {
+		t.Errorf("expected aggregated actions to include review and plan, got: %s", msg)
 	}
 }
 

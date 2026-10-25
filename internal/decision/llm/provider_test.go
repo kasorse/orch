@@ -73,7 +73,7 @@ const contextOut = "Here you go:\n```json\n{\"context_depth\": {\"none\": 0.2, \
 const classifyOut = `{
   "complexity": {"simple": 0.33, "medium": 0.33, "complex": 0.33},
   "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3},
-  "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95},
+  "stages": {"research": 0.1, "development": 0.95},
   "scope": 0.3
 }`
 
@@ -131,7 +131,7 @@ func TestClassify(t *testing.T) {
 	if score.Score == nil || *score.Score < 1.19 || *score.Score > 1.21 || score.Confidence != 0.6 {
 		t.Errorf("score = %+v", score)
 	}
-	if r, _ := tc.Stages.Get(domain.StageAnalysis); r.Probability != 0.9 {
+	if r, _ := tc.Stages.Get(domain.StageDevelopment); r.Probability != 0.95 {
 		t.Errorf("stages = %+v", tc.Stages)
 	}
 	if _, asked := tc.Stages.Get(domain.StageReview); asked {
@@ -170,7 +170,7 @@ func TestClassify(t *testing.T) {
 func TestClassify_ScopeOnlyWhenAsked(t *testing.T) {
 	skipped := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone, SkipScope: true}
 	asked := domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone}
-	const withoutScope = `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}}`
+	const withoutScope = `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "development": 0.95}}`
 
 	client := &fakeClient{outputs: []string{withoutScope}}
 	p, _ := newProvider(client, both)
@@ -203,7 +203,7 @@ func TestClassify_ScopeOnlyWhenAsked(t *testing.T) {
 }
 
 func TestClassify_ChoiceOnly(t *testing.T) {
-	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "analysis": 1, "development": 1}, "scope": 0.1}`
+	out := `{"complexity": {"simple": 0.1, "medium": 0.2, "complex": 0.7}, "stages": {"research": 0, "development": 1}, "scope": 0.1}`
 	client := &fakeClient{outputs: []string{out}}
 	p, _ := newProvider(client, []domain.ComplexitySource{domain.ComplexitySourceChoice})
 	tc, err := p.Classify(context.Background(), domain.ClassificationInput{Request: "x", ContextDepth: domain.ContextDepthNone})
@@ -216,7 +216,7 @@ func TestClassify_ChoiceOnly(t *testing.T) {
 }
 
 func TestInvalidAnswers(t *testing.T) {
-	stages := `"stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}`
+	stages := `"stages": {"research": 0.1, "development": 0.95}`
 	cases := map[string]string{
 		"not json":                  "I think it is medium.",
 		"missing complexity":        `{"complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `}`,
@@ -226,10 +226,11 @@ func TestInvalidAnswers(t *testing.T) {
 		"probability above one":     `{"complexity": {"simple": -0.2, "medium": 1.2, "complex": 0}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `}`,
 		"score levels as names":     `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, ` + stages + `}`,
 		"missing stage":             `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1}}`,
-		"stage above one":           `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 1.5, "analysis": 0.9, "development": 0.95}}`,
+		"stage above one":           `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 1.5, "development": 0.95}}`,
 		"verdict instead of probas": `{"complexity": "medium", ` + stages + `}`,
-		"stage no longer asked":     `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95, "review": 0.7}}`,
-		"unknown field":             `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `, "workflow": ["analysis"]}`,
+		"stage no longer asked":     `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "development": 0.95, "review": 0.7}}`,
+		"stage analysis (removed)":  `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, "stages": {"research": 0.1, "analysis": 0.9, "development": 0.95}}`,
+		"unknown field":             `{"complexity": {"simple": 0.1, "medium": 0.6, "complex": 0.3}, "complexity_score": {"0": 0.1, "1": 0.6, "2": 0.3}, ` + stages + `, "workflow": ["planning"]}`,
 	}
 	for name, out := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -409,7 +410,7 @@ type stubChooser struct{ calls int }
 
 func (s *stubChooser) Choose(context.Context, error, *domain.ProjectContext, domain.DecisionPolicy) (interaction.ManualChoice, error) {
 	s.calls++
-	return interaction.ManualChoice{Complexity: domain.ComplexityMedium, Stages: []domain.Stage{domain.StageAnalysis}}, nil
+	return interaction.ManualChoice{Complexity: domain.ComplexityMedium, Stages: []domain.Stage{domain.StagePlanning}}, nil
 }
 
 func TestCLIFailureFollowsOnFailure(t *testing.T) {

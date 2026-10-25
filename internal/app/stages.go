@@ -121,7 +121,7 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 	// and testing with it, is on whatever the probabilities said, and decision.json says why.
 	if storyTask {
 		res.Decision = policy.ForceDevelopment(res.Decision, storyTaskReason)
-		// The task file is the plan: research, analysis and planning are not run again.
+		// The task file is the plan: research and planning are not run again.
 		res.Decision = policy.SkipPlanning(res.Decision, storyTaskPlannedReason)
 	}
 	return decisionOutcome{

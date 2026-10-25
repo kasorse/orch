@@ -72,11 +72,11 @@ func TestStageDecisions_GetSetAll(t *testing.T) {
 	}
 
 	var partial StageDecisions
-	partial.Set(StageAnalysis, ProbabilityDecision{Probability: 0.4})
+	partial.Set(StagePlanning, ProbabilityDecision{Probability: 0.4})
 	if _, ok := partial.Get(StageReview); ok {
 		t.Error("Get of a stage that was not set reported success")
 	}
-	if all := partial.All(); len(all) != 1 || all[0].Stage != StageAnalysis {
+	if all := partial.All(); len(all) != 1 || all[0].Stage != StagePlanning {
 		t.Errorf("All() of one set stage = %+v", all)
 	}
 
@@ -105,7 +105,6 @@ func validClassification() TaskClassification {
 		},
 		Stages: StageDecisions{
 			Research:    &ProbabilityDecision{Probability: 0.2},
-			Analysis:    &ProbabilityDecision{Probability: 0.9},
 			Development: &ProbabilityDecision{Probability: 0.99},
 		},
 		Provider: "jev",
@@ -177,10 +176,10 @@ func TestTaskClassification_Validate(t *testing.T) {
 			d.Score = &s
 			c.Complexity[ComplexitySourceChoice] = d
 		}, "must not carry a score"},
-		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Analysis.Probability = 1.01 }, "stage analysis"},
+		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Research.Probability = 1.01 }, "stage research"},
 		{"negative stage probability", func(c *TaskClassification) { c.Stages.Research.Probability = -0.01 }, "stage research"},
 		{"NaN stage probability", func(c *TaskClassification) { c.Stages.Development.Probability = math.NaN() }, "stage development"},
-		{"asked stage missing", func(c *TaskClassification) { c.Stages.Analysis = nil }, "stage analysis has no probability"},
+		{"asked stage missing", func(c *TaskClassification) { c.Stages.Research = nil }, "stage research has no probability"},
 		{"stage not asked answered", func(c *TaskClassification) {
 			c.Stages.Review = &ProbabilityDecision{Probability: 0.5}
 		}, "stage review is not asked"},

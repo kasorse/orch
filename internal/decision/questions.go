@@ -106,11 +106,6 @@ var stageQuestions = map[domain.Stage]YesNoQuestion{
 		True:         "The request needs information that is not in the repository: comparing approaches, choosing or evaluating libraries or tools, or looking up external standards or APIs.",
 		False:        "Everything needed is in the request, the repository, or common engineering knowledge.",
 	},
-	domain.StageAnalysis: {
-		Instructions: "Does fulfilling `request` require analysing existing code or the problem before acting?",
-		True:         "The cause, the affected code, or the right place to change is not yet known and must be found by reading code, logs or behaviour.",
-		False:        "What to do and where is already clear from the request.",
-	},
 	domain.StageDevelopment: {
 		Instructions: "Does fulfilling `request` require changing code in the repository?",
 		True:         "Files in the repository must be created, modified or deleted.",

@@ -279,17 +279,6 @@ type ResearchArtifact struct {
 	Answer string `json:"answer,omitempty"`
 }
 
-type AnalysisArtifact struct {
-	Summary        string   `json:"summary"`
-	SummaryShort   string   `json:"summary_short,omitempty"`
-	RootCause      string   `json:"root_cause"`
-	AffectedFiles  []string `json:"affected_files"`
-	Recommendation string   `json:"recommendation"`
-	Risks          []string `json:"risks"`
-	// Answer: see ResearchArtifact.Answer.
-	Answer string `json:"answer,omitempty"`
-}
-
 type PlanArtifact struct {
 	Summary       string   `json:"summary"`
 	SummaryShort  string   `json:"summary_short,omitempty"`

@@ -169,7 +169,7 @@ func TestScenario18_ResumeRefusesTampering(t *testing.T) {
 	cfg := jevConfig(t, j)
 	failed := failedAtImplement(t, repoDir, cfg)
 	calls := len(invocations(t, invocationsLog))
-	artifact := filepath.Join(filepath.Dir(runJSONPath(t, repoDir)), "artifacts", "000-analyze.json")
+	artifact := filepath.Join(filepath.Dir(runJSONPath(t, repoDir)), "artifacts", "000-plan.json")
 
 	cases := []struct {
 		name   string

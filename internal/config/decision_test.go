@@ -230,11 +230,26 @@ func TestValidateDecision_Policy(t *testing.T) {
 		{"old complexity.medium", func(c *Config) { c.Policy.Complexity.Medium = 0.7 }, "policy.complexity.medium was replaced by policy.complexity.cuts"},
 		{"old complexity.complex", func(c *Config) { c.Policy.Complexity.Complex = 0.55 }, "policy.complexity.complex was replaced by policy.complexity.cuts"},
 		{"missing stage threshold", func(c *Config) {
-			delete(c.Policy.Stages.Thresholds, "analysis")
-		}, "policy.stages.thresholds.analysis is required"},
+			delete(c.Policy.Stages.Thresholds, "research")
+		}, "policy.stages.thresholds.research is required"},
 		{"stage threshold out of range", func(c *Config) {
-			c.Policy.Stages.Thresholds["analysis"] = 1.5
-		}, "policy.stages.thresholds.analysis must be in [0, 1]"},
+			c.Policy.Stages.Thresholds["research"] = 1.5
+		}, "policy.stages.thresholds.research must be in [0, 1]"},
+		{"analysis threshold names its replacement", func(c *Config) {
+			c.Policy.Stages.Thresholds["analysis"] = 0.6
+		}, "policy.clarify.threshold"},
+		{"analysis threshold names the spec", func(c *Config) {
+			c.Policy.Stages.Thresholds["analysis"] = 0.6
+		}, "policy.stages.thresholds.analysis: analysis is not a stage any more"},
+		{"analysis in the template", func(c *Config) {
+			c.Policy.Stages.Force = map[string][]string{"complex": {"analysis", "review"}}
+		}, "policy.stages.force.complex: analysis is not a stage any more"},
+		{"actions.analyze", func(c *Config) {
+			c.Actions.Analyze = map[string]any{"provider": "claude", "model": "sonnet"}
+		}, "actions.analyze was removed"},
+		{"actions.analyze names the spec", func(c *Config) {
+			c.Actions.Analyze = map[string]any{"provider": "claude", "model": "sonnet"}
+		}, "specs/clarify"},
 		{"threshold of a stage no longer asked", func(c *Config) {
 			c.Policy.Stages.Thresholds["review"] = 0.7
 		}, "policy.stages.thresholds.review: review is not asked any more"},
@@ -262,7 +277,7 @@ func TestValidateDecision_Policy(t *testing.T) {
 	// distinct from an omitted one.
 	cfg := validConfig()
 	cfg.Policy.ContextDepth.ProjectThreshold = float64Ptr(0)
-	cfg.Policy.Stages.Thresholds["analysis"] = 0
+	cfg.Policy.Stages.Thresholds["research"] = 0
 	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
 	}
@@ -365,8 +380,8 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 	if p.ProjectContextThreshold != 0.5 {
 		t.Errorf("ProjectContextThreshold = %v, want 0.5", p.ProjectContextThreshold)
 	}
-	if got := len(p.StageThreshold); got != 3 {
-		t.Fatalf("StageThreshold has %d entries, want 3", got)
+	if got := len(p.StageThreshold); got != 2 {
+		t.Fatalf("StageThreshold has %d entries, want 2", got)
 	}
 	if p.StageThreshold["research"] != 0.70 {
 		t.Errorf(`StageThreshold["research"] = %v, want 0.70`, p.StageThreshold["research"])
@@ -375,7 +390,7 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 		t.Errorf("ComplexityCuts = %+v", p.ComplexityCuts)
 	}
 	force := p.ForceStages["complex"]
-	if len(force) != 3 {
-		t.Fatalf("ForceStages[complex] = %v, want 3 stages", force)
+	if len(force) != 2 {
+		t.Fatalf("ForceStages[complex] = %v, want 2 stages", force)
 	}
 }

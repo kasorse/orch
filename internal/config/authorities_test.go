@@ -54,7 +54,6 @@ func TestValidateAuthorities_AsksEveryRoute(t *testing.T) {
 	}
 	want := []string{
 		"claude:web",  // research
-		"claude:read", // analyze
 		"claude:read", // plan
 		"claude:edit", // implement
 		"claude:read", // review
@@ -145,7 +144,7 @@ func TestValidateAuthorities_ExampleConfig(t *testing.T) {
 
 func TestProvidersInUse(t *testing.T) {
 	cfg := validConfig()
-	cfg.Actions.Analyze.Provider, cfg.Actions.Plan.Provider, cfg.Actions.Implement.Provider = "gemini", "gemini", "gemini"
+	cfg.Actions.Plan.Provider, cfg.Actions.Implement.Provider = "gemini", "gemini"
 	cfg.Translation.Provider = "claude"
 	got := ProvidersInUse(cfg)
 	if want := []string{"claude", "codex", "gemini"}; !slices.Equal(got, want) {

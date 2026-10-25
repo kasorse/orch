@@ -50,7 +50,7 @@ func exploreOnce(t *testing.T) bool {
 	t.Helper()
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", analyzeResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", readOnlyResponse)
 	script := scriptBugfixMedium()
 	script.Stages["research"] = 0.57
 	cfg := jevConfig(t, startJev(t, script), func(o *configOptions) {

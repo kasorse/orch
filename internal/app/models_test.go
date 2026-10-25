@@ -14,7 +14,7 @@ func routedConfig() config.Config {
 		return config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: model}}
 	}
 	cfg := config.Config{Actions: config.ActionsConfig{
-		Research: pm("sonnet"), Analyze: pm("sonnet"), Plan: pm("sonnet"), Implement: pm("sonnet"), Review: pm("sonnet"),
+		Research: pm("sonnet"), Plan: pm("sonnet"), Implement: pm("sonnet"), Review: pm("sonnet"),
 	}}
 	cfg.Actions.Implement.Effort = "medium"
 	cfg.Actions.Implement.ByComplexity = map[domain.Complexity]config.ModelEffort{

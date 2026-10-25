@@ -467,6 +467,23 @@ func validateComplexityPolicy(c ComplexityPolicyConfig) []string {
 	return problems
 }
 
+// analysisRemoved says what took the place of the analysis stage (specs/clarify): a key kept
+// under the old name would silently mean something else, so it is refused and never mapped.
+const analysisRemoved = "analysis is not a stage any more: the clarify step makes the task clear before the " +
+	"decision (specs/clarify), and a stage that reads the code is planning"
+
+// forceStageProblem checks one stage of policy.stages.force.<complexity> and returns the problem,
+// or "" when it is a stage.
+func forceStageProblem(complexity, stage string) string {
+	if stage == "analysis" {
+		return fmt.Sprintf("policy.stages.force.%s: %s", complexity, analysisRemoved)
+	}
+	if _, err := domain.ParseStage(stage); err != nil {
+		return fmt.Sprintf("policy.stages.force.%s has unknown stage %q", complexity, stage)
+	}
+	return ""
+}
+
 func validatePolicyConfig(p PolicyConfig) []string {
 	var problems []string
 
@@ -491,6 +508,9 @@ func validatePolicyConfig(p PolicyConfig) []string {
 	for _, key := range slices.Sorted(maps.Keys(p.Stages.Thresholds)) {
 		st, err := domain.ParseStage(key)
 		switch {
+		case key == "analysis":
+			problems = append(problems, "policy.stages.thresholds.analysis: "+analysisRemoved+
+				"; whether the task is clear enough is policy.clarify.threshold")
 		case err != nil:
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds has unknown stage %q", key))
 		case !slices.Contains(domain.AskedStages(), st):
@@ -505,8 +525,8 @@ func validatePolicyConfig(p PolicyConfig) []string {
 			continue
 		}
 		for _, s := range stages {
-			if _, err := domain.ParseStage(s); err != nil {
-				problems = append(problems, fmt.Sprintf("policy.stages.force.%s has unknown stage %q", key, s))
+			if msg := forceStageProblem(key, s); msg != "" {
+				problems = append(problems, msg)
 			}
 		}
 	}

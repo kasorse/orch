@@ -30,7 +30,7 @@ func TestScenario19g_CredentialsScrubbed(t *testing.T) {
 	}
 
 	dumps := map[string]string{"test command": envOut}
-	for _, action := range []string{"analyze", "implement", "review"} {
+	for _, action := range []string{"plan", "implement", "review"} {
 		dumps[action] = filepath.Join(envDir, action+".env")
 	}
 	for who, path := range dumps {

@@ -56,16 +56,6 @@ func goldenResearch() *domain.ResearchArtifact {
 	}
 }
 
-func goldenAnalysis() *domain.AnalysisArtifact {
-	return &domain.AnalysisArtifact{
-		Summary:        "The panic comes from a nil map in Store.Put.",
-		RootCause:      "Store is constructed without make().",
-		AffectedFiles:  []string{"internal/store/store.go"},
-		Recommendation: "initialise the map in NewStore.",
-		Risks:          []string{"callers that build Store{} directly"},
-	}
-}
-
 func goldenPlan() *domain.PlanArtifact {
 	return &domain.PlanArtifact{
 		Summary:            "Initialise the map in NewStore and guard Put.",
@@ -111,7 +101,6 @@ func TestPrompts_Golden(t *testing.T) {
 	retry := &domain.ImplementationArtifact{Summary: "Added make() in NewStore."}
 	noRisks := goldenPlan()
 	noRisks.Risks = nil
-	emptyAnalysis := &domain.AnalysisArtifact{Summary: "The panic comes from a nil map in Store.Put.", RootCause: "Store is constructed without make().", Recommendation: "initialise the map in NewStore."}
 
 	cases := []struct {
 		name  string
@@ -119,48 +108,43 @@ func TestPrompts_Golden(t *testing.T) {
 	}{
 		{"research", func() string { return BuildResearchPrompt(ResearchPromptInput{Task: goldenTask}) }},
 		{"research_final", func() string { return BuildResearchPrompt(ResearchPromptInput{Task: goldenTask, FinalAnswer: true}) }},
-		{"analyze_research", func() string {
-			return BuildAnalyzePrompt(AnalyzePromptInput{Task: goldenTask, Research: goldenResearch()})
-		}},
-		{"analyze_final", func() string { return BuildAnalyzePrompt(AnalyzePromptInput{Task: goldenTask, FinalAnswer: true}) }},
-		{"plan_analysis", func() string {
-			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, Analysis: goldenAnalysis()})
+		{"plan_research", func() string {
+			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, Research: goldenResearch()})
 		}},
 		{"plan_final", func() string {
-			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), FinalAnswer: true})
+			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, FinalAnswer: true})
 		}},
-		{"plan_empty_lists", func() string { return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, Analysis: emptyAnalysis}) }},
 		{"implement_first", func() string {
-			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan()})
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan()})
 		}},
 		{"implement_verify", func() string {
-			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(), Verify: true})
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan(), Verify: true})
 		}},
 		{"implement_verify_checks", func() string {
-			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(), Verify: true, VerifyChecks: true})
+			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan(), Verify: true, VerifyChecks: true})
 		}},
 		{"implement_retry_test", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				Task: goldenTask, Plan: goldenPlan(),
 				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat, LastTestResult: goldenFailingTest(),
 			})
 		}},
 		{"implement_retry_check", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				Task: goldenTask, Plan: goldenPlan(),
 				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat, LastTestResult: goldenFailingCheck(),
 			})
 		}},
 		{"implement_retry_review", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				Task: goldenTask, Plan: goldenPlan(),
 				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat,
 				ReviewIssues: []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "internal/store/store.go", Description: "Put still panics on a zero Store"}},
 			})
 		}},
 		{"implement_retry_review_criteria", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(),
+				Task: goldenTask, Plan: goldenPlan(),
 				PreviousImplementation: retry, RunDiffStat: goldenRunDiffStat,
 				UnmetCriteria: []domain.CriterionVerdict{{Index: 2, Criterion: goldenPlan().AcceptanceCriteria[1], Evidence: "no test calls Put on a fresh store"}},
 				ReviewIssues:  []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "internal/store/store.go", Description: "Put still panics on a zero Store"}},
@@ -176,13 +160,13 @@ func TestPrompts_Golden(t *testing.T) {
 		}},
 		{"review_plan", func() string {
 			return BuildReviewPrompt(ReviewPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Plan: goldenPlan(), Implementation: goldenImplementation(),
+				Task: goldenTask, Plan: goldenPlan(), Implementation: goldenImplementation(),
 				TestResult: &domain.TestResult{Command: "go test ./...", Success: true}, GitDiff: goldenDiff,
 			})
 		}},
 		{"review_no_plan", func() string {
 			return BuildReviewPrompt(ReviewPromptInput{
-				Task: goldenTask, Analysis: goldenAnalysis(), Implementation: goldenImplementation(),
+				Task: goldenTask, Implementation: goldenImplementation(),
 				TestResult: &domain.TestResult{Command: "go test ./...", Success: true}, GitDiff: goldenDiff,
 			})
 		}},
@@ -261,21 +245,19 @@ func TestWriteList(t *testing.T) {
 }
 
 func TestPrompts_StageContext(t *testing.T) {
-	analysis, plan := goldenAnalysis(), goldenPlan()
-	planPrompt := BuildPlanPrompt(PlanPromptInput{Task: "t", Analysis: analysis})
-	implement := BuildImplementPrompt(ImplementPromptInput{Task: "t", Analysis: analysis, Plan: plan})
-	review := BuildReviewPrompt(ReviewPromptInput{Task: "t", Analysis: analysis, Plan: plan, GitDiff: "d"})
+	plan := goldenPlan()
+	planPrompt := BuildPlanPrompt(PlanPromptInput{Task: "t", Research: goldenResearch()})
+	implement := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: plan})
+	review := BuildReviewPrompt(ReviewPromptInput{Task: "t", Plan: plan, GitDiff: "d"})
 
 	for name, tc := range map[string]struct {
 		prompt string
 		want   []string
 	}{
 		"plan": {planPrompt, []string{
-			"Affected files (from analysis):\n- internal/store/store.go\n", "Risks (from analysis):\n- callers that build Store{} directly\n",
-			`"acceptance_criteria": ["..."]`, acceptanceCriteriaRule,
+			"Research:\nA write to a nil map panics", `"acceptance_criteria": ["..."]`, acceptanceCriteriaRule,
 		}},
 		"implement": {implement, []string{
-			"Affected files (from analysis):\n- internal/store/store.go\n", "Risks (from analysis):\n",
 			"Steps:\n- add make() in NewStore\n", "Affected files (from plan):\n- internal/store/store.go\n- internal/store/store_test.go\n",
 			"Risks (from plan):\n- Store{} literals in tests\n", "Acceptance criteria:\n- Put on a store from NewStore does not panic\n",
 		}},
@@ -292,6 +274,11 @@ func TestPrompts_StageContext(t *testing.T) {
 	}
 	if strings.Contains(review, "Affected files") {
 		t.Error("review is not given file lists (QL01)")
+	}
+	for name, prompt := range map[string]string{"plan": planPrompt, "implement": implement, "review": review} {
+		if strings.Contains(prompt, "Analysis") || strings.Contains(prompt, "from analysis") {
+			t.Errorf("%s prompt has an analysis block, but analysis is no longer a stage:\n%s", name, prompt)
+		}
 	}
 
 	// QL02: the verdict shape and rule only with criteria, the §7.2 paragraph always.
@@ -319,7 +306,7 @@ func TestPrompts_StageContext(t *testing.T) {
 		}
 	}
 
-	bare := BuildImplementPrompt(ImplementPromptInput{Task: "t", Analysis: &domain.AnalysisArtifact{Summary: "s"}, Plan: &domain.PlanArtifact{Summary: "p"}})
+	bare := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: &domain.PlanArtifact{Summary: "p"}})
 	for _, heading := range []string{"Affected files", "Risks", "Steps:", "Acceptance criteria"} {
 		if strings.Contains(bare, heading) {
 			t.Errorf("an empty list left %q in the prompt:\n%s", heading, bare)

@@ -23,12 +23,6 @@
       "reason": "not selected"
     },
     {
-      "stage": "analysis",
-      "forced": false,
-      "enabled": false,
-      "reason": "not selected"
-    },
-    {
       "stage": "planning",
       "forced": false,
       "enabled": false,

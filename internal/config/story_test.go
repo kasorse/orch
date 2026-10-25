@@ -125,11 +125,10 @@ func TestStoryBudgetProblems(t *testing.T) {
 	cfg := validConfig()
 	cost := 5.0
 	cfg.Story = &StoryConfig{MaxServices: 5, MaxTasks: 12, SpecDir: "specs", MaxCostUSD: &cost}
-	cfg.Actions.Analyze.Provider = "codex"
-	cfg.Actions.Plan.Provider = "claude"
+	cfg.Actions.Plan.Provider = "codex"
 
 	got := storyBudgetProblems(cfg, costStub{"claude": true})
-	if len(got) != 1 || !strings.Contains(got[0], "story.max_cost_usd") || !strings.Contains(got[0], "actions.analyze") {
+	if len(got) != 1 || !strings.Contains(got[0], "story.max_cost_usd") || !strings.Contains(got[0], "actions.plan") {
 		t.Errorf("problems = %v", got)
 	}
 	if got := storyBudgetProblems(cfg, costStub{"claude": true, "codex": true}); len(got) != 0 {

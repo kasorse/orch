@@ -225,7 +225,7 @@ func checkStoryTaskFlags(cli cliArgs, rest []string) error {
 // story task (specs/story/SPEC.md §11.2).
 const storyTaskReason = "story task"
 
-// storyTaskPlannedReason is the reason decision.json gives research, analysis and planning a
+// storyTaskPlannedReason is the reason decision.json gives research and planning a
 // story task turned off: its task file is already the plan.
 const storyTaskPlannedReason = "story task: the task file is the plan"
 

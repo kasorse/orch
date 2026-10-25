@@ -31,10 +31,10 @@ config: |
     complexity:
       cuts: {medium: 1.24, complex: 1.48}
     stages:
-      thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+      thresholds: {research: 0.81, development: 0.81}
       force:
-        medium: [analysis, review]
-        complex: [analysis, planning, review]
+        medium: [planning, review]
+        complex: [planning, review]
 
   context:
     max_files: 20
@@ -46,9 +46,6 @@ config: |
       provider: claude
       model: sonnet
       effort: medium
-    analyze:
-      provider: claude
-      model: sonnet
     plan:
       provider: claude
       model: sonnet

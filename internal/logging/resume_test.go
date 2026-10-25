@@ -16,7 +16,6 @@ const resumeRunID = "3f2a9c1e-8d4b-4c6a-9e21-5b7f0a3c9d10"
 
 func resumeWorkflow() *domain.Workflow {
 	return &domain.Workflow{Steps: []domain.Step{
-		{Action: domain.ActionAnalyze, Stage: domain.StageAnalysis},
 		{Action: domain.ActionPlan, Stage: domain.StagePlanning},
 		{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
 		{Action: domain.ActionTest, Stage: domain.StageTesting},
@@ -41,10 +40,10 @@ func testStep(index, exitCode, attempt int) domain.StepExecution {
 const providerFailure = "provider execution failed\n\nprovider: claude\naction: implement\nmodel: sonnet\nfailure: timeout"
 
 func TestResumeOverview_Golden(t *testing.T) {
-	failedImplement := aiStep(2, domain.ActionImplement, 0)
+	failedImplement := aiStep(1, domain.ActionImplement, 0)
 	failedImplement.Status, failedImplement.Error = domain.StepFailed, providerFailure
 
-	review := aiStep(4, domain.ActionReview, 0)
+	review := aiStep(3, domain.ActionReview, 0)
 	review.ReviewResult = &domain.ReviewResult{Status: domain.ReviewPass, Summary: "two problems", Issues: []domain.ReviewIssue{
 		{Severity: domain.SeverityHigh, File: "retry.go", Description: "no backoff cap"},
 		{Severity: domain.SeverityLow, File: "retry.go", Description: "naming"},
@@ -62,7 +61,7 @@ func TestResumeOverview_Golden(t *testing.T) {
 		{
 			name: "resume_interrupted",
 			run: domain.Run{Status: domain.RunRunning, Executions: []domain.StepExecution{
-				aiStep(0, domain.ActionAnalyze, 0), aiStep(1, domain.ActionPlan, 0), aiStep(2, domain.ActionImplement, 0),
+				aiStep(0, domain.ActionPlan, 0), aiStep(1, domain.ActionImplement, 0),
 			}},
 			tree:  " M internal/retry/retry.go\n?? internal/retry/retry_404_test.go",
 			entry: domain.ActionTest, why: "continue after implement",
@@ -71,7 +70,7 @@ func TestResumeOverview_Golden(t *testing.T) {
 		{
 			name: "resume_failed_implement",
 			run: domain.Run{Status: domain.RunFailed, FailureReason: providerFailure, Executions: []domain.StepExecution{
-				aiStep(0, domain.ActionAnalyze, 0), aiStep(1, domain.ActionPlan, 0), failedImplement,
+				aiStep(0, domain.ActionPlan, 0), failedImplement,
 			}},
 			treeErr: errors.New("git status failed: fatal: index file corrupt\nmore"),
 			entry:   domain.ActionImplement, why: "retry implement (failed: provider execution failed)",
@@ -80,9 +79,9 @@ func TestResumeOverview_Golden(t *testing.T) {
 		{
 			name: "resume_limit_raised",
 			run: domain.Run{Status: domain.RunStopped, FailureReason: "maximum fix iterations exceeded", Executions: []domain.StepExecution{
-				aiStep(0, domain.ActionAnalyze, 0), aiStep(1, domain.ActionPlan, 0), aiStep(2, domain.ActionImplement, 0),
-				testStep(3, 0, 0), review,
-				aiStep(5, domain.ActionImplement, 1), testStep(6, 1, 1),
+				aiStep(0, domain.ActionPlan, 0), aiStep(1, domain.ActionImplement, 0),
+				testStep(2, 0, 0), review,
+				aiStep(4, domain.ActionImplement, 1), testStep(5, 1, 1),
 			}},
 			tree:  " M internal/retry/retry.go",
 			entry: domain.ActionImplement, why: "tests failed, retrying implement",
@@ -95,8 +94,8 @@ func TestResumeOverview_Golden(t *testing.T) {
 				// Local, so the golden file reads 10:12 in any time zone.
 				FetchedAt: time.Date(2026, 9, 30, 10, 12, 30, 0, time.Local),
 			}}},
-			entry: domain.ActionAnalyze, why: "start",
-			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
+			entry: domain.ActionPlan, why: "start",
+			remaining: []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
 		},
 		{
 			name: "resume_story_source",
@@ -104,14 +103,14 @@ func TestResumeOverview_Golden(t *testing.T) {
 				Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1, Jira: "PAY-124",
 				Branch: "story/refunds/RF02", BaseRef: strings.Repeat("a", 40), BaseBranch: "main",
 			}}},
-			entry: domain.ActionAnalyze, why: "start",
-			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
+			entry: domain.ActionPlan, why: "start",
+			remaining: []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
 		},
 		{
 			name:  "resume_plan_mode",
 			run:   domain.Run{Status: domain.RunPending, Mode: domain.ModePlan},
-			entry: domain.ActionAnalyze, why: "start",
-			remaining: []domain.ActionType{domain.ActionAnalyze, domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
+			entry: domain.ActionPlan, why: "start",
+			remaining: []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview},
 		},
 	}
 	for _, tc := range cases {

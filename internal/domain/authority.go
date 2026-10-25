@@ -35,7 +35,6 @@ func (a Authority) Valid() bool {
 // row: the orchestrator runs the test command itself and makes no AI call for it.
 var actionAuthority = map[ActionType]Authority{
 	ActionResearch:  AuthorityWeb,
-	ActionAnalyze:   AuthorityRead,
 	ActionPlan:      AuthorityRead,
 	ActionReview:    AuthorityRead,
 	ActionImplement: AuthorityEdit,

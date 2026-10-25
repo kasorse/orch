@@ -204,10 +204,10 @@ func TestImplementRetry_SplitsOldAndNewFailures(t *testing.T) {
 func TestRestore_KeepsTheRedPreRunTest(t *testing.T) {
 	red := &domain.TestResult{Command: "go test ./...", ExitCode: 1, Stdout: "FAIL"}
 	run := &domain.Run{ID: "r", PreRunTest: red, AllowRedTests: true, Executions: []domain.StepExecution{
-		{Index: 0, Action: domain.ActionAnalyze, Status: domain.StepCompleted},
+		{Index: 0, Action: domain.ActionPlan, Status: domain.StepCompleted},
 	}}
 	d := &Dispatcher{}
-	if err := d.Restore(run, memReader{memKey(0, domain.ActionAnalyze): `{"summary":"a","root_cause":"","affected_files":null,"recommendation":"","risks":null}`}); err != nil {
+	if err := d.Restore(run, memReader{memKey(0, domain.ActionPlan): `{"summary":"a","steps":null,"affected_files":null,"risks":null}`}); err != nil {
 		t.Fatal(err)
 	}
 	if d.preRunFailureForImplement() == nil {

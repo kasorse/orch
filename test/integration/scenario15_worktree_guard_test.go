@@ -17,9 +17,10 @@ import (
 // clean restore point, and an implement that changes a protected path stops the run
 // before test executes anything.
 
-// scriptAnalysisOnly decides a read-only workflow: analysis alone.
-func scriptAnalysisOnly() jevScript {
-	return jevScript{PProject: 0.9, Choice: [3]float64{0.8, 0.15, 0.05}, Stages: map[string]float64{"analysis": 0.95}}
+// scriptReadOnly decides a read-only workflow: no asked stage clears its threshold and the
+// simple level has no template, so planning alone runs (the fallback of specs/clarify CL01).
+func scriptReadOnly() jevScript {
+	return jevScript{PProject: 0.9, Choice: [3]float64{0.8, 0.15, 0.05}}
 }
 
 func dirtyFixture(t *testing.T) string {
@@ -55,15 +56,15 @@ func TestScenario15_DirtyTreeRefusesImplement(t *testing.T) {
 func TestScenario15_DirtyTreeAllowsReadOnlyWorkflow(t *testing.T) {
 	repoDir := dirtyFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	j := startJev(t, scriptAnalysisOnly())
+	j := startJev(t, scriptReadOnly())
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "explain Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 	if !strings.Contains(stderr, "uncommitted changes") {
 		t.Errorf("expected the dirty-tree warning, stderr:\n%s", stderr)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze"}) {
-		t.Errorf("invocations = %v, want [analyze]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan"}) {
+		t.Errorf("invocations = %v, want [plan]", got)
 	}
 }
 
@@ -75,7 +76,7 @@ func TestScenario15_DirtyTreeAllowedByConfig(t *testing.T) {
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	// On a dirty tree the restore point is a stash commit holding notes.txt, not HEAD.
@@ -153,8 +154,8 @@ func TestScenario15_ProtectedPathStopsBeforeTest(t *testing.T) {
 			if _, statErr := os.Stat(marker); statErr == nil {
 				t.Error("test.command ran after a protected-path violation")
 			}
-			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement"}) {
-				t.Errorf("invocations = %v, want [analyze implement]", got)
+			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
+				t.Errorf("invocations = %v, want [plan implement]", got)
 			}
 		})
 	}

@@ -22,7 +22,7 @@ import (
 //	      command: graphify-mcp
 //	      args: ["{repo}/graphify-out/graph.json"]
 //	      tools: [query_graph, get_node, get_neighbors, shortest_path]
-//	      actions: [analyze, plan, implement, review]
+//	      actions: [plan, implement, review]
 //	  user_settings: false
 type ExtensionsConfig struct {
 	// MCP lists MCP servers by name. Only the listed tools of a server are given to the
@@ -50,14 +50,14 @@ type MCPServerConfig struct {
 	// Tools are the server's tool names the model may call, without the "mcp__<name>__"
 	// prefix. "*" allows every tool the server offers.
 	Tools []string `yaml:"tools"`
-	// Actions are the workflow actions (research, analyze, plan, implement, review) that
-	// get this server. Empty means the read-only ones: analyze, plan and review.
+	// Actions are the workflow actions (research, plan, implement, review) that
+	// get this server. Empty means the read-only ones: plan and review.
 	Actions []string `yaml:"actions"`
 }
 
 // DefaultMCPActions are the actions an MCP server is offered to when none are listed:
 // the steps that read the repository but do not change it.
-var DefaultMCPActions = []string{"analyze", "plan", "review"}
+var DefaultMCPActions = []string{"plan", "review"}
 
 var mcpNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
@@ -65,7 +65,16 @@ var mcpNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // server cannot take it.
 const reservedMCPServer = "orch"
 
-var extensionActions = []string{"research", "analyze", "plan", "implement", "review"}
+var extensionActions = []string{"research", "plan", "implement", "review"}
+
+// actionNotAnAction is the reason an action name in extensions is refused, when there is more
+// to say than "not an action": the analyze action was removed (specs/clarify).
+func actionNotAnAction(a string) string {
+	if a == "analyze" {
+		return "the analyze action was removed, a step that reads the code is plan (specs/clarify); "
+	}
+	return ""
+}
 
 // ActionsFor returns the actions s is offered to.
 func (s MCPServerConfig) ActionsFor() []string {
@@ -136,7 +145,7 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 		}
 		for _, a := range s.Actions {
 			if !slices.Contains(extensionActions, a) {
-				problems = append(problems, fmt.Sprintf("%s.actions: %q is not an action (want: %s)", key, a, strings.Join(extensionActions, ", ")))
+				problems = append(problems, fmt.Sprintf("%s.actions: %s%q is not an action (want: %s)", key, actionNotAnAction(a), a, strings.Join(extensionActions, ", ")))
 			}
 		}
 		for _, a := range s.ActionsFor() {
@@ -147,7 +156,7 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 	}
 	for _, a := range e.UserSettingsActions {
 		if !slices.Contains(extensionActions, a) {
-			problems = append(problems, fmt.Sprintf("extensions.user_settings_actions: %q is not an action (want: %s)", a, strings.Join(extensionActions, ", ")))
+			problems = append(problems, fmt.Sprintf("extensions.user_settings_actions: %s%q is not an action (want: %s)", actionNotAnAction(a), a, strings.Join(extensionActions, ", ")))
 		}
 	}
 	if len(e.UserSettingsActions) > 0 && !e.UserSettings {

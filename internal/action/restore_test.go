@@ -42,7 +42,6 @@ func (c *routedClient) Execute(ctx context.Context, req provider.Request) (provi
 // dispatcherState is everything Restore must rebuild.
 type dispatcherState struct {
 	Research       *domain.ResearchArtifact
-	Analysis       *domain.AnalysisArtifact
 	Plan           *domain.PlanArtifact
 	Impl           *domain.ImplementationArtifact
 	CommitImpl     *domain.ImplementationArtifact
@@ -54,7 +53,7 @@ type dispatcherState struct {
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastAnalysis, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
+	return dispatcherState{d.lastResearch, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -98,13 +97,12 @@ func TestRestore_MatchesLiveContextAfterEveryStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Workflow = &domain.Workflow{Steps: []domain.Step{
-		{Action: domain.ActionResearch}, {Action: domain.ActionAnalyze}, {Action: domain.ActionPlan},
+		{Action: domain.ActionResearch}, {Action: domain.ActionPlan},
 		{Action: domain.ActionImplement}, {Action: domain.ActionTest}, {Action: domain.ActionReview},
 	}}
 
 	client := &routedClient{seen: map[string]int{}, outputs: map[string][]string{
 		"research":  {`{"summary":"r","findings":["f"],"options":[],"recommendation":"x","references":["u"]}`},
-		"analyze":   {`{"summary":"a","root_cause":"rc","affected_files":["a.go"],"recommendation":"r","risks":[]}`},
 		"plan":      {`not json - falls back to the summary`},
 		"implement": {`{"summary":"i1","changed_files":["a.go"],"tests_added":[]}`, `{"summary":"i2","changed_files":["a.go"]}`, `{"summary":"i3"}`},
 		"review": {
@@ -130,10 +128,10 @@ func TestRestore_MatchesLiveContextAfterEveryStep(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 
-	// research, analyze, plan, implement, test (fail), implement, test, review (fail),
+	// research, plan, implement, test (fail), implement, test, review (fail),
 	// implement, test, review.
-	if checker.checks != 11 {
-		t.Errorf("checked %d steps, want 11", checker.checks)
+	if checker.checks != 10 {
+		t.Errorf("checked %d steps, want 10", checker.checks)
 	}
 }
 

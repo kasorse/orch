@@ -22,7 +22,7 @@ func TestManualDecision_BuildsAndVerifies(t *testing.T) {
 	}
 	d, _ := domain.ManualDecision(domain.StageOrder())
 	wf, err := Build(d.Stages)
-	if err != nil || len(wf.Steps) != 6 {
-		t.Errorf("all six: %v, %+v", err, wf)
+	if err != nil || len(wf.Steps) != 5 {
+		t.Errorf("all five: %v, %+v", err, wf)
 	}
 }

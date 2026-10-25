@@ -9,7 +9,7 @@ testing: threshold 0.50, ran in 2 runs
 
 review: threshold —, ran in 0 runs
 
-research, analysis, planning: with and without the stage (no proposal)
+research, planning: with and without the stage (no proposal)
   no run
 
 models per complexity (no proposal)
@@ -24,7 +24,7 @@ testing: threshold 0.70, ran in 2 runs
 
 review: threshold —, ran in 0 runs
 
-research, analysis, planning: with and without the stage (no proposal)
+research, planning: with and without the stage (no proposal)
   no run
 
 models per complexity (no proposal)

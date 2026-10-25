@@ -48,14 +48,6 @@ func (r *ConsoleReporter) printResult(exec domain.StepExecution, outcome workflo
 		f.writeText(&b, "Recommendation", a.Recommendation)
 		f.writeList(&b, "References", a.References)
 		f.writeText(&b, "Answer", a.Answer)
-	case domain.AnalysisArtifact:
-		f.writeText(&b, "In short", a.SummaryShort)
-		f.writeText(&b, "Summary", a.Summary)
-		f.writeText(&b, "Root cause", a.RootCause)
-		f.writeList(&b, "Affected files", a.AffectedFiles)
-		f.writeText(&b, "Recommendation", a.Recommendation)
-		f.writeList(&b, "Risks", a.Risks)
-		f.writeText(&b, "Answer", a.Answer)
 	case domain.PlanArtifact:
 		f.writeText(&b, "In short", a.SummaryShort)
 		f.writeText(&b, "Summary", a.Summary)

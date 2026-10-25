@@ -11,8 +11,8 @@ import (
 // doubles as the routing marker fake executables grep on in integration tests. The task is
 // always embedded through taskBlock, repository data through fence.
 
-// readOnlyRule is shared by every read-only stage prompt: research, analysis and
-// planning inspect, they never change the repository.
+// readOnlyRule is shared by every read-only stage prompt: research and planning
+// inspect, they never change the repository.
 const readOnlyRule = "This is a read-only step: do not create, modify or delete any files in the repository."
 
 // finalAnswerRule is appended when the step is the workflow's last read-only step and
@@ -102,28 +102,9 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	return b.String()
 }
 
-type AnalyzePromptInput struct {
-	Task        string
-	Research    *domain.ResearchArtifact
-	FinalAnswer bool
-}
-
-func BuildAnalyzePrompt(in AnalyzePromptInput) string {
-	var b strings.Builder
-	b.WriteString("ACTION: analyze\n\n")
-	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
-	b.WriteString(summaryShortRule + "\n\n")
-	writeFinalAnswerRule(&b, in.FinalAnswer)
-	b.WriteString("Task:\n" + taskBlock(in.Task))
-	writeResearch(&b, in.Research)
-	return b.String()
-}
-
 type PlanPromptInput struct {
 	Task        string
 	Research    *domain.ResearchArtifact
-	Analysis    *domain.AnalysisArtifact
 	FinalAnswer bool
 }
 
@@ -137,12 +118,6 @@ func BuildPlanPrompt(in PlanPromptInput) string {
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeResearch(&b, in.Research)
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
-			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
-		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
-		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
-	}
 	return b.String()
 }
 
@@ -199,14 +174,13 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 }
 
 // ImplementPromptInput carries whichever prior context is available. On the first
-// attempt, Analysis/Plan (whichever the workflow produced) are set and
+// attempt, Plan (when the workflow produced one) is set and
 // PreviousImplementation/LastTestResult/ReviewIssues are nil/empty. On a retry after test
 // failure, LastTestResult carries the failing command/stdout/stderr. On a retry after
 // review failure, ReviewIssues carries the structured issues and UnmetCriteria the
 // acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
 	Task                   string
-	Analysis               *domain.AnalysisArtifact
 	Plan                   *domain.PlanArtifact
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
@@ -260,13 +234,6 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
 
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
-			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
-		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
-		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
-		b.WriteString("\n")
-	}
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
 		writeList(&b, "Steps", in.Plan.Steps)
@@ -464,7 +431,6 @@ type ReviewPromptInput struct {
 	// Acceptance are the task's own acceptance criteria (domain.Task.Acceptance, a story
 	// task's): they come first in the numbered list, ahead of the plan's.
 	Acceptance     []string
-	Analysis       *domain.AnalysisArtifact
 	Plan           *domain.PlanArtifact
 	Implementation *domain.ImplementationArtifact
 	TestResult     *domain.TestResult
@@ -555,9 +521,6 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
 
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\n\n", in.Analysis.Summary)
-	}
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
 		writeList(&b, "Steps", in.Plan.Steps)

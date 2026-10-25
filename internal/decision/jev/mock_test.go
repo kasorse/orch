@@ -26,7 +26,7 @@ func classificationRequest(request string) systemOneRequest {
 		}},
 		"complexity_score": {Type: questionScore, Instructions: "Rate how complex it is.", Criteria: complexityLevels},
 	}
-	for _, st := range []string{"research", "analysis", "development"} {
+	for _, st := range []string{"research", "development"} {
 		qs["stage_"+st] = question{Type: questionNoul, Instructions: "Does `request` need " + st + "?",
 			Criteria: map[string]string{"true": "yes", "false": "no"}}
 	}
@@ -63,8 +63,8 @@ func TestMock_AnswersEveryQuestionInValidShape(t *testing.T) {
 	if resp.Model != MockModelPrefix+"jev-1.13.0" {
 		t.Errorf("Model = %q", resp.Model)
 	}
-	if len(resp.Answers) != 5 {
-		t.Fatalf("got %d answers, want 5", len(resp.Answers))
+	if len(resp.Answers) != 4 {
+		t.Fatalf("got %d answers, want 4", len(resp.Answers))
 	}
 
 	c := resp.Answers["complexity"]
@@ -159,7 +159,7 @@ func TestMock_Complexity(t *testing.T) {
 func TestMock_Stages(t *testing.T) {
 	enabled := func(resp systemOneResponse) []string {
 		var out []string
-		for _, st := range []string{"research", "analysis", "development"} {
+		for _, st := range []string{"research", "development"} {
 			a, ok := resp.Answers["stage_"+st]
 			if !ok {
 				t.Fatalf("no answer for stage_%s", st)
@@ -173,9 +173,9 @@ func TestMock_Stages(t *testing.T) {
 	cases := map[string][]string{
 		"Compare Redis and Memcached for caching":         {"research"},
 		"Fix a typo in the README":                        {"development"},
-		"Fix the race condition in the dispatcher":        {"analysis", "development"},
-		"Add pagination support to the list endpoint":     {"analysis", "development"},
-		"Rewrite the whole engine with a new concurrency": {"analysis", "development"},
+		"Fix the race condition in the dispatcher":        {"development"},
+		"Add pagination support to the list endpoint":     {"development"},
+		"Rewrite the whole engine with a new concurrency": {"development"},
 	}
 	for request, want := range cases {
 		if got := enabled(mustDecide(t, classificationRequest(request))); !reflect.DeepEqual(got, want) {

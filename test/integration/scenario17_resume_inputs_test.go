@@ -106,8 +106,8 @@ func TestScenario17_ImplementCannotRewriteResumeInputs(t *testing.T) {
 			if _, statErr := os.Stat(marker); statErr == nil {
 				t.Error("test.command ran after the run directory was rewritten")
 			}
-			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement"}) {
-				t.Errorf("invocations = %v, want [analyze implement]", got)
+			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
+				t.Errorf("invocations = %v, want [plan implement]", got)
 			}
 		})
 	}

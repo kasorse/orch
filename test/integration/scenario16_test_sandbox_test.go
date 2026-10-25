@@ -76,7 +76,7 @@ func TestScenario16_TestRunsSandboxed(t *testing.T) {
 	if !strings.Contains(raw, `"sandboxed": true`) {
 		t.Errorf("run.json must record the sandboxed test result")
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 }

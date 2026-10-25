@@ -91,6 +91,9 @@ func (s *Store) LoadRun(runID string) (*domain.Run, error) {
 // accepts the run's own id (a run found by walking a tree, whose directory is not named
 // after it); anything else must equal it.
 func decodeRun(data []byte, wantID string) (*domain.Run, error) {
+	if startedBeforeClarify(data, runProbe) {
+		return nil, &apperr.RunStateError{Kind: apperr.RunNotResumable, RunID: wantID, Msg: startedBeforeClarifyMsg}
+	}
 	var run domain.Run
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -182,6 +185,9 @@ func (s *Store) LoadDecision(runID string) (domain.DecisionTrace, time.Time, err
 
 // decodeDecision strictly decodes and validates the content of a decision.json.
 func decodeDecision(data []byte, runID string) (domain.DecisionTrace, error) {
+	if startedBeforeClarify(data, traceProbe) {
+		return domain.DecisionTrace{}, &apperr.RunStateError{Kind: apperr.RunNotResumable, RunID: runID, Msg: startedBeforeClarifyMsg}
+	}
 	var trace domain.DecisionTrace
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

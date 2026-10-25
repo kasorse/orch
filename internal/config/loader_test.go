@@ -46,9 +46,9 @@ policy:
   complexity:
     cuts: {medium: 0.50, complex: 1.40}
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, development: 0.60}
+    thresholds: {research: 0.70, development: 0.60}
     force:
-      complex: [analysis, planning, review]
+      complex: [planning, review]
 
 context:
   max_files: 20
@@ -56,9 +56,6 @@ context:
 
 actions:
   research:
-    provider: claude
-    model: sonnet
-  analyze:
     provider: claude
     model: sonnet
   plan:
@@ -136,9 +133,6 @@ func TestLoad_PerActionTimeout(t *testing.T) {
 version: 1
 
 actions:
-  analyze:
-    provider: claude
-    model: sonnet
   plan:
     provider: claude
     model: sonnet
@@ -164,8 +158,8 @@ execution:
 	if cfg.Actions.Review.Timeout != 20*time.Minute {
 		t.Errorf("expected review timeout 20m, got %v", cfg.Actions.Review.Timeout)
 	}
-	if cfg.Actions.Analyze.Timeout != 0 {
-		t.Errorf("expected analyze timeout to stay unset, got %v", cfg.Actions.Analyze.Timeout)
+	if cfg.Actions.Plan.Timeout != 0 {
+		t.Errorf("expected plan timeout to stay unset, got %v", cfg.Actions.Plan.Timeout)
 	}
 }
 
@@ -225,11 +219,10 @@ policy:
   context_depth: {project_threshold: 0.5}
   complexity: {cuts: {medium: 0.50, complex: 1.40}}
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, development: 0.60}
+    thresholds: {research: 0.70, development: 0.60}
 context: {max_files: 20, max_bytes: 24576}
 actions:
   research: {provider: claude, model: sonnet}
-  analyze: {provider: claude, model: sonnet}
   plan: {provider: claude, model: sonnet}
   implement: {provider: claude, model: opus}
   review: {provider: claude, model: sonnet}
@@ -256,21 +249,55 @@ func TestLoad_RateLimitWait(t *testing.T) {
 	}
 }
 
+// The keys specs/clarify removed are still declared, so strict loading does not call them
+// unknown: Validate refuses each with its replacement and the spec, never reading it as
+// something else.
+func TestValidate_RefusesTheKeysAnalysisLeft(t *testing.T) {
+	thresholds := "thresholds: {research: 0.70, development: 0.60}"
+	for name, tc := range map[string]struct {
+		yaml string
+		want []string
+	}{
+		"threshold": {strings.Replace(validV2(""), thresholds, "thresholds: {research: 0.70, analysis: 0.60, development: 0.60}", 1),
+			[]string{"policy.stages.thresholds.analysis", "policy.clarify.threshold", "specs/clarify"}},
+		"force": {strings.Replace(validV2(""), thresholds, thresholds+"\n    force: {complex: [analysis, review]}", 1),
+			[]string{"policy.stages.force.complex", "analysis is not a stage any more", "specs/clarify"}},
+		"action": {strings.Replace(validV2(""), "  plan: {", "  analyze: {provider: claude, model: sonnet}\n  plan: {", 1),
+			[]string{"actions.analyze was removed", "specs/clarify"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, tc.yaml))
+			if err != nil {
+				t.Fatalf("Load: the key must be declared, got %v", err)
+			}
+			err = Validate(cfg)
+			if err == nil {
+				t.Fatal("Validate accepted a key analysis left")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error lacks %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
 func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		yaml string
 		want []string
 	}{
-		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 25: exectuion"}},
+		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 24: exectuion"}},
 		// actions, translation and jira decode through their own UnmarshalYAML: strictness
 		// must reach inside those too.
 		"inside an action": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
-			"review: {provider: claude, model: sonnet, timout: 20m}", 1), []string{"line 21: timout"}},
+			"review: {provider: claude, model: sonnet, timout: 20m}", 1), []string{"line 20: timout"}},
 		"translation effort": {strings.Replace(validV2(""), "model: haiku,", "model: haiku, effort: high,", 1),
 			[]string{"line 9: effort"}},
 		"inside jira": {validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: basic\n  email_env: E\n  token_env: T\n  timeuot: 5s\n"),
-			[]string{"line 30: timeuot"}},
-		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 25: limit", "line 26: securty"}},
+			[]string{"line 29: timeuot"}},
+		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 24: limit", "line 25: securty"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tc.yaml))

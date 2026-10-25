@@ -53,15 +53,15 @@ policy:
     # task stream answers on another scale, so recalibrate for yours (SPEC.md §7).
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    # Three stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
-    # if not, the run only answers), research (is outside knowledge needed) and analysis (is the
-    # cause or the place to change unknown). The rest comes from the template below: the stages
-    # on at each complexity. Testing always comes with development; without development,
-    # testing and review are off.
-    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+    # Two stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
+    # if not, the run only answers) and research (is outside knowledge needed). The rest comes
+    # from the template below: the stages on at each complexity. Testing always comes with
+    # development; without development, testing and review are off. If nothing is on, planning
+    # runs alone.
+    thresholds: {research: 0.81, development: 0.81}
     force:
-      medium: [analysis, review]
-      complex: [analysis, planning, review]
+      medium: [planning, review]
+      complex: [planning, review]
   # Path rules (specs/governance/SPEC.md §4): checked on the run's net diff after each implement.
   # Rules apply in file order and every matching rule applies, so requirements add up. A change
   # that matches a rule whose stage the workflow lacks stops the run. To forbid a path outright
@@ -92,10 +92,6 @@ actions:
     provider: claude
     model: sonnet
     effort: medium
-
-  analyze:
-    provider: claude
-    model: sonnet
 
   plan:
     provider: claude
@@ -264,7 +260,7 @@ security:
 #       command: graphify-mcp
 #       args: ["{repo}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
-#       actions: [analyze, plan, implement, review]   # default: analyze, plan, review
+#       actions: [plan, implement, review]            # default: plan, review
 #   user_settings: true                               # plugins, skills, hooks
 #   user_settings_actions: [implement, review]        # default: every model step
 

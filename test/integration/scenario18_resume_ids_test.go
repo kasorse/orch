@@ -17,22 +17,21 @@ import (
 // reported, not re-run; run IDs resolve by full ID or a unique prefix of at least 8
 // characters; and a run another process holds is refused.
 
-const analyzeAnswerResponse = `{
+const readOnlyAnswerResponse = `{
   "summary": "Add() subtracts instead of adding.",
-  "root_cause": "wrong operator",
+  "steps": ["use + instead of -"],
   "affected_files": ["fixture.go"],
-  "recommendation": "use + instead of -",
   "risks": [],
   "answer": "Add returns a - b; it should return a + b."
 }`
 
-// completedReadOnlyRun runs an analysis-only task to completion and returns it.
+// completedReadOnlyRun runs a plan-only task to completion and returns it.
 func completedReadOnlyRun(t *testing.T) (repoDir, cfg, invocationsLog string, run resumedRun) {
 	t.Helper()
 	repoDir = fakeexec.InitGitFixture(t)
 	invocationsLog, _ = decisionEnv(t, repoDir)
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "analyze", analyzeAnswerResponse)
-	cfg = jevConfig(t, startJev(t, scriptAnalysisOnly()))
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "plan", readOnlyAnswerResponse)
+	cfg = jevConfig(t, startJev(t, scriptReadOnly()))
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "explain Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)

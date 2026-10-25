@@ -15,7 +15,6 @@ func (d *Dispatcher) executePlan(ctx context.Context, run *domain.Run) (workflow
 	prompt := BuildPlanPrompt(PlanPromptInput{
 		Task:        run.Task.Description,
 		Research:    d.lastResearch,
-		Analysis:    d.lastAnalysis,
 		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionPlan),
 	})
 
@@ -45,7 +44,9 @@ const (
 	maxCriterionBytes     = 300
 )
 
-// parsePlan is lenient, matching parseAnalysis - see its comment. The criteria are capped
+// parsePlan is lenient: correctness of the plan itself is judged by the downstream
+// test/review steps, not by strict schema validation here, so a malformed or prose response is
+// not a hard failure - it falls back to the raw text as the summary. The criteria are capped
 // here, once, so the artifact a resume reads back holds what the prompts used.
 func parsePlan(output string) domain.PlanArtifact {
 	var artifact domain.PlanArtifact

@@ -30,8 +30,6 @@ func (d *Dispatcher) execute(ctx context.Context, actionType domain.ActionType, 
 	switch actionType {
 	case domain.ActionResearch:
 		return d.executeResearch(ctx, run)
-	case domain.ActionAnalyze:
-		return d.executeAnalyze(ctx, run)
 	case domain.ActionPlan:
 		return d.executePlan(ctx, run)
 	case domain.ActionImplement:
@@ -79,8 +77,6 @@ func (d *Dispatcher) actionTimeout(actionType domain.ActionType) time.Duration {
 	switch actionType {
 	case domain.ActionResearch:
 		return d.Config.Actions.Research.Timeout
-	case domain.ActionAnalyze:
-		return d.Config.Actions.Analyze.Timeout
 	case domain.ActionPlan:
 		return d.Config.Actions.Plan.Timeout
 	case domain.ActionImplement:

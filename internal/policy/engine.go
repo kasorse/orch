@@ -51,7 +51,7 @@ func SelectComplexity(d domain.ComplexityDecision, p domain.DecisionPolicy) doma
 //
 // and without development, testing and review are off: there is no diff to test or review.
 // A stage the provider was not asked about (planning, testing, review) has no probability;
-// the template (ForceStages) is what turns it on. If nothing is enabled, analysis alone is
+// the template (ForceStages) is what turns it on. If nothing is enabled, planning alone is
 // (TASKS.md В6) rather than an empty workflow.
 func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p domain.DecisionPolicy) domain.StageSelection {
 	forced := forcedSet(p, complexity)
@@ -88,9 +88,9 @@ func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p 
 
 	if !anyEnabled(sel) {
 		for i := range sel.Stages {
-			if sel.Stages[i].Stage == domain.StageAnalysis {
+			if sel.Stages[i].Stage == domain.StagePlanning {
 				sel.Stages[i].Enabled = true
-				sel.Stages[i].Reason = "forced: no stage cleared its threshold, defaulting to analysis"
+				sel.Stages[i].Reason = "forced: no stage cleared its threshold, defaulting to planning"
 				break
 			}
 		}

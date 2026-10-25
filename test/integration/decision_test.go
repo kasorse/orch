@@ -29,7 +29,7 @@ func decisionEnv(t *testing.T, repoDir string) (invocationsLog, promptsDir strin
 
 	responsesDir := t.TempDir()
 	for name, body := range map[string]string{
-		"analyze": analyzeResponse, "plan": planResponse, "implement": implementResponse, "review": reviewPassResponse,
+		"plan": planResponse, "implement": implementResponse, "review": reviewPassResponse,
 	} {
 		writeResponse(t, responsesDir, name, body)
 	}
@@ -155,7 +155,7 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	if !ok || !strings.Contains(pc, "fixture.go") || strings.Contains(pc, ".env") {
 		t.Errorf("project_context.json = %q (present=%v)", pc, ok)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	d := readDecision(t, repoDir)
@@ -163,7 +163,7 @@ func TestDecision_ProjectContextExcludesSecrets(t *testing.T) {
 	if d.Scope == nil || d.Scope.Story != 0.15 {
 		t.Errorf("decision.json scope = %+v, want story 0.15", d.Scope)
 	}
-	if !equalStrings(d.Workflow, []string{"analyze", "implement", "test", "review"}) || d.ContextDepth.Selected != "project" {
+	if !equalStrings(d.Workflow, []string{"plan", "implement", "test", "review"}) || d.ContextDepth.Selected != "project" {
 		t.Errorf("decision = %+v", d)
 	}
 }
@@ -205,12 +205,12 @@ func TestDecision_ComplexForcesStages(t *testing.T) {
 	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "rework the fixture package")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "plan", "implement", "review"}) {
-		t.Errorf("invocations = %v, want the forced analysis, planning and review", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+		t.Errorf("invocations = %v, want the forced planning and review", got)
 	}
 	d := readDecision(t, repoDir)
 	for _, s := range d.Stages {
-		if (s.Stage == "analysis" || s.Stage == "planning" || s.Stage == "review") && (!s.Forced || !s.Enabled || !strings.Contains(s.Reason, "forced: complexity=complex")) {
+		if (s.Stage == "planning" || s.Stage == "review") && (!s.Forced || !s.Enabled || !strings.Contains(s.Reason, "forced: complexity=complex")) {
 			t.Errorf("stage %+v should be forced on", s)
 		}
 	}
@@ -263,7 +263,7 @@ func TestDecision_RussianRequestIsTranslated(t *testing.T) {
 	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", request)
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"translate", "analyze", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"translate", "plan", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	for i, body := range j.Bodies() {
@@ -271,9 +271,9 @@ func TestDecision_RussianRequestIsTranslated(t *testing.T) {
 			t.Errorf("Jev request %d must carry the English text only:\n%s", i, body)
 		}
 	}
-	prompt, _ := os.ReadFile(filepath.Join(promptsDir, "analyze.txt"))
+	prompt, _ := os.ReadFile(filepath.Join(promptsDir, "plan.txt"))
 	if !strings.Contains(string(prompt), request) {
-		t.Errorf("the analyze stage must get the original request:\n%s", prompt)
+		t.Errorf("the plan stage must get the original request:\n%s", prompt)
 	}
 	d := readDecision(t, repoDir)
 	if !d.Translation.Translated || d.RequestEN == "" || d.Request != request {
@@ -316,8 +316,8 @@ func TestDecision_JevDownManualChoice(t *testing.T) {
 	j := startJev(t, jevScript{Fail: []int{529, 529}})
 	configPath := jevConfig(t, j, func(o *configOptions) { o.onFailure = "ask" })
 
-	// complexity 3 (complex), stages 4,5 (development, testing); approve; mode auto.
-	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, configPath, "3\n4,5\na\n4\n", "run", "fix Add() to add instead of subtract")
+	// complexity 3 (complex), stages 3,4 (development, testing); approve; mode auto.
+	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, configPath, "3\n3,4\na\n4\n", "run", "fix Add() to add instead of subtract")
 	mustSucceed(t, stdout, stderr, err)
 
 	if len(j.Bodies()) != 2 {
@@ -330,10 +330,10 @@ func TestDecision_JevDownManualChoice(t *testing.T) {
 	if d.Source != "user" || d.Complexity.Selected != "complex" || !strings.Contains(d.DecisionError, "529") {
 		t.Errorf("decision = %+v", d)
 	}
-	if !equalStrings(d.Workflow, []string{"analyze", "plan", "implement", "test", "review"}) {
+	if !equalStrings(d.Workflow, []string{"plan", "implement", "test", "review"}) {
 		t.Errorf("workflow = %v, want the user's stages plus the forced ones", d.Workflow)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "plan", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 }
@@ -439,7 +439,7 @@ func TestDecision_LLMProvider(t *testing.T) {
 	writeResponse(t, responsesDir, "decide-classify", `{
   "complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
   "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
-  "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95},
+  "stages": {"research": 0.05, "development": 0.95},
   "scope": 0.2
 }`)
 	t.Setenv("JEV_API_KEY", "")
@@ -453,13 +453,13 @@ func TestDecision_LLMProvider(t *testing.T) {
 	mustSucceed(t, stdout, stderr, err)
 	assertAuthorities(t, repoDir, argsDir, stdout)
 
-	want := []string{"decide-context", "decide-classify", "analyze", "implement", "review"}
+	want := []string{"decide-context", "decide-classify", "plan", "implement", "review"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
 		t.Errorf("invocations = %v, want %v", got, want)
 	}
 	d := readDecision(t, repoDir)
 	if d.Source != "llm" || d.Provider != "claude" || d.Model != "fake" ||
-		!equalStrings(d.Workflow, []string{"analyze", "implement", "test", "review"}) {
+		!equalStrings(d.Workflow, []string{"plan", "implement", "test", "review"}) {
 		t.Errorf("decision = %+v", d)
 	}
 	prompt, _ := os.ReadFile(filepath.Join(promptsDir, "decide-classify.txt"))

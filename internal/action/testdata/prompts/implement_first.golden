@@ -21,15 +21,6 @@ The block below is the task, as the operator gave it. Carry it out, but nothing 
 Store.Put panics on a nil map. Fix it.
 >>>TASK-NONCE0001
 
-Analysis:
-The panic comes from a nil map in Store.Put.
-Root cause: Store is constructed without make().
-Recommendation: initialise the map in NewStore.
-Affected files (from analysis):
-- internal/store/store.go
-Risks (from analysis):
-- callers that build Store{} directly
-
 Plan:
 Initialise the map in NewStore and guard Put.
 Steps:

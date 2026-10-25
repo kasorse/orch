@@ -305,8 +305,6 @@ func (s requestSignals) noul(id string) float64 {
 	switch strings.TrimPrefix(id, "stage_") {
 	case "research":
 		yes = s.research || (s.question && !s.codeRef)
-	case "analysis":
-		yes = s.bug || (s.codeRef && s.question) || (s.change && s.complexity > 0)
 	case "development":
 		yes = s.change && !(s.question && !s.feature && !s.bug)
 	default:

@@ -111,12 +111,12 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	artifact := domain.AnalysisArtifact{Summary: "root cause found"}
-	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionAnalyze, artifact, "")
+	artifact := domain.PlanArtifact{Summary: "root cause found"}
+	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionPlan, artifact, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantRel := filepath.Join("artifacts", "001-analyze.json")
+	wantRel := filepath.Join("artifacts", "001-plan.json")
 	if relPath != wantRel {
 		t.Errorf("expected relative path %q, got %q", wantRel, relPath)
 	}
@@ -125,7 +125,7 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected artifact file to exist: %v", err)
 	}
-	var saved domain.AnalysisArtifact
+	var saved domain.PlanArtifact
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatalf("artifact file is not valid JSON: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestSaveDecisionAndProjectContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Workflow: []domain.ActionType{domain.ActionAnalyze}}
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Workflow: []domain.ActionType{domain.ActionPlan}}
 	if err := store.SaveDecision(run.ID, trace); err != nil {
 		t.Fatal(err)
 	}

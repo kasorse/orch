@@ -17,7 +17,6 @@ func validConfig() Config {
 		Version: CurrentVersion,
 		Actions: ActionsConfig{
 			Research:  ActionConfig{ProviderModel: ProviderModel{Provider: "gemini", Model: "pro"}},
-			Analyze:   ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
 			Plan:      ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
 			Implement: ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "opus"}},
 			Review:    ActionConfig{ProviderModel: ProviderModel{Provider: "codex", Model: "gpt"}},
@@ -45,8 +44,8 @@ func validConfig() Config {
 			ContextDepth: ContextDepthPolicyConfig{ProjectThreshold: float64Ptr(0.5)},
 			Complexity:   ComplexityPolicyConfig{Cuts: &ComplexityCutsConfig{Medium: float64Ptr(0.50), Complex: float64Ptr(1.40)}},
 			Stages: StagePolicyConfig{
-				Thresholds: map[string]float64{"research": 0.70, "analysis": 0.60, "development": 0.60},
-				Force:      map[string][]string{"complex": {"analysis", "planning", "review"}},
+				Thresholds: map[string]float64{"research": 0.70, "development": 0.60},
+				Force:      map[string][]string{"complex": {"planning", "review"}},
 			},
 		},
 		Context: ContextConfig{MaxFiles: 20, MaxBytes: 24576},
@@ -206,7 +205,7 @@ func TestValidate_AggregatesAllProblems(t *testing.T) {
 	}
 	msg := err.Error()
 	// Every missing action's provider/model should be reported, not just the first.
-	for _, action := range []string{"research", "analyze", "plan", "implement", "review", "translation"} {
+	for _, action := range []string{"research", "plan", "implement", "review", "translation"} {
 		if !strings.Contains(msg, action+".provider is required") {
 			t.Errorf("expected aggregated error to mention %s.provider, got: %s", action, msg)
 		}
@@ -544,8 +543,8 @@ func TestValidate_AllowedModels(t *testing.T) {
 		"LLM decision provider": {func(c *Config) {
 			c.Decision.Provider, c.Decision.Model = "claude", "tiny"
 		}, "decision: model tiny is not in allowed_models (" + org + ")"},
-		"route without a model": {func(c *Config) { c.Actions.Analyze.Model = "" },
-			"actions.analyze: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+		"route without a model": {func(c *Config) { c.Actions.Plan.Model = "" },
+			"actions.plan: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 		"translator without a model": {func(c *Config) { c.Translation.Model = "" },
 			"translation: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 	} {

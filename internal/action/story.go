@@ -136,7 +136,7 @@ type PlanningLogger interface {
 
 // PlanningCall is what a planning call runs with besides its prompt. Route and Timeout are the
 // base route and the timeout of the action the call runs on (SPEC A2): for a survey the
-// surveyed repository's own actions.analyze, for specify the story home's actions.plan.
+// surveyed repository's own actions.plan, for specify the story home's actions.plan.
 type PlanningCall struct {
 	Registry *provider.Registry
 	Route    config.ProviderModel
@@ -197,7 +197,7 @@ func Survey(ctx context.Context, call PlanningCall, repo SurveyRepo, request str
 	if repo.Dir == "" {
 		return res, &apperr.WorkflowError{Msg: fmt.Sprintf("survey of %s: the repository has no checkout directory", repo.Name)}
 	}
-	kind := planningKind{action: "survey", log: "survey-" + repo.Name, timeout: "actions.analyze.timeout"}
+	kind := planningKind{action: "survey", log: "survey-" + repo.Name, timeout: "actions.plan.timeout"}
 	var err error
 	res.Output, res.Usage, err = call.run(ctx, kind, provider.Request{
 		Prompt: res.Prompt, WorkingDir: repo.Dir, Authority: domain.AuthorityRead,

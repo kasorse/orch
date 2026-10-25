@@ -7,7 +7,6 @@ import "testing"
 func TestAuthorityFor(t *testing.T) {
 	cases := map[ActionType]Authority{
 		ActionResearch:  AuthorityWeb,
-		ActionAnalyze:   AuthorityRead,
 		ActionPlan:      AuthorityRead,
 		ActionReview:    AuthorityRead,
 		ActionImplement: AuthorityEdit,
