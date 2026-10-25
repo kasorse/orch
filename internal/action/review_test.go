@@ -124,7 +124,7 @@ func TestParseReviewStrict_Criteria(t *testing.T) {
 }
 
 func TestExecuteReview_Criteria(t *testing.T) {
-	plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"first", " ", "second"}}
+	plan := &domain.InvestigationArtifact{Summary: "p", AcceptanceCriteria: []string{"first", " ", "second"}}
 	run := func(t *testing.T, output string) (*fakeClient, workflow.StepOutcome, error) {
 		repo, dir := guardRepo(t)
 		put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
@@ -132,7 +132,7 @@ func TestExecuteReview_Criteria(t *testing.T) {
 		registry := provider.NewRegistry()
 		registry.Register(provider.Claude, client)
 		d := New(testConfig(), registry, repo, nil)
-		d.lastPlan = plan
+		d.lastInvestigation = plan
 		outcome, err := d.Execute(context.Background(), domain.ActionReview, &domain.Run{ID: "r"})
 		if err == nil && len(d.pendingUnmetCriteria) != len(outcome.ReviewResult.UnmetCriteria()) {
 			t.Errorf("pendingUnmetCriteria = %+v", d.pendingUnmetCriteria)
@@ -171,14 +171,14 @@ func TestExecuteReview_Criteria(t *testing.T) {
 
 func TestExecuteReview_TaskAcceptanceComesFirst(t *testing.T) {
 	task := domain.Task{Description: "t", Acceptance: []string{"task one", " ", "task two"}}
-	run := func(t *testing.T, plan *domain.PlanArtifact, output string) (*fakeClient, workflow.StepOutcome, error) {
+	run := func(t *testing.T, plan *domain.InvestigationArtifact, output string) (*fakeClient, workflow.StepOutcome, error) {
 		repo, dir := guardRepo(t)
 		put(t, dir, "main.go", "package main\n\nfunc main() {}\n")
 		client := &fakeClient{output: output}
 		registry := provider.NewRegistry()
 		registry.Register(provider.Claude, client)
 		d := New(testConfig(), registry, repo, nil)
-		d.lastPlan = plan
+		d.lastInvestigation = plan
 		outcome, err := d.Execute(context.Background(), domain.ActionReview, &domain.Run{ID: "r", Task: task})
 		return client, outcome, err
 	}
@@ -191,7 +191,7 @@ func TestExecuteReview_TaskAcceptanceComesFirst(t *testing.T) {
 	}
 
 	t.Run("then the plan's", func(t *testing.T) {
-		plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
+		plan := &domain.InvestigationArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
 		client, outcome, err := run(t, plan, verdicts(3))
 		if err != nil {
 			t.Fatal(err)
@@ -225,7 +225,7 @@ func TestExecuteReview_TaskAcceptanceComesFirst(t *testing.T) {
 	})
 
 	t.Run("a verdict count of the plan alone is malformed", func(t *testing.T) {
-		plan := &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
+		plan := &domain.InvestigationArtifact{Summary: "p", AcceptanceCriteria: []string{"plan one"}}
 		_, _, err := run(t, plan, verdicts(1))
 		var we *apperr.WorkflowError
 		if !errors.As(err, &we) || we.Msg != "malformed review output" {

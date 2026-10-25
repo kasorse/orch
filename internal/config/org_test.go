@@ -198,11 +198,11 @@ func TestLoadLayered_PolicyPaths(t *testing.T) {
 func TestLoadLayered_Force(t *testing.T) {
 	runOrgRows(t, []orgRow{
 		{name: "per complexity union keeps order",
-			repo: "policy:\n  stages:\n    force:\n      complex: [planning, review]\n      medium: [testing]\n",
+			repo: "policy:\n  stages:\n    force:\n      complex: [investigation, review]\n      medium: [testing]\n",
 			org:  "policy:\n  stages:\n    force:\n      complex: [review, research]\n      simple: [testing]\n",
 			check: func(t *testing.T, cfg Config) {
 				want := map[string][]string{
-					"complex": {"review", "research", "planning"},
+					"complex": {"review", "research", "investigation"},
 					"medium":  {"testing"},
 					"simple":  {"testing"},
 				}
@@ -213,12 +213,13 @@ func TestLoadLayered_Force(t *testing.T) {
 	})
 }
 
-// The org file's template is checked on its own, before any merge: analysis is refused there
-// as in a repository file, naming specs/clarify.
+// The org file's template is checked on its own, before any merge: analysis and planning are
+// refused there as in a repository file, naming specs/clarify.
 func TestOrgProblems_RefusesAnalysisInTheTemplate(t *testing.T) {
-	org := OrgConfig{Policy: OrgPolicy{Stages: OrgStages{Force: map[string][]string{"complex": {"analysis", "review"}}}}}
+	org := OrgConfig{Policy: OrgPolicy{Stages: OrgStages{Force: map[string][]string{"complex": {"analysis", "planning", "review"}}}}}
 	got := strings.Join(orgProblems(org), "\n")
-	for _, want := range []string{"policy.stages.force.complex: analysis is not a stage any more", "specs/clarify"} {
+	for _, want := range []string{"policy.stages.force.complex: analysis is not a stage any more",
+		"policy.stages.force.complex: planning was renamed investigation", "specs/clarify"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("orgProblems lacks %q:\n%s", want, got)
 		}

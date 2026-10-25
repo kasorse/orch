@@ -22,7 +22,7 @@ func TestScenario456_MissingExecutable(t *testing.T) {
 			name:      "missing claude",
 			installed: []string{"codex", "gemini"},
 			missingAction: func(p providerSet) providerSet {
-				p.Research, p.Plan, p.Implement, p.Review = "codex", "codex", "codex", "codex"
+				p.Research, p.Investigate, p.Implement, p.Review = "codex", "codex", "codex", "codex"
 				p.Translation = "claude" // only the translator needs claude
 				return p
 			},

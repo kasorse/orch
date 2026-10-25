@@ -10,8 +10,8 @@ import "orchestrator/internal/domain"
 func Gaps(wf domain.Workflow) []string {
 	var out []string
 	for _, step := range wf.Steps {
-		if step.Action == domain.ActionImplement && !wf.Contains(domain.ActionPlan) {
-			out = append(out, "development runs without a plan; it works from the task text alone")
+		if step.Action == domain.ActionImplement && !wf.Contains(domain.ActionInvestigate) {
+			out = append(out, "development runs without an investigation; it works from the task text alone")
 		}
 	}
 	return out

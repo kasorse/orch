@@ -11,7 +11,7 @@ import (
 // doubles as the routing marker fake executables grep on in integration tests. The task is
 // always embedded through taskBlock, repository data through fence.
 
-// readOnlyRule is shared by every read-only stage prompt: research and planning
+// readOnlyRule is shared by every read-only stage prompt: research and investigation
 // inspect, they never change the repository.
 const readOnlyRule = "This is a read-only step: do not create, modify or delete any files in the repository."
 
@@ -21,12 +21,18 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 // an operator skimming the run.
 const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
 
-// acceptanceCriteriaRule tells plan what a criterion is (specs/quality/SPEC.md §4.2). parsePlan
-// enforces the same cap.
+// acceptanceCriteriaRule tells investigate what a criterion is (specs/quality/SPEC.md §4.2).
+// parseInvestigation enforces the same cap.
 const acceptanceCriteriaRule = `"acceptance_criteria" lists what must be true of the result for the task to be done. ` +
 	`Each criterion is one observable, checkable statement about the result, for example ` +
 	`"function X returns ErrEmpty for an empty input" or "` + "`go test ./internal/store`" + ` passes". ` +
 	`Give at most 8; write none rather than vague ones.`
+
+// rootCauseRule tells investigate what "root_cause" is (specs/clarify): the analysis that the
+// analysis stage used to give, now one field of the investigation's artifact.
+const rootCauseRule = `"root_cause" is the cause of the behaviour the task describes, found in the code: ` +
+	`what goes wrong, where (file and function) and why. Give it when the task is about a defect or an ` +
+	`unexpected behaviour; leave the key out when the task asks for something new and there is no cause to find.`
 
 // implementSummaryShortRule is implement's variant: its "summary_short" becomes the
 // commit message offered at the end of the run (MVP.md §42.2).
@@ -102,18 +108,19 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	return b.String()
 }
 
-type PlanPromptInput struct {
+type InvestigatePromptInput struct {
 	Task        string
 	Research    *domain.ResearchArtifact
 	FinalAnswer bool
 }
 
-func BuildPlanPrompt(in PlanPromptInput) string {
+func BuildInvestigatePrompt(in InvestigatePromptInput) string {
 	var b strings.Builder
-	b.WriteString("ACTION: plan\n\n")
-	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("ACTION: investigate\n\n")
+	b.WriteString("Investigate the following software engineering task: read the code it concerns and create an implementation plan for it. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
+	b.WriteString(rootCauseRule + "\n\n")
 	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
@@ -181,7 +188,7 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 // acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
 	Task                   string
-	Plan                   *domain.PlanArtifact
+	Plan                   *domain.InvestigationArtifact
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
@@ -431,7 +438,7 @@ type ReviewPromptInput struct {
 	// Acceptance are the task's own acceptance criteria (domain.Task.Acceptance, a story
 	// task's): they come first in the numbered list, ahead of the plan's.
 	Acceptance     []string
-	Plan           *domain.PlanArtifact
+	Plan           *domain.InvestigationArtifact
 	Implementation *domain.ImplementationArtifact
 	TestResult     *domain.TestResult
 	GitDiff        string
@@ -472,7 +479,7 @@ func oneLine(s string) string {
 
 // planCriteria are the plan's acceptance criteria as the prompts number them: the blank
 // ones are skipped, as writeNumberedList does, so a verdict's index counts the same list.
-func planCriteria(p *domain.PlanArtifact) []string {
+func planCriteria(p *domain.InvestigationArtifact) []string {
 	var out []string
 	if p == nil {
 		return out
@@ -488,7 +495,7 @@ func planCriteria(p *domain.PlanArtifact) []string {
 // reviewCriteria are the criteria a review answers, in the order the prompt numbers them: the
 // task's acceptance items first, then the plan's, the blank ones skipped. The prompt, the
 // parser (parseReviewStrict) and the stored verdicts all count this one list.
-func reviewCriteria(acceptance []string, p *domain.PlanArtifact) []string {
+func reviewCriteria(acceptance []string, p *domain.InvestigationArtifact) []string {
 	var out []string
 	for _, c := range acceptance {
 		if strings.TrimSpace(c) != "" {

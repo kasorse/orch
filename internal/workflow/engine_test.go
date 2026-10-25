@@ -213,10 +213,10 @@ func TestEngine_MaxStepsExceeded(t *testing.T) {
 	}
 }
 
-// budgetExecutor scripts three steps (research, plan, implement) that each report usage.
+// budgetExecutor scripts three steps (research, investigate, implement) that each report usage.
 func budgetExecutor(usage domain.Usage) *scriptedExecutor {
 	exec := newScriptedExecutor()
-	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionPlan, domain.ActionImplement} {
+	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionInvestigate, domain.ActionImplement} {
 		u := usage
 		exec.script(a, StepOutcome{Outcome: OutcomeSuccess, Usage: &u}, nil)
 	}
@@ -225,7 +225,7 @@ func budgetExecutor(usage domain.Usage) *scriptedExecutor {
 
 func budgetWorkflow() domain.Workflow {
 	return domain.Workflow{Steps: []domain.Step{
-		{Action: domain.ActionResearch}, {Action: domain.ActionPlan}, {Action: domain.ActionImplement},
+		{Action: domain.ActionResearch}, {Action: domain.ActionInvestigate}, {Action: domain.ActionImplement},
 	}}
 }
 
@@ -247,7 +247,7 @@ func TestEngine_BudgetStopsBeforeTheNextStep(t *testing.T) {
 		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
 	}
 	// The check runs before a step, so the second step overshoots and the third never starts.
-	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionPlan})
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionInvestigate})
 }
 
 func TestEngine_BudgetReachedStopsTheThirdStep(t *testing.T) {
@@ -267,7 +267,7 @@ func TestEngine_BudgetReachedStopsTheThirdStep(t *testing.T) {
 	if want := "budget exceeded: $4.00 of $4.00"; run.FailureReason != want {
 		t.Errorf("FailureReason = %q, want %q", run.FailureReason, want)
 	}
-	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionPlan})
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionInvestigate})
 }
 
 func TestEngine_BudgetNotReachedRunsAllSteps(t *testing.T) {
@@ -302,7 +302,7 @@ func TestEngine_NoBudgetNeverStops(t *testing.T) {
 func TestEngine_BudgetSaysLowerBoundForPartialUsage(t *testing.T) {
 	exec := newScriptedExecutor()
 	exec.script(domain.ActionResearch, StepOutcome{Outcome: OutcomeSuccess, Usage: &domain.Usage{Partial: true}}, nil)
-	exec.script(domain.ActionPlan, StepOutcome{Outcome: OutcomeSuccess, Usage: &domain.Usage{CostUSD: 3}}, nil)
+	exec.script(domain.ActionInvestigate, StepOutcome{Outcome: OutcomeSuccess, Usage: &domain.Usage{CostUSD: 3}}, nil)
 	run := newRun(budgetWorkflow())
 	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2, MaxCostUSD: 3}}
 
@@ -471,14 +471,14 @@ func assertActions(t *testing.T, got, want []domain.ActionType) {
 
 // --- TASKS.md T05: generalized transitions ---------------------------------------
 
-func TestEngine_ResearchThenPlanCompletes(t *testing.T) {
+func TestEngine_ResearchThenInvestigateCompletes(t *testing.T) {
 	wf := domain.Workflow{Steps: []domain.Step{
 		{Action: domain.ActionResearch, Stage: domain.StageResearch},
-		{Action: domain.ActionPlan, Stage: domain.StagePlanning},
+		{Action: domain.ActionInvestigate, Stage: domain.StageInvestigation},
 	}}
 	exec := newScriptedExecutor()
 	exec.script(domain.ActionResearch, StepOutcome{Outcome: OutcomeSuccess}, nil)
-	exec.script(domain.ActionPlan, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionInvestigate, StepOutcome{Outcome: OutcomeSuccess}, nil)
 
 	run := newRun(wf)
 	engine := &Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 12, MaxFixIterations: 2}}
@@ -489,7 +489,7 @@ func TestEngine_ResearchThenPlanCompletes(t *testing.T) {
 	if run.Status != domain.RunCompleted {
 		t.Errorf("expected completed, got %s", run.Status)
 	}
-	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionPlan})
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionResearch, domain.ActionInvestigate})
 }
 
 // TestEngine_StandaloneTestingFailureFailsRun is TASKS.md В5: a workflow with no
@@ -602,16 +602,16 @@ func TestEngine_TestingOnlyWorkflowCompletesOnSuccess(t *testing.T) {
 }
 
 // TestEngine_DevelopmentWithoutTestOrReviewCompletesAfterImplement checks a
-// development-only workflow (planning enabled it, but neither testing nor
+// development-only workflow (investigation enabled it, but neither testing nor
 // review cleared their thresholds): implement's success has nowhere forward to go but
 // Done, purely from wf.Steps' order, without any RequiresTest/RequiresReview check.
 func TestEngine_DevelopmentWithoutTestOrReviewCompletesAfterImplement(t *testing.T) {
 	wf := domain.Workflow{Steps: []domain.Step{
-		{Action: domain.ActionPlan, Stage: domain.StagePlanning},
+		{Action: domain.ActionInvestigate, Stage: domain.StageInvestigation},
 		{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
 	}}
 	exec := newScriptedExecutor()
-	exec.script(domain.ActionPlan, StepOutcome{Outcome: OutcomeSuccess}, nil)
+	exec.script(domain.ActionInvestigate, StepOutcome{Outcome: OutcomeSuccess}, nil)
 	exec.script(domain.ActionImplement, StepOutcome{Outcome: OutcomeSuccess}, nil)
 
 	run := newRun(wf)
@@ -623,5 +623,5 @@ func TestEngine_DevelopmentWithoutTestOrReviewCompletesAfterImplement(t *testing
 	if run.Status != domain.RunCompleted {
 		t.Errorf("expected completed, got %s", run.Status)
 	}
-	assertActions(t, exec.calls, []domain.ActionType{domain.ActionPlan, domain.ActionImplement})
+	assertActions(t, exec.calls, []domain.ActionType{domain.ActionInvestigate, domain.ActionImplement})
 }

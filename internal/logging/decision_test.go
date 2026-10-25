@@ -22,7 +22,7 @@ func dist(s, m, c float64) map[domain.Complexity]float64 {
 func stageOutcomes() []domain.StageOutcome {
 	return []domain.StageOutcome{
 		{Stage: domain.StageResearch, Probability: ptr(0.05), Threshold: ptr(0.7), Reason: "p=0.05 < 0.70"},
-		{Stage: domain.StagePlanning, Probability: ptr(0.40), Threshold: ptr(0.65), Reason: "p=0.40 < 0.65"},
+		{Stage: domain.StageInvestigation, Probability: ptr(0.40), Threshold: ptr(0.65), Reason: "p=0.40 < 0.65"},
 		{Stage: domain.StageDevelopment, Probability: ptr(0.99), Threshold: ptr(0.6), Enabled: true, Reason: "p=0.99 >= 0.60"},
 		{Stage: domain.StageTesting, Probability: ptr(0.95), Threshold: ptr(0.6), Enabled: true, Reason: "p=0.95 >= 0.60"},
 		{Stage: domain.StageReview, Probability: ptr(0.74), Threshold: ptr(0.7), Enabled: true, Reason: "p=0.74 >= 0.70"},
@@ -73,11 +73,11 @@ func TestRenderDecision_Golden(t *testing.T) {
 		DecisionError: "decision provider jev failed: unavailable (the service is overloaded or failing), HTTP 529, after 2 attempts\n\nresponse body:\n{}",
 		Complexity:    domain.ComplexityOutcome{Selected: domain.ComplexityComplex},
 		Stages: []domain.StageOutcome{
-			{Stage: domain.StagePlanning, Forced: true, Enabled: true, Reason: "forced: complexity=complex"},
+			{Stage: domain.StageInvestigation, Forced: true, Enabled: true, Reason: "forced: complexity=complex"},
 			{Stage: domain.StageDevelopment, Enabled: true, Reason: "selected by user"},
 			{Stage: domain.StageReview, Forced: true, Reason: "forced: complexity=complex, excluded by user"},
 		},
-		Workflow: []domain.ActionType{domain.ActionPlan, domain.ActionImplement},
+		Workflow: []domain.ActionType{domain.ActionInvestigate, domain.ActionImplement},
 	}
 
 	dec, _ := domain.ManualDecision([]domain.Stage{domain.StageTesting, domain.StageReview})

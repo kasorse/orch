@@ -16,7 +16,7 @@ func outcome(stage domain.Stage, enabled bool) domain.StageOutcome {
 
 // TestBuild_OrdersStagesRegardlessOfInputOrder is TASKS.md T04's acceptance example:
 // a selection whose Stages entries are listed out of order (review, development,
-// planning, testing) must still produce a workflow ordered planning, development,
+// investigation, testing) must still produce a workflow ordered investigation, development,
 // testing, review - Build walks domain.StageOrder() itself rather than trusting the
 // selection's own order (SPEC.md §13: stage order is never something a caller or a
 // decision provider controls).
@@ -24,7 +24,7 @@ func TestBuild_OrdersStagesRegardlessOfInputOrder(t *testing.T) {
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{
 		outcome(domain.StageReview, true),
 		outcome(domain.StageDevelopment, true),
-		outcome(domain.StagePlanning, true),
+		outcome(domain.StageInvestigation, true),
 		outcome(domain.StageTesting, true),
 	}}
 
@@ -32,7 +32,7 @@ func TestBuild_OrdersStagesRegardlessOfInputOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview}
+	want := []domain.ActionType{domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview}
 	if !reflect.DeepEqual(actions(w), want) {
 		t.Errorf("got %v, want %v", actions(w), want)
 	}
@@ -41,7 +41,7 @@ func TestBuild_OrdersStagesRegardlessOfInputOrder(t *testing.T) {
 func TestBuild_OnlyEnabledStagesAreIncluded(t *testing.T) {
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{
 		outcome(domain.StageResearch, false),
-		outcome(domain.StagePlanning, true),
+		outcome(domain.StageInvestigation, true),
 		outcome(domain.StageDevelopment, true),
 		outcome(domain.StageTesting, false),
 		outcome(domain.StageReview, true),
@@ -51,7 +51,7 @@ func TestBuild_OnlyEnabledStagesAreIncluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionReview}
+	want := []domain.ActionType{domain.ActionInvestigate, domain.ActionImplement, domain.ActionReview}
 	if !reflect.DeepEqual(actions(w), want) {
 		t.Errorf("got %v, want %v", actions(w), want)
 	}
@@ -63,7 +63,7 @@ func TestBuild_OnlyEnabledStagesAreIncluded(t *testing.T) {
 func TestBuild_SetsStage(t *testing.T) {
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{
 		outcome(domain.StageResearch, true),
-		outcome(domain.StagePlanning, true),
+		outcome(domain.StageInvestigation, true),
 	}}
 
 	w, err := Build(sel)
@@ -76,15 +76,15 @@ func TestBuild_SetsStage(t *testing.T) {
 	if w.Steps[0].Stage != domain.StageResearch || w.Steps[0].Action != domain.ActionResearch {
 		t.Errorf("step 0 = %+v, want stage research / action research", w.Steps[0])
 	}
-	if w.Steps[1].Stage != domain.StagePlanning || w.Steps[1].Action != domain.ActionPlan {
-		t.Errorf("step 1 = %+v, want stage planning / action plan", w.Steps[1])
+	if w.Steps[1].Stage != domain.StageInvestigation || w.Steps[1].Action != domain.ActionInvestigate {
+		t.Errorf("step 1 = %+v, want stage investigation / action investigate", w.Steps[1])
 	}
 }
 
 func TestBuild_Deterministic(t *testing.T) {
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{
 		outcome(domain.StageResearch, true),
-		outcome(domain.StagePlanning, true),
+		outcome(domain.StageInvestigation, true),
 		outcome(domain.StageDevelopment, true),
 		outcome(domain.StageTesting, true),
 		outcome(domain.StageReview, true),
@@ -103,7 +103,7 @@ func TestBuild_Deterministic(t *testing.T) {
 func TestBuild_NoEnabledStages(t *testing.T) {
 	sel := domain.StageSelection{Stages: []domain.StageOutcome{
 		outcome(domain.StageResearch, false),
-		outcome(domain.StagePlanning, false),
+		outcome(domain.StageInvestigation, false),
 	}}
 
 	_, err := Build(sel)
@@ -143,7 +143,7 @@ func TestBuild_FromPolicySelection(t *testing.T) {
 			domain.StageDevelopment: 0.60,
 		},
 		ForceStages: map[domain.Complexity][]domain.Stage{
-			domain.ComplexityComplex: {domain.StagePlanning, domain.StageReview},
+			domain.ComplexityComplex: {domain.StageInvestigation, domain.StageReview},
 		},
 	}
 	stages := domain.StageDecisions{
@@ -156,7 +156,7 @@ func TestBuild_FromPolicySelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []domain.ActionType{domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview}
+	want := []domain.ActionType{domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview}
 	if !reflect.DeepEqual(actions(w), want) {
 		t.Errorf("got %v, want %v", actions(w), want)
 	}

@@ -34,10 +34,10 @@ func (a Authority) Valid() bool {
 // actionAuthority is the fixed action -> authority table (SPEC.md §5.1). ActionTest has no
 // row: the orchestrator runs the test command itself and makes no AI call for it.
 var actionAuthority = map[ActionType]Authority{
-	ActionResearch:  AuthorityWeb,
-	ActionPlan:      AuthorityRead,
-	ActionReview:    AuthorityRead,
-	ActionImplement: AuthorityEdit,
+	ActionResearch:    AuthorityWeb,
+	ActionInvestigate: AuthorityRead,
+	ActionReview:      AuthorityRead,
+	ActionImplement:   AuthorityEdit,
 }
 
 // AuthorityFor returns the authority a workflow action's provider call runs with. An action

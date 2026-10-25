@@ -16,16 +16,16 @@ func wfOf(actions ...domain.ActionType) domain.Workflow {
 
 func TestNext_ForwardFollowsWorkflowOrder(t *testing.T) {
 	// A workflow shape that could never come out of the fixed stage order
-	// (StageOrder is research/planning/development/testing/review), used
+	// (StageOrder is research/investigation/development/testing/review), used
 	// deliberately to prove forward progress reads wf.Steps rather than assuming any
 	// particular hardcoded jump.
-	wf := wfOf(domain.ActionPlan, domain.ActionResearch, domain.ActionReview, domain.ActionImplement)
+	wf := wfOf(domain.ActionInvestigate, domain.ActionResearch, domain.ActionReview, domain.ActionImplement)
 
 	tests := []struct {
 		current State
 		want    State
 	}{
-		{StatePlan, StateResearch},
+		{StateInvestigate, StateResearch},
 		{StateResearch, StateReview},
 		{StateReview, StateImplement},
 		{StateImplement, StateDone},
@@ -52,7 +52,7 @@ func TestNext_LastStepSuccessGoesToDone(t *testing.T) {
 func TestNext_NonRetryableFailureAlwaysFails(t *testing.T) {
 	// Every state except Test and Review fails the run outright on outcome=failure,
 	// regardless of what else is in the workflow.
-	for _, current := range []State{StateResearch, StatePlan, StateImplement} {
+	for _, current := range []State{StateResearch, StateInvestigate, StateImplement} {
 		wf := wfOf(domain.ActionType(current), domain.ActionTest, domain.ActionReview)
 		got, reason := Next(current, OutcomeFailure, wf)
 		if got != StateFailed {
@@ -114,12 +114,12 @@ func TestNext_ReviewFailure_WithoutImplement_StillCompletes(t *testing.T) {
 
 func TestNext_TestSuccess_FollowsWorkflowOrder(t *testing.T) {
 	// Test succeeding must move forward by position, not by a hardcoded
-	// RequiresReview-style check - here the next step is plan, not review, to
+	// RequiresReview-style check - here the next step is investigate, not review, to
 	// prove that.
-	wf := wfOf(domain.ActionTest, domain.ActionPlan)
+	wf := wfOf(domain.ActionTest, domain.ActionInvestigate)
 	got, _ := Next(StateTest, OutcomeSuccess, wf)
-	if got != StatePlan {
-		t.Errorf("Next(test, success) = %s, want plan (the next step in wf.Steps)", got)
+	if got != StateInvestigate {
+		t.Errorf("Next(test, success) = %s, want investigate (the next step in wf.Steps)", got)
 	}
 }
 
@@ -151,7 +151,7 @@ func TestIsBackwardEntryToImplement(t *testing.T) {
 		{StateTest, StateImplement, true},
 		{StateReview, StateImplement, true},
 		{StateResearch, StateImplement, false},
-		{StatePlan, StateImplement, false},
+		{StateInvestigate, StateImplement, false},
 		{StateTest, StateReview, false},
 		{StateImplement, StateDone, false},
 	}

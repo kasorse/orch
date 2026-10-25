@@ -21,18 +21,18 @@ const criteriaPlanResponse = `{
 func TestScenario38_UnmetCriterionThenMet(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	r := newQualityRun(t, repoDir)
-	writeResponse(t, r.responses, "plan", criteriaPlanResponse)
+	writeResponse(t, r.responses, "investigate", criteriaPlanResponse)
 	writeResponse(t, r.responses, "review_1", reviewJSON("fail", "[]",
 		`[{"index": 1, "met": true, "evidence": "fixture.go:4"}, {"index": 2, "met": false, "evidence": "no test calls Add with negative numbers"}]`))
 	writeResponse(t, r.responses, "review_2", reviewJSON("pass", "[]",
 		`[{"index": 1, "met": true, "evidence": "fixture.go:4"}, {"index": 2, "met": true, "evidence": "fixture_test.go:6"}]`))
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run",
-		"--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review",
+		"--stage", "investigation", "--stage", "development", "--stage", "testing", "--stage", "review",
 		"fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan", "implement", "review", "implement", "review"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review", "implement", "review"}) {
 		t.Fatalf("invocations = %v", got)
 	}
 

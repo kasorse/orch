@@ -12,18 +12,18 @@ import (
 type Stage string
 
 const (
-	StageResearch    Stage = "research"
-	StagePlanning    Stage = "planning"
-	StageDevelopment Stage = "development"
-	StageTesting     Stage = "testing"
-	StageReview      Stage = "review"
+	StageResearch      Stage = "research"
+	StageInvestigation Stage = "investigation"
+	StageDevelopment   Stage = "development"
+	StageTesting       Stage = "testing"
+	StageReview        Stage = "review"
 )
 
 // stageOrder is the deterministic execution order (SPEC.md §13). It is also the
 // complete set of supported stages.
 var stageOrder = []Stage{
 	StageResearch,
-	StagePlanning,
+	StageInvestigation,
 	StageDevelopment,
 	StageTesting,
 	StageReview,
@@ -32,11 +32,11 @@ var stageOrder = []Stage{
 // stageActions maps each stage to the workflow action that executes it. It is a
 // table rather than a switch so tests and documentation can walk it.
 var stageActions = map[Stage]ActionType{
-	StageResearch:    ActionResearch,
-	StagePlanning:    ActionPlan,
-	StageDevelopment: ActionImplement,
-	StageTesting:     ActionTest,
-	StageReview:      ActionReview,
+	StageResearch:      ActionResearch,
+	StageInvestigation: ActionInvestigate,
+	StageDevelopment:   ActionImplement,
+	StageTesting:       ActionTest,
+	StageReview:        ActionReview,
 }
 
 // StageOrder returns every supported stage in execution order. The slice is a fresh
@@ -57,14 +57,15 @@ func ParseStage(s string) (Stage, error) {
 // stageAliases are the action names accepted by --stage besides the canonical stage
 // names (specs/stage-select/SPEC.md §4.1). They are never persisted.
 var stageAliases = map[string]Stage{
-	"plan":      StagePlanning,
-	"implement": StageDevelopment,
-	"test":      StageTesting,
+	"investigate": StageInvestigation,
+	"implement":   StageDevelopment,
+	"test":        StageTesting,
 }
 
-// removedStages are the stage and action names specs/clarify took out: --stage refuses them
-// by name instead of reporting an unknown stage, so nobody wonders whether it was a typo.
-var removedStages = map[string]bool{"analysis": true, "analyze": true}
+// removedStages are the stage and action names specs/clarify took out or renamed: --stage
+// refuses them by name instead of reporting an unknown stage, so nobody wonders whether it was
+// a typo, and planning is never mapped to investigation silently.
+var removedStages = map[string]bool{"analysis": true, "analyze": true, "planning": true, "plan": true}
 
 // ParseStageFlag parses an operator-given stage name: trimmed, case-insensitive, a
 // canonical stage or an action-name alias. ParseStage stays strict because it reads
@@ -78,10 +79,11 @@ func ParseStageFlag(s string) (Stage, error) {
 		return st, nil
 	}
 	if removedStages[n] {
-		return "", fmt.Errorf("stage %q was removed: the clarify step now makes the task clear before the "+
-			"decision (specs/clarify); valid: %s (aliases: plan, implement, test)", s, joinValues(stageOrder))
+		return "", fmt.Errorf("stage %q was removed: analysis became the clarify step before the decision and "+
+			"planning became investigation (specs/clarify); valid: %s (aliases: investigate, implement, test)",
+			s, joinValues(stageOrder))
 	}
-	return "", fmt.Errorf("unknown stage %q; valid: %s (aliases: plan, implement, test)", s, joinValues(stageOrder))
+	return "", fmt.Errorf("unknown stage %q; valid: %s (aliases: investigate, implement, test)", s, joinValues(stageOrder))
 }
 
 // Action returns the workflow action that executes s, or false for an unknown stage.

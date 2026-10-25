@@ -27,8 +27,8 @@ policy:
   stages:
     thresholds: {research: 0.81, development: 0.81}
     force:
-      medium: [planning, review]
-      complex: [planning, review]
+      medium: [investigation, review]
+      complex: [investigation, review]
 
 context:
   max_files: 20
@@ -40,7 +40,7 @@ actions:
     provider: claude
     model: sonnet
     effort: medium
-  plan:
+  investigate:
     provider: claude
     model: sonnet
   implement:

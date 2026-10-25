@@ -48,7 +48,7 @@ policy:
   stages:
     thresholds: {research: 0.70, development: 0.60}
     force:
-      complex: [planning, review]
+      complex: [investigation, review]
 
 context:
   max_files: 20
@@ -58,7 +58,7 @@ actions:
   research:
     provider: claude
     model: sonnet
-  plan:
+  investigate:
     provider: claude
     model: sonnet
   implement:
@@ -133,7 +133,7 @@ func TestLoad_PerActionTimeout(t *testing.T) {
 version: 1
 
 actions:
-  plan:
+  investigate:
     provider: claude
     model: sonnet
   implement:
@@ -158,8 +158,8 @@ execution:
 	if cfg.Actions.Review.Timeout != 20*time.Minute {
 		t.Errorf("expected review timeout 20m, got %v", cfg.Actions.Review.Timeout)
 	}
-	if cfg.Actions.Plan.Timeout != 0 {
-		t.Errorf("expected plan timeout to stay unset, got %v", cfg.Actions.Plan.Timeout)
+	if cfg.Actions.Investigate.Timeout != 0 {
+		t.Errorf("expected investigate timeout to stay unset, got %v", cfg.Actions.Investigate.Timeout)
 	}
 }
 
@@ -223,7 +223,7 @@ policy:
 context: {max_files: 20, max_bytes: 24576}
 actions:
   research: {provider: claude, model: sonnet}
-  plan: {provider: claude, model: sonnet}
+  investigate: {provider: claude, model: sonnet}
   implement: {provider: claude, model: opus}
   review: {provider: claude, model: sonnet}
 test: {command: "go test ./..."}
@@ -262,8 +262,14 @@ func TestValidate_RefusesTheKeysAnalysisLeft(t *testing.T) {
 			[]string{"policy.stages.thresholds.analysis", "policy.clarify.threshold", "specs/clarify"}},
 		"force": {strings.Replace(validV2(""), thresholds, thresholds+"\n    force: {complex: [analysis, review]}", 1),
 			[]string{"policy.stages.force.complex", "analysis is not a stage any more", "specs/clarify"}},
-		"action": {strings.Replace(validV2(""), "  plan: {", "  analyze: {provider: claude, model: sonnet}\n  plan: {", 1),
+		"action": {strings.Replace(validV2(""), "  investigate: {", "  analyze: {provider: claude, model: sonnet}\n  investigate: {", 1),
 			[]string{"actions.analyze was removed", "specs/clarify"}},
+		"planning threshold": {strings.Replace(validV2(""), thresholds, "thresholds: {research: 0.70, planning: 0.60, development: 0.60}", 1),
+			[]string{"policy.stages.thresholds.planning", "investigation", "specs/clarify"}},
+		"planning in the template": {strings.Replace(validV2(""), thresholds, thresholds+"\n    force: {complex: [planning, review]}", 1),
+			[]string{"policy.stages.force.complex", "planning was renamed investigation", "specs/clarify"}},
+		"actions.plan": {strings.Replace(validV2(""), "  investigate: {", "  plan: {provider: claude, model: sonnet}\n  investigate: {", 1),
+			[]string{"actions.plan was renamed actions.investigate", "specs/clarify"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, err := Load(writeTempConfig(t, tc.yaml))

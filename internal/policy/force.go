@@ -69,7 +69,7 @@ func restoredReason(so domain.StageOutcome, complexity domain.Complexity) string
 	return fmt.Sprintf("forced: complexity=%s", complexity)
 }
 
-// SkipPlanning turns off research and planning for a task whose plan is already
+// SkipPlanning turns off research and investigation for a task whose plan is already
 // written (a story task: its task file is the plan, specs/story/SPEC.md §11.2), with reason.
 // It runs once on the decision; an operator's edit on the review screen may turn them back on.
 // dec is not modified.
@@ -77,7 +77,7 @@ func SkipPlanning(dec domain.Decision, reason string) domain.Decision {
 	stages := slices.Clone(dec.Stages.Stages)
 	for i, so := range stages {
 		switch so.Stage {
-		case domain.StageResearch, domain.StagePlanning:
+		case domain.StageResearch, domain.StageInvestigation:
 			if so.Enabled {
 				stages[i].Enabled, stages[i].Forced, stages[i].Explored, stages[i].Reason = false, false, false, reason
 			}

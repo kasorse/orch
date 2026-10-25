@@ -64,9 +64,9 @@ func oldRun(t *testing.T, repoDir string) string {
 
 	rel := ".orchestrator/runs/3f2a9c1e-0000-4000-8000-000000000001"
 	for name, content := range map[string]string{
-		"run.json":                `{"id":"3f2a9c1e-0000-4000-8000-000000000001"}`,
-		"logs/001-implement.log":  "log\n",
-		"artifacts/000-plan.json": `{"summary":"plan"}`,
+		"run.json":                       `{"id":"3f2a9c1e-0000-4000-8000-000000000001"}`,
+		"logs/001-implement.log":         "log\n",
+		"artifacts/000-investigate.json": `{"summary":"plan"}`,
 	} {
 		p := filepath.Join(repoDir, rel, name)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -80,7 +80,7 @@ func oldRun(t *testing.T, repoDir string) string {
 }
 
 func TestScenario17_ImplementCannotRewriteResumeInputs(t *testing.T) {
-	for _, name := range []string{"run.json", "artifacts/000-plan.json"} {
+	for _, name := range []string{"run.json", "artifacts/000-investigate.json"} {
 		t.Run(name, func(t *testing.T) {
 			repoDir := fakeexec.InitGitFixture(t)
 			rel := oldRun(t, repoDir)
@@ -106,8 +106,8 @@ func TestScenario17_ImplementCannotRewriteResumeInputs(t *testing.T) {
 			if _, statErr := os.Stat(marker); statErr == nil {
 				t.Error("test.command ran after the run directory was rewritten")
 			}
-			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
-				t.Errorf("invocations = %v, want [plan implement]", got)
+			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement"}) {
+				t.Errorf("invocations = %v, want [investigate implement]", got)
 			}
 		})
 	}

@@ -23,14 +23,14 @@ import (
 // provider are configured to use. Every field defaults to "claude" (Decision to "jev")
 // via defaultProviderSet - tests override only what they need.
 type providerSet struct {
-	Research, Plan, Implement, Review, Translation string
+	Research, Investigate, Implement, Review, Translation string
 	// Decision is "jev" or a CLI provider (TASKS.md T22).
 	Decision string
 }
 
 func defaultProviderSet() providerSet {
 	return providerSet{
-		Research: "claude", Plan: "claude", Implement: "claude", Review: "claude",
+		Research: "claude", Investigate: "claude", Implement: "claude", Review: "claude",
 		Translation: "claude", Decision: "jev",
 	}
 }
@@ -130,7 +130,7 @@ func (o configOptions) actionsYAML() string {
 	p := o.providers
 	var b strings.Builder
 	for _, a := range []struct{ name, provider string }{
-		{"research", p.Research}, {"plan", p.Plan}, {"implement", p.Implement}, {"review", p.Review},
+		{"research", p.Research}, {"investigate", p.Investigate}, {"implement", p.Implement}, {"review", p.Review},
 	} {
 		fmt.Fprintf(&b, "  %s:\n    provider: %s\n    model: fake\n", a.name, a.provider)
 		if levels := o.byComplexity[a.name]; len(levels) > 0 {
@@ -282,8 +282,8 @@ policy:
   stages:
     thresholds: {research: 0.60, development: 0.60}
     force:
-      medium: [planning, review]
-      complex: [planning, review]
+      medium: [investigation, review]
+      complex: [investigation, review]
 %s
 context:
   max_files: 20
@@ -464,7 +464,7 @@ func bytesSplitLines(data []byte) []string {
 	return lines
 }
 
-// readOnlyResponse is the answer of a read-only step (research, plan) that only reports what it
+// readOnlyResponse is the answer of a read-only step (research, investigate) that only reports what it
 // found; it is not the final answer of a workflow, which readOnlyAnswerResponse carries.
 const readOnlyResponse = `{
   "summary": "Add() subtracts instead of adding.",

@@ -195,7 +195,7 @@ func TestProvider_ClassifyMapsFixture(t *testing.T) {
 			t.Errorf("stage %s = %v, want %v", st, got.Probability, p)
 		}
 	}
-	for _, st := range []domain.Stage{domain.StagePlanning, domain.StageTesting, domain.StageReview} {
+	for _, st := range []domain.Stage{domain.StageInvestigation, domain.StageTesting, domain.StageReview} {
 		if _, ok := tc.Stages.Get(st); ok {
 			t.Errorf("stage %s has a probability, but is not asked", st)
 		}

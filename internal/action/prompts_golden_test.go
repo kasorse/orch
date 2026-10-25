@@ -56,8 +56,8 @@ func goldenResearch() *domain.ResearchArtifact {
 	}
 }
 
-func goldenPlan() *domain.PlanArtifact {
-	return &domain.PlanArtifact{
+func goldenPlan() *domain.InvestigationArtifact {
+	return &domain.InvestigationArtifact{
 		Summary:            "Initialise the map in NewStore and guard Put.",
 		Steps:              []string{"add make() in NewStore", "add a test for Put on a fresh store"},
 		AffectedFiles:      []string{"internal/store/store.go", "internal/store/store_test.go"},
@@ -108,11 +108,11 @@ func TestPrompts_Golden(t *testing.T) {
 	}{
 		{"research", func() string { return BuildResearchPrompt(ResearchPromptInput{Task: goldenTask}) }},
 		{"research_final", func() string { return BuildResearchPrompt(ResearchPromptInput{Task: goldenTask, FinalAnswer: true}) }},
-		{"plan_research", func() string {
-			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, Research: goldenResearch()})
+		{"investigate_research", func() string {
+			return BuildInvestigatePrompt(InvestigatePromptInput{Task: goldenTask, Research: goldenResearch()})
 		}},
-		{"plan_final", func() string {
-			return BuildPlanPrompt(PlanPromptInput{Task: goldenTask, FinalAnswer: true})
+		{"investigate_final", func() string {
+			return BuildInvestigatePrompt(InvestigatePromptInput{Task: goldenTask, FinalAnswer: true})
 		}},
 		{"implement_first", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan()})
@@ -246,7 +246,7 @@ func TestWriteList(t *testing.T) {
 
 func TestPrompts_StageContext(t *testing.T) {
 	plan := goldenPlan()
-	planPrompt := BuildPlanPrompt(PlanPromptInput{Task: "t", Research: goldenResearch()})
+	investigatePrompt := BuildInvestigatePrompt(InvestigatePromptInput{Task: "t", Research: goldenResearch()})
 	implement := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: plan})
 	review := BuildReviewPrompt(ReviewPromptInput{Task: "t", Plan: plan, GitDiff: "d"})
 
@@ -254,8 +254,9 @@ func TestPrompts_StageContext(t *testing.T) {
 		prompt string
 		want   []string
 	}{
-		"plan": {planPrompt, []string{
+		"investigate": {investigatePrompt, []string{
 			"Research:\nA write to a nil map panics", `"acceptance_criteria": ["..."]`, acceptanceCriteriaRule,
+			`"root_cause": "..."`, rootCauseRule,
 		}},
 		"implement": {implement, []string{
 			"Steps:\n- add make() in NewStore\n", "Affected files (from plan):\n- internal/store/store.go\n- internal/store/store_test.go\n",
@@ -275,7 +276,7 @@ func TestPrompts_StageContext(t *testing.T) {
 	if strings.Contains(review, "Affected files") {
 		t.Error("review is not given file lists (QL01)")
 	}
-	for name, prompt := range map[string]string{"plan": planPrompt, "implement": implement, "review": review} {
+	for name, prompt := range map[string]string{"investigate": investigatePrompt, "implement": implement, "review": review} {
 		if strings.Contains(prompt, "Analysis") || strings.Contains(prompt, "from analysis") {
 			t.Errorf("%s prompt has an analysis block, but analysis is no longer a stage:\n%s", name, prompt)
 		}
@@ -283,7 +284,7 @@ func TestPrompts_StageContext(t *testing.T) {
 
 	// QL02: the verdict shape and rule only with criteria, the §7.2 paragraph always.
 	noPlan := BuildReviewPrompt(ReviewPromptInput{Task: "t", GitDiff: "d"})
-	blank := BuildReviewPrompt(ReviewPromptInput{Task: "t", Plan: &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{" "}}, GitDiff: "d"})
+	blank := BuildReviewPrompt(ReviewPromptInput{Task: "t", Plan: &domain.InvestigationArtifact{Summary: "p", AcceptanceCriteria: []string{" "}}, GitDiff: "d"})
 	for name, prompt := range map[string]string{"with criteria": review, "no plan": noPlan, "blank criteria": blank} {
 		if !strings.Contains(prompt, "You have Read, Grep and Glob.") || !strings.Contains(prompt, reviewSurroundingsRule) {
 			t.Errorf("review prompt (%s) lacks the Read/Grep paragraph", name)
@@ -306,7 +307,7 @@ func TestPrompts_StageContext(t *testing.T) {
 		}
 	}
 
-	bare := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: &domain.PlanArtifact{Summary: "p"}})
+	bare := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: &domain.InvestigationArtifact{Summary: "p"}})
 	for _, heading := range []string{"Affected files", "Risks", "Steps:", "Acceptance criteria"} {
 		if strings.Contains(bare, heading) {
 			t.Errorf("an empty list left %q in the prompt:\n%s", heading, bare)

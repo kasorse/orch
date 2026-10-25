@@ -18,7 +18,7 @@ import (
 // before test executes anything.
 
 // scriptReadOnly decides a read-only workflow: no asked stage clears its threshold and the
-// simple level has no template, so planning alone runs (the fallback of specs/clarify CL01).
+// simple level has no template, so investigation alone runs (the fallback of specs/clarify CL01).
 func scriptReadOnly() jevScript {
 	return jevScript{PProject: 0.9, Choice: [3]float64{0.8, 0.15, 0.05}}
 }
@@ -63,8 +63,8 @@ func TestScenario15_DirtyTreeAllowsReadOnlyWorkflow(t *testing.T) {
 	if !strings.Contains(stderr, "uncommitted changes") {
 		t.Errorf("expected the dirty-tree warning, stderr:\n%s", stderr)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan"}) {
-		t.Errorf("invocations = %v, want [plan]", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate"}) {
+		t.Errorf("invocations = %v, want [investigate]", got)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestScenario15_DirtyTreeAllowedByConfig(t *testing.T) {
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	// On a dirty tree the restore point is a stash commit holding notes.txt, not HEAD.
@@ -154,8 +154,8 @@ func TestScenario15_ProtectedPathStopsBeforeTest(t *testing.T) {
 			if _, statErr := os.Stat(marker); statErr == nil {
 				t.Error("test.command ran after a protected-path violation")
 			}
-			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
-				t.Errorf("invocations = %v, want [plan implement]", got)
+			if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement"}) {
+				t.Errorf("invocations = %v, want [investigate implement]", got)
 			}
 		})
 	}

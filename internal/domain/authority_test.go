@@ -6,13 +6,14 @@ import "testing"
 // as a test change.
 func TestAuthorityFor(t *testing.T) {
 	cases := map[ActionType]Authority{
-		ActionResearch:  AuthorityWeb,
-		ActionPlan:      AuthorityRead,
-		ActionReview:    AuthorityRead,
-		ActionImplement: AuthorityEdit,
-		ActionTest:      AuthorityNone,
-		"deploy":        AuthorityNone, // unknown actions fail closed
-		"":              AuthorityNone,
+		ActionResearch:    AuthorityWeb,
+		ActionInvestigate: AuthorityRead,
+		ActionReview:      AuthorityRead,
+		ActionImplement:   AuthorityEdit,
+		ActionTest:        AuthorityNone,
+		"plan":            AuthorityNone, // renamed to investigate (specs/clarify): fails closed
+		"deploy":          AuthorityNone, // unknown actions fail closed
+		"":                AuthorityNone,
 	}
 	for action, want := range cases {
 		if got := AuthorityFor(action); got != want {

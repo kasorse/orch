@@ -20,7 +20,7 @@ import (
 
 func (d *Dispatcher) applyResearch(a domain.ResearchArtifact) { d.lastResearch = &a }
 
-func (d *Dispatcher) applyPlan(a domain.PlanArtifact) { d.lastPlan = &a }
+func (d *Dispatcher) applyInvestigation(a domain.InvestigationArtifact) { d.lastInvestigation = &a }
 
 func (d *Dispatcher) applyImplementation(a domain.ImplementationArtifact) {
 	d.lastImpl = &a
@@ -76,12 +76,12 @@ type ArtifactReader interface {
 // anything; failed executions changed nothing live and are skipped here too (a failed
 // implement did not consume the pending retry context, so its retry gets the same one).
 //
-// research/plan/implement context comes from their artifacts, decoded strictly.
+// research/investigate/implement context comes from their artifacts, decoded strictly.
 // Test and review results come from run.json, where the engine recorded them; when their
 // artifact exists it must agree. Anything missing or inconsistent refuses the resume
 // rather than continuing with a thinner prompt.
 func (d *Dispatcher) Restore(run *domain.Run, r ArtifactReader) error {
-	d.lastResearch, d.lastPlan, d.lastImpl, d.lastTest = nil, nil, nil, nil
+	d.lastResearch, d.lastInvestigation, d.lastImpl, d.lastTest = nil, nil, nil, nil
 	d.commitImpl = nil
 	d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.preRunFailure = nil, nil, nil, nil
 	d.pendingMediumIssues = nil
@@ -109,12 +109,12 @@ func (d *Dispatcher) restoreOne(runID string, exec domain.StepExecution, r Artif
 			return err
 		}
 		d.applyResearch(a)
-	case domain.ActionPlan:
-		var a domain.PlanArtifact
+	case domain.ActionInvestigate:
+		var a domain.InvestigationArtifact
 		if err := readArtifact(r, runID, exec, &a); err != nil {
 			return err
 		}
-		d.applyPlan(a)
+		d.applyInvestigation(a)
 	case domain.ActionImplement:
 		var a domain.ImplementationArtifact
 		if err := readArtifact(r, runID, exec, &a); err != nil {

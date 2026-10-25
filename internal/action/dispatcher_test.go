@@ -80,10 +80,10 @@ func (f *fakeArtifactWriter) SaveArtifact(runID string, stepIndex int, actionTyp
 func testConfig() *config.Config {
 	return &config.Config{
 		Actions: config.ActionsConfig{
-			Research:  config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "research-model"}},
-			Plan:      config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
-			Implement: config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
-			Review:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Research:    config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "research-model"}},
+			Investigate: config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Implement:   config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
+			Review:      config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}},
 		},
 		Test: config.TestConfig{Command: "go test ./..."},
 		// The secret scan reads the real working tree; the tests that cover it (secrets_test.go)
@@ -116,25 +116,25 @@ func (g *fakeGuard) Changed(ctx context.Context, before GuardState) ([]string, e
 	return g.changed, nil
 }
 
-func TestExecutePlan_ArtifactAndAuthority(t *testing.T) {
+func TestExecuteInvestigate_ArtifactAndAuthority(t *testing.T) {
 	client := &fakeClient{output: `{"summary":"s","steps":["step1"],"affected_files":["a.go"],"risks":[]}`}
 	d := newDispatcher(client)
 	writer := &fakeArtifactWriter{}
 	d.Artifacts = writer
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix the bug"}}
-	outcome, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if outcome.Outcome != workflow.OutcomeSuccess {
 		t.Errorf("expected success, got %s", outcome.Outcome)
 	}
-	if d.lastPlan == nil || d.lastPlan.Summary != "s" {
-		t.Errorf("expected the plan to be stored, got %+v", d.lastPlan)
+	if d.lastInvestigation == nil || d.lastInvestigation.Summary != "s" {
+		t.Errorf("expected the investigation to be stored, got %+v", d.lastInvestigation)
 	}
 	if client.lastReq.Authority != domain.AuthorityRead {
-		t.Errorf("plan authority = %q, want read", client.lastReq.Authority)
+		t.Errorf("investigate authority = %q, want read", client.lastReq.Authority)
 	}
 	if len(writer.calls) != 1 {
 		t.Fatalf("expected one artifact save, got %d", len(writer.calls))
@@ -156,7 +156,7 @@ func TestSaveArtifact_CarriesThePromptSent(t *testing.T) {
 	d.Artifacts = writer
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix the bug"}}
-	if _, err := d.Execute(context.Background(), domain.ActionPlan, run); err != nil {
+	if _, err := d.Execute(context.Background(), domain.ActionInvestigate, run); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.Execute(context.Background(), domain.ActionTest, run); err != nil {
@@ -166,51 +166,54 @@ func TestSaveArtifact_CarriesThePromptSent(t *testing.T) {
 		t.Fatalf("saved %d artifacts, want 2", len(writer.calls))
 	}
 	if got := writer.calls[0].prompt; got != client.lastReq.Prompt || !strings.Contains(got, "mcp__graph__query") {
-		t.Errorf("plan artifact prompt = %q, want the prompt sent: %q", got, client.lastReq.Prompt)
+		t.Errorf("investigate artifact prompt = %q, want the prompt sent: %q", got, client.lastReq.Prompt)
 	}
 	if got := writer.calls[1].prompt; got != "" {
 		t.Errorf("test artifact prompt = %q, want none", got)
 	}
 }
 
-func TestExecutePlan_MalformedJSON_FallsBackToRawText(t *testing.T) {
+func TestExecuteInvestigate_MalformedJSON_FallsBackToRawText(t *testing.T) {
 	client := &fakeClient{output: "not json at all"}
 	d := newDispatcher(client)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix the bug"}}
-	outcome, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if outcome.Outcome != workflow.OutcomeSuccess {
 		t.Errorf("expected success (lenient parsing), got %s", outcome.Outcome)
 	}
-	if d.lastPlan.Summary != "not json at all" {
-		t.Errorf("expected raw text fallback, got %q", d.lastPlan.Summary)
+	if d.lastInvestigation.Summary != "not json at all" {
+		t.Errorf("expected raw text fallback, got %q", d.lastInvestigation.Summary)
 	}
 }
 
-func TestExecutePlan_Success(t *testing.T) {
-	client := &fakeClient{output: `{"summary":"s","steps":["step1"],"affected_files":[],"risks":[]}`}
+func TestExecuteInvestigate_Success(t *testing.T) {
+	client := &fakeClient{output: `{"summary":"s","root_cause":"Put writes to a nil map","steps":["step1"],"affected_files":[],"risks":[]}`}
 	d := newDispatcher(client)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "add feature"}}
-	outcome, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if outcome.Outcome != workflow.OutcomeSuccess {
 		t.Errorf("expected success, got %s", outcome.Outcome)
 	}
-	if d.lastPlan == nil || d.lastPlan.Summary != "s" {
-		t.Errorf("expected plan to be stored, got %+v", d.lastPlan)
+	if d.lastInvestigation == nil || d.lastInvestigation.Summary != "s" {
+		t.Errorf("expected investigation to be stored, got %+v", d.lastInvestigation)
+	}
+	if d.lastInvestigation.RootCause != "Put writes to a nil map" {
+		t.Errorf("root_cause = %q, want it parsed from the answer", d.lastInvestigation.RootCause)
 	}
 }
 
 func TestExecuteImplement_IncludesPlanContext(t *testing.T) {
 	client := &fakeClient{output: `{"summary":"done","changed_files":["a.go"],"tests_added":[]}`}
 	d := newDispatcher(client)
-	d.lastPlan = &domain.PlanArtifact{Summary: "plan summary", Steps: []string{"step1"}}
+	d.lastInvestigation = &domain.InvestigationArtifact{Summary: "plan summary", Steps: []string{"step1"}}
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
 	outcome, err := d.Execute(context.Background(), domain.ActionImplement, run)
@@ -394,7 +397,7 @@ func TestExecute_ProviderError_ActionFieldFilledIn(t *testing.T) {
 	d := newDispatcher(client)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	_, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	_, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -402,15 +405,15 @@ func TestExecute_ProviderError_ActionFieldFilledIn(t *testing.T) {
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
 	}
-	if providerErr.Action != "plan" {
-		t.Errorf("expected Action to be filled in as plan, got %q", providerErr.Action)
+	if providerErr.Action != "investigate" {
+		t.Errorf("expected Action to be filled in as investigate, got %q", providerErr.Action)
 	}
 }
 
 // TestExecuteReview_ActionTimeout_FiresIndependentlyOfParentContext is the direct
 // regression test for the reported bug: previously review shared one deadline with
 // every earlier step, so a slow-but-legitimate review call could be killed mid-work
-// purely because plan/implement/test had already spent most of the run-wide
+// purely because investigate/implement/test had already spent most of the run-wide
 // execution.timeout. actions.review.timeout now gives review its own, dedicated
 // deadline, independent of whether the parent context has a deadline at all.
 func TestExecuteReview_ActionTimeout_FiresIndependentlyOfParentContext(t *testing.T) {
@@ -517,7 +520,7 @@ func TestExecute_ProviderError_ConfiguredTimeoutUnsetWithoutActionOverride(t *te
 	d := newDispatcher(client)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	_, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	_, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -526,7 +529,7 @@ func TestExecute_ProviderError_ConfiguredTimeoutUnsetWithoutActionOverride(t *te
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
 	}
 	if providerErr.ConfiguredTimeout != 0 {
-		t.Errorf("expected ConfiguredTimeout to stay zero with no actions.plan.timeout set, got %v", providerErr.ConfiguredTimeout)
+		t.Errorf("expected ConfiguredTimeout to stay zero with no actions.investigate.timeout set, got %v", providerErr.ConfiguredTimeout)
 	}
 }
 
@@ -545,7 +548,7 @@ func TestExecute_ProviderError_LogPathFilledIn(t *testing.T) {
 	d.Logs = fakeLogPathBuilder{}
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	_, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	_, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -566,7 +569,7 @@ func TestExecute_ProviderError_NoLogPathWithoutOutput(t *testing.T) {
 	d.Logs = fakeLogPathBuilder{}
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	_, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	_, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	var providerErr *apperr.ProviderError
 	if !errors.As(err, &providerErr) {
 		t.Fatalf("expected *apperr.ProviderError, got %T", err)
@@ -576,11 +579,11 @@ func TestExecute_ProviderError_NoLogPathWithoutOutput(t *testing.T) {
 	}
 }
 
-// TestExecutePlan_ProviderFailure_PopulatesRawOutput is the direct regression test for
+// TestExecuteInvestigate_ProviderFailure_PopulatesRawOutput is the direct regression test for
 // the reported bug (F3): a failing provider call must not be discarded as an empty
 // StepOutcome{} - the CLI's stdout (where claude --print writes backend/API errors) has to
 // survive into the outcome so the engine's stepFinished wiring can log it.
-func TestExecutePlan_ProviderFailure_PopulatesRawOutput(t *testing.T) {
+func TestExecuteInvestigate_ProviderFailure_PopulatesRawOutput(t *testing.T) {
 	client := &fakeClient{
 		output: "backend error: rate limited",
 		err:    &apperr.ProviderError{Provider: "claude", Model: "m", ExitCode: 1},
@@ -588,7 +591,7 @@ func TestExecutePlan_ProviderFailure_PopulatesRawOutput(t *testing.T) {
 	d := newDispatcher(client)
 
 	run := &domain.Run{ID: "run-1", Task: domain.Task{Description: "fix it"}}
-	outcome, err := d.Execute(context.Background(), domain.ActionPlan, run)
+	outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, run)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -766,7 +769,7 @@ func TestExecuteTest_WithoutGuardRefusesBeforeRunning(t *testing.T) {
 }
 
 func TestCall_DeniesTheRunsDirectory(t *testing.T) {
-	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionPlan, domain.ActionImplement, domain.ActionReview} {
+	for _, a := range []domain.ActionType{domain.ActionResearch, domain.ActionInvestigate, domain.ActionImplement, domain.ActionReview} {
 		t.Run(string(a), func(t *testing.T) {
 			client := &fakeClient{output: `{"status":"pass","summary":"s","issues":[]}`}
 			registry := provider.NewRegistry()
@@ -791,7 +794,7 @@ func TestCall_DeniesTheRunsDirectory(t *testing.T) {
 	// Outside the worktree there is nothing to deny.
 	client := &fakeClient{output: "{}"}
 	d := newDispatcher(client)
-	if _, err := d.Execute(context.Background(), domain.ActionPlan, &domain.Run{ID: "r"}); err != nil {
+	if _, err := d.Execute(context.Background(), domain.ActionInvestigate, &domain.Run{ID: "r"}); err != nil {
 		t.Fatal(err)
 	}
 	if slices.ContainsFunc(client.lastReq.DenyRead, func(p string) bool { return strings.Contains(p, "orchestrator") }) {

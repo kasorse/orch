@@ -42,7 +42,7 @@ func (c *routedClient) Execute(ctx context.Context, req provider.Request) (provi
 // dispatcherState is everything Restore must rebuild.
 type dispatcherState struct {
 	Research       *domain.ResearchArtifact
-	Plan           *domain.PlanArtifact
+	Investigation  *domain.InvestigationArtifact
 	Impl           *domain.ImplementationArtifact
 	CommitImpl     *domain.ImplementationArtifact
 	Test           *domain.TestResult
@@ -53,7 +53,7 @@ type dispatcherState struct {
 }
 
 func stateOf(d *Dispatcher) dispatcherState {
-	return dispatcherState{d.lastResearch, d.lastPlan, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
+	return dispatcherState{d.lastResearch, d.lastInvestigation, d.lastImpl, d.commitImpl, d.lastTest, d.pendingTestFailure, d.pendingReviewIssues, d.pendingUnmetCriteria, d.pendingMediumIssues}
 }
 
 // restoreChecker is an engine Observer: after every step it copies the run through JSON
@@ -97,14 +97,14 @@ func TestRestore_MatchesLiveContextAfterEveryStep(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Workflow = &domain.Workflow{Steps: []domain.Step{
-		{Action: domain.ActionResearch}, {Action: domain.ActionPlan},
+		{Action: domain.ActionResearch}, {Action: domain.ActionInvestigate},
 		{Action: domain.ActionImplement}, {Action: domain.ActionTest}, {Action: domain.ActionReview},
 	}}
 
 	client := &routedClient{seen: map[string]int{}, outputs: map[string][]string{
-		"research":  {`{"summary":"r","findings":["f"],"options":[],"recommendation":"x","references":["u"]}`},
-		"plan":      {`not json - falls back to the summary`},
-		"implement": {`{"summary":"i1","changed_files":["a.go"],"tests_added":[]}`, `{"summary":"i2","changed_files":["a.go"]}`, `{"summary":"i3"}`},
+		"research":    {`{"summary":"r","findings":["f"],"options":[],"recommendation":"x","references":["u"]}`},
+		"investigate": {`not json - falls back to the summary`},
+		"implement":   {`{"summary":"i1","changed_files":["a.go"],"tests_added":[]}`, `{"summary":"i2","changed_files":["a.go"]}`, `{"summary":"i3"}`},
 		"review": {
 			`{"status":"pass","summary":"bad","issues":[{"severity":"high","file":"a.go","description":"bug"}]}`,
 			`{"status":"pass","summary":"ok","issues":[{"severity":"low","file":"a.go","description":"nit"}]}`,
@@ -210,11 +210,12 @@ func TestRestore_RefusesMissingOrInvalidState(t *testing.T) {
 	}
 }
 
-// A plan artifact written before acceptance_criteria existed loads, with no criteria, and the
-// prompts built from it work; one written after it loads with its criteria (QL01).
-func TestRestore_PlanArtifactWithAndWithoutCriteria(t *testing.T) {
+// An investigation artifact written before acceptance_criteria existed loads, with no criteria,
+// and the prompts built from it work; one written after it loads with its criteria (QL01). The
+// root_cause is optional on both.
+func TestRestore_InvestigationArtifactWithAndWithoutCriteria(t *testing.T) {
 	old := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[]}`
-	current := `{"summary":"p","steps":["a"],"affected_files":["a.go"],"risks":[],"acceptance_criteria":["a.go compiles","a test covers it"]}`
+	current := `{"summary":"p","root_cause":"a.go ignores the error","steps":["a"],"affected_files":["a.go"],"risks":[],"acceptance_criteria":["a.go compiles","a test covers it"]}`
 	cases := []struct {
 		name, artifact string
 		want           []string
@@ -225,16 +226,16 @@ func TestRestore_PlanArtifactWithAndWithoutCriteria(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			run := &domain.Run{ID: "r", Executions: []domain.StepExecution{
-				{Index: 0, Action: domain.ActionPlan, Status: domain.StepCompleted},
+				{Index: 0, Action: domain.ActionInvestigate, Status: domain.StepCompleted},
 			}}
 			d := &Dispatcher{}
-			if err := d.Restore(run, memReader{memKey(0, domain.ActionPlan): tc.artifact}); err != nil {
+			if err := d.Restore(run, memReader{memKey(0, domain.ActionInvestigate): tc.artifact}); err != nil {
 				t.Fatal(err)
 			}
-			if d.lastPlan == nil || !slices.Equal(d.lastPlan.AcceptanceCriteria, tc.want) {
-				t.Fatalf("restored plan = %+v, want criteria %q", d.lastPlan, tc.want)
+			if d.lastInvestigation == nil || !slices.Equal(d.lastInvestigation.AcceptanceCriteria, tc.want) {
+				t.Fatalf("restored investigation = %+v, want criteria %q", d.lastInvestigation, tc.want)
 			}
-			prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: d.lastPlan})
+			prompt := BuildImplementPrompt(ImplementPromptInput{Task: "t", Plan: d.lastInvestigation})
 			if got := strings.Contains(prompt, "Acceptance criteria:\n"); got != (tc.want != nil) {
 				t.Errorf("criteria in the implement prompt = %v, want %v:\n%s", got, tc.want != nil, prompt)
 			}
@@ -374,17 +375,17 @@ func TestStoreImplementsArtifactReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	var _ ArtifactReader = store
-	if _, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan); !os.IsNotExist(err) {
+	if _, err := store.ReadArtifact(run.ID, 0, domain.ActionInvestigate); !os.IsNotExist(err) {
 		t.Errorf("missing artifact: %v, want not-exist", err)
 	}
-	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p"}, ""); err != nil {
+	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionInvestigate, domain.InvestigationArtifact{Summary: "p"}, ""); err != nil {
 		t.Fatal(err)
 	}
-	data, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan)
+	data, err := store.ReadArtifact(run.ID, 0, domain.ActionInvestigate)
 	if err != nil || !strings.Contains(string(data), `"summary": "p"`) {
 		t.Errorf("read back %q, %v", data, err)
 	}
-	if _, err := store.ReadArtifact("../"+filepath.Base(run.ID), 0, domain.ActionPlan); err == nil {
+	if _, err := store.ReadArtifact("../"+filepath.Base(run.ID), 0, domain.ActionInvestigate); err == nil {
 		t.Error("a non-ID run reached the filesystem")
 	}
 }

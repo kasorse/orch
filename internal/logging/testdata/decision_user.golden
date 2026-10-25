@@ -1,8 +1,8 @@
 Warning: translation failed (translation timed out after 1m0s); sending the original text
 complexity: complex (chosen by user)
 decision: chosen by user (decision provider jev failed: unavailable (the service is overloaded or failing), HTTP 529, after 2 attempts)
-workflow: plan → implement
+workflow: investigate → implement
 stages:
-  planning     on   forced: complexity=complex
-  development  on   selected by user
-  review       off  forced: complexity=complex, excluded by user
+  investigation on   forced: complexity=complex
+  development   on   selected by user
+  review        off  forced: complexity=complex, excluded by user

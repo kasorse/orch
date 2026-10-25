@@ -16,8 +16,8 @@ import (
 // its history left off - a failed step is retried with the context it had, limits count
 // the whole history, and a run whose process died is continued as "interrupted".
 
-// scriptWithPlan decides planning -> development -> testing -> review: size 1.65
-// is complex under the test cuts, and complex's template is planning and review.
+// scriptWithPlan decides investigation -> development -> testing -> review: size 1.65
+// is complex under the test cuts, and complex's template is investigation and review.
 func scriptWithPlan() jevScript {
 	return jevScript{
 		PProject: 0.9,
@@ -49,7 +49,7 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	cfg := jevConfig(t, j)
 
 	failed := failedAtImplement(t, repoDir, cfg)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement"}) {
 		t.Fatalf("first attempt invocations = %v", got)
 	}
 	if err := os.Remove(filepath.Join(promptsDir, "implement.txt")); err != nil {
@@ -59,7 +59,7 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 
 	stdout, stderr, err := resume(t, repoDir, cfg, failed.ID)
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "implement", "review"}) {
 		t.Errorf("invocations = %v: only implement is retried, then test and review", got)
 	}
 	if len(j.Bodies()) != decisionCalls {
@@ -85,7 +85,7 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	for _, e := range run.Executions {
 		got = append(got, e.Action)
 	}
-	if !equalStrings(got, []string{"plan", "implement", "implement", "test", "review"}) {
+	if !equalStrings(got, []string{"investigate", "implement", "implement", "test", "review"}) {
 		t.Fatalf("executions = %v: the history must be appended to, never rewritten", got)
 	}
 	for i, e := range run.Executions {
@@ -196,7 +196,7 @@ func TestScenario18_ResumeInterruptedRun(t *testing.T) {
 	if !strings.Contains(stdout, "Previous attempt: interrupted") {
 		t.Errorf("stdout lacks the interrupted header:\n%s", stdout)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	run := loadResumedRun(t, repoDir)

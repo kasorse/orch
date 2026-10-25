@@ -164,7 +164,7 @@ func validateStory(s StoryConfig) []string {
 }
 
 // storyBudgetProblems refuses story.max_cost_usd when a provider a story's own calls route to
-// reports no cost: the survey and specify run on actions.plan, so the
+// reports no cost: the survey and specify run on actions.investigate, so the
 // budget could then never be reached. The children's routes are their repositories' own.
 func storyBudgetProblems(cfg Config, checker CostChecker) []string {
 	if cfg.Story == nil || cfg.Story.MaxCostUSD == nil {
@@ -172,7 +172,7 @@ func storyBudgetProblems(cfg Config, checker CostChecker) []string {
 	}
 	var problems []string
 	for _, a := range []struct{ name, provider string }{
-		{"plan", cfg.Actions.Plan.Provider},
+		{"investigate", cfg.Actions.Investigate.Provider},
 	} {
 		if a.provider == "" || (checker != nil && checker.ReportsCost(a.provider)) {
 			continue

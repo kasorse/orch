@@ -97,7 +97,7 @@ func TestOutcomeOf_UnmetCriterion(t *testing.T) {
 }
 
 func TestEntry(t *testing.T) {
-	full := wfp(domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	full := wfp(domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
 	cases := []struct {
 		name    string
 		run     *domain.Run
@@ -105,22 +105,22 @@ func TestEntry(t *testing.T) {
 		whyHas  string
 		wantErr string
 	}{
-		{"empty history starts at the first step", runWith(full), StatePlan, "start", ""},
-		{"continue after a completed step", runWith(full, done(domain.ActionPlan)), StateImplement, "continue after plan", ""},
-		{"a hard failure retries the same action", runWith(full, done(domain.ActionPlan), hardFail(domain.ActionImplement, "timeout\nmore")),
+		{"empty history starts at the first step", runWith(full), StateInvestigate, "start", ""},
+		{"continue after a completed step", runWith(full, done(domain.ActionInvestigate)), StateImplement, "continue after investigate", ""},
+		{"a hard failure retries the same action", runWith(full, done(domain.ActionInvestigate), hardFail(domain.ActionImplement, "timeout\nmore")),
 			StateImplement, "retry implement (failed: timeout)", ""},
-		{"a failed review hard error retries review", runWith(full, done(domain.ActionPlan), done(domain.ActionImplement), done(domain.ActionTest), hardFail(domain.ActionReview, "malformed review output")),
+		{"a failed review hard error retries review", runWith(full, done(domain.ActionInvestigate), done(domain.ActionImplement), done(domain.ActionTest), hardFail(domain.ActionReview, "malformed review output")),
 			StateReview, "retry review", ""},
-		{"test failure with implement goes back to implement", runWith(full, done(domain.ActionPlan), done(domain.ActionImplement), failedTest()),
+		{"test failure with implement goes back to implement", runWith(full, done(domain.ActionInvestigate), done(domain.ActionImplement), failedTest()),
 			StateImplement, "tests failed, retrying implement", ""},
-		{"review failure with implement goes back to implement", runWith(full, done(domain.ActionPlan), done(domain.ActionImplement), done(domain.ActionTest), failedReview()),
+		{"review failure with implement goes back to implement", runWith(full, done(domain.ActionInvestigate), done(domain.ActionImplement), done(domain.ActionTest), failedReview()),
 			StateImplement, "review found issues", ""},
 		{"test failure without implement re-runs the test", runWith(wfp(domain.ActionTest), failedTest()),
 			StateTest, "re-run test (tests failed)", ""},
 		{"review failure without implement is done", runWith(wfp(domain.ActionReview), failedReview()), StateDone, "", ""},
-		{"a finished history is done", runWith(full, done(domain.ActionPlan), done(domain.ActionImplement), done(domain.ActionTest), done(domain.ActionReview)),
+		{"a finished history is done", runWith(full, done(domain.ActionInvestigate), done(domain.ActionImplement), done(domain.ActionTest), done(domain.ActionReview)),
 			StateDone, "", ""},
-		{"a passing test continues to review", runWith(full, done(domain.ActionPlan), done(domain.ActionImplement), done(domain.ActionTest)),
+		{"a passing test continues to review", runWith(full, done(domain.ActionInvestigate), done(domain.ActionImplement), done(domain.ActionTest)),
 			StateReview, "continue after test", ""},
 		{"no workflow", &domain.Run{}, "", "", "no steps"},
 		{"completed test without a result", runWith(full, domain.StepExecution{Action: domain.ActionTest, Status: domain.StepCompleted}), "", "", "no test result"},
@@ -228,7 +228,7 @@ func seenFrom(run *domain.Run) map[domain.ActionType]int {
 // runs exactly the actions an uninterrupted run would have, ends in the same status, and
 // counts the same fix iterations.
 func TestResume_EquivalentToUninterrupted(t *testing.T) {
-	wf := wfp(domain.ActionPlan, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	wf := wfp(domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
 	plan := map[domain.ActionType][]bool{
 		domain.ActionTest:   {false, true, true},
 		domain.ActionReview: {false, true},
@@ -282,7 +282,7 @@ func TestResume_EquivalentToUninterrupted(t *testing.T) {
 }
 
 func TestResume_RetriesAHardFailure(t *testing.T) {
-	wf := wfp(domain.ActionPlan, domain.ActionImplement, domain.ActionTest)
+	wf := wfp(domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest)
 	limits := domain.LimitsView{MaxSteps: 20, MaxFixIterations: 3}
 
 	first := &resultExecutor{seen: map[domain.ActionType]int{}, failAt: 2}
@@ -307,7 +307,7 @@ func TestResume_RetriesAHardFailure(t *testing.T) {
 }
 
 func TestResume_FinishedHistoryCompletesWithoutCalls(t *testing.T) {
-	run := runWith(wfp(domain.ActionPlan), done(domain.ActionPlan))
+	run := runWith(wfp(domain.ActionInvestigate), done(domain.ActionInvestigate))
 	run.Status = domain.RunRunning // crashed between persisting the step and the status
 	exec := &resultExecutor{seen: map[domain.ActionType]int{}}
 	if err := (&Engine{Executor: exec, Limits: domain.LimitsView{MaxSteps: 5, MaxFixIterations: 1}}).Run(context.Background(), run); err != nil {

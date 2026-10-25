@@ -30,7 +30,7 @@ const skipNoTrace = "without a decision trace"
 
 // comparedStages are the stages that get a comparison table and no proposal: a run has no
 // per-run signal of whether they paid off (§7.1).
-var comparedStages = []domain.Stage{domain.StageResearch, domain.StagePlanning}
+var comparedStages = []domain.Stage{domain.StageResearch, domain.StageInvestigation}
 
 // CalibKey is what traces are grouped by: probabilities from different decision models, or
 // from different policies, are not comparable (§7.1, §7.2). An empty PolicyHash is the group
@@ -618,7 +618,7 @@ func renderStage(w io.Writer, s StageCalibration, minRuns int) {
 }
 
 func renderComparison(w io.Writer, rows []ComparisonRow) {
-	fmt.Fprintln(w, "\nresearch, planning: with and without the stage (no proposal)")
+	fmt.Fprintln(w, "\nresearch, investigation: with and without the stage (no proposal)")
 	if len(rows) == 0 {
 		fmt.Fprintln(w, "  no run")
 		return

@@ -33,8 +33,8 @@ type jevScript struct {
 	ModelsStatus int
 }
 
-// scriptBugfixMedium decides planning -> development -> testing -> review: size 1.1 is medium
-// under the test cuts, and medium's template is planning and review.
+// scriptBugfixMedium decides investigation -> development -> testing -> review: size 1.1 is medium
+// under the test cuts, and medium's template is investigation and review.
 func scriptBugfixMedium() jevScript {
 	return jevScript{
 		PProject: 0.9,

@@ -340,7 +340,7 @@ func (st *reviewState) render(s style) []string {
 			if st.on[so.Stage] {
 				box = s.green("[✓]")
 			}
-			name := fmt.Sprintf("%-12s", so.Stage)
+			name := fmt.Sprintf("%-13s", so.Stage)
 			switch {
 			case focused:
 				name = s.bold(name)

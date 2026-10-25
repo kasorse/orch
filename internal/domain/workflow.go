@@ -3,17 +3,17 @@ package domain
 type ActionType string
 
 const (
-	ActionPlan      ActionType = "plan"
-	ActionImplement ActionType = "implement"
-	ActionTest      ActionType = "test"
-	ActionReview    ActionType = "review"
-	ActionResearch  ActionType = "research"
+	ActionInvestigate ActionType = "investigate"
+	ActionImplement   ActionType = "implement"
+	ActionTest        ActionType = "test"
+	ActionReview      ActionType = "review"
+	ActionResearch    ActionType = "research"
 )
 
 // Valid reports whether a is one of the defined actions.
 func (a ActionType) Valid() bool {
 	switch a {
-	case ActionResearch, ActionPlan, ActionImplement, ActionTest, ActionReview:
+	case ActionResearch, ActionInvestigate, ActionImplement, ActionTest, ActionReview:
 		return true
 	}
 	return false

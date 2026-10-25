@@ -101,7 +101,7 @@ func TestLoadStoryService_NoConfig(t *testing.T) {
 func TestLoadStoryService_Home(t *testing.T) {
 	home := t.TempDir()
 	var cfg config.Config
-	cfg.Actions.Plan = config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "codex", Model: "m"}, Timeout: time.Minute}
+	cfg.Actions.Investigate = config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "codex", Model: "m"}, Timeout: time.Minute}
 	cfg.Context.ExtraDeny = []string{"secrets/**"}
 
 	got, err := loadStoryService(context.Background(), serviceCandidate{Name: "platform", Path: home}, home, cfg, nil, nil)

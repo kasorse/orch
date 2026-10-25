@@ -90,9 +90,9 @@ type Dispatcher struct {
 	// means this process's own executable, with symlinks resolved. Tests set it.
 	VerifyExecutable string
 
-	lastResearch *domain.ResearchArtifact
-	lastPlan     *domain.PlanArtifact
-	lastImpl     *domain.ImplementationArtifact
+	lastResearch      *domain.ResearchArtifact
+	lastInvestigation *domain.InvestigationArtifact
+	lastImpl          *domain.ImplementationArtifact
 	// commitImpl is the run's first implementation with a summary_short: the commit
 	// describes the whole change, not the last fix iteration (MVP.md §42.2).
 	commitImpl *domain.ImplementationArtifact

@@ -36,8 +36,13 @@ func Validate(cfg Config) error {
 
 	if cfg.Actions.Analyze != nil {
 		problems = append(problems, "actions.analyze was removed: analysis is no longer a stage, the clarify step "+
-			"makes the task clear before the decision and a stage that reads the code is actions.plan "+
+			"makes the task clear before the decision and a stage that reads the code is actions.investigate "+
 			"(specs/clarify)")
+	}
+	if cfg.Actions.Plan != nil {
+		problems = append(problems, "actions.plan was renamed actions.investigate: planning became the investigation "+
+			"stage, which reads the code and plans a change or answers; move the section under the new name, "+
+			"it takes the same keys, by_complexity included (specs/clarify)")
 	}
 	for _, pm := range cfg.actionProviderModels() {
 		problems = append(problems, validateProviderModel(pm.Action, pm.ProviderModel)...)
@@ -152,7 +157,7 @@ func verifyProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"review", cfg.Actions.Review},
 	}
 	for _, o := range others {
@@ -190,7 +195,7 @@ func escalateProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"review", cfg.Actions.Review},
 	} {
 		if o.a.escalateSet {
@@ -241,7 +246,7 @@ func byComplexityProblems(cfg Config) []string {
 		action ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 		{"review", cfg.Actions.Review},
 	} {
@@ -296,7 +301,7 @@ func extraReviewerProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 	} {
 		if o.a.modelsSet || len(o.a.Models) > 0 {
@@ -350,7 +355,7 @@ func allowedModelProblems(cfg Config) []string {
 		action ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 		{"review", cfg.Actions.Review},
 	} {

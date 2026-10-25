@@ -8,19 +8,19 @@ import (
 )
 
 func TestGaps(t *testing.T) {
-	const devNoPlan = "development runs without a plan; it works from the task text alone"
+	const devNoPlan = "development runs without an investigation; it works from the task text alone"
 	cases := []struct {
 		name  string
 		stage []domain.Stage
 		want  []string
 	}{
 		{"research alone", []domain.Stage{domain.StageResearch}, nil},
-		{"planning alone", []domain.Stage{domain.StagePlanning}, nil},
+		{"investigation alone", []domain.Stage{domain.StageInvestigation}, nil},
 		{"development alone", []domain.Stage{domain.StageDevelopment}, []string{devNoPlan}},
 		{"testing alone", []domain.Stage{domain.StageTesting}, nil},
 		{"review alone", []domain.Stage{domain.StageReview}, nil},
 		{"testing+review", []domain.Stage{domain.StageReview, domain.StageTesting}, nil},
-		{"planning+development", []domain.Stage{domain.StageDevelopment, domain.StagePlanning}, nil},
+		{"investigation+development", []domain.Stage{domain.StageDevelopment, domain.StageInvestigation}, nil},
 		{"research+development", []domain.Stage{domain.StageResearch, domain.StageDevelopment}, []string{devNoPlan}},
 		{"full chain", domain.StageOrder(), nil},
 	}

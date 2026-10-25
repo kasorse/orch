@@ -68,10 +68,10 @@ func TestScenario18_DirtyRefusalIsResumable(t *testing.T) {
 	if got := len(j.Bodies()); got != decisionCalls {
 		t.Errorf("resume must not decide again: %d decision calls, was %d", got, decisionCalls)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
-	for _, want := range []string{"Resuming run " + refused.ID, "Next: plan — start", "Remaining workflow: plan → implement → test → review", "Restore point:"} {
+	for _, want := range []string{"Resuming run " + refused.ID, "Next: investigate — start", "Remaining workflow: investigate → implement → test → review", "Restore point:"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -84,7 +84,7 @@ func TestScenario18_DirtyRefusalIsResumable(t *testing.T) {
 			run.Status, run.FailureReason, run.PreRunRef, run.HeadRef, len(run.ResumeBaseline), head)
 	}
 	if len(run.Resumes) != 1 || run.Resumes[0].FromStatus != "failed" || !strings.Contains(run.Resumes[0].FromReason, "uncommitted changes") ||
-		run.Resumes[0].Entry != "plan" || run.Resumes[0].Mode != "auto" {
+		run.Resumes[0].Entry != "investigate" || run.Resumes[0].Mode != "auto" {
 		t.Errorf("resumes = %+v", run.Resumes)
 	}
 	for _, e := range run.Executions {
@@ -133,7 +133,7 @@ func TestScenario18_PlanModeResumeChangesNothing(t *testing.T) {
 
 	stdout, stderr, err = runOrchestrator(t, repoDir, cfg, "resume", planned.ID)
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	// The restore point, head_ref and baseline are recorded when the run first executes,
@@ -144,10 +144,10 @@ func TestScenario18_PlanModeResumeChangesNothing(t *testing.T) {
 		t.Errorf("run after resume: status=%s pre_run_ref=%s head_ref=%s baseline=%d bytes (HEAD %s)",
 			run.Status, run.PreRunRef, run.HeadRef, len(run.ResumeBaseline), head)
 	}
-	if len(run.Resumes) != 1 || run.Resumes[0].FromStatus != "pending" || run.Resumes[0].Entry != "plan" {
+	if len(run.Resumes) != 1 || run.Resumes[0].FromStatus != "pending" || run.Resumes[0].Entry != "investigate" {
 		t.Errorf("resumes = %+v", run.Resumes)
 	}
-	if len(run.Executions) == 0 || run.Executions[0].Action != "plan" {
+	if len(run.Executions) == 0 || run.Executions[0].Action != "investigate" {
 		t.Errorf("executions = %+v, want the first step first", run.Executions)
 	}
 

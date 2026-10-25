@@ -3,14 +3,16 @@ package persistence
 import "encoding/json"
 
 // startedBeforeClarifyMsg is the refusal for a run whose workflow or decision still names the
-// analysis stage or the analyze action, which specs/clarify removed (Approach §6).
+// analysis or planning stage or the analyze or plan action, which specs/clarify removed or
+// renamed (Approach §6).
 const startedBeforeClarifyMsg = "this run was started before specs/clarify; it cannot be resumed by this version"
 
-// removedActions and removedStages are the names specs/clarify took out. A file naming one is
-// refused whole, with startedBeforeClarifyMsg, instead of failing on the unknown value.
+// removedActions and removedStages are the names specs/clarify took out or renamed. A file
+// naming one is refused whole, with startedBeforeClarifyMsg, instead of failing on the unknown
+// value or reading plan as investigate.
 var (
-	removedActions = map[string]bool{"analyze": true}
-	removedStages  = map[string]bool{"analysis": true}
+	removedActions = map[string]bool{"analyze": true, "plan": true}
+	removedStages  = map[string]bool{"analysis": true, "planning": true}
 )
 
 // probe lists the action and stage names a file holds. It reads loosely, only the fields it

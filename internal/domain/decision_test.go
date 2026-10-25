@@ -72,11 +72,11 @@ func TestStageDecisions_GetSetAll(t *testing.T) {
 	}
 
 	var partial StageDecisions
-	partial.Set(StagePlanning, ProbabilityDecision{Probability: 0.4})
+	partial.Set(StageInvestigation, ProbabilityDecision{Probability: 0.4})
 	if _, ok := partial.Get(StageReview); ok {
 		t.Error("Get of a stage that was not set reported success")
 	}
-	if all := partial.All(); len(all) != 1 || all[0].Stage != StagePlanning {
+	if all := partial.All(); len(all) != 1 || all[0].Stage != StageInvestigation {
 		t.Errorf("All() of one set stage = %+v", all)
 	}
 

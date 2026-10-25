@@ -14,15 +14,15 @@ import (
 // total_cost_usd 3 and limits.max_cost_usd is 5. The run stops before the step that follows the
 // call that crossed the budget; a resume under max_cost_usd 10 continues it.
 
-var budgetStages = []string{"run", "--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review",
+var budgetStages = []string{"run", "--stage", "investigation", "--stage", "development", "--stage", "testing", "--stage", "review",
 	"fix Add in fixture.go"}
 
-// costPerCall makes the fake claude answer plan, implement and review with a stream-json
+// costPerCall makes the fake claude answer investigate, implement and review with a stream-json
 // result that reports cost.
 func costPerCall(t *testing.T, cost float64) {
 	t.Helper()
 	dir := os.Getenv("FAKE_RESPONSES_DIR")
-	for name, body := range map[string]string{"plan": readOnlyResponse, "implement": implementResponse, "review": reviewPassResponse} {
+	for name, body := range map[string]string{"investigate": readOnlyResponse, "implement": implementResponse, "review": reviewPassResponse} {
 		writeResponse(t, dir, name, streamResult(t, body, cost))
 	}
 }
@@ -40,13 +40,13 @@ func TestScenario47_BudgetStopsTheRunAndAResumeContinuesIt(t *testing.T) {
 	assertContains(t, "the error", err.Error(),
 		"Run status: stopped", "Reason: budget exceeded: $6.00 of $5.00", "Raise limits.max_cost_usd to continue it.")
 
-	// plan cost 3 (under 5), implement cost 3 (6 in all): the test step never started.
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan", "implement"}) {
-		t.Errorf("invocations = %v, want [plan implement]", got)
+	// investigate cost 3 (under 5), implement cost 3 (6 in all): the test step never started.
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate", "implement"}) {
+		t.Errorf("invocations = %v, want [investigate implement]", got)
 	}
 	run := loadQL(t, repoDir)
 	if run.Status != "stopped" || run.FailureReason != "budget exceeded: $6.00 of $5.00" ||
-		!equalStrings(run.actions(), []string{"plan", "implement"}) {
+		!equalStrings(run.actions(), []string{"investigate", "implement"}) {
 		t.Fatalf("status %s, reason %q, executions %v", run.Status, run.FailureReason, run.actions())
 	}
 
@@ -57,10 +57,10 @@ func TestScenario47_BudgetStopsTheRunAndAResumeContinuesIt(t *testing.T) {
 
 	resumed := loadQL(t, repoDir)
 	if resumed.Status != "completed" || resumed.FailureReason != "" ||
-		!equalStrings(resumed.actions(), []string{"plan", "implement", "test", "review"}) {
+		!equalStrings(resumed.actions(), []string{"investigate", "implement", "test", "review"}) {
 		t.Errorf("after the resume: status %s, reason %q, executions %v", resumed.Status, resumed.FailureReason, resumed.actions())
 	}
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan", "implement", "review"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v, want only the review added", got)
 	}
 }

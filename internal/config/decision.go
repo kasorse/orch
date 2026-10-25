@@ -470,13 +470,21 @@ func validateComplexityPolicy(c ComplexityPolicyConfig) []string {
 // analysisRemoved says what took the place of the analysis stage (specs/clarify): a key kept
 // under the old name would silently mean something else, so it is refused and never mapped.
 const analysisRemoved = "analysis is not a stage any more: the clarify step makes the task clear before the " +
-	"decision (specs/clarify), and a stage that reads the code is planning"
+	"decision (specs/clarify), and a stage that reads the code is investigation"
+
+// planningRenamed says what took the place of the planning stage (specs/clarify), for the same
+// reason: planning is never read as investigation.
+const planningRenamed = "planning was renamed investigation: the stage that reads the code plans a change or " +
+	"answers (specs/clarify)"
 
 // forceStageProblem checks one stage of policy.stages.force.<complexity> and returns the problem,
 // or "" when it is a stage.
 func forceStageProblem(complexity, stage string) string {
-	if stage == "analysis" {
+	switch stage {
+	case "analysis":
 		return fmt.Sprintf("policy.stages.force.%s: %s", complexity, analysisRemoved)
+	case "planning":
+		return fmt.Sprintf("policy.stages.force.%s: %s", complexity, planningRenamed)
 	}
 	if _, err := domain.ParseStage(stage); err != nil {
 		return fmt.Sprintf("policy.stages.force.%s has unknown stage %q", complexity, stage)
@@ -511,6 +519,9 @@ func validatePolicyConfig(p PolicyConfig) []string {
 		case key == "analysis":
 			problems = append(problems, "policy.stages.thresholds.analysis: "+analysisRemoved+
 				"; whether the task is clear enough is policy.clarify.threshold")
+		case key == "planning":
+			problems = append(problems, "policy.stages.thresholds.planning: "+planningRenamed+
+				"; the investigation stage has no threshold, it comes from policy.stages.force per complexity")
 		case err != nil:
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds has unknown stage %q", key))
 		case !slices.Contains(domain.AskedStages(), st):

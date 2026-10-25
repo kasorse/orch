@@ -22,7 +22,7 @@ import (
 //	      command: graphify-mcp
 //	      args: ["{repo}/graphify-out/graph.json"]
 //	      tools: [query_graph, get_node, get_neighbors, shortest_path]
-//	      actions: [plan, implement, review]
+//	      actions: [investigate, implement, review]
 //	  user_settings: false
 type ExtensionsConfig struct {
 	// MCP lists MCP servers by name. Only the listed tools of a server are given to the
@@ -50,14 +50,14 @@ type MCPServerConfig struct {
 	// Tools are the server's tool names the model may call, without the "mcp__<name>__"
 	// prefix. "*" allows every tool the server offers.
 	Tools []string `yaml:"tools"`
-	// Actions are the workflow actions (research, plan, implement, review) that
-	// get this server. Empty means the read-only ones: plan and review.
+	// Actions are the workflow actions (research, investigate, implement, review) that
+	// get this server. Empty means the read-only ones: investigate and review.
 	Actions []string `yaml:"actions"`
 }
 
 // DefaultMCPActions are the actions an MCP server is offered to when none are listed:
 // the steps that read the repository but do not change it.
-var DefaultMCPActions = []string{"plan", "review"}
+var DefaultMCPActions = []string{"investigate", "review"}
 
 var mcpNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
@@ -65,13 +65,17 @@ var mcpNameRE = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // server cannot take it.
 const reservedMCPServer = "orch"
 
-var extensionActions = []string{"research", "plan", "implement", "review"}
+var extensionActions = []string{"research", "investigate", "implement", "review"}
 
 // actionNotAnAction is the reason an action name in extensions is refused, when there is more
-// to say than "not an action": the analyze action was removed (specs/clarify).
+// to say than "not an action": the analyze action was removed and plan was renamed investigate
+// (specs/clarify).
 func actionNotAnAction(a string) string {
-	if a == "analyze" {
-		return "the analyze action was removed, a step that reads the code is plan (specs/clarify); "
+	switch a {
+	case "analyze":
+		return "the analyze action was removed, a step that reads the code is investigate (specs/clarify); "
+	case "plan":
+		return "the plan action was renamed investigate (specs/clarify); "
 	}
 	return ""
 }

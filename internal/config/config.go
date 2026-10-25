@@ -203,15 +203,17 @@ func parseDurationField(name, raw string) (time.Duration, error) {
 	return d, nil
 }
 
-// ActionsConfig is the actions section. Analyze is declared only so strict decoding accepts the
-// key and the validator can reject it with the replacement: the analyze action is gone
-// (specs/clarify), and a route kept under the name would silently mean something else.
+// ActionsConfig is the actions section. Analyze and Plan are declared only so strict decoding
+// accepts the keys and the validator can reject them with the replacement: the analyze action is
+// gone and plan became investigate (specs/clarify), and a route kept under the old name would
+// silently mean something else.
 type ActionsConfig struct {
-	Research  ActionConfig `yaml:"research"`
-	Analyze   any          `yaml:"analyze"`
-	Plan      ActionConfig `yaml:"plan"`
-	Implement ActionConfig `yaml:"implement"`
-	Review    ActionConfig `yaml:"review"`
+	Research    ActionConfig `yaml:"research"`
+	Analyze     any          `yaml:"analyze"`
+	Plan        any          `yaml:"plan"`
+	Investigate ActionConfig `yaml:"investigate"`
+	Implement   ActionConfig `yaml:"implement"`
+	Review      ActionConfig `yaml:"review"`
 }
 
 // For returns the configuration of a workflow action that makes a provider call; ok is false
@@ -220,8 +222,8 @@ func (a ActionsConfig) For(t domain.ActionType) (ac ActionConfig, ok bool) {
 	switch t {
 	case domain.ActionResearch:
 		return a.Research, true
-	case domain.ActionPlan:
-		return a.Plan, true
+	case domain.ActionInvestigate:
+		return a.Investigate, true
 	case domain.ActionImplement:
 		return a.Implement, true
 	case domain.ActionReview:
@@ -643,7 +645,7 @@ func (c Config) CredentialEnvNames() []string {
 func (c Config) actionProviderModels() []namedProviderModel {
 	return []namedProviderModel{
 		{Action: "research", ProviderModel: c.Actions.Research.ProviderModel},
-		{Action: "plan", ProviderModel: c.Actions.Plan.ProviderModel},
+		{Action: "investigate", ProviderModel: c.Actions.Investigate.ProviderModel},
 		{Action: "implement", ProviderModel: c.Actions.Implement.ProviderModel},
 		{Action: "review", ProviderModel: c.Actions.Review.ProviderModel},
 	}
@@ -659,7 +661,7 @@ type namedProviderModel struct {
 func (c Config) actionTimeouts() []namedTimeout {
 	return []namedTimeout{
 		{Action: "research", Timeout: c.Actions.Research.Timeout},
-		{Action: "plan", Timeout: c.Actions.Plan.Timeout},
+		{Action: "investigate", Timeout: c.Actions.Investigate.Timeout},
 		{Action: "implement", Timeout: c.Actions.Implement.Timeout},
 		{Action: "review", Timeout: c.Actions.Review.Timeout},
 	}

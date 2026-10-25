@@ -16,12 +16,12 @@ func TestExtensionsFor(t *testing.T) {
 		"memory":   {URL: "https://mem.example/mcp", Tools: []string{"*"}, Actions: []string{"implement"}},
 	}, UserSettings: true, UserSettingsActions: []string{"implement"}}
 
-	plan := extensionsFor(cfg, domain.ActionPlan, "/work/repo")
-	if plan.UserSettings {
+	investigate := extensionsFor(cfg, domain.ActionInvestigate, "/work/repo")
+	if investigate.UserSettings {
 		t.Error("user settings were opted in for implement only")
 	}
-	if got := strings.Join(plan.MCPTools, ","); got != "mcp__graphify__get_node,mcp__graphify__query_graph" {
-		t.Errorf("plan tools = %s", got)
+	if got := strings.Join(investigate.MCPTools, ","); got != "mcp__graphify__get_node,mcp__graphify__query_graph" {
+		t.Errorf("investigate tools = %s", got)
 	}
 	var doc struct {
 		MCPServers map[string]struct {
@@ -29,11 +29,11 @@ func TestExtensionsFor(t *testing.T) {
 			Args    []string `json:"args"`
 		} `json:"mcpServers"`
 	}
-	if err := json.Unmarshal([]byte(plan.MCPConfig), &doc); err != nil {
+	if err := json.Unmarshal([]byte(investigate.MCPConfig), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if len(doc.MCPServers) != 1 || doc.MCPServers["graphify"].Args[0] != "/work/repo/graphify-out/graph.json" {
-		t.Errorf("plan mcp config = %s", plan.MCPConfig)
+		t.Errorf("investigate mcp config = %s", investigate.MCPConfig)
 	}
 
 	impl := extensionsFor(cfg, domain.ActionImplement, "/work/repo")
@@ -43,12 +43,12 @@ func TestExtensionsFor(t *testing.T) {
 	if research := extensionsFor(cfg, domain.ActionResearch, "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
 		t.Errorf("research must get nothing: %+v", research)
 	}
-	if got := withExtensionsHint("ACTION: plan\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionPlan, "/r")); got != "ACTION: plan\nbody" {
+	if got := withExtensionsHint("ACTION: investigate\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionInvestigate, "/r")); got != "ACTION: investigate\nbody" {
 		t.Errorf("no extensions, no hint: %q", got)
 	}
 	// The hint comes right after the first line, which stays "ACTION: <name>".
-	got := withExtensionsHint("ACTION: plan\nbody", plan)
-	if !strings.HasPrefix(got, "ACTION: plan\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
+	got := withExtensionsHint("ACTION: investigate\nbody", investigate)
+	if !strings.HasPrefix(got, "ACTION: investigate\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
 		t.Errorf("hint = %q", got)
 	}
 }

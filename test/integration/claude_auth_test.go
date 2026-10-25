@@ -38,7 +38,7 @@ func clearAuthEnv(t *testing.T) {
 const authRequest = "исправь Add() в fixture.go, чтобы она складывала, а не вычитала"
 
 // authCalls are the calls of a full run with the LLM decision provider, in order.
-var authCalls = []string{"translate", "decide-context", "decide-classify", "plan", "implement", "review"}
+var authCalls = []string{"translate", "decide-context", "decide-classify", "investigate", "implement", "review"}
 
 // authRun prepares a full run whose translator and decision provider are claude (or what
 // mutate sets) and returns its config and the directory FAKE_ENV_DIR points to.

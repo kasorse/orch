@@ -63,7 +63,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	prompt := BuildReviewPrompt(ReviewPromptInput{
 		Task:           run.Task.Description,
 		Acceptance:     run.Task.Acceptance,
-		Plan:           d.lastPlan,
+		Plan:           d.lastInvestigation,
 		Implementation: d.lastImpl,
 		TestResult:     d.lastTest,
 		GitDiff:        diff.Text,
@@ -78,7 +78,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}
-	criteria := reviewCriteria(run.Task.Acceptance, d.lastPlan)
+	criteria := reviewCriteria(run.Task.Acceptance, d.lastInvestigation)
 	first, err := parseReviewStrict(result.Output, criteria)
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}

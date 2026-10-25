@@ -16,7 +16,7 @@ var jevDown = &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionUnavai
 
 func choosePolicy() domain.DecisionPolicy {
 	return domain.DecisionPolicy{ForceStages: map[domain.Complexity][]domain.Stage{
-		domain.ComplexityComplex: {domain.StagePlanning, domain.StageReview},
+		domain.ComplexityComplex: {domain.StageInvestigation, domain.StageReview},
 	}}
 }
 
@@ -72,13 +72,13 @@ func TestChoose_ForcedStagesMarkedAndIncluded(t *testing.T) {
 	if len(choice.Stages) != 0 || len(choice.Excluded) != 0 || choice.Complexity != domain.ComplexityComplex {
 		t.Errorf("choice = %+v", choice)
 	}
-	if !strings.Contains(out, "[2] planning  * forced for complexity=complex") || strings.Contains(out, "[1] research  *") {
+	if !strings.Contains(out, "[2] investigation  * forced for complexity=complex") || strings.Contains(out, "[1] research  *") {
 		t.Errorf("forced stages not marked:\n%s", out)
 	}
 }
 
 func TestChoose_ExcludingForcedNeedsConfirmation(t *testing.T) {
-	// -5 (review) confirmed, -2 (planning) declined.
+	// -5 (review) confirmed, -2 (investigation) declined.
 	choice, err, out, _ := runChooser(t, "3", "3 -5 -2", "y", "n")
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +97,7 @@ func TestChoose_EmptySelectionRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(out, "Select at least one stage.") != 2 || !reflect.DeepEqual(choice.Stages, []domain.Stage{domain.StagePlanning}) {
+	if strings.Count(out, "Select at least one stage.") != 2 || !reflect.DeepEqual(choice.Stages, []domain.Stage{domain.StageInvestigation}) {
 		t.Errorf("choice = %+v\n%s", choice, out)
 	}
 }

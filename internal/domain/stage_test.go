@@ -7,7 +7,7 @@ import (
 )
 
 func TestStageOrder(t *testing.T) {
-	want := []Stage{StageResearch, StagePlanning, StageDevelopment, StageTesting, StageReview}
+	want := []Stage{StageResearch, StageInvestigation, StageDevelopment, StageTesting, StageReview}
 	if got := StageOrder(); !slices.Equal(got, want) {
 		t.Fatalf("StageOrder() = %v, want %v", got, want)
 	}
@@ -22,11 +22,11 @@ func TestStageOrder(t *testing.T) {
 
 func TestStageAction(t *testing.T) {
 	want := map[Stage]ActionType{
-		StageResearch:    ActionResearch,
-		StagePlanning:    ActionPlan,
-		StageDevelopment: ActionImplement,
-		StageTesting:     ActionTest,
-		StageReview:      ActionReview,
+		StageResearch:      ActionResearch,
+		StageInvestigation: ActionInvestigate,
+		StageDevelopment:   ActionImplement,
+		StageTesting:       ActionTest,
+		StageReview:        ActionReview,
 	}
 	for _, st := range StageOrder() {
 		got, ok := st.Action()
@@ -63,10 +63,16 @@ func TestParseStage(t *testing.T) {
 
 func TestParseStageFlag(t *testing.T) {
 	ok := map[string]Stage{
-		"research": StageResearch,
-		"planning": StagePlanning, "plan": StagePlanning, "development": StageDevelopment,
-		"implement": StageDevelopment, "testing": StageTesting, "test": StageTesting,
-		"review": StageReview, "  ReVieW ": StageReview, "TEST": StageTesting,
+		"research":      StageResearch,
+		"investigation": StageInvestigation,
+		"investigate":   StageInvestigation,
+		"development":   StageDevelopment,
+		"implement":     StageDevelopment,
+		"testing":       StageTesting,
+		"test":          StageTesting,
+		"review":        StageReview,
+		"  ReVieW ":     StageReview,
+		"TEST":          StageTesting,
 	}
 	for in, want := range ok {
 		if got, err := ParseStageFlag(in); err != nil || got != want {
@@ -75,8 +81,8 @@ func TestParseStageFlag(t *testing.T) {
 	}
 	_, err := ParseStageFlag("reveiw")
 	if err == nil || !strings.Contains(err.Error(), `unknown stage "reveiw"`) ||
-		!strings.Contains(err.Error(), "research, planning, development, testing, review") ||
-		!strings.Contains(err.Error(), "aliases: plan, implement, test") {
+		!strings.Contains(err.Error(), "research, investigation, development, testing, review") ||
+		!strings.Contains(err.Error(), "aliases: investigate, implement, test") {
 		t.Errorf("unknown-name error = %v", err)
 	}
 	if _, err := ParseStage("analyze"); err == nil {
@@ -84,9 +90,10 @@ func TestParseStageFlag(t *testing.T) {
 	}
 }
 
-// analysis and analyze are refused by name, with the spec that removed them (specs/clarify).
+// analysis, analyze, planning and plan are refused by name, with the spec that removed or
+// renamed them (specs/clarify).
 func TestParseStageFlag_RefusesRemovedStages(t *testing.T) {
-	for _, in := range []string{"analysis", "analyze", " Analyze "} {
+	for _, in := range []string{"analysis", "analyze", " Analyze ", "planning", "plan", " PLAN "} {
 		_, err := ParseStageFlag(in)
 		if err == nil || !strings.Contains(err.Error(), "specs/clarify") || strings.Contains(err.Error(), "unknown stage") {
 			t.Errorf("ParseStageFlag(%q) error = %v, want a refusal naming specs/clarify", in, err)

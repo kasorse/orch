@@ -121,10 +121,10 @@ func TestForceDevelopment_DoesNotMutateTheInput(t *testing.T) {
 
 func TestSkipPlanning_TurnsTheReadOnlyStagesOff(t *testing.T) {
 	dec := belowDevelopment(0.7, false)
-	dec.Stages.Stages = append(dec.Stages.Stages, domain.StageOutcome{Stage: domain.StagePlanning, Enabled: true, Forced: true, Reason: "forced: complexity=complex"})
+	dec.Stages.Stages = append(dec.Stages.Stages, domain.StageOutcome{Stage: domain.StageInvestigation, Enabled: true, Forced: true, Reason: "forced: complexity=complex"})
 	before := belowDevelopment(0.7, false)
 	got := SkipPlanning(ForceDevelopment(dec, "story task"), "story task: planned")
-	for _, st := range []domain.Stage{domain.StageResearch, domain.StagePlanning} {
+	for _, st := range []domain.Stage{domain.StageResearch, domain.StageInvestigation} {
 		if s := stageOf(t, got, st); s.Enabled || s.Forced || s.Reason != "story task: planned" {
 			t.Errorf("%s = %+v, want off with the reason", st, s)
 		}

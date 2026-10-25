@@ -93,7 +93,7 @@ func testPolicy() domain.DecisionPolicy {
 		ProjectContextThreshold: 0.5,
 		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold:          th,
-		ForceStages:             map[domain.Complexity][]domain.Stage{domain.ComplexityComplex: {domain.StagePlanning, domain.StageReview}},
+		ForceStages:             map[domain.Complexity][]domain.Stage{domain.ComplexityComplex: {domain.StageInvestigation, domain.StageReview}},
 	}
 }
 
@@ -107,7 +107,7 @@ func depthDecision(pProject float64) domain.ContextDepthDecision {
 func classificationFor(depth domain.ContextDepth) domain.TaskClassification {
 	var stages domain.StageDecisions
 	for st, p := range map[domain.Stage]float64{
-		domain.StageResearch: 0.1, domain.StagePlanning: 0.2,
+		domain.StageResearch: 0.1, domain.StageInvestigation: 0.2,
 		domain.StageDevelopment: 0.95, domain.StageTesting: 0.9, domain.StageReview: 0.3,
 	} {
 		stages.Set(st, domain.ProbabilityDecision{Probability: p})
@@ -236,8 +236,8 @@ func TestClassify_ProviderFailureAsksUser(t *testing.T) {
 			if res.Decision.Source != domain.DecisionSourceUser || res.DecisionError != jevDown {
 				t.Errorf("decision = %+v", res.Decision)
 			}
-			// complex forces planning, review on top of the user's development.
-			want := []domain.Stage{domain.StagePlanning, domain.StageDevelopment, domain.StageReview}
+			// complex forces investigation, review on top of the user's development.
+			want := []domain.Stage{domain.StageInvestigation, domain.StageDevelopment, domain.StageReview}
 			if got := res.Decision.Stages.EnabledStages(); !equalStages(got, want) {
 				t.Errorf("stages = %v, want %v", got, want)
 			}
@@ -343,7 +343,7 @@ func TestResultTrace_ReconstructsTheDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := res.Trace(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionPlan}, {Action: domain.ActionImplement}}})
+	trace := res.Trace(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionInvestigate}, {Action: domain.ActionImplement}}})
 
 	raw, err := json.Marshal(trace)
 	if err != nil {

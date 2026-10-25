@@ -410,7 +410,7 @@ type stubChooser struct{ calls int }
 
 func (s *stubChooser) Choose(context.Context, error, *domain.ProjectContext, domain.DecisionPolicy) (interaction.ManualChoice, error) {
 	s.calls++
-	return interaction.ManualChoice{Complexity: domain.ComplexityMedium, Stages: []domain.Stage{domain.StagePlanning}}, nil
+	return interaction.ManualChoice{Complexity: domain.ComplexityMedium, Stages: []domain.Stage{domain.StageInvestigation}}, nil
 }
 
 func TestCLIFailureFollowsOnFailure(t *testing.T) {

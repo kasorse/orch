@@ -25,12 +25,12 @@ const readOnlyAnswerResponse = `{
   "answer": "Add returns a - b; it should return a + b."
 }`
 
-// completedReadOnlyRun runs a plan-only task to completion and returns it.
+// completedReadOnlyRun runs an investigate-only task to completion and returns it.
 func completedReadOnlyRun(t *testing.T) (repoDir, cfg, invocationsLog string, run resumedRun) {
 	t.Helper()
 	repoDir = fakeexec.InitGitFixture(t)
 	invocationsLog, _ = decisionEnv(t, repoDir)
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "plan", readOnlyAnswerResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "investigate", readOnlyAnswerResponse)
 	cfg = jevConfig(t, startJev(t, scriptReadOnly()))
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "explain Add in fixture.go")

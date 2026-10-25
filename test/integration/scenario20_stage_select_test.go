@@ -216,20 +216,20 @@ func TestScenario20e_FixLoop(t *testing.T) {
 	})
 }
 
-// f: planning alone: the plan is the answer, and nothing is missing before it.
-func TestScenario20f_PlanningAlone(t *testing.T) {
+// f: investigation alone: the investigation is the answer, and nothing is missing before it.
+func TestScenario20f_InvestigationAlone(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
 
-	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "plan", "plan the fix")
+	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "investigate", "investigate the fix")
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	if strings.Contains(stderr, "runs without") {
-		t.Errorf("stderr has a gap warning for planning alone:\n%s", stderr)
+		t.Errorf("stderr has a gap warning for investigation alone:\n%s", stderr)
 	}
 	if !strings.Contains(stdout, "fix the operator") {
-		t.Errorf("stdout lacks the plan as the answer:\n%s", stdout)
+		t.Errorf("stdout lacks the investigation as the answer:\n%s", stdout)
 	}
 	r.noDecisionLayer(t)
 }
@@ -238,22 +238,22 @@ func TestScenario20f_PlanningAlone(t *testing.T) {
 func TestScenario20g_AliasesCollapse(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
 
-	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "plan", "--stage", "planning", "explain Add")
+	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "investigate", "--stage", "investigation", "explain Add")
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"plan"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate"}) {
 		t.Errorf("invocations = %v", got)
 	}
-	if n := strings.Count(stdout, "Stages (manual): planning"); n != 1 {
+	if n := strings.Count(stdout, "Stages (manual): investigation"); n != 1 {
 		t.Errorf("the stage line appears %d times:\n%s", n, stdout)
 	}
 }
 
-// g2: analysis and analyze are not stages any more (specs/clarify): --stage refuses both by
-// name, before any call.
-func TestScenario20g2_AnalysisStageIsRefused(t *testing.T) {
+// g2: analysis and analyze are not stages any more, and plan and planning became investigate
+// and investigation (specs/clarify): --stage refuses all four by name, before any call.
+func TestScenario20g2_RemovedStagesAreRefused(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
 
-	for _, name := range []string{"analysis", "analyze"} {
+	for _, name := range []string{"analysis", "analyze", "planning", "plan"} {
 		_, _, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", name, "explain Add")
 		if err == nil || !strings.Contains(err.Error(), "specs/clarify") {
 			t.Errorf("--stage %s: err = %v, want a refusal naming specs/clarify", name, err)

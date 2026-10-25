@@ -7,7 +7,7 @@ import (
 )
 
 // Scenario 33, stage context (specs/quality/SPEC.md §4): what an earlier stage found reaches
-// the later ones. The research reaches the plan, the plan's files and risks reach implement,
+// the later ones. The research reaches the investigation, the plan's files and risks reach implement,
 // the plan's steps, risks and acceptance criteria reach review, and a retried implement is
 // shown the diff stat of what the run has changed so far.
 
@@ -37,7 +37,7 @@ func TestScenario33_StageContextReachesLaterStages(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	r := newQualityRun(t, repoDir)
 	writeResponse(t, r.responses, "research", ctxResearchResponse)
-	writeResponse(t, r.responses, "plan", ctxPlanResponse)
+	writeResponse(t, r.responses, "investigate", ctxPlanResponse)
 	writeResponse(t, r.responses, "review", ctxReviewResponse)
 	// The first implement edits the file without fixing it, so the tests fail and implement
 	// runs again with something to show; the second fixes it.
@@ -45,15 +45,15 @@ func TestScenario33_StageContextReachesLaterStages(t *testing.T) {
 	appendOnEveryImplement(t, repoDir)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run",
-		"--stage", "research", "--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review",
+		"--stage", "research", "--stage", "investigation", "--stage", "development", "--stage", "testing", "--stage", "review",
 		"fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"research", "plan", "implement", "implement", "review"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"research", "investigate", "implement", "implement", "review"}) {
 		t.Fatalf("invocations = %v", got)
 	}
 
-	assertContains(t, "the plan prompt", r.prompt(t, "plan", 1),
+	assertContains(t, "the investigate prompt", r.prompt(t, "investigate", 1),
 		"Research:\nInteger addition in Go needs no library.",
 		"- the + operator is enough",
 		"Recommendation: use the + operator")

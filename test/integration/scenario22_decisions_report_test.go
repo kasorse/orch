@@ -29,7 +29,7 @@ func TestScenario22_DecisionsReport(t *testing.T) {
 		mustSucceed(t, stdout, stderr, err)
 	}
 	j := startJev(t, agree)
-	stdout, stderr, err = runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "planning", "explain Sub")
+	stdout, stderr, err = runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "investigation", "explain Sub")
 	mustSucceed(t, stdout, stderr, err)
 	before := invocations(t, invocationsLog)
 	requests := j.ModelRequests() + len(j.Bodies())

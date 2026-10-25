@@ -12,14 +12,14 @@ func reviewFixture(askMode bool) *reviewState {
 	p := func(f float64) *float64 { return &f }
 	d := domain.Decision{Complexity: domain.ComplexityOutcome{Selected: "simple"}, Stages: domain.StageSelection{Stages: []domain.StageOutcome{
 		{Stage: "research", Probability: p(0.03), Threshold: p(0.7)},
-		{Stage: "planning", Probability: p(0.08), Threshold: p(0.65)},
+		{Stage: "investigation", Probability: p(0.08), Threshold: p(0.65)},
 		{Stage: "development", Probability: p(0.98), Threshold: p(0.6), Enabled: true},
 		{Stage: "testing", Probability: p(0.85), Threshold: p(0.6), Enabled: true},
 		{Stage: "review", Probability: p(0.3), Threshold: p(0.7)},
 	}}}
 	r := &ConsoleReporter{}
 	return r.newReviewState(ReviewInput{Decision: d, AskMode: askMode, DefaultMode: domain.ModeAcceptEdits, Editable: true,
-		Policy: domain.DecisionPolicy{ForceStages: map[domain.Complexity][]domain.Stage{"complex": {"planning", "review"}}}})
+		Policy: domain.DecisionPolicy{ForceStages: map[domain.Complexity][]domain.Stage{"complex": {"investigation", "review"}}}})
 }
 
 func press(t *testing.T, st *reviewState, keys ...tui.Event) (bool, ReviewResult) {
@@ -83,11 +83,11 @@ func TestReview_ComplexityTurnsOnForcedStages(t *testing.T) {
 		t.Fatalf("complexity = %s", res.Decision.Complexity.Selected)
 	}
 	got := strings.Join(stageNames(res.Decision.Stages.EnabledStages()), ",")
-	if got != "planning,development,testing,review" {
+	if got != "investigation,development,testing,review" {
 		t.Errorf("enabled = %s", got)
 	}
 	for _, so := range res.Decision.Stages.Stages {
-		if (so.Stage == "planning" || so.Stage == "review") && !so.Forced {
+		if (so.Stage == "investigation" || so.Stage == "review") && !so.Forced {
 			t.Errorf("%s must be marked forced", so.Stage)
 		}
 	}
@@ -96,14 +96,14 @@ func TestReview_ComplexityTurnsOnForcedStages(t *testing.T) {
 func TestReview_UnforcingWarnsAndRecordsOverride(t *testing.T) {
 	st := reviewFixture(false)
 	press(t, st, kTab, kRight, kRight) // complex
-	press(t, st, digit('2'))           // planning off
+	press(t, st, digit('2'))           // investigation off
 	if !strings.Contains(st.message, "forced for complexity=complex") {
 		t.Errorf("expected a warning, got %q", st.message)
 	}
 	_, res := press(t, st, kEnter)
 	for _, so := range res.Decision.Stages.Stages {
-		if so.Stage == "planning" && (so.Enabled || !so.Forced || !strings.Contains(so.Reason, "excluded by user")) {
-			t.Errorf("planning = %+v", so)
+		if so.Stage == "investigation" && (so.Enabled || !so.Forced || !strings.Contains(so.Reason, "excluded by user")) {
+			t.Errorf("investigation = %+v", so)
 		}
 	}
 }
@@ -133,8 +133,8 @@ func TestReview_EscAndCancelButton(t *testing.T) {
 
 func TestReview_ArrowNavigationTogglesWithSpace(t *testing.T) {
 	st := reviewFixture(false)
-	_, res := press(t, st, kDown, kSpace, kEnter) // planning on
-	if got := strings.Join(stageNames(res.Decision.Stages.EnabledStages()), ","); got != "planning,development,testing" {
+	_, res := press(t, st, kDown, kSpace, kEnter) // investigation on
+	if got := strings.Join(stageNames(res.Decision.Stages.EnabledStages()), ","); got != "investigation,development,testing" {
 		t.Errorf("enabled = %s", got)
 	}
 }

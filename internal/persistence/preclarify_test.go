@@ -19,6 +19,12 @@ func TestDecodeRun_RefusesARunStartedBeforeClarify(t *testing.T) {
 		"execution":     head + `"executions":[{"index":0,"action":"analyze","status":"completed"}]}`,
 		"decision":      head + `"decision":{"stages":{"stages":[{"stage":"analysis","forced":false,"enabled":true,"reason":"p"}]}}}`,
 		"resume entry":  head + `"resumes":[{"entry":"analyze"}]}`,
+
+		"plan workflow step":     head + `"workflow":{"steps":[{"action":"plan","stage":"planning"},{"action":"implement","stage":"development"}]}}`,
+		"plan execution":         head + `"executions":[{"index":0,"action":"plan","status":"completed"}]}`,
+		"planning decision":      head + `"decision":{"stages":{"stages":[{"stage":"planning","forced":false,"enabled":true,"reason":"p"}]}}}`,
+		"plan resume entry":      head + `"resumes":[{"entry":"plan"}]}`,
+		"plan step, investigate": head + `"workflow":{"steps":[{"action":"plan","stage":"investigation"}]}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := decodeRun([]byte(body), preClarifyRunID)
@@ -38,6 +44,9 @@ func TestDecodeDecision_RefusesATraceWithAnalysis(t *testing.T) {
 	for name, body := range map[string]string{
 		"stage":    `{"stages":[{"stage":"analysis","forced":false,"enabled":true,"reason":"p"}],"workflow":["implement"]}`,
 		"workflow": `{"stages":[],"workflow":["analyze","implement"]}`,
+
+		"planning stage": `{"stages":[{"stage":"planning","forced":false,"enabled":true,"reason":"p"}],"workflow":["implement"]}`,
+		"plan workflow":  `{"stages":[],"workflow":["plan","implement"]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := decodeDecision([]byte(body), preClarifyRunID)

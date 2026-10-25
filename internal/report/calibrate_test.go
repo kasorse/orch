@@ -317,7 +317,7 @@ func TestCalibrate_ComparisonOfAStageWithAndWithout(t *testing.T) {
 	out := renderCalibration(es, nil, 1)
 	sp := func(n int) string { return strings.Repeat(" ", n) }
 	for _, want := range []string{
-		"research, planning: with and without the stage (no proposal)",
+		"research, investigation: with and without the stage (no proposal)",
 		"medium" + sp(5) + "research" + sp(2) + "with" + sp(9) + "2" + sp(3) + "2 (100.0%)" + sp(5) + "0.50",
 		"medium" + sp(5) + "research" + sp(2) + "without" + sp(6) + "1" + sp(5) + "0 (0.0%)" + sp(5) + "1.00",
 	} {

@@ -145,7 +145,7 @@ type ProbabilityDecision struct {
 }
 
 // askedStages are the stages a decision provider is asked about (specs/decision-shape/SPEC.md
-// §6.1), in stage order: facts about the task that its size does not already carry. Planning,
+// §6.1), in stage order: facts about the task that its size does not already carry. Investigation,
 // testing and review come from the level and from development instead.
 var askedStages = []Stage{StageResearch, StageDevelopment}
 
@@ -155,11 +155,11 @@ func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
 // StageDecisions holds the probability of each stage a provider was asked about; a stage that
 // was not asked is nil.
 type StageDecisions struct {
-	Research    *ProbabilityDecision `json:"research,omitempty"`
-	Planning    *ProbabilityDecision `json:"planning,omitempty"`
-	Development *ProbabilityDecision `json:"development,omitempty"`
-	Testing     *ProbabilityDecision `json:"testing,omitempty"`
-	Review      *ProbabilityDecision `json:"review,omitempty"`
+	Research      *ProbabilityDecision `json:"research,omitempty"`
+	Investigation *ProbabilityDecision `json:"investigation,omitempty"`
+	Development   *ProbabilityDecision `json:"development,omitempty"`
+	Testing       *ProbabilityDecision `json:"testing,omitempty"`
+	Review        *ProbabilityDecision `json:"review,omitempty"`
 }
 
 // field returns a pointer to s's field for stage, or nil for an unknown stage.
@@ -167,8 +167,8 @@ func (s *StageDecisions) field(stage Stage) **ProbabilityDecision {
 	switch stage {
 	case StageResearch:
 		return &s.Research
-	case StagePlanning:
-		return &s.Planning
+	case StageInvestigation:
+		return &s.Investigation
 	case StageDevelopment:
 		return &s.Development
 	case StageTesting:
