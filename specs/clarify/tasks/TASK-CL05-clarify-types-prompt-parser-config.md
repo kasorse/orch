@@ -49,3 +49,10 @@ Render, Configuration).
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `22f27c57-2d40-4261-8548-a7d0edc5df44` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/clarify/CL05` on `story/clarify/CL04` @ 0a7ab49, commit 2e6b6dd.
+Cost $4.89. Implementation summary: Add clarify types, prompt, answer parser and config section.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

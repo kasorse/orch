@@ -44,3 +44,10 @@ ranked Markdown sections from the files `clarify.docs` matches, behind the deny 
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `8eee0b07-a38a-4e6a-8627-5bd3670738ba` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/clarify/CL04` on `story/clarify/CL03` @ 233b749, commit 0a7ab49.
+Cost $0.69. Implementation summary: Add projectctx.Docs and clarify.docs/max_bytes config.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

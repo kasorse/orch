@@ -50,3 +50,10 @@ only task that edits the shared documents.
 
 Do not edit anything under `specs/clarify/`. The four `bench/` tests that skip under bwrap are run
 by the operator outside the sandbox before the branch merges; that is not part of this task.
+
+## As built (2026-10-25)
+
+Run `e7b092ba-7b10-4c30-88bf-38d9376754a5` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/clarify/CL08` on `story/clarify/CL07` @ c3a34bf, commit 1716436.
+Cost $5.83. Implementation summary: Add clarify scenarios, calibrate clarity section and docs.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

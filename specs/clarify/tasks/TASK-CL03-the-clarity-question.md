@@ -54,3 +54,10 @@ it.
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `adb1524a-fe8c-450f-8e40-d0e84f110fe7` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/clarify/CL03` on `story/clarify/CL02` @ 28774b8, commit 233b749.
+Cost $6.52. Implementation summary: Ask and record the clarity question in the pre-check.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

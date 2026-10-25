@@ -35,3 +35,10 @@ Every stage prompt that takes the task gets the clarification after it (Contract
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `c1c20098-c481-45b4-b4ba-d985c9d336aa` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/clarify/CL07` on `story/clarify/CL06` @ 8956391, commit c3a34bf.
+Cost $0.62. Implementation summary: Pass the clarification to stage prompts after the task.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

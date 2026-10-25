@@ -60,3 +60,10 @@ used to give.
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `3aadc421-d755-43c3-a099-a3dc7fb7fb0e` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/clarify/CL02` on `story/clarify/CL01` @ c0b2997, commit 28774b8.
+Cost $2.88. Implementation summary: Rename planning to investigation and add root_cause to its artifact.
+Conflicts with spec/clarify: internal/action/extensions_test.go.

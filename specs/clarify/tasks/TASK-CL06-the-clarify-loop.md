@@ -56,3 +56,10 @@ re-check, the operator's additions, and the `task needs input` stop. The result 
 ## Notes
 
 Do not edit anything under `specs/clarify/`.
+
+## As built (2026-10-25)
+
+Run `338047e1-552e-4ada-a998-e0eecf06b7c5` in orche: completed, 2 fix iterations, tests passed, review pass.
+Branch `story/clarify/CL06` on `story/clarify/CL05` @ 2e6b6dd, commit 8956391.
+Cost $9.30. Implementation summary: Count clarify calls in the budget and in an undecided run's outcome.
+Conflicts with spec/clarify: internal/action/extensions_test.go.
