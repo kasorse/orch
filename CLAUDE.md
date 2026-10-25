@@ -401,6 +401,13 @@ user-defined workflow language. Don't add abstractions only useful for these.
 
 ## Tasks from `specs/*/tasks`
 
+When you cut a specification into tasks, each task updates the documentation its own change makes
+out of date - its sections of MVP.md, CLAUDE.md, README.md, `orchestrator.example.yaml` - in the
+same task. Do not leave the documentation to a closing task: one task editing MVP.md in a dozen
+places reads it piece by piece with a context that grows every turn (specs/clarify CL08: 20
+minutes, 94 edits of MVP.md). A closing task may still add what only exists once every task is
+done, such as a section that summarises the whole feature.
+
 A task is finished by its specification's README ("Ground rules"), not only by green tests:
 tick it in that README's table and in `TODO.md` where `TODO.md` tracks it, bring the
 README's `Status:` line up to date, and add an `## As built` section to the task file with
@@ -429,7 +436,8 @@ cd bench && go test ./...   # bench/ is a separate module; the root go test does
 
 `scripts/check.sh` runs these four gates in the root module and in `bench/` and stops at the
 first failure; it is also the orchestrator's `test.command` for this repository, so a run's
-test step covers both modules. Under the bwrap sandbox four `bench/` tests skip (nested
+test step covers both modules. `ORCH_TEST_FILTER` (set only by the implement session's
+`run_tests`) narrows its `go test` to `-run <filter>`; build, vet and gofmt still run in full. Under the bwrap sandbox four `bench/` tests skip (nested
 bwrap, `orchestrator validate`, the end-to-end `TestPipeline` of `bench/test` among them); run
 the script outside the sandbox once per specification, before its branch merges (rebuild
 `bin/orchestrator` first, since the `orchestrator validate` test uses it).

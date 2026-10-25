@@ -4941,8 +4941,9 @@ and `jira`. A service's story base is the branch checked out in it when the stor
    (summary, relevant files, interfaces, constraints) is strictly validated and bounded.
 4. **Specify**: one call with `none` authority on the home's `actions.investigate` route, from the
    request, the surveys (fenced) and the closed list of services. A task is a vertical slice
-   one run can implement, test and review, leaves its repository's tests passing, changes one
-   repository, and lists in `depends_on` what it needs. The answer is validated strictly: slug,
+   one run can implement, test and review, leaves its repository's tests passing, updates the
+   documentation its own change makes out of date (no task is set aside for the others'
+   documentation), changes one repository, and lists in `depends_on` what it needs. The answer is validated strictly: slug,
    prefix `[A-Z]{2}`, task IDs `<prefix><NN>`, `repo` a found service, size S/M/L, at most
    `max_tasks` tasks, bounded texts, the graph rules of §48.4. Any violation is an
    `InvalidResponse`: nothing is written under `spec_dir` and the answer is kept in the story's

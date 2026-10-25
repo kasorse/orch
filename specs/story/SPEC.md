@@ -213,6 +213,10 @@ printed list shows it, and `--repo` corrects it. The cost of the mistake is one 
   `story.max_tasks`, and the rules a task must follow:
   - a vertical slice that one run can implement, test and review (size S or M; an L is split);
   - after it, that repository's tests pass;
+  - it updates, in the same task, the documentation its own change makes out of date; no task
+    is set aside to write the documentation of the others (a closing documentation task edits
+    one large file in many places with a context that grows each turn, and is the slowest and
+    costliest task of the story);
   - it changes exactly one repository;
   - it lists what it needs in `depends_on`; within one repository the tasks a task needs form a
     chain (§9.2);
