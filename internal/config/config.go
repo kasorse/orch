@@ -535,6 +535,10 @@ type Config struct {
 	Policy      PolicyConfig      `yaml:"policy"`
 	Context     ContextConfig     `yaml:"context"`
 
+	// Clarify configures the clarify step (specs/clarify); nil while the section is absent,
+	// which is valid until the step is wired in.
+	Clarify *ClarifyConfig `yaml:"clarify"`
+
 	// Security holds the knobs of the execution-authority guards (specs/permissions/
 	// SPEC.md §7, §9). None of them widens what a step may do.
 	Security SecurityConfig `yaml:"security"`

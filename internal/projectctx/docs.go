@@ -115,13 +115,9 @@ func firstParagraph(lines []string) string {
 	return clip(strings.Join(para, " "), maxExcerptLen)
 }
 
-// docExcerpts returns the sections of README.md and docs/*.md that mention the
-// request's terms, most matching first. Only the opening of each section is kept: the
-// point is to show Jev what the docs say about the area, not to ship the docs.
-func docExcerpts(root string, files []string, q queryTokens) []domain.DocExcerpt {
-	if len(q.words) == 0 {
-		return nil
-	}
+// contextDocFiles picks the files the Context Manager reads for excerpts: README.md and
+// docs/*.md, at most maxDocCandidates.
+func contextDocFiles(files []string) []string {
 	var docs []string
 	for _, f := range files {
 		lower := strings.ToLower(f)
@@ -131,6 +127,17 @@ func docExcerpts(root string, files []string, q queryTokens) []domain.DocExcerpt
 	}
 	if len(docs) > maxDocCandidates {
 		docs = docs[:maxDocCandidates]
+	}
+	return docs
+}
+
+// docExcerpts returns the sections of the given Markdown files that mention the
+// request's terms, most matching first, at most limit of them (all when limit <= 0). Only
+// the opening of each section is kept: the point is to show the reader what the docs say
+// about the area, not to ship the docs. The caller has applied the deny list to docs.
+func docExcerpts(root string, docs []string, q queryTokens, limit int) []domain.DocExcerpt {
+	if len(q.words) == 0 {
+		return nil
 	}
 
 	type scored struct {
@@ -158,7 +165,7 @@ func docExcerpts(root string, files []string, q queryTokens) []domain.DocExcerpt
 	}
 	sort.SliceStable(found, func(i, j int) bool { return found[i].score > found[j].score })
 	var out []domain.DocExcerpt
-	for i := 0; i < len(found) && i < maxDocExcerpts; i++ {
+	for i := 0; i < len(found) && (limit <= 0 || i < limit); i++ {
 		out = append(out, found[i].excerpt)
 	}
 	return out

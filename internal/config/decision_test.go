@@ -359,6 +359,35 @@ func TestValidateDecision_Context(t *testing.T) {
 	}
 }
 
+func TestValidateClarifyDocs(t *testing.T) {
+	hundred, ok := 100, 4096
+	tests := []struct {
+		name    string
+		clarify *ClarifyConfig
+		wantErr string
+	}{
+		{"absent", nil, ""},
+		{"defaults", &ClarifyConfig{}, ""},
+		{"valid", &ClarifyConfig{Docs: []string{"docs/**/*.md"}, MaxBytes: &ok}, ""},
+		{"invalid glob", &ClarifyConfig{Docs: []string{"docs/["}}, "clarify.docs[0]"},
+		{"max_bytes too small", &ClarifyConfig{MaxBytes: &hundred}, "clarify.max_bytes must be between 1024 and 131072, got 100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Clarify = tt.clarify
+			err := Validate(cfg)
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("Validate() = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+	var c *ClarifyConfig
+	if g := c.DocGlobs(); len(g) != 1 || g[0] != "**/*.md" || c.InstructionBytes() != 16384 {
+		t.Errorf("defaults = %v, %d", g, c.InstructionBytes())
+	}
+}
+
 func TestValidateDecision_Research(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Research.Provider = ""

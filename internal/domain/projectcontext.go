@@ -26,6 +26,15 @@ type DocExcerpt struct {
 	Text    string `json:"text"`
 }
 
+// Instructions are the project instructions the clarify call reads (specs/clarify): the
+// rules of the root instruction files and the ranked sections of the documentation files
+// clarify.docs matches, cut to clarify.max_bytes. Truncated is set when the budget dropped any.
+type Instructions struct {
+	Rules     []string     `json:"rules,omitempty"`
+	Excerpts  []DocExcerpt `json:"excerpts,omitempty"`
+	Truncated bool         `json:"truncated,omitempty"`
+}
+
 // Purpose values for RelevantFile. Path-based matching (T08) can only tell tests apart;
 // the symbol-based roles are filled in by T17.
 const (

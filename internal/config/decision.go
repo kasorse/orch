@@ -297,6 +297,55 @@ type ContextConfig struct {
 	ExtraDeny []string `yaml:"extra_deny"`
 }
 
+// Defaults and bounds of clarify.docs and clarify.max_bytes.
+const (
+	defaultClarifyMaxBytes = 16384
+	minClarifyMaxBytes     = 1024
+	maxClarifyMaxBytes     = 131072
+)
+
+// ClarifyConfig is the clarify section (specs/clarify). Only the instruction selection is
+// declared so far: the route and the rounds come with the step itself.
+type ClarifyConfig struct {
+	// Docs are the globs, with "**", over the git-listed files that supply the instructions.
+	Docs []string `yaml:"docs"`
+	// MaxBytes caps the rules and excerpts together; nil means the default.
+	MaxBytes *int `yaml:"max_bytes"`
+}
+
+// DocGlobs returns clarify.docs, "**/*.md" when absent.
+func (c *ClarifyConfig) DocGlobs() []string {
+	if c == nil || len(c.Docs) == 0 {
+		return []string{"**/*.md"}
+	}
+	return c.Docs
+}
+
+// InstructionBytes returns clarify.max_bytes, 16384 when absent.
+func (c *ClarifyConfig) InstructionBytes() int {
+	if c == nil || c.MaxBytes == nil {
+		return defaultClarifyMaxBytes
+	}
+	return *c.MaxBytes
+}
+
+func clarifyProblems(c *ClarifyConfig) []string {
+	if c == nil {
+		return nil
+	}
+	var problems []string
+	for i, g := range c.Docs {
+		if err := domain.ValidateGlob(g); err != nil {
+			problems = append(problems, fmt.Sprintf("clarify.docs[%d] %q: %v", i, g, err))
+		}
+	}
+	if c.MaxBytes != nil && (*c.MaxBytes < minClarifyMaxBytes || *c.MaxBytes > maxClarifyMaxBytes) {
+		problems = append(problems, fmt.Sprintf("clarify.max_bytes must be between %d and %d, got %d",
+			minClarifyMaxBytes, maxClarifyMaxBytes, *c.MaxBytes))
+	}
+	return problems
+}
+
 // DecisionPolicy converts the validated policy configuration into the domain-only
 // value the Policy Engine (internal/policy, T03) consumes. Callers must call
 // ValidateDecisionConfig first: DecisionPolicy assumes every required field is
@@ -379,6 +428,7 @@ func decisionProblems(cfg Config) []string {
 	}
 
 	problems = append(problems, validatePolicyConfig(cfg.Policy)...)
+	problems = append(problems, clarifyProblems(cfg.Clarify)...)
 
 	if cfg.Context.MaxFiles <= 0 {
 		problems = append(problems, fmt.Sprintf("context.max_files must be positive, got %d", cfg.Context.MaxFiles))
