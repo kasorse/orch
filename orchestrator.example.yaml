@@ -217,7 +217,8 @@ limits:
   # much (USD), with status stopped and exit code 4; one expensive step can still overshoot it.
   # Every provider the actions route to must report a call's cost (only claude does), or
   # validation refuses the budget. A call cut short reports no cost, so the sum is then a lower
-  # bound. The decision phase (translation, classification) is not counted.
+  # bound. The decision phase (translation, classification) is not counted; the clarify call and
+  # the clarity re-checks (the `clarify:` section) are.
   # max_cost_usd: 5.00
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:

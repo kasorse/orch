@@ -8,11 +8,13 @@ to disk. The full spec is `MVP.md` (the decision layer in detail: `specs/JEV int
 
 A **decision provider** — the [Jev](https://docs.typesafe.ai) decision API, or one of the
 CLIs — only estimates probabilities: does the task need repository context, how complex is
-it, how likely is each stage (research, analysis, planning, development, testing, review)
-needed. Everything chosen from those numbers is Go code: configurable thresholds pick the
-complexity and the stages, the stages always run in the same order, and a deterministic state
-machine drives them. The AI models only do reasoning (research, analysis, planning,
-implementation, review) — they never decide what happens next. Test pass/fail is decided only
+it, whether the task is clear enough to act on, how likely is each stage (research,
+investigation, development, testing, review) needed. Everything chosen from those numbers is
+Go code: configurable thresholds pick the complexity and the stages, the stages always run in
+the same order, and a deterministic state machine drives them. The AI models only do reasoning
+(research, investigation, implementation, review) — they never decide what happens next. A task
+that is not clear is first made clear by one more call that has no tools and does not read the
+code (see [Clarifying an unclear task](#clarifying-an-unclear-task)). Test pass/fail is decided only
 by the real exit code of your test command, never by anything a model says.
 
 ## Prerequisites
@@ -69,16 +71,27 @@ translation:
   model: haiku
   timeout: 60s
 
+clarify:                     # required: a route, or `clarify: {enabled: false}` written out
+  enabled: true              # false: no clarify step (the clarity question is still asked and recorded)
+  provider: claude
+  model: sonnet
+  timeout: 120s
+  docs: ["**/*.md"]          # globs over the files git lists; the deny list applies first
+  max_bytes: 16384           # rules + excerpts sent with the task; 1024..131072
+  max_rounds: 2              # additions the operator may make after a re-check; 0..5
+
 policy:
   context_depth:
     project_threshold: 0.5
+  clarify:
+    threshold: 0.80          # P(clear) >= threshold -> the task is clear enough
   complexity:
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+    thresholds: {research: 0.81, development: 0.81}
     force:
-      medium: [analysis, review]
-      complex: [analysis, planning, review]
+      medium: [investigation, review]
+      complex: [investigation, review]
 
 context:
   max_files: 20
@@ -86,11 +99,10 @@ context:
   extra_deny: []
 
 actions:
-  research:  { provider: claude, model: sonnet }
-  analyze:   { provider: claude, model: sonnet }
-  plan:      { provider: claude, model: sonnet }
-  implement: { provider: claude, model: opus }
-  review:    { provider: claude, model: sonnet, timeout: 20m }
+  research:    { provider: claude, model: sonnet }
+  investigate: { provider: claude, model: sonnet }
+  implement:   { provider: claude, model: opus }
+  review:      { provider: claude, model: sonnet, timeout: 20m }
 
 test:
   command: "go test ./..."
@@ -138,20 +150,32 @@ security:
 - **`translation`** — a request that is mostly Russian is translated to English for the
   decision provider (the stages still get your original text). If translation fails, the
   original is sent and a warning is printed.
-- **`policy`** turns probabilities into decisions (`specs/decision-shape/`):
+- **`clarify`** (required) routes the one call that makes an unclear task clear, see
+  [Clarifying an unclear task](#clarifying-an-unclear-task). `enabled: false` turns the step
+  off (the benchmark does); `provider`, `model`, `effort` and `timeout` route it like an
+  action; `docs` (globs over the files git lists, default `["**/*.md"]`) and `max_bytes`
+  (1024..131072, default 16384) bound the repository's rules and documentation excerpts it
+  gets; `max_rounds` (0..5, default 2) is how many additions you may make after a re-check.
+  The provider must be able to enforce authority `none`.
+- **`policy`** turns probabilities into decisions (`specs/decision-shape/`, `specs/clarify/`):
+  - `clarify.threshold` (in (0, 1], required): the task is clear enough when the decision
+    provider's P(clear) is at or above it. 0.80 is not calibrated: `decisions calibrate`
+    shows the distribution and how many runs stopped `task needs input`;
   - `project_threshold` for collecting project context;
   - `complexity.cuts` on size = P(medium) + 2·P(complex), from 0 to 2: size at or above
     `complex` is complex, at or above `medium` medium, else simple. The example's cuts are the
     50/35/15 quantiles of past decisions of one decision model on one repository's tasks;
     take yours from `decisions calibrate`;
-  - `stages.thresholds` for the three stages the decision provider is asked about:
-    development (are files changed; without it the run only answers), research (is outside
-    knowledge needed) and analysis (is the cause or the place to change unknown);
+  - `stages.thresholds` for the two stages the decision provider is asked about:
+    development (are files changed; without it the run only answers) and research (is outside
+    knowledge needed);
   - `stages.force`, the template: the stages on at each complexity. Testing always comes
     with development; without development, testing and review are off.
 
-  If nothing qualifies, the workflow is `analysis`. The same values apply to every decision
-  provider.
+  If nothing qualifies, the workflow is `investigation`. The same values apply to every
+  decision provider. `analysis` and `planning` are not stages any more: a config that still
+  names them (a threshold, the template, `policy.explore`, `actions.analyze`, `actions.plan`)
+  is refused with the replacement and a pointer to `specs/clarify/`.
 - **`context`** bounds the project context sent to the decision provider; `extra_deny`
   adds glob patterns that are never read.
 - Each entry under **`actions`** independently chooses a `provider` (`claude` | `codex` |
@@ -192,8 +216,8 @@ security:
 
 ### Getting more from the same stages (opt-in)
 
-Every stage already gets what the earlier ones found (the analysis and plan files and risks, the
-plan's acceptance criteria, and on a retry the diff stat of what the run changed so far), and
+Every stage already gets what the earlier ones found (the investigation's files and risks, its
+acceptance criteria, the clarification agreed before the run, and on a retry the diff stat of what the run changed so far), and
 review checks each acceptance criterion. The keys below are all optional and off unless
 written; a run with none of them behaves as before, apart from those richer prompts and
 `limits.stop_without_progress`:
@@ -259,7 +283,8 @@ optional and commented out in `orchestrator.example.yaml`; the org file has its 
   `run.json` tells a CI job. To forbid a path outright use `security.protected_paths`.
 - **Budget.** `limits.max_cost_usd` stops a run before the next step once its steps have cost
   that much (status `stopped`, exit code 4); a resume counts what was spent and continues once
-  you raise it. A step can overshoot by its own cost, and the decision phase is not counted.
+  you raise it. A step can overshoot by its own cost; the decision phase is not counted, except
+the clarify call and its re-checks.
   Only providers that report a call's cost (claude) can be routed with a budget, or validation
   refuses it.
 - **Org layer.** `/etc/orchestrator/org.yaml` (or the file `ORCHESTRATOR_ORG_CONFIG` names,
@@ -285,9 +310,9 @@ its permission checks turned off.
 
 | call | authority | may | may not |
 |---|---|---|---|
-| translation, decision | `none` | answer from the prompt | use any tool |
+| translation, decision, clarify | `none` | answer from the prompt | use any tool |
 | `research` | `web` | search and fetch web pages | read any file |
-| `analyze`, `plan`, `review` | `read` | read and search the repository | write, run commands, use the network |
+| `investigate`, `review` | `read` | read and search the repository | write, run commands, use the network |
 | `implement` | `edit` | read, create and modify files **inside the repository** | run commands (not even `go build`), use the network, write outside the repository, touch `.git/` or `.claude/` |
 | `test` | — | the orchestrator runs `test.command` itself | — |
 
@@ -419,7 +444,7 @@ extensions:
       command: graphify-mcp
       args: ["{repo}/graphify-out/graph.json"]   # {repo} = the repository root
       tools: [query_graph, get_node, get_neighbors, shortest_path]   # or ["*"]
-      actions: [analyze, plan, implement, review]                    # default: analyze, plan, review
+      actions: [investigate, implement, review]                      # default: investigate, review
   user_settings: true             # ~/.claude/settings.json: plugins, skills, hooks
   user_settings_actions: [implement, review]                         # default: every model step
 ```
@@ -501,25 +526,65 @@ summary: `MVP.md` §38.
 
 1. **Language.** A request whose prose is at least 30% Cyrillic is translated.
 2. **Pre-check.** The decision provider estimates whether classifying the request needs the
-   repository; above `project_threshold`, project context is collected.
-3. **Project context.** A compact summary — never whole files: language and dependencies
+   repository, and how clear the request is (P(clear)); above `project_threshold`, project
+   context is collected.
+3. **Clarify.** If P(clear) is under `policy.clarify.threshold`, the task is made clear before
+   anything else is decided, see [Clarifying an unclear task](#clarifying-an-unclear-task).
+4. **Project context.** A compact summary — never whole files: language and dependencies
    from the manifest, test layout, bullet rules from `AGENTS.md`/`CLAUDE.md`/
    `CONTRIBUTING.md`, matching README/docs sections, the files relevant to the request with
    one-line summaries, git branch and changed paths.
-4. **Classification.** Complexity distribution(s) and the probabilities of the three asked
-   stages (development, research, analysis).
-5. **Policy.** The cuts on size pick the complexity; its template, the asked stages over
+5. **Classification.** Complexity distribution(s) and the probabilities of the two asked
+   stages (development, research).
+6. **Policy.** The cuts on size pick the complexity; its template, the asked stages over
    their thresholds and testing with development make the stages.
-6. **Workflow.** `research → analyze → plan → implement → test → review`, filtered to the
+7. **Workflow.** `research → investigate → implement → test → review`, filtered to the
    enabled stages. A workflow without `implement` ends by printing the answer written by its
    last read-only step.
+
+### Clarifying an unclear task
+
+The pre-check also asks whether the request is clear enough to act on: is it stated what has to
+be achieved, where, and how to tell that it is done. Go compares the answer, P(clear), with
+`policy.clarify.threshold`. A clear task goes on at no extra cost.
+
+Under the threshold (and with `clarify.enabled: true`) one more call runs before the decision:
+the clarify step. It is routed by the `clarify` section, has authority `none` — no tools, so it
+cannot open a file — and gets the request plus the repository's *instructions*, chosen by Go: the
+bullet rules of `AGENTS.md`, `CLAUDE.md` and `CONTRIBUTING.md` and the Markdown sections of the
+files `clarify.docs` matches (ranked by the request's words, cut to `clarify.max_bytes`; the deny
+list is applied before anything is read). It lists what is unclear, with a question for each
+point and, where the documentation says so, the answer and its source. The decision provider never
+sees the instructions: it is asked again about the request followed by the clarification (the
+re-check).
+
+- **At a terminal** (not `--mode auto`) you see each point with the proposed answer: Enter keeps it,
+  text replaces it, `-` leaves the point open. If the re-check still rates the task unclear you
+  may add text to it, up to `clarify.max_rounds` times; an empty addition stops the run.
+- **`--mode auto`** takes the answers the documentation supports and the model's stated
+  assumptions, and leaves the rest open.
+- If the task is still unclear after the re-check (in auto mode, or when the rounds are spent),
+  the run stops with `task needs input` and exit code 4. The console and `summary.md` list the open
+  points and the last P(clear) against the threshold. There is nothing to resume: change the task
+  and start a new run.
+- What was agreed is `task.clarification` in `run.json` and is given to the stages after the
+  task, as the clarification. The stages still get your original request first. A failed
+  clarify call fails the run (an unclear task never goes on unclarified).
+- `run --stage` runs the same step; the stages stay yours. A story task (`run --story-task`)
+  skips it: the task file is the plan. `clarify: {enabled: false}` turns the step off, and the
+  run goes on whatever P(clear) is; the question is still asked and recorded in `decision.json`.
+
+`policy.clarify.threshold` is not calibrated; `decisions calibrate` shows the P(clear)
+distribution and the share of runs that stopped `task needs input`, and proposes nothing.
 
 ## What is sent to Jev
 
 With `decision.provider: jev`, two requests per run go to `decision.jev.base_url`
 (`https://api.typesafe.ai` by default):
 
-- the request text — the English translation when one was made;
+- the request text — the English translation when one was made; after a clarify step, the
+  request followed by the clarification (the points, their answers and your additions — never
+  the instruction files themselves), once more per re-check;
 - when project context is needed, the context described above: paths, one-line summaries,
   rules, doc excerpts, dependency names, test layout, git branch and changed paths.
 
@@ -685,7 +750,7 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
   are grouped by decision provider, model and `policy_hash`; for each group it prints the
   runs where the stage ran in probability buckets of 0.1 with the share the stage paid off in
   (testing: a test failed after an implement; review: a failing verdict followed by an
-  implement), then comparison tables for research, analysis and planning and a table per
+  implement), then comparison tables for research and investigation and a table per
   complexity and model (runs, completed share, mean `fix_iterations`, mean cost), and ends
   with a YAML diff of `policy.stages.thresholds` with the rows behind each line. A threshold
   is raised to the lowest bucket edge above it such that the stage paid off in none of at
@@ -695,8 +760,10 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
   the decisions' sizes spread, which stage answers only repeat the size, the cuts for a target
   share (`--size-target`, default 50/35/15) and the share of runs that needed a fix per size;
   it ends with a YAML diff of `policy.complexity.cuts`, the medium cut lowered when the
-  simple level would hold more than `--simple-max-hard` (default 0.2) hard runs. Nothing is
-  written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen by hand and mock
+  simple level would hold more than `--simple-max-hard` (default 0.2) hard runs. A third
+  section shows the `P(clear)` of the first check per decision model and questions hash, how
+  the checks ended, and the share of runs that stopped `task needs input`; it proposes no
+  clarity threshold. Nothing is written; you apply the diff by hand. Manual (`--stage`) runs, runs chosen by hand and mock
   answers are skipped. It needs no config and calls nothing.
 - `--mode plan|manual|accept-edits|auto` — without it, `run` asks you to approve or cancel the
   decided workflow and then to pick a mode; `manual` confirms every step. `auto` asks nothing
@@ -881,19 +948,24 @@ if the test step ends green. A run stopped this way resumes once the tests pass
 ```
 orchestrator run --stage review "review my change"
 orchestrator run --stage testing --stage review "check the hand edit"
-orchestrator run --stage plan "plan the cache"
+orchestrator run --stage investigation "investigate the cache"
 orchestrator run --stage review --jira PMC-2789
 ```
 
 Use it when you already know what you need: review code you changed by hand, just run the
-tests, plan without implementing. Names are `research`, `analysis`, `planning`,
-`development`, `testing`, `review`, plus the aliases `analyze`, `plan`, `implement`, `test`.
+tests, investigate without implementing. Names are `research`, `investigation`,
+`development`, `testing`, `review`, plus the aliases `investigate`, `implement`, `test`. The
+old names `analysis`, `analyze`, `planning` and `plan` are refused with a message pointing to
+`specs/clarify/`.
 Repeat `--stage` for several; one stage per flag. The order is always the fixed one, whatever
 order you give them in, and the retry rules, permissions, test command and resume are the same
 as for a decided run. `decision.json` records `source: manual`.
 
-* A stage whose usual input you skipped (planning without analysis, development without a
-  plan) prints a warning and still runs. Testing and review never warn.
+* A stage whose usual input you skipped (development without an investigation) prints a
+  warning and still runs. Testing and review never warn.
+* The clarity question is asked and, when the task is unclear, the clarify step runs before the
+  stages (see [Clarifying an unclear task](#clarifying-an-unclear-task)); `decision.json` still
+  records `source: manual`.
 * `review` looks at your uncommitted changes against `HEAD`. With no changes it fails with
   `nothing to review` before calling the model.
 * `development` still needs a clean worktree (or `security.require_clean_worktree: false`);

@@ -567,7 +567,7 @@ run started …» / «New failures since the run started: …» в промпт�
 - кешировать решение по хешу (task, HEAD, policy version) для повторных прогонов.
 Правка `questions.go` = рекалибровка (CLAUDE.md), поэтому делать только вместе с G5.
 
-### [ ] Q9. Ясность задачи до решения; одна стадия, читающая код — P1 · L
+### [x] Q9. Ясность задачи до решения; одна стадия, читающая код — P1 · L
 **Зачем:** analyze и plan оба читают код и возвращают места правки, план пересказывает анализ;
 никто не проверяет, понятно ли из задачи, что нужно сделать, и неясная задача проходит
 implement, test и review наугад.
@@ -578,6 +578,25 @@ pre-check только по тексту; ниже `policy.clarify.threshold` �
 run останавливается `task needs input` со списком неясного. Analysis уходит из стадий
 (спрашиваются research и development), planning переименован в investigation (`investigate`):
 план или, без development, ответ. Старые ключи конфига — ошибка с сообщением.
+**Сделано (2026-10-25):** CL01–CL08, нормативный текст — MVP.md §49 (и §8, §9, §37, §38.1, §40,
+§44.4, §48). Вопрос `clarity` (в `questions_hash`) задаётся в pre-check тем же вызовом, что
+`context_depth`; `policy.clarify.threshold` (включительно, в `policy_hash`); шаг clarify — один
+вызов с правом `none` по маршруту секции `clarify:` (обязательна; `enabled: false` для бенча),
+инструкции выбирает `projectctx.Docs` (правила корневых `AGENTS.md`/`CLAUDE.md`/`CONTRIBUTING.md`
+и разделы Markdown по `clarify.docs`, до `clarify.max_bytes`, deny-список раньше чтения);
+повторная проверка `decision.Provider.Clarity` видит только текст; в терминале оператор
+отвечает по пунктам и дополняет задачу (`clarify.max_rounds`), в `--mode auto` берутся ответы
+по документам и допущения, остальное остаётся открытым; не ясно — `task needs input`, код 4,
+`resume` отказывает. `task.clarification` в `run.json`, `clarity` и `usage.clarify[]`/
+`clarity_recheck[]` в `decision.json` (входят в `decision_overhead` и `max_cost_usd`),
+`artifacts/clarify-<N>.json`, `logs/clarify-<N>.*`, `logs/decide-clarity-<N>.*`; стадии получают
+уточнение после задачи. Спрашиваются research и development; analysis/planning/analyze/plan —
+ошибка с отсылкой к `specs/clarify`; `investigation`/`investigate` (право `read`) — план или
+ответ. Сценарии: `test/integration/clarify_test.go`, `clarify_scenarios_test.go`;
+`decisions calibrate` показывает распределение P(clear) по `questions_hash` и долю
+`task needs input`, порог не предлагает (A1). Живой проверки нового вопроса на настоящем Jev нет
+(D11); пороги остальных стадий не пересчитаны (D10); четыре теста `bench/`, пропускаемые под
+bwrap, оператор запускает вне песочницы перед слиянием ветки.
 
 ---
 

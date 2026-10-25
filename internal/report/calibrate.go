@@ -173,6 +173,68 @@ type Calibration struct {
 	Shape         []ShapeGroup
 	SizeTarget    SizeTarget
 	SimpleMaxHard float64
+	// Clarity is the P(clear) distribution per decision model and questions hash, NeedsInput the
+	// runs that stopped "task needs input" (specs/clarify CL08). Both only show: there is no
+	// proposal for policy.clarify.threshold (A1).
+	Clarity    []ClarityGroup
+	NeedsInput NeedsInputStats
+}
+
+// ClarityGroup is the runs of one decision model and questions hash that were asked the clarity
+// question: P(clear) of the first check in buckets of 0.1, and how the checks ended. Traces from
+// differently worded questions are on different scales, as for the size (ShapeKey).
+type ClarityGroup struct {
+	Key  ShapeKey
+	Runs int
+	// First counts the first check (the pre-check, the request alone) per bucket.
+	First [bucketCount]int
+	// Rechecked is the runs that had a re-check after the clarify step.
+	Rechecked int
+	// Status counts how the last check ended; Thresholds are the distinct policy.clarify.threshold
+	// values the runs recorded, ascending.
+	Status     map[domain.ClarityStatus]int
+	Thresholds []float64
+}
+
+// NeedsInputStats is the share of runs that stopped "task needs input". Such a run has no
+// decision.json, so it is counted over every run read, and its last P(clear) comes from run.json.
+type NeedsInputStats struct {
+	Runs, Total int
+	// Last counts the last check of those runs per bucket.
+	Last [bucketCount]int
+}
+
+func (s *NeedsInputStats) add(run domain.Run) {
+	s.Runs++
+	if c := run.Task.Clarification; c != nil && len(c.Checks) > 0 {
+		if p := c.Checks[len(c.Checks)-1]; !math.IsNaN(p) {
+			s.Last[bucketOf(p)]++
+		}
+	}
+}
+
+type clarityAcc struct {
+	runs       int
+	first      [bucketCount]int
+	rechecked  int
+	status     map[domain.ClarityStatus]int
+	thresholds map[float64]bool
+}
+
+func (a *clarityAcc) add(c *domain.ClarityTrace) {
+	if len(c.Checks) == 0 || math.IsNaN(c.Checks[0]) {
+		return
+	}
+	a.runs++
+	a.first[bucketOf(c.Checks[0])]++
+	if len(c.Checks) > 1 {
+		a.rechecked++
+	}
+	if a.status == nil {
+		a.status, a.thresholds = map[domain.ClarityStatus]int{}, map[float64]bool{}
+	}
+	a.status[c.Status]++
+	a.thresholds[c.Threshold] = true
 }
 
 // sample is one run where a stage ran: its probability, whether the stage paid off, and
@@ -215,8 +277,13 @@ func Calibrate(entries []RunEntry, unreadable []UnreadableRun, minRuns int) Cali
 	minRuns = max(minRuns, 1)
 	c := Calibration{MinRuns: minRuns, Traces: len(entries), Skipped: map[string]int{}, Unreadable: unreadable}
 	groups := map[CalibKey]*groupAcc{}
+	clarity := map[ShapeKey]*clarityAcc{}
+	c.NeedsInput.Total = len(entries)
 
 	for _, e := range entries {
+		if e.Run.FailureReason == domain.FailureTaskNeedsInput {
+			c.NeedsInput.add(e.Run)
+		}
 		t := e.Trace
 		if t == nil {
 			c.Skipped[skipNoTrace]++
@@ -234,11 +301,35 @@ func Calibrate(entries []RunEntry, unreadable []UnreadableRun, minRuns int) Cali
 			groups[key] = g
 		}
 		g.add(e, runOutcome(e))
+		if t.Clarity != nil {
+			ck := ShapeKey{Provider: t.Provider, Model: t.Model, QuestionsHash: t.QuestionsHash}
+			if clarity[ck] == nil {
+				clarity[ck] = &clarityAcc{}
+			}
+			clarity[ck].add(t.Clarity)
+		}
 	}
 
 	for key, g := range groups {
 		c.Groups = append(c.Groups, g.finish(key, minRuns))
 	}
+	for key, a := range clarity {
+		if a.runs == 0 {
+			continue
+		}
+		g := ClarityGroup{Key: key, Runs: a.runs, First: a.first, Rechecked: a.rechecked, Status: a.status}
+		for th := range a.thresholds {
+			g.Thresholds = append(g.Thresholds, th)
+		}
+		slices.Sort(g.Thresholds)
+		c.Clarity = append(c.Clarity, g)
+	}
+	slices.SortFunc(c.Clarity, func(a, b ClarityGroup) int {
+		return cmp.Or(
+			strings.Compare(a.Key.Provider, b.Key.Provider),
+			strings.Compare(a.Key.Model, b.Key.Model),
+			strings.Compare(a.Key.QuestionsHash, b.Key.QuestionsHash))
+	})
 	slices.SortFunc(c.Groups, func(a, b CalibGroup) int {
 		return cmp.Or(
 			strings.Compare(a.Key.Provider, b.Key.Provider),
@@ -570,6 +661,7 @@ func RenderCalibration(w io.Writer, runsDir string, c Calibration) {
 		renderModels(w, g.Models)
 	}
 	renderShape(w, c.Shape, c.SizeTarget, c.SimpleMaxHard)
+	renderClarity(w, c.Clarity, c.NeedsInput)
 
 	fmt.Fprintln(w, "\npolicy.stages.thresholds (a proposal; nothing is written)")
 	for _, g := range c.Groups {
@@ -631,6 +723,52 @@ func renderComparison(w io.Writer, rows []ComparisonRow) {
 			stats CalibStats
 		}{{"with", r.With}, {"without", r.Without}} {
 			fmt.Fprintf(w, row, r.Complexity, r.Stage, v.name, strconv.Itoa(v.stats.Runs), v.stats.completedCell(), v.stats.fixCell())
+		}
+	}
+}
+
+// renderClarity writes the clarity section: the distribution of the first P(clear) per group and
+// the share of runs that stopped "task needs input". It shows and proposes nothing (A1); it writes
+// nothing at all when no run was asked the clarity question and none stopped for input.
+func renderClarity(w io.Writer, groups []ClarityGroup, stopped NeedsInputStats) {
+	if len(groups) == 0 && stopped.Runs == 0 {
+		return
+	}
+	fmt.Fprintln(w, "\nclarity: P(clear) of the first check (specs/clarify; no proposal)")
+	for _, g := range groups {
+		threshold := "threshold " + noValue
+		switch len(g.Thresholds) {
+		case 0:
+		case 1:
+			threshold = fmt.Sprintf("threshold %.2f", g.Thresholds[0])
+		default:
+			threshold = "mixed thresholds"
+		}
+		fmt.Fprintf(w, "\n== %s/%s  questions %s  %s  (%d runs)\n", orNoValue(g.Key.Provider), orNoValue(g.Key.Model), shortHash(g.Key.QuestionsHash), threshold, g.Runs)
+		for i, n := range g.First {
+			if n > 0 {
+				fmt.Fprintf(w, "  %-9s %5d\n", bucketLabel(i), n)
+			}
+		}
+		var ended []string
+		for _, s := range []domain.ClarityStatus{domain.ClarityClear, domain.ClarityUnclear, domain.ClarityDisabled} {
+			if n := g.Status[s]; n > 0 {
+				ended = append(ended, fmt.Sprintf("%s %d", s, n))
+			}
+		}
+		fmt.Fprintf(w, "re-checked in %d runs; last check: %s\n", g.Rechecked, strings.Join(ended, ", "))
+	}
+	share := 0.0
+	if stopped.Total > 0 {
+		share = 100 * float64(stopped.Runs) / float64(stopped.Total)
+	}
+	fmt.Fprintf(w, "\nstopped %q: %d of %d runs (%.1f%%)\n", domain.FailureTaskNeedsInput, stopped.Runs, stopped.Total, share)
+	if slices.ContainsFunc(stopped.Last[:], func(n int) bool { return n > 0 }) {
+		fmt.Fprintln(w, "last P(clear) of those runs:")
+	}
+	for i, n := range stopped.Last {
+		if n > 0 {
+			fmt.Fprintf(w, "  %-9s %5d\n", bucketLabel(i), n)
 		}
 	}
 }
