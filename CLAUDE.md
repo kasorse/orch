@@ -434,9 +434,10 @@ gofmt -l .          # must be empty
 cd bench && go test ./...   # bench/ is a separate module; the root go test does not run it
 ```
 
-`scripts/check.sh` runs these four gates in the root module and in `bench/` and stops at the
+`scripts/check.sh` runs these four gates in the root module only (not `bench/`, test that by hand
+with the command above) and stops at the
 first failure; it is also the orchestrator's `test.command` for this repository, so a run's
-test step covers both modules. `ORCH_TEST_FILTER` (set only by the implement session's
+test step does not cover `bench/`. `ORCH_TEST_FILTER` (set only by the implement session's
 `run_tests`) narrows its `go test` to `-run <filter>`; build, vet and gofmt still run in full. Under the bwrap sandbox four `bench/` tests skip (nested
 bwrap, `orchestrator validate`, the end-to-end `TestPipeline` of `bench/test` among them); run
 the script outside the sandbox once per specification, before its branch merges (rebuild

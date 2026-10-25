@@ -1215,7 +1215,7 @@ gofmt -l .   # should print nothing
 
 The benchmark in `bench/` is a separate Go module, which the root `go test ./...` does not
 include: test it with `cd bench && go test ./...`. `scripts/check.sh` runs the four gates in
-both modules. What `bench/` is and how to run it: [`bench/README.md`](bench/README.md).
+the root module only. What `bench/` is and how to run it: [`bench/README.md`](bench/README.md).
 
 `go test ./...` requires no network access, no Jev key and no real `claude`/`codex`/`gemini`
 installs: the `test/integration` suite uses fake executables installed on a scoped `PATH` and

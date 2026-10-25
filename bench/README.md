@@ -379,8 +379,7 @@ each is there, are in `run.sh` and in
 cd bench && go test ./...
 ```
 
-or `scripts/check.sh` from the repository root, which runs build, vet, test and `gofmt -l` in
-the root module and here. The tests need no network and no real `claude`: `bench/test` runs
+(`scripts/check.sh` at the repository root covers only the root module, not this one). The tests need no network and no real `claude`: `bench/test` runs
 the whole pipeline once against a local fixture repository with fake `orchestrator` and
 `claude` programs. `bench/cmd/orchbench/readme_test.go` keeps this file and `orchbench --help`
 listing the same commands and flags.
