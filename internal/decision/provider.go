@@ -20,8 +20,13 @@ type Provider interface {
 	Name() string
 	// Source is what the decision trace records as having decided.
 	Source() domain.DecisionSource
-	// ContextDepth is the pre-check: does classifying request need repository context?
+	// ContextDepth is the pre-check: does classifying request need repository context? Its
+	// answer also carries P(clear), the clarity question asked in the same call
+	// (specs/clarify), so a clear task costs no extra call.
 	ContextDepth(ctx context.Context, request string) (domain.ContextDepthDecision, error)
+	// Clarity is the clarity question asked alone, on request and the rendered clarification
+	// so far (empty when there is none): the re-check after a clarification.
+	Clarity(ctx context.Context, request, clarification string) (domain.ClarityDecision, error)
 	// Classify returns the complexity distribution(s) and every stage's probability.
 	Classify(ctx context.Context, input domain.ClassificationInput) (domain.TaskClassification, error)
 }

@@ -24,9 +24,12 @@ the quality loop (stage context, `checks:`, the in-session verify tools, review 
 design record in `specs/quality/`;
 governance - path rules, the org config layer, the cost budget, threshold calibration and
 exploration: MVP.md §45, with its design record in `specs/governance/`;
-the decision shape - complexity cut from one size number, three asked stages and the level's
+the decision shape - complexity cut from one size number, the asked stages and the level's
 template, cut proposals in `decisions calibrate`, `actions.implement.escalate`: MVP.md §9,
 §9.1, §31.1, §44.8, §45.4, with its design record in `specs/decision-shape/`;
+clarify - the clarity question, the clarify step before the decision, `task.clarification`,
+`task needs input`, and the `investigation` stage that took the place of analysis and planning:
+MVP.md §49 (with §8, §9, §37, §40), with its design record in `specs/clarify/`;
 the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.md`, with its
 design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
@@ -39,9 +42,11 @@ This file is a summary to keep future work aligned with them, not a replacement.
 
 Responsibilities are strictly separated:
 
-- **LLM** — task reasoning: research, analysis, planning, implementation, review.
+- **LLM** — task reasoning: clarifying an unclear task (no tools), research, investigation,
+  implementation, review.
 - **Decision provider** — bounded probabilities only: does the task need project context,
-  its complexity distribution, each stage's probability. It never decides anything.
+  is it clear enough, its complexity distribution, each stage's probability. It never decides
+  anything.
 - **Orchestrator (this codebase)** — translation and decision-round invocation, project
   context collection, the policy (thresholds → decisions), workflow construction, provider
   routing, state transitions, limits, artifacts/context, test execution, persistence.
@@ -87,7 +92,13 @@ must write it for an operator's sake too.
 [--jira] → fetch the issue, render it as the task  (internal/jira; failure → exit, no run)
 [--stage] → Decision{source: manual} from the flags; the rest of this flow is skipped
 request → translate if ≥30% Cyrillic prose (internal/translate; failure → original + warning)
-        → pre-check: P(none), P(project)              (decision.Provider.ContextDepth)
+        → pre-check: P(none), P(project), P(clear)    (decision.Provider.ContextDepth)
+        → P(clear) ≥ policy.clarify.threshold? no → the clarify step (MVP.md §49): one LLM call,
+          authority none (no tools), given the request and the instructions Go selected
+          (projectctx.Docs); then a re-check of request + clarification (decision.Provider.
+          Clarity). Still unclear: interactive → the operator adds text, up to clarify.max_rounds;
+          auto or rounds spent → the run stops `task needs input` (exit 4, nothing to resume).
+          Not for --story-task; clarify.enabled: false asks and records the question only.
         → policy: project if P(project) ≥ project_threshold
         → Context Manager builds ProjectContext        (internal/projectctx)
           failure → continue with context_limited
@@ -106,24 +117,30 @@ fetch before it, and the rendered text is then the request like typed text. Prov
 selected statically by `decision.provider`. Both use the
 shared questions (`internal/decision/questions.go`) and state (`internal/decision/state.go`) —
 edit them in one place only, and treat any wording change as a reason to recalibrate
-thresholds.
+thresholds. The decision provider sees text only: the request, later the request followed by
+the rendered clarification — never an instruction file (`ClarityState{Request,
+Clarification}`).
 
 Fixed stage order and stage → action mapping (Go code, not LLM-invented):
 
 ```
-research → research, analysis → analyze, planning → plan,
+research → research, investigation → investigate,
 development → implement, testing → test, review → review
 ```
 
-Policy rules (`specs/decision-shape/`): size = P(medium) + 2·P(complex), computed by Go from
-the probabilities for every provider; complexity is `complex` if size ≥
+The clarify step is not a stage and is never in a workflow: it runs before the decision.
+`analysis`/`analyze` and `planning`/`plan` are gone (a config or `--stage` naming them is
+refused with a message naming `specs/clarify`).
+
+Policy rules (`specs/decision-shape/`, `specs/clarify/`): size = P(medium) + 2·P(complex),
+computed by Go from the probabilities for every provider; complexity is `complex` if size ≥
 `policy.complexity.cuts.complex`, else `medium` if size ≥ `cuts.medium`, else `simple` —
-applied to both the primary and the shadow question, the primary decides. Only research,
-analysis and development are asked (`domain.AskedStages`); stages = `policy.stages.force
+applied to both the primary and the shadow question, the primary decides. Only research
+and development are asked (`domain.AskedStages`); stages = `policy.stages.force
 [complexity]` (the template) ∪ the asked stages with probability ≥ threshold (inclusive) ∪
 testing whenever development is on; without development, testing and review are off; nothing
-enabled → `analysis`. `policy.explore` never explores development. The same decision always
-produces the same workflow.
+enabled → `investigation`. `policy.explore` never explores development. The same decision always
+produces the same workflow. `policy.clarify.threshold` is inclusive too (`policy.ClearEnough`).
 
 Engine transitions (`internal/workflow/transitions.go`) are a state machine, not a for-loop
 over a fixed list: success → the next step of the workflow (done after the last); test
@@ -133,9 +150,11 @@ history is append-only (`run.Executions`), never overwritten. Two independent li
 against infinite loops: `max_steps`, `max_fix_iterations`; `limits.stop_without_progress`
 (`workflow.NoProgress`, over persisted executions only) ends a fix loop earlier when implement
 changed nothing or the same failure repeats. Without `implement`, the last
-read-only step (research/analyze/plan) writes the final `answer`, printed at the end.
+read-only step (research/investigate) writes the final `answer`, printed at the end.
 `Engine.Run` always enters through `workflow.Entry(run)`: the first step for an empty
 history, otherwise the state the history and the transition table give (MVP.md §37.5).
+`investigate` has authority `read`; with `implement` its artifact is the plan (read by implement
+and review), without it, as the last read-only step, it writes the answer.
 
 ## Non-negotiable invariants
 
@@ -143,8 +162,10 @@ history, otherwise the state the history and the transition table give (MVP.md �
   `config.Validate` → `config.ValidateDependencies` → `config.ValidateAuthorities` always
   run fully, in order, before any decision client or translator is constructed (the provider
   registry is built first; constructing it calls nothing). `Validate` covers the decision
-  surface too; `ValidateDependencies` checks every action's, the translator's and an LLM
-  decision provider's executable, and the Jev API key, and — only with
+  surface too (`clarify:` is required: a route or `clarify: {enabled: false}`; the old
+  `analysis`/`planning` keys are refused naming their replacement and `specs/clarify`);
+  `ValidateDependencies` checks every action's, the translator's, the clarify step's (when
+  enabled) and an LLM decision provider's executable, and the Jev API key, and — only with
   `DependencyOptions{Jira: true}` (`run --jira`, `story plan --jira`, and `validate` when the
   section is present) — the Jira section and its variables; `ValidateAuthorities` checks that each
   route's provider can enforce its authority; right after it, every routed provider CLI's
@@ -156,9 +177,13 @@ history, otherwise the state the history and the transition table give (MVP.md �
   validator rejects with its own message (a literal secret) must be declared in the schema.
 - **Least authority, fixed in Go, fail closed** (MVP.md §38, `specs/permissions/`). Every
   provider call carries a `domain.Authority` (`none`, `web`, `read`, `edit`): workflow
-  actions from `domain.AuthorityFor`, the translator and the LLM decision provider
-  `AuthorityNone` explicitly — never chosen by a model, a provider default or config, never
-  configurable per action, and independent of the run mode. No authority has a shell tool;
+  actions from `domain.AuthorityFor`, the translator, the clarify step and the LLM decision
+  provider `AuthorityNone` explicitly — never chosen by a model, a provider default or config,
+  never configurable per action, and independent of the run mode. The clarify call has no tools,
+  so "do not read the code" is enforced by its authority, not by its prompt; the instructions it
+  gets are chosen by Go (`projectctx.Docs`, deny list first), and the decision provider never
+  sees them. A failed clarify call fails the run (`ProviderError`): an unclear task never goes
+  on unclarified. No authority has a shell tool;
   Bash rules that constrain arguments are never a boundary. No call gets both repository
   access and a way out (network, shell). Authority → CLI flags exists only in
   `internal/provider/<name>/buildArgs`; an adapter declares `Supports` only for authorities a
@@ -312,7 +337,9 @@ history, otherwise the state the history and the transition table give (MVP.md �
   `flock`ed by the one `run`/`resume` that owns it.
   Until the operator approves, a resume changes nothing on disk. `run` and `resume` share
   one tail after the decision (`executeWorkflow` in `internal/app/app.go`); keep it that
-  way.
+  way. A resume refuses a run started before `specs/clarify` (a workflow with `analyze` or
+  `plan`, a decision with `analysis` or `planning`) and a run stopped `task needs input`
+  (nothing to resume); it reads `task.clarification` back for the stages and asks nothing again.
 - **Commit only on an explicit yes** (MVP.md §42). At the end of a completed run with
   `implement`, the shared tail offers a commit on the current branch (`app.offerCommit`),
   never under `--mode auto` unless `auto_commit: true` gave the yes in advance (§42.6:
@@ -339,7 +366,8 @@ history, otherwise the state the history and the transition table give (MVP.md �
   a merge that conflicts makes the task `conflict` and stops the story for a manual merge); no
   model output picks what runs next, where, or with which stages. A story task is an
   ordinary worktree run started as a child process (`run --story-task`, hidden), with
-  development forced on and research, analysis and planning off (the task file is the plan),
+  development forced on and research and investigation off (the task file is the plan), no
+  clarify step,
   the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer;
   stories do not nest. `story run` runs up to `story.max_parallel` (`--parallel N`, 1..8, default
   1) ready tasks at once, each its own child run, with one goroutine owning `story.json`, the
@@ -354,8 +382,10 @@ history, otherwise the state the history and the transition table give (MVP.md �
   key recorded after the 201, no retry once a request may have reached Jira (only 429/503 with
   `Retry-After`), and an intent without a key stops the next start. `run`, `resume` and `story
   plan` write nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
-- Stages always get the user's original request; the translation is only for the decision
-  provider and relevant-file search.
+- Stages always get the user's original request (through `action.taskBlock`); the translation
+  is only for the decision provider and relevant-file search. After a clarify step the stages
+  that take the task (research, investigate, implement, review) get, after it, the rendered
+  clarification (`domain.Clarification.Render`) through `action.fence`; an empty one adds nothing.
 
 ## Out of scope (MVP.md §30)
 
@@ -420,7 +450,10 @@ tests assemble such values at run time (`internal/secretscan`, scenario 27).
 ## Run artifacts
 
 Persisted under `.orchestrator/runs/<run-id>/`: `run.json` (with `task.source` for a
-`run --jira` task, the `decision`,
+`run --jira` task, `task.clarification` (`{threshold, checks, status, rounds}`: written once
+before the decision, absent when the first check was clear, with `clarify.enabled: false`, for
+a story task and after a failed pre-check; a run stopped `task needs input` has it and no
+decision or workflow), the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
 `org_config` (`{path, sha256}` of the org file the run started under; each `resumes[]` entry
 has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
@@ -451,15 +484,20 @@ and `complexity.cuts`; `stages[].explored`: a stage
 `policy.explore` turned on; grouped on by `decisions report` and
 `decisions calibrate` (read-only, `internal/report/calibrate.go`); full trace:
 translation, source, model, depth, complexity with choice/score agreement, every stage's
-probability/threshold (absent for a stage not asked)/forced/reason, latencies, and `usage` of each decision call that
-reported one: `translation`, `context_depth`, `classification`),
+probability/threshold (absent for a stage not asked)/forced/reason, `clarity` {threshold,
+checks, status, reason} (`status` `disabled` under `clarify.enabled: false`), latencies, and `usage` of each decision call that
+reported one: `translation`, `context_depth`, `classification`, `clarify`, `clarity_recheck`; the
+last two count in `outcome.decision_overhead` and `limits.max_cost_usd`; `policy_hash` covers
+`policy.clarify.threshold`),
 `project_context.json` (exactly what was sent, only if something was), `workflow.json`,
 `ticket.json` (the fetched issue, `run --jira` only; an audit record never read back),
 `artifacts/<NNN>-<action>.json` (a model step's with the `prompt` exactly as sent - a record,
-removed when a resume reads the artifact back), `logs/<NNN>-<action>.{stdout,stderr}.log` (a test step with
+removed when a resume reads the artifact back), `artifacts/clarify-<N>.json` (the clarify call's
+prompt as sent, the excerpts' paths and headings, the parsed points), `logs/<NNN>-<action>.{stdout,stderr}.log` (a test step with
 `checks:` adds `logs/<NNN>-test.<check>.*`, an implement with verify calls adds
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
-`logs/decide-{context,classify}.*`, `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.
+`logs/decide-{context,classify}.*`, `logs/clarify-<N>.*`, `logs/decide-clarity-<N>.*` (one per
+re-check), `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`

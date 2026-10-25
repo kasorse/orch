@@ -47,7 +47,7 @@ const bootstrapStream = 0x6f72636862656e63
 // stageOrder is the order of the workflow's stages (CLAUDE.md), complexityOrder the order of
 // the policy's levels. A name in neither comes after them, in lexical order.
 var (
-	stageOrder      = []string{"research", "analysis", "planning", "development", "testing", "review"}
+	stageOrder      = []string{"research", "analysis", "investigation", "development", "testing", "review"}
 	complexityOrder = []string{"simple", "medium", "complex"}
 	failOrder       = []string{results.FailOracle, results.FailRegression, results.FailAnswer, results.FailTreeChanged}
 )

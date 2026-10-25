@@ -14,8 +14,12 @@ type Task struct {
 	// every other task.
 	Acceptance []string `json:"acceptance,omitempty"`
 	// Source records where the task came from; nil for a task typed on the command line.
-	Source    *TaskSource `json:"source,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
+	Source *TaskSource `json:"source,omitempty"`
+	// Clarification is what was agreed about an unclear task before the decision (specs/clarify):
+	// written once, never changed. Nil when the first check cleared the threshold, under
+	// clarify.enabled: false, for a story task and after a failed pre-check.
+	Clarification *Clarification `json:"clarification,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
 }
 
 // TaskSourceJira is TaskSource.Kind for a task rendered from a Jira issue.

@@ -14,16 +14,20 @@ translation:
   model: opus
   timeout: 60s
 
+clarify: {enabled: false}
+
 policy:
   context_depth:
     project_threshold: 0.5
+  clarify:
+    threshold: 0.80
   complexity:
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    thresholds: {research: 0.81, analysis: 0.86, development: 0.81}
+    thresholds: {research: 0.81, development: 0.81}
     force:
-      medium: [analysis, review]
-      complex: [planning, review]
+      medium: [investigation, review]
+      complex: [investigation, review]
 
 context:
   max_files: 20
@@ -34,14 +38,7 @@ actions:
   research:
     provider: claude
     model: haiku
-  analyze:
-    provider: claude
-    model: sonnet
-    effort: medium
-    by_complexity:
-      simple: {model: haiku, effort: xhigh}
-      complex: {model: sonnet, effort: high}
-  plan:
+  investigate:
     provider: claude
     model: opus
     effort: medium

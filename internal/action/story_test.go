@@ -233,10 +233,10 @@ func TestPlanningCalls_ProviderErrorNamesTheCall(t *testing.T) {
 	call = planningCallWith(failing(apperr.FailureTimeout))
 	call.Timeout = time.Minute
 	_, err = Specify(ctx, call, SpecifyInput{Request: "r", Repos: []string{"billing"}, MaxTasks: 12})
-	if !errors.As(err, &perr) || perr.Action != "specify" || perr.ConfiguredTimeout != time.Minute || perr.TimeoutSetting != "actions.plan.timeout" {
+	if !errors.As(err, &perr) || perr.Action != "specify" || perr.ConfiguredTimeout != time.Minute || perr.TimeoutSetting != "actions.investigate.timeout" {
 		t.Errorf("err = %#v", err)
 	}
-	if !strings.Contains(err.Error(), "exceeded actions.plan.timeout = 1m0s") {
+	if !strings.Contains(err.Error(), "exceeded actions.investigate.timeout = 1m0s") {
 		t.Errorf("the message must name the setting:\n%v", err)
 	}
 }

@@ -43,12 +43,14 @@ translation:
 policy:
   context_depth:
     project_threshold: 0.5
+  clarify:
+    threshold: 0.80
   complexity:
     cuts: {medium: 0.50, complex: 1.40}
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, development: 0.60}
+    thresholds: {research: 0.70, development: 0.60}
     force:
-      complex: [analysis, planning, review]
+      complex: [investigation, review]
 
 context:
   max_files: 20
@@ -58,10 +60,7 @@ actions:
   research:
     provider: claude
     model: sonnet
-  analyze:
-    provider: claude
-    model: sonnet
-  plan:
+  investigate:
     provider: claude
     model: sonnet
   implement:
@@ -80,11 +79,22 @@ limits:
 
 execution:
   timeout: 15m
+
+clarify:
+  provider: claude
+  model: sonnet
+  effort: medium
+  timeout: 120s
+  max_rounds: 3
 `)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if c := cfg.Clarify; !c.Active() || c.Provider != "claude" || c.Model != "sonnet" || c.Effort != "medium" ||
+		c.Timeout != 2*time.Minute || c.AdditionRounds() != 3 {
+		t.Errorf("clarify = %+v", c)
 	}
 	if cfg.Version != 2 {
 		t.Errorf("expected version 2, got %d", cfg.Version)
@@ -136,10 +146,7 @@ func TestLoad_PerActionTimeout(t *testing.T) {
 version: 1
 
 actions:
-  analyze:
-    provider: claude
-    model: sonnet
-  plan:
+  investigate:
     provider: claude
     model: sonnet
   implement:
@@ -164,8 +171,8 @@ execution:
 	if cfg.Actions.Review.Timeout != 20*time.Minute {
 		t.Errorf("expected review timeout 20m, got %v", cfg.Actions.Review.Timeout)
 	}
-	if cfg.Actions.Analyze.Timeout != 0 {
-		t.Errorf("expected analyze timeout to stay unset, got %v", cfg.Actions.Analyze.Timeout)
+	if cfg.Actions.Investigate.Timeout != 0 {
+		t.Errorf("expected investigate timeout to stay unset, got %v", cfg.Actions.Investigate.Timeout)
 	}
 }
 
@@ -223,19 +230,20 @@ decision:
 translation: {provider: claude, model: haiku, timeout: 60s}
 policy:
   context_depth: {project_threshold: 0.5}
+  clarify: {threshold: 0.80}
   complexity: {cuts: {medium: 0.50, complex: 1.40}}
   stages:
-    thresholds: {research: 0.70, analysis: 0.60, development: 0.60}
+    thresholds: {research: 0.70, development: 0.60}
 context: {max_files: 20, max_bytes: 24576}
 actions:
   research: {provider: claude, model: sonnet}
-  analyze: {provider: claude, model: sonnet}
-  plan: {provider: claude, model: sonnet}
+  investigate: {provider: claude, model: sonnet}
   implement: {provider: claude, model: opus}
   review: {provider: claude, model: sonnet}
 test: {command: "go test ./..."}
 limits: {max_steps: 12, max_fix_iterations: 2}
 execution: {timeout: 15m}
+clarify: {enabled: false}
 ` + extra
 }
 
@@ -256,12 +264,126 @@ func TestLoad_RateLimitWait(t *testing.T) {
 	}
 }
 
+// The keys specs/clarify removed are still declared, so strict loading does not call them
+// unknown: Validate refuses each with its replacement and the spec, never reading it as
+// something else.
+func TestValidate_RefusesTheKeysAnalysisLeft(t *testing.T) {
+	thresholds := "thresholds: {research: 0.70, development: 0.60}"
+	for name, tc := range map[string]struct {
+		yaml string
+		want []string
+	}{
+		"threshold": {strings.Replace(validV2(""), thresholds, "thresholds: {research: 0.70, analysis: 0.60, development: 0.60}", 1),
+			[]string{"policy.stages.thresholds.analysis", "policy.clarify.threshold", "specs/clarify"}},
+		"force": {strings.Replace(validV2(""), thresholds, thresholds+"\n    force: {complex: [analysis, review]}", 1),
+			[]string{"policy.stages.force.complex", "analysis is not a stage any more", "specs/clarify"}},
+		"action": {strings.Replace(validV2(""), "  investigate: {", "  analyze: {provider: claude, model: sonnet}\n  investigate: {", 1),
+			[]string{"actions.analyze was removed", "specs/clarify"}},
+		"planning threshold": {strings.Replace(validV2(""), thresholds, "thresholds: {research: 0.70, planning: 0.60, development: 0.60}", 1),
+			[]string{"policy.stages.thresholds.planning", "investigation", "specs/clarify"}},
+		"planning in the template": {strings.Replace(validV2(""), thresholds, thresholds+"\n    force: {complex: [planning, review]}", 1),
+			[]string{"policy.stages.force.complex", "planning was renamed investigation", "specs/clarify"}},
+		"actions.plan": {strings.Replace(validV2(""), "  investigate: {", "  plan: {provider: claude, model: sonnet}\n  investigate: {", 1),
+			[]string{"actions.plan was renamed actions.investigate", "specs/clarify"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, tc.yaml))
+			if err != nil {
+				t.Fatalf("Load: the key must be declared, got %v", err)
+			}
+			err = Validate(cfg)
+			if err == nil {
+				t.Fatal("Validate accepted a key analysis left")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error lacks %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
+// policy.clarify.threshold is required and in (0, 1]: loaded from a file, a missing key and a 0
+// are config errors, and a key inside policy.clarify nobody declared is an unknown one.
+func TestLoad_ClarifyThreshold(t *testing.T) {
+	const withThreshold = "  clarify: {threshold: 0.80}\n"
+	cfg, err := Load(writeTempConfig(t, validV2("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Policy.Clarify.Threshold == nil || *cfg.Policy.Clarify.Threshold != 0.80 {
+		t.Fatalf("threshold = %v, want 0.80", cfg.Policy.Clarify.Threshold)
+	}
+	if got := cfg.DecisionPolicy().ClarityThreshold; got != 0.80 {
+		t.Errorf("DecisionPolicy().ClarityThreshold = %v, want 0.80", got)
+	}
+
+	for name, tc := range map[string]struct{ replace, want string }{
+		"missing": {"", "policy.clarify.threshold is required"},
+		"zero":    {"  clarify: {threshold: 0}\n", "policy.clarify.threshold must be in (0, 1]"},
+		"above 1": {"  clarify: {threshold: 1.2}\n", "policy.clarify.threshold must be in (0, 1]"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), withThreshold, tc.replace, 1)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			err = Validate(cfg)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate = %v, want an error containing %q", err, tc.want)
+			}
+		})
+	}
+
+	_, err = Load(writeTempConfig(t, strings.Replace(validV2(""), withThreshold, "  clarify: {threshold: 0.8, treshold: 0.7}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "treshold") {
+		t.Errorf("an undeclared key in policy.clarify must fail to load, got %v", err)
+	}
+}
+
+// The clarify section is required: a route, or `clarify: {enabled: false}` written out.
+func TestLoad_ClarifySectionIsRequired(t *testing.T) {
+	const section = "clarify: {enabled: false}\n"
+	tests := []struct{ name, replace, want string }{
+		{"absent", "", "clarify is required"},
+		{"null", "clarify:\n", "clarify is required"},
+		{"empty", "clarify: {}\n", "clarify.provider is required"},
+		{"disabled alone", section, ""},
+		{"enabled, no key", "clarify: {enabled: true}\n", "clarify.provider is required"},
+		{"a route", "clarify: {provider: claude, model: sonnet, timeout: 2m}\n", ""},
+		{"a route without a timeout", "clarify: {provider: claude, model: sonnet}\n", "clarify.timeout must be a positive duration"},
+		{"max_rounds out of range", "clarify: {enabled: false, max_rounds: 9}\n", "clarify.max_rounds must be between 0 and 5, got 9"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeTempConfig(t, strings.Replace(validV2(""), section, tc.replace, 1)))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			err = Validate(cfg)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Errorf("Validate = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	_, err := Load(writeTempConfig(t, strings.Replace(validV2(""), section, "clarify: {enabled: false, docs: [a.md], max_byte: 5}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "max_byte") {
+		t.Errorf("an undeclared key in clarify must fail to load, got %v", err)
+	}
+	_, err = Load(writeTempConfig(t, strings.Replace(validV2(""), section, "clarify: {provider: claude, model: sonnet, timeout: soon}\n", 1)))
+	if err == nil || !strings.Contains(err.Error(), "clarify.timeout") {
+		t.Errorf("a malformed clarify.timeout must fail to load, got %v", err)
+	}
+}
+
 func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 	for name, tc := range map[string]struct {
 		yaml string
 		want []string
 	}{
-		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 25: exectuion"}},
+		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 26: exectuion"}},
 		// actions, translation and jira decode through their own UnmarshalYAML: strictness
 		// must reach inside those too.
 		"inside an action": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
@@ -269,8 +391,10 @@ func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 		"translation effort": {strings.Replace(validV2(""), "model: haiku,", "model: haiku, effort: high,", 1),
 			[]string{"line 9: effort"}},
 		"inside jira": {validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: basic\n  email_env: E\n  token_env: T\n  timeuot: 5s\n"),
-			[]string{"line 30: timeuot"}},
-		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 25: limit", "line 26: securty"}},
+			[]string{"line 31: timeuot"}},
+		"inside clarify": {strings.Replace(validV2(""), "clarify: {enabled: false}", "clarify: {enabled: false, max_round: 3}", 1),
+			[]string{"line 25: max_round"}},
+		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 26: limit", "line 27: securty"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tc.yaml))

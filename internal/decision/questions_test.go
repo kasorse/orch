@@ -72,6 +72,20 @@ func TestStageQuestions_OnePerAskedStageInOrder(t *testing.T) {
 	}
 }
 
+// analysis is no longer a stage (specs/clarify): research and development are the only questions.
+func TestStageQuestions_AskOnlyResearchAndDevelopment(t *testing.T) {
+	var got []domain.Stage
+	for _, q := range StageQuestions() {
+		got = append(got, q.Stage)
+	}
+	if len(got) != 2 || got[0] != domain.StageResearch || got[1] != domain.StageDevelopment {
+		t.Errorf("StageQuestions asks %v, want research and development", got)
+	}
+	if _, ok := stageQuestions[domain.Stage("analysis")]; ok {
+		t.Error("the analysis question is still defined")
+	}
+}
+
 func TestScopeQuestion_IsNotAStageQuestion(t *testing.T) {
 	q := ScopeQuestion()
 	if q.ID != "scope_story" || q.Stage != "" {
@@ -86,6 +100,41 @@ func TestScopeQuestion_IsNotAStageQuestion(t *testing.T) {
 	for _, sq := range StageQuestions() {
 		if sq.ID == q.ID {
 			t.Errorf("StageQuestions returns the scope question %q", sq.ID)
+		}
+	}
+}
+
+func TestClarityQuestion_IsNotAStageQuestion(t *testing.T) {
+	q := ClarityQuestion()
+	if q.ID != "clarity" || q.Stage != "" {
+		t.Errorf("ClarityQuestion = %s/%q, want clarity with no stage", q.ID, q.Stage)
+	}
+	if q.Instructions == "" || q.True == "" || q.False == "" {
+		t.Errorf("clarity question is incomplete: %+v", q)
+	}
+	if !strings.Contains(q.Instructions, "`request`") {
+		t.Error("clarity instructions must refer to the `request` state field")
+	}
+	for _, sq := range StageQuestions() {
+		if sq.ID == q.ID {
+			t.Errorf("StageQuestions returns the clarity question %q", sq.ID)
+		}
+	}
+}
+
+func TestQuestionsHash_CoversTheClarityQuestion(t *testing.T) {
+	h := QuestionsHash()
+	saved := clarityQuestion
+	t.Cleanup(func() { clarityQuestion = saved })
+	for name, change := range map[string]func(*YesNoQuestion){
+		"instructions": func(q *YesNoQuestion) { q.Instructions += " " },
+		"yes":          func(q *YesNoQuestion) { q.True += " " },
+		"no":           func(q *YesNoQuestion) { q.False += " " },
+	} {
+		clarityQuestion = saved
+		change(&clarityQuestion)
+		if QuestionsHash() == h {
+			t.Errorf("changing the clarity question's %s text did not change the hash", name)
 		}
 	}
 }
@@ -115,11 +164,11 @@ func TestQuestionsHash(t *testing.T) {
 	if again := QuestionsHash(); again != h {
 		t.Errorf("QuestionsHash is not stable: %q then %q", h, again)
 	}
-	saved := stageQuestions[domain.StageAnalysis]
-	t.Cleanup(func() { stageQuestions[domain.StageAnalysis] = saved })
+	saved := stageQuestions[domain.StageResearch]
+	t.Cleanup(func() { stageQuestions[domain.StageResearch] = saved })
 	reworded := saved
 	reworded.Instructions += " "
-	stageQuestions[domain.StageAnalysis] = reworded
+	stageQuestions[domain.StageResearch] = reworded
 	if QuestionsHash() == h {
 		t.Error("rewording a stage question did not change the hash")
 	}

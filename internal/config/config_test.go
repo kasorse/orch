@@ -167,7 +167,7 @@ func TestValidate_ReviewModels(t *testing.T) {
 	if cfg, err := Load(writeTempConfig(t, reviewModelsYAML("[a, b, c, d]"))); err != nil || Validate(cfg) != nil {
 		t.Errorf("four extra reviewers are valid: %v", err)
 	}
-	for _, action := range []string{"research", "analyze", "plan", "implement"} {
+	for _, action := range []string{"research", "investigate", "implement"} {
 		y := strings.Replace(validV2(""), action+": {provider: claude, model:", action+": {models: [opus], provider: claude, model:", 1)
 		cfg, err := Load(writeTempConfig(t, y))
 		if err != nil {

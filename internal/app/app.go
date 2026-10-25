@@ -225,7 +225,7 @@ func checkStoryTaskFlags(cli cliArgs, rest []string) error {
 // story task (specs/story/SPEC.md §11.2).
 const storyTaskReason = "story task"
 
-// storyTaskPlannedReason is the reason decision.json gives research, analysis and planning a
+// storyTaskPlannedReason is the reason decision.json gives research and investigation a
 // story task turned off: its task file is already the plan.
 const storyTaskPlannedReason = "story task: the task file is the plan"
 
@@ -1150,13 +1150,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
-		out, err = decideManual(stages, task.Description, reporter)
+		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
+			reporter, prompter, interactive, stream, stderr)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
 			reporter, prompter, interactive, storyIn != nil, stream, stderr)
 	}
 	if err != nil {
-		return failRun(store, run, err)
+		return stopUndecided(store, run, out, err)
 	}
 
 	wf, err := workflow.Build(out.decision.Stages)
@@ -1520,6 +1521,11 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		Persist:  store.SaveRun,
 		Limits:   limitsView(*cfg),
 	}
+	// The clarify step and the clarity re-checks are paid from limits.max_cost_usd too
+	// (specs/clarify). They are read from decision.json, so a resume counts them as well.
+	if trace := loadTrace(store, run.ID); trace != nil && trace.Usage != nil {
+		engine.DecisionCalls = trace.Usage.ClarifyCalls()
+	}
 
 	if mode == domain.ModeManual {
 		gate := interaction.NewTerminalGate(s.prompter, s.reporter.PausingWriter())
@@ -1762,7 +1768,7 @@ func worktreeRel(ctx context.Context, repo *repository.Repository, p string) str
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over
 // HTTP, its offline mock, or a CLI provider. The Jev API key is read from the
 // environment here and handed only to the client's constructor.
-func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, stream, stderr io.Writer) (decision.Provider, error) {
+func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, label string, stream, stderr io.Writer) (decision.Provider, error) {
 	d := cfg.Decision
 	sources := d.Complexity.Sources()
 
@@ -1787,7 +1793,7 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 	}
 	return &llm.Provider{
 		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
-		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Deciding the workflow"}, Stream: stream,
+		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: label}, Stream: stream,
 	}, nil
 }
 
@@ -1888,12 +1894,18 @@ func failRun(store *persistence.Store, run *domain.Run, err error) error {
 // loader refuses) the outcome leaves the decision calls out rather than failing a run that
 // already ended.
 func writeOutcome(store *persistence.Store, run *domain.Run) error {
+	return writeOutcomeWith(store, run, loadTrace(store, run.ID))
+}
+
+// writeOutcomeWith is writeOutcome with the decision trace given: a run that ended before its
+// decision.json was written passes the trace its decision step had so far, so the decision calls
+// it made are counted in its outcome all the same.
+func writeOutcomeWith(store *persistence.Store, run *domain.Run, trace *domain.DecisionTrace) error {
 	switch run.Status {
 	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
 	default:
 		return nil
 	}
-	trace := loadTrace(store, run.ID)
 	outcome := domain.ComputeOutcome(*run, trace)
 	run.Outcome = &outcome
 	if err := store.SaveRun(run); err != nil {

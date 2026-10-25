@@ -68,14 +68,14 @@ func usageEnv(t *testing.T, repoDir string) {
 		cost float64
 	}{
 		"translate":      {"Fix Add() in fixture.go so that it adds instead of subtracting", 0.01},
-		"decide-context": {`{"context_depth": {"none": 0.9, "project": 0.1}}`, 0.02},
+		"decide-context": {`{"context_depth": {"none": 0.9, "project": 0.1}, "clarity": 0.9}`, 0.02},
 		"decide-classify": {`{"complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
  "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
- "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95},
+ "stages": {"research": 0.05, "development": 0.95},
  "scope": 0.2}`, 0.03},
-		"analyze":   {analyzeResponse, 0.11},
-		"implement": {implementResponse, 0.33},
-		"review":    {reviewPassResponse, 0.44},
+		"investigate": {readOnlyResponse, 0.11},
+		"implement":   {implementResponse, 0.33},
+		"review":      {reviewPassResponse, 0.44},
 	} {
 		writeResponse(t, dir, name, streamResult(t, r.text, r.cost))
 	}
@@ -91,7 +91,7 @@ func TestScenario29_UsageRecorded(t *testing.T) {
 		"run", "исправь Add() в fixture.go, чтобы она складывала, а не вычитала")
 	mustSucceed(t, stdout, stderr, err)
 
-	wantCost := map[string]float64{"analyze": 0.11, "implement": 0.33, "review": 0.44}
+	wantCost := map[string]float64{"investigate": 0.11, "implement": 0.33, "review": 0.44}
 	run := readUsageRun(t, repoDir)
 	if len(run.Executions) != 4 {
 		t.Fatalf("executions = %+v", run.Executions)

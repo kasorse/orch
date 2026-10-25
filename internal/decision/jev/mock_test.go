@@ -26,7 +26,7 @@ func classificationRequest(request string) systemOneRequest {
 		}},
 		"complexity_score": {Type: questionScore, Instructions: "Rate how complex it is.", Criteria: complexityLevels},
 	}
-	for _, st := range []string{"research", "analysis", "development"} {
+	for _, st := range []string{"research", "development"} {
 		qs["stage_"+st] = question{Type: questionNoul, Instructions: "Does `request` need " + st + "?",
 			Criteria: map[string]string{"true": "yes", "false": "no"}}
 	}
@@ -63,8 +63,8 @@ func TestMock_AnswersEveryQuestionInValidShape(t *testing.T) {
 	if resp.Model != MockModelPrefix+"jev-1.13.0" {
 		t.Errorf("Model = %q", resp.Model)
 	}
-	if len(resp.Answers) != 5 {
-		t.Fatalf("got %d answers, want 5", len(resp.Answers))
+	if len(resp.Answers) != 4 {
+		t.Fatalf("got %d answers, want 4", len(resp.Answers))
 	}
 
 	c := resp.Answers["complexity"]
@@ -159,7 +159,7 @@ func TestMock_Complexity(t *testing.T) {
 func TestMock_Stages(t *testing.T) {
 	enabled := func(resp systemOneResponse) []string {
 		var out []string
-		for _, st := range []string{"research", "analysis", "development"} {
+		for _, st := range []string{"research", "development"} {
 			a, ok := resp.Answers["stage_"+st]
 			if !ok {
 				t.Fatalf("no answer for stage_%s", st)
@@ -173,9 +173,9 @@ func TestMock_Stages(t *testing.T) {
 	cases := map[string][]string{
 		"Compare Redis and Memcached for caching":         {"research"},
 		"Fix a typo in the README":                        {"development"},
-		"Fix the race condition in the dispatcher":        {"analysis", "development"},
-		"Add pagination support to the list endpoint":     {"analysis", "development"},
-		"Rewrite the whole engine with a new concurrency": {"analysis", "development"},
+		"Fix the race condition in the dispatcher":        {"development"},
+		"Add pagination support to the list endpoint":     {"development"},
+		"Rewrite the whole engine with a new concurrency": {"development"},
 	}
 	for request, want := range cases {
 		if got := enabled(mustDecide(t, classificationRequest(request))); !reflect.DeepEqual(got, want) {
@@ -197,6 +197,58 @@ func TestMock_ScopeAnswersWeakWhateverTheRequest(t *testing.T) {
 		if a.Type != questionNoul || a.Noul == nil || *a.Noul != 0.15 {
 			t.Errorf("%q: scope answer = %+v, want noul 0.15", request, a)
 		}
+	}
+}
+
+// A request under about 8 words or without a verb is unclear; a named file, function or error
+// message makes it clear.
+func TestMock_Clarity(t *testing.T) {
+	cases := []struct {
+		request string
+		want    bool
+	}{
+		{"make it faster", false},
+		{"Add a cache", false},
+		{"The performance of the whole orders service lately somehow", false}, // long, but no verb
+		{"Add pagination support to the list endpoint of the orders service", true},
+		{"Fix Add in fixture.go", true},
+		{"Fix the panic: index out of range in the dispatcher", true},
+		{`Fix the error "connection reset by peer" on upload`, true},
+		{"Call Reset() after use", true},
+	}
+	q := decision.ClarityQuestion()
+	for _, tc := range cases {
+		request, want := tc.request, tc.want
+		a := mustDecide(t, systemOneRequest{
+			Model:     "jev-1.13.0",
+			State:     decision.PreCheckState{Request: request},
+			Questions: map[string]question{q.ID: yesNoQuestion(q)},
+		}).Answers[q.ID]
+		if a.Type != questionNoul || a.Noul == nil {
+			t.Fatalf("%q: clarity answer = %+v", request, a)
+		}
+		if got := *a.Noul >= 0.5; got != want {
+			t.Errorf("%q: P(clear) = %v, want clear = %v", request, *a.Noul, want)
+		}
+	}
+}
+
+// The re-check sends the clarification with the request, and the mock reads both.
+func TestMock_ClarityReadsTheClarification(t *testing.T) {
+	q := decision.ClarityQuestion()
+	ask := func(clarification string) float64 {
+		a := mustDecide(t, systemOneRequest{
+			Model:     "jev-1.13.0",
+			State:     decision.ClarityState{Request: "make it faster", Clarification: clarification},
+			Questions: map[string]question{q.ID: yesNoQuestion(q)},
+		}).Answers[q.ID]
+		return *a.Noul
+	}
+	if got := ask(""); got >= 0.5 {
+		t.Errorf("P(clear) without a clarification = %v, want unclear", got)
+	}
+	if got := ask("- Which call is slow? Save in internal/repository/product.go  [operator]"); got < 0.5 {
+		t.Errorf("P(clear) with a clarification naming a file = %v, want clear", got)
 	}
 }
 

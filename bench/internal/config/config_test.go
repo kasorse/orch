@@ -189,18 +189,19 @@ func TestOrchestratorConfigsFollowTheExample(t *testing.T) {
 			got := renderedMap(t, name)
 
 			// implement runs the common model; decision, test and execution are filled per
-			// task or deliberately different (see the comment of C.yaml).
+			// task or deliberately different (see the comment of C.yaml), and clarify is off in
+			// every benchmark config: a benchmark has no operator, and the step is not what it measures.
 			actions, ok := example["actions"].(map[string]any)
 			if !ok {
 				t.Fatalf("actions is not a mapping in the example: %v", example["actions"])
 			}
 			actions["implement"] = map[string]any{"provider": "claude", "model": "sonnet"}
-			for _, key := range []string{"decision", "test", "execution"} {
+			for _, key := range []string{"decision", "test", "execution", "clarify"} {
 				delete(example, key)
 				delete(got, key)
 			}
 			if !reflect.DeepEqual(got, example) {
-				t.Errorf("%s differs from orchestrator.example.yaml outside decision, test and execution:\n got %v\nwant %v", name, got, example)
+				t.Errorf("%s differs from orchestrator.example.yaml outside decision, test, execution and clarify:\n got %v\nwant %v", name, got, example)
 			}
 		})
 	}

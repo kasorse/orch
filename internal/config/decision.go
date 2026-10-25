@@ -175,6 +175,13 @@ type ContextDepthPolicyConfig struct {
 	ProjectThreshold *float64 `yaml:"project_threshold"`
 }
 
+// ClarifyPolicyConfig is policy.clarify (specs/clarify): the task is clear enough when the
+// decision provider's P(clear) is at least Threshold.
+type ClarifyPolicyConfig struct {
+	// Threshold is a pointer so an omitted value (nil) is an error, not a threshold of 0.
+	Threshold *float64 `yaml:"threshold"`
+}
+
 // ComplexityPolicyConfig configures the cuts on a complexity distribution's size
 // (specs/decision-shape/SPEC.md §5.2). Complex and Medium, the probability thresholds
 // before it, are declared only so strict decoding accepts them and the validator can name
@@ -207,6 +214,7 @@ type StagePolicyConfig struct {
 // component (internal/policy) that consumes it.
 type PolicyConfig struct {
 	ContextDepth ContextDepthPolicyConfig `yaml:"context_depth"`
+	Clarify      ClarifyPolicyConfig      `yaml:"clarify"`
 	Complexity   ComplexityPolicyConfig   `yaml:"complexity"`
 	Stages       StagePolicyConfig        `yaml:"stages"`
 	// Paths are the path rules, applied in file order (specs/governance/SPEC.md §4.1).
@@ -289,6 +297,122 @@ type ContextConfig struct {
 	ExtraDeny []string `yaml:"extra_deny"`
 }
 
+// Defaults and bounds of the clarify section.
+const (
+	defaultClarifyMaxBytes = 16384
+	minClarifyMaxBytes     = 1024
+	maxClarifyMaxBytes     = 131072
+	defaultClarifyRounds   = 2
+	maxClarifyRounds       = 5
+)
+
+// ClarifyConfig is the clarify section (specs/clarify): whether the clarify step runs, the route
+// of its one call, how many additions the operator may make after a re-check, and which files
+// supply its instructions. The section is required: a route, or `clarify: {enabled: false}`
+// written out. Like TranslationConfig, the route needs a positive timeout, and a nil
+// *ClarifyConfig is a section that is absent.
+type ClarifyConfig struct {
+	// Enabled is a pointer so an absent key (nil, which means true) can be told from false; read
+	// it through Active.
+	Enabled *bool
+	// ProviderModel is the route, with the optional effort; read only while the step is active.
+	ProviderModel
+	// Timeout bounds the clarify call.
+	Timeout time.Duration
+	// Docs are the globs, with "**", over the git-listed files that supply the instructions.
+	Docs []string
+	// MaxBytes caps the rules and excerpts together; nil means the default.
+	MaxBytes *int
+	// MaxRounds is how many additions the operator may make after a re-check, 0 to 5; nil means
+	// the default.
+	MaxRounds *int
+}
+
+func (c *ClarifyConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Enabled   *bool    `yaml:"enabled"`
+		Provider  string   `yaml:"provider"`
+		Model     string   `yaml:"model"`
+		Effort    string   `yaml:"effort"`
+		Timeout   string   `yaml:"timeout"`
+		Docs      []string `yaml:"docs"`
+		MaxBytes  *int     `yaml:"max_bytes"`
+		MaxRounds *int     `yaml:"max_rounds"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	timeout, err := parseDurationField("clarify.timeout", raw.Timeout)
+	if err != nil {
+		return err
+	}
+	*c = ClarifyConfig{
+		Enabled:       raw.Enabled,
+		ProviderModel: ProviderModel{Provider: raw.Provider, Model: raw.Model, Effort: raw.Effort},
+		Timeout:       timeout,
+		Docs:          raw.Docs,
+		MaxBytes:      raw.MaxBytes,
+		MaxRounds:     raw.MaxRounds,
+	}
+	return nil
+}
+
+// Active reports whether the clarify step runs: the section is there and enabled is not false.
+func (c *ClarifyConfig) Active() bool {
+	return c != nil && (c.Enabled == nil || *c.Enabled)
+}
+
+// AdditionRounds returns clarify.max_rounds, 2 when absent.
+func (c *ClarifyConfig) AdditionRounds() int {
+	if c == nil || c.MaxRounds == nil {
+		return defaultClarifyRounds
+	}
+	return *c.MaxRounds
+}
+
+// DocGlobs returns clarify.docs, "**/*.md" when absent.
+func (c *ClarifyConfig) DocGlobs() []string {
+	if c == nil || len(c.Docs) == 0 {
+		return []string{"**/*.md"}
+	}
+	return c.Docs
+}
+
+// InstructionBytes returns clarify.max_bytes, 16384 when absent.
+func (c *ClarifyConfig) InstructionBytes() int {
+	if c == nil || c.MaxBytes == nil {
+		return defaultClarifyMaxBytes
+	}
+	return *c.MaxBytes
+}
+
+func clarifyProblems(c *ClarifyConfig) []string {
+	if c == nil {
+		return []string{"clarify is required: write a route (provider, model, timeout) for the clarify step, " +
+			"or `clarify: {enabled: false}` to turn it off (specs/clarify)"}
+	}
+	var problems []string
+	if c.Active() {
+		problems = append(problems, validateProviderModel("clarify", c.ProviderModel)...)
+		if c.Timeout <= 0 {
+			problems = append(problems, "clarify.timeout must be a positive duration")
+		}
+	}
+	if c.MaxRounds != nil && (*c.MaxRounds < 0 || *c.MaxRounds > maxClarifyRounds) {
+		problems = append(problems, fmt.Sprintf("clarify.max_rounds must be between 0 and %d, got %d", maxClarifyRounds, *c.MaxRounds))
+	}
+	for i, g := range c.Docs {
+		if err := domain.ValidateGlob(g); err != nil {
+			problems = append(problems, fmt.Sprintf("clarify.docs[%d] %q: %v", i, g, err))
+		}
+	}
+	if c.MaxBytes != nil && (*c.MaxBytes < minClarifyMaxBytes || *c.MaxBytes > maxClarifyMaxBytes) {
+		problems = append(problems, fmt.Sprintf("clarify.max_bytes must be between %d and %d, got %d",
+			minClarifyMaxBytes, maxClarifyMaxBytes, *c.MaxBytes))
+	}
+	return problems
+}
+
 // DecisionPolicy converts the validated policy configuration into the domain-only
 // value the Policy Engine (internal/policy, T03) consumes. Callers must call
 // ValidateDecisionConfig first: DecisionPolicy assumes every required field is
@@ -332,6 +456,11 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 		projectThreshold = *c.Policy.ContextDepth.ProjectThreshold
 	}
 
+	clarityThreshold := 0.0
+	if c.Policy.Clarify.Threshold != nil {
+		clarityThreshold = *c.Policy.Clarify.Threshold
+	}
+
 	var explore *domain.ExploreSettings
 	if c.Policy.Explore != nil {
 		explore = &domain.ExploreSettings{Band: c.Policy.Explore.Band, Rate: c.Policy.Explore.Rate}
@@ -339,6 +468,7 @@ func (c Config) DecisionPolicy() domain.DecisionPolicy {
 
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: projectThreshold,
+		ClarityThreshold:        clarityThreshold,
 		ComplexityCuts:          cuts,
 		StageThreshold:          stageThreshold,
 		ForceStages:             forceStages,
@@ -365,6 +495,7 @@ func decisionProblems(cfg Config) []string {
 	}
 
 	problems = append(problems, validatePolicyConfig(cfg.Policy)...)
+	problems = append(problems, clarifyProblems(cfg.Clarify)...)
 
 	if cfg.Context.MaxFiles <= 0 {
 		problems = append(problems, fmt.Sprintf("context.max_files must be positive, got %d", cfg.Context.MaxFiles))
@@ -467,6 +598,31 @@ func validateComplexityPolicy(c ComplexityPolicyConfig) []string {
 	return problems
 }
 
+// analysisRemoved says what took the place of the analysis stage (specs/clarify): a key kept
+// under the old name would silently mean something else, so it is refused and never mapped.
+const analysisRemoved = "analysis is not a stage any more: the clarify step makes the task clear before the " +
+	"decision (specs/clarify), and a stage that reads the code is investigation"
+
+// planningRenamed says what took the place of the planning stage (specs/clarify), for the same
+// reason: planning is never read as investigation.
+const planningRenamed = "planning was renamed investigation: the stage that reads the code plans a change or " +
+	"answers (specs/clarify)"
+
+// forceStageProblem checks one stage of policy.stages.force.<complexity> and returns the problem,
+// or "" when it is a stage.
+func forceStageProblem(complexity, stage string) string {
+	switch stage {
+	case "analysis":
+		return fmt.Sprintf("policy.stages.force.%s: %s", complexity, analysisRemoved)
+	case "planning":
+		return fmt.Sprintf("policy.stages.force.%s: %s", complexity, planningRenamed)
+	}
+	if _, err := domain.ParseStage(stage); err != nil {
+		return fmt.Sprintf("policy.stages.force.%s has unknown stage %q", complexity, stage)
+	}
+	return ""
+}
+
 func validatePolicyConfig(p PolicyConfig) []string {
 	var problems []string
 
@@ -474,6 +630,13 @@ func validatePolicyConfig(p PolicyConfig) []string {
 		problems = append(problems, "policy.context_depth.project_threshold is required")
 	} else if v := *p.ContextDepth.ProjectThreshold; v < 0 || v > 1 {
 		problems = append(problems, fmt.Sprintf("policy.context_depth.project_threshold must be in [0, 1], got %v", v))
+	}
+
+	// Written as a negated range so a NaN is rejected too. 0 is refused: every task would pass.
+	if p.Clarify.Threshold == nil {
+		problems = append(problems, "policy.clarify.threshold is required")
+	} else if v := *p.Clarify.Threshold; !(v > 0 && v <= 1) {
+		problems = append(problems, fmt.Sprintf("policy.clarify.threshold must be in (0, 1], got %v", v))
 	}
 
 	problems = append(problems, validateComplexityPolicy(p.Complexity)...)
@@ -491,6 +654,12 @@ func validatePolicyConfig(p PolicyConfig) []string {
 	for _, key := range slices.Sorted(maps.Keys(p.Stages.Thresholds)) {
 		st, err := domain.ParseStage(key)
 		switch {
+		case key == "analysis":
+			problems = append(problems, "policy.stages.thresholds.analysis: "+analysisRemoved+
+				"; whether the task is clear enough is policy.clarify.threshold")
+		case key == "planning":
+			problems = append(problems, "policy.stages.thresholds.planning: "+planningRenamed+
+				"; the investigation stage has no threshold, it comes from policy.stages.force per complexity")
 		case err != nil:
 			problems = append(problems, fmt.Sprintf("policy.stages.thresholds has unknown stage %q", key))
 		case !slices.Contains(domain.AskedStages(), st):
@@ -505,8 +674,8 @@ func validatePolicyConfig(p PolicyConfig) []string {
 			continue
 		}
 		for _, s := range stages {
-			if _, err := domain.ParseStage(s); err != nil {
-				problems = append(problems, fmt.Sprintf("policy.stages.force.%s has unknown stage %q", key, s))
+			if msg := forceStageProblem(key, s); msg != "" {
+				problems = append(problems, msg)
 			}
 		}
 	}
@@ -538,10 +707,13 @@ func jevKeyProblems(d DecisionConfig) []string {
 }
 
 // decisionProviderModels lists the CLIs the decision flow calls: translation always
-// (fail-fast must not depend on the request's language), and the decision provider
-// when it is an LLM.
+// (fail-fast must not depend on the request's language), the clarify step when it is on, and the
+// decision provider when it is an LLM.
 func decisionProviderModels(cfg Config) []namedProviderModel {
 	pms := []namedProviderModel{{Action: "translation", ProviderModel: cfg.Translation.ProviderModel}}
+	if cfg.Clarify.Active() {
+		pms = append(pms, namedProviderModel{Action: "clarify", ProviderModel: cfg.Clarify.ProviderModel})
+	}
 	if !cfg.Decision.UsesJev() {
 		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: cfg.Decision.Provider, Model: cfg.Decision.Model}})
 	}

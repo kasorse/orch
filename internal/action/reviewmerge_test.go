@@ -251,7 +251,7 @@ func TestExecuteReview_SecondReviewerCriteriaAreChecked(t *testing.T) {
 		reviewClean,
 	}}
 	d, _ := reviewWith(t, client, "opus")
-	d.lastPlan = &domain.PlanArtifact{Summary: "p", AcceptanceCriteria: []string{"it works"}}
+	d.lastInvestigation = &domain.InvestigationArtifact{Summary: "p", AcceptanceCriteria: []string{"it works"}}
 	if _, err := d.Execute(context.Background(), domain.ActionReview, &domain.Run{ID: "r"}); err == nil {
 		t.Fatal("want an error: the second answer has no verdict for the criterion")
 	}

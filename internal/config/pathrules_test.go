@@ -8,7 +8,7 @@ import (
 	"orchestrator/internal/domain"
 )
 
-const thresholdsLine = "    thresholds: {research: 0.70, analysis: 0.60, development: 0.60}\n"
+const thresholdsLine = "    thresholds: {research: 0.70, development: 0.60}\n"
 
 // withPaths is validV2 with the given policy.paths entries (YAML list items, indented four
 // spaces under "paths:").

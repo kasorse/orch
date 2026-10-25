@@ -7,17 +7,17 @@ import (
 )
 
 // Scenario 33, stage context (specs/quality/SPEC.md §4): what an earlier stage found reaches
-// the later ones. The plan's files and risks and the analysis's reach implement, the plan's
-// steps, risks and acceptance criteria reach review, and a retried implement is shown the
-// diff stat of what the run has changed so far.
+// the later ones. The research reaches the investigation, the plan's files and risks reach implement,
+// the plan's steps, risks and acceptance criteria reach review, and a retried implement is
+// shown the diff stat of what the run has changed so far.
 
 const (
-	ctxAnalyzeResponse = `{
-  "summary": "Add() subtracts instead of adding.",
-  "root_cause": "wrong operator",
-  "affected_files": ["fixture.go"],
-  "recommendation": "use + instead of -",
-  "risks": ["callers may rely on the old result"]
+	ctxResearchResponse = `{
+  "summary": "Integer addition in Go needs no library.",
+  "findings": ["the + operator is enough"],
+  "options": [],
+  "recommendation": "use the + operator",
+  "references": []
 }`
 
 	ctxPlanResponse = `{
@@ -36,8 +36,8 @@ var ctxReviewResponse = reviewJSON("pass", "[]",
 func TestScenario33_StageContextReachesLaterStages(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	r := newQualityRun(t, repoDir)
-	writeResponse(t, r.responses, "analyze", ctxAnalyzeResponse)
-	writeResponse(t, r.responses, "plan", ctxPlanResponse)
+	writeResponse(t, r.responses, "research", ctxResearchResponse)
+	writeResponse(t, r.responses, "investigate", ctxPlanResponse)
 	writeResponse(t, r.responses, "review", ctxReviewResponse)
 	// The first implement edits the file without fixing it, so the tests fail and implement
 	// runs again with something to show; the second fixes it.
@@ -45,22 +45,22 @@ func TestScenario33_StageContextReachesLaterStages(t *testing.T) {
 	appendOnEveryImplement(t, repoDir)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run",
-		"--stage", "analysis", "--stage", "planning", "--stage", "development", "--stage", "testing", "--stage", "review",
+		"--stage", "research", "--stage", "investigation", "--stage", "development", "--stage", "testing", "--stage", "review",
 		"fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"analyze", "plan", "implement", "implement", "review"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"research", "investigate", "implement", "implement", "review"}) {
 		t.Fatalf("invocations = %v", got)
 	}
 
-	assertContains(t, "the plan prompt", r.prompt(t, "plan", 1),
-		"Affected files (from analysis):\n- fixture.go\n",
-		"Risks (from analysis):\n- callers may rely on the old result")
+	assertContains(t, "the investigate prompt", r.prompt(t, "investigate", 1),
+		"Research:\nInteger addition in Go needs no library.",
+		"- the + operator is enough",
+		"Recommendation: use the + operator")
 
 	first := r.prompt(t, "implement", 1)
+	assertNotContains(t, "the first implement prompt", first, "Analysis:")
 	assertContains(t, "the first implement prompt", first,
-		"Affected files (from analysis):\n- fixture.go\n",
-		"Risks (from analysis):\n- callers may rely on the old result\n",
 		"Steps:\n- use + in Add\n",
 		"Affected files (from plan):\n- fixture.go\n- fixture_test.go\n",
 		"Risks (from plan):\n- tests pin the old behavior\n",

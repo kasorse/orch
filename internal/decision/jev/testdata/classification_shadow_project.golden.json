@@ -60,14 +60,6 @@
         "true": "The work splits into several independent changes, each of which could be reviewed and merged by itself: it touches more than one service or repository, or it is a sequence of steps after each of which the system still works."
       }
     },
-    "stage_analysis": {
-      "type": "noul",
-      "instructions": "Does fulfilling `request` require analysing existing code or the problem before acting?",
-      "criteria": {
-        "false": "What to do and where is already clear from the request.",
-        "true": "The cause, the affected code, or the right place to change is not yet known and must be found by reading code, logs or behaviour."
-      }
-    },
     "stage_development": {
       "type": "noul",
       "instructions": "Does fulfilling `request` require changing code in the repository?",

@@ -247,6 +247,12 @@ func codexAuthChangeNotice(run *domain.Run, now domain.CodexAuth) string {
 // verifyWorkflow refuses a run without a workflow (nothing to continue; that is a new run)
 // and a run whose workflow is not the one its decision builds (run.json was edited).
 func verifyWorkflow(run *domain.Run) error {
+	// A task that stayed unclear stopped before its workflow (specs/clarify, Approach §4): what is
+	// missing is in the task, which only a new run can change.
+	if run.FailureReason == domain.FailureTaskNeedsInput && run.Workflow == nil {
+		return &apperr.RunStateError{Kind: apperr.RunNotResumable, RunID: run.ID,
+			Msg: "nothing to resume: the run stopped before its workflow (task needs input); start a new run with the missing details in the task"}
+	}
 	if run.Decision == nil || run.Workflow == nil {
 		return &apperr.RunStateError{Kind: apperr.RunNotResumable, RunID: run.ID, Msg: "no workflow was decided for this run; start a new run"}
 	}

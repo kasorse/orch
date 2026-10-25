@@ -1,4 +1,4 @@
 context: project (p=0.91 ≥ 0.50), limited: list repository files: git failed
 complexity: medium (choice p=0.63, score=1.65 → complex ✗ disagrees)
 decision: jev (jev-1.13.0)
-workflow: analyze → implement → test → review
+workflow: implement → test → review

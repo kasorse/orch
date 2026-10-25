@@ -84,11 +84,11 @@ func newStoryRun(t *testing.T, mutate ...func(in map[string]any)) storyRun {
 
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	invocationsLog, promptsDir := decisionEnv(t, repoDir)
-	// Medium: the template gives analysis and review; development is rated 0.1, under its 0.6.
+	// Medium: the template gives planning and review; development is rated 0.1, under its 0.6.
 	j := startJev(t, jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.1},
+		Stages:   map[string]float64{"development": 0.1},
 	})
 	cfg := jevConfig(t, j)
 

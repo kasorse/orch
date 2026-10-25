@@ -16,9 +16,9 @@ func TestStepStarted_PrintsNumberedUppercaseHeader(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)
 
-	r.StepStarted(&domain.Run{}, 0, domain.ActionAnalyze)
+	r.StepStarted(&domain.Run{}, 0, domain.ActionInvestigate)
 
-	want := "\n[1] ANALYZE\n"
+	want := "\n[1] INVESTIGATE\n"
 	if buf.String() != want {
 		t.Errorf("got %q, want %q", buf.String(), want)
 	}
@@ -52,10 +52,10 @@ func TestRenderAuthority(t *testing.T) {
 		want string
 	}{
 		{
-			steps(domain.ActionResearch, domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest, domain.ActionReview),
-			"authority: research=web, analyze=read, implement=edit, review=read; test runs: go test ./... " + notSandboxed + "\n",
+			steps(domain.ActionResearch, domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview),
+			"authority: research=web, investigate=read, implement=edit, review=read; test runs: go test ./... " + notSandboxed + "\n",
 		},
-		{steps(domain.ActionAnalyze), "authority: analyze=read\n"},
+		{steps(domain.ActionInvestigate), "authority: investigate=read\n"},
 		{steps(domain.ActionTest), "authority: test runs: go test ./... — NOT sandboxed: network, $HOME and your files are reachable\n"},
 	}
 	var sandboxed bytes.Buffer
@@ -84,13 +84,13 @@ func TestProviderCallStarted_PrintsProviderModelAndRunningLine(t *testing.T) {
 	}
 }
 
-func TestStepFinished_AnalyzeSuccess_PrintsCompletedWithDuration(t *testing.T) {
+func TestStepFinished_InvestigateSuccess_PrintsCompletedWithDuration(t *testing.T) {
 	var buf bytes.Buffer
 	r := NewConsoleReporter(&buf)
 
 	start := time.Now()
 	exec := domain.StepExecution{
-		Action:    domain.ActionAnalyze,
+		Action:    domain.ActionInvestigate,
 		Provider:  &domain.ProviderRef{Provider: "claude", Model: "sonnet"},
 		StartedAt: start,
 		// 12.8s, exactly representable after Round(100ms) so the rendered text is exact.

@@ -11,8 +11,8 @@ import (
 // doubles as the routing marker fake executables grep on in integration tests. The task is
 // always embedded through taskBlock, repository data through fence.
 
-// readOnlyRule is shared by every read-only stage prompt: research, analysis and
-// planning inspect, they never change the repository.
+// readOnlyRule is shared by every read-only stage prompt: research and investigation
+// inspect, they never change the repository.
 const readOnlyRule = "This is a read-only step: do not create, modify or delete any files in the repository."
 
 // finalAnswerRule is appended when the step is the workflow's last read-only step and
@@ -21,12 +21,18 @@ const readOnlyRule = "This is a read-only step: do not create, modify or delete 
 // an operator skimming the run.
 const summaryShortRule = `"summary_short" is "summary" in one line of at most 72 characters, without a trailing period.`
 
-// acceptanceCriteriaRule tells plan what a criterion is (specs/quality/SPEC.md §4.2). parsePlan
-// enforces the same cap.
+// acceptanceCriteriaRule tells investigate what a criterion is (specs/quality/SPEC.md §4.2).
+// parseInvestigation enforces the same cap.
 const acceptanceCriteriaRule = `"acceptance_criteria" lists what must be true of the result for the task to be done. ` +
 	`Each criterion is one observable, checkable statement about the result, for example ` +
 	`"function X returns ErrEmpty for an empty input" or "` + "`go test ./internal/store`" + ` passes". ` +
 	`Give at most 8; write none rather than vague ones.`
+
+// rootCauseRule tells investigate what "root_cause" is (specs/clarify): the analysis that the
+// analysis stage used to give, now one field of the investigation's artifact.
+const rootCauseRule = `"root_cause" is the cause of the behaviour the task describes, found in the code: ` +
+	`what goes wrong, where (file and function) and why. Give it when the task is about a defect or an ` +
+	`unexpected behaviour; leave the key out when the task asks for something new and there is no cause to find.`
 
 // implementSummaryShortRule is implement's variant: its "summary_short" becomes the
 // commit message offered at the end of the run (MVP.md §42.2).
@@ -92,9 +98,27 @@ const reviewOperatorRule = `Implement can only read and edit files: it cannot ru
 const finalAnswerRule = `This is the final step of the workflow and no code will be changed. In "answer", ` +
 	`write the complete reply to the user's request, in the language the request is written in.`
 
+// clarificationBlock is the rendered clarification (domain.Clarification.Render) as a fenced
+// block, written after the task; "" when there is none, so such a prompt does not change.
+func clarificationBlock(text string) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	return fence("clarification", "the clarification agreed before the run", text)
+}
+
+// writeClarificationAfterTask writes the block after a task block that ends the prompt so far.
+func writeClarificationAfterTask(b *strings.Builder, text string) {
+	if block := clarificationBlock(text); block != "" {
+		b.WriteString("\n" + block)
+	}
+}
+
 type ResearchPromptInput struct {
-	Task        string
-	FinalAnswer bool
+	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification string
+	FinalAnswer   bool
 }
 
 func BuildResearchPrompt(in ResearchPromptInput) string {
@@ -105,50 +129,29 @@ func BuildResearchPrompt(in ResearchPromptInput) string {
 	b.WriteString(summaryShortRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
+	writeClarificationAfterTask(&b, in.Clarification)
 	return b.String()
 }
 
-type AnalyzePromptInput struct {
-	Task        string
-	Research    *domain.ResearchArtifact
-	FinalAnswer bool
+type InvestigatePromptInput struct {
+	Task          string
+	Clarification string
+	Research      *domain.ResearchArtifact
+	FinalAnswer   bool
 }
 
-func BuildAnalyzePrompt(in AnalyzePromptInput) string {
+func BuildInvestigatePrompt(in InvestigatePromptInput) string {
 	var b strings.Builder
-	b.WriteString("ACTION: analyze\n\n")
-	b.WriteString("Analyze the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"affected_files\": [\"...\"],\n  \"recommendation\": \"...\",\n  \"risks\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
+	b.WriteString("ACTION: investigate\n\n")
+	b.WriteString("Investigate the following software engineering task: read the code it concerns and create an implementation plan for it. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"root_cause\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
 	b.WriteString(summaryShortRule + "\n\n")
-	writeFinalAnswerRule(&b, in.FinalAnswer)
-	b.WriteString("Task:\n" + taskBlock(in.Task))
-	writeResearch(&b, in.Research)
-	return b.String()
-}
-
-type PlanPromptInput struct {
-	Task        string
-	Research    *domain.ResearchArtifact
-	Analysis    *domain.AnalysisArtifact
-	FinalAnswer bool
-}
-
-func BuildPlanPrompt(in PlanPromptInput) string {
-	var b strings.Builder
-	b.WriteString("ACTION: plan\n\n")
-	b.WriteString("Create an implementation plan for the following software engineering task. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"steps\": [\"...\"],\n  \"affected_files\": [\"...\"],\n  \"risks\": [\"...\"],\n  \"acceptance_criteria\": [\"...\"]" + answerField(in.FinalAnswer) + "\n}\n\n")
-	b.WriteString(summaryShortRule + "\n\n")
+	b.WriteString(rootCauseRule + "\n\n")
 	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
+	writeClarificationAfterTask(&b, in.Clarification)
 	writeResearch(&b, in.Research)
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "\nAnalysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
-			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
-		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
-		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
-	}
 	return b.String()
 }
 
@@ -205,15 +208,16 @@ func writeResearch(b *strings.Builder, r *domain.ResearchArtifact) {
 }
 
 // ImplementPromptInput carries whichever prior context is available. On the first
-// attempt, Analysis/Plan (whichever the workflow produced) are set and
+// attempt, Plan (when the workflow produced one) is set and
 // PreviousImplementation/LastTestResult/ReviewIssues are nil/empty. On a retry after test
 // failure, LastTestResult carries the failing command/stdout/stderr. On a retry after
 // review failure, ReviewIssues carries the structured issues and UnmetCriteria the
 // acceptance criteria the review found unmet, with their evidence.
 type ImplementPromptInput struct {
-	Task                   string
-	Analysis               *domain.AnalysisArtifact
-	Plan                   *domain.PlanArtifact
+	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification          string
+	Plan                   *domain.InvestigationArtifact
 	PreviousImplementation *domain.ImplementationArtifact
 	LastTestResult         *domain.TestResult
 	ReviewIssues           []domain.ReviewIssue
@@ -277,14 +281,10 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	}
 
 	b.WriteString("Task:\n" + taskBlock(in.Task) + "\n")
-
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\nRoot cause: %s\nRecommendation: %s\n",
-			in.Analysis.Summary, in.Analysis.RootCause, in.Analysis.Recommendation)
-		writeList(&b, "Affected files (from analysis)", in.Analysis.AffectedFiles)
-		writeList(&b, "Risks (from analysis)", in.Analysis.Risks)
-		b.WriteString("\n")
+	if block := clarificationBlock(in.Clarification); block != "" {
+		b.WriteString(block + "\n")
 	}
+
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
 		writeList(&b, "Steps", in.Plan.Steps)
@@ -479,11 +479,12 @@ func writeTestOutput(b *strings.Builder, r domain.TestResult, maxBytes int, owne
 
 type ReviewPromptInput struct {
 	Task string
+	// Clarification is the task's rendered clarification, "" when it has none.
+	Clarification string
 	// Acceptance are the task's own acceptance criteria (domain.Task.Acceptance, a story
 	// task's): they come first in the numbered list, ahead of the plan's.
 	Acceptance     []string
-	Analysis       *domain.AnalysisArtifact
-	Plan           *domain.PlanArtifact
+	Plan           *domain.InvestigationArtifact
 	Implementation *domain.ImplementationArtifact
 	TestResult     *domain.TestResult
 	GitDiff        string
@@ -524,7 +525,7 @@ func oneLine(s string) string {
 
 // planCriteria are the plan's acceptance criteria as the prompts number them: the blank
 // ones are skipped, as writeNumberedList does, so a verdict's index counts the same list.
-func planCriteria(p *domain.PlanArtifact) []string {
+func planCriteria(p *domain.InvestigationArtifact) []string {
 	var out []string
 	if p == nil {
 		return out
@@ -540,7 +541,7 @@ func planCriteria(p *domain.PlanArtifact) []string {
 // reviewCriteria are the criteria a review answers, in the order the prompt numbers them: the
 // task's acceptance items first, then the plan's, the blank ones skipped. The prompt, the
 // parser (parseReviewStrict) and the stored verdicts all count this one list.
-func reviewCriteria(acceptance []string, p *domain.PlanArtifact) []string {
+func reviewCriteria(acceptance []string, p *domain.InvestigationArtifact) []string {
 	var out []string
 	for _, c := range acceptance {
 		if strings.TrimSpace(c) != "" {
@@ -572,10 +573,10 @@ func BuildReviewPrompt(in ReviewPromptInput) string {
 	b.WriteString(reviewOperatorRule)
 
 	b.WriteString("Original task (expected outcome):\n" + taskBlock(in.Task) + "\n")
-
-	if in.Analysis != nil {
-		fmt.Fprintf(&b, "Analysis:\n%s\n\n", in.Analysis.Summary)
+	if block := clarificationBlock(in.Clarification); block != "" {
+		b.WriteString(block + "\n")
 	}
+
 	if in.Plan != nil {
 		fmt.Fprintf(&b, "Plan:\n%s\n", in.Plan.Summary)
 		writeList(&b, "Steps", in.Plan.Steps)

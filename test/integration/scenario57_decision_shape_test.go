@@ -12,10 +12,10 @@ import (
 )
 
 // Scenarios 57-62, the decision shape (specs/decision-shape/SPEC.md): the level is cut from one
-// size number, three stages are asked and the rest come from the level's template, a fix after
+// size number, two stages are asked and the rest come from the level's template, a fix after
 // a failed test runs one level up, and decisions calibrate proposes the cuts. The integration
-// config cuts at 0.5 and 1.4, and its template is medium: [analysis, review], complex:
-// [analysis, planning, review].
+// config cuts at 0.5 and 1.4, and its template is medium: [investigation, review], complex:
+// [investigation, review].
 
 // decisionStage is the stage of decision.json named st.
 func decisionStage(t *testing.T, d decisionJSON, st string) (enabled bool, reason string) {
@@ -29,22 +29,20 @@ func decisionStage(t *testing.T, d decisionJSON, st string) (enabled bool, reaso
 	return false, ""
 }
 
-// 57. A simple size has no template, but a cause that is not known brings analysis, and
-// testing comes with development without being asked.
-func TestScenario57_SimpleSizeWithAnalysis(t *testing.T) {
+// 57. A simple size has no template, so a change is implement and, with it, testing, which comes
+// with development without being asked.
+func TestScenario57_SimpleSizeNoTemplate(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	script := scriptBugfixLow()
-	script.Stages["analysis"] = 0.9
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, startJev(t, script)), "run", "fix Add in fixture.go")
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, startJev(t, scriptBugfixLow())), "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	d := readDecision(t, repoDir)
-	if d.Complexity.Selected != "simple" || !equalStrings(d.Workflow, []string{"analyze", "implement", "test"}) {
+	if d.Complexity.Selected != "simple" || !equalStrings(d.Workflow, []string{"implement", "test"}) {
 		t.Errorf("complexity %s, workflow %v", d.Complexity.Selected, d.Workflow)
 	}
 	if on, reason := decisionStage(t, d, "testing"); !on || reason != "with development" {
@@ -55,28 +53,26 @@ func TestScenario57_SimpleSizeWithAnalysis(t *testing.T) {
 	}
 }
 
-// 58. A medium size gets the template (analysis and review), whatever P(analysis) says, and
-// implement runs on the medium model.
+// 58. A medium size gets the template (investigation and review), and implement runs on the medium
+// model.
 func TestScenario58_MediumSizeTemplateAndModel(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	argsDir := t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
-	script := scriptBugfixMedium()
-	script.Stages["analysis"] = 0.1
-	cfg := jevConfig(t, startJev(t, script), func(o *configOptions) {
+	cfg := jevConfig(t, startJev(t, scriptBugfixMedium()), func(o *configOptions) {
 		o.byComplexity = map[string]map[string]string{"implement": {"medium": "medium-fake"}}
 	})
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	d := readDecision(t, repoDir)
-	if on, reason := decisionStage(t, d, "analysis"); !on || reason != "forced: complexity=medium" {
-		t.Errorf("analysis = %v, %q", on, reason)
+	if on, reason := decisionStage(t, d, "investigation"); !on || reason != "forced: complexity=medium" {
+		t.Errorf("investigation = %v, %q", on, reason)
 	}
 	assertContains(t, "implement's argv", readFile(t, argsDir+"/implement.args"), "--model\nmedium-fake\n")
 	if p := loadQL(t, repoDir).ofAction("implement")[0].Provider; p == nil || p.ModelSource != "by_complexity.medium" {
@@ -84,19 +80,19 @@ func TestScenario58_MediumSizeTemplateAndModel(t *testing.T) {
 	}
 }
 
-// 59. No code change: the run only answers. Medium's review is dropped, and the answer is
-// printed.
+// 59. No code change: the run only answers, with the template's investigation as its last
+// read-only step. Medium's review is dropped, and the investigation's answer is printed.
 func TestScenario59_NoCodeChangeAnswersOnly(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "analyze", analyzeAnswerResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "investigate", readOnlyAnswerResponse)
 	script := scriptBugfixMedium()
-	script.Stages = map[string]float64{"analysis": 0.95, "development": 0.1}
+	script.Stages = map[string]float64{"development": 0.1}
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, startJev(t, script)), "run", "explain Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)
 
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	if !strings.Contains(stdout, "Answer:\nAdd returns a - b; it should return a + b.") {
@@ -223,11 +219,11 @@ func TestScenario63_EscalateWithinTheLevel(t *testing.T) {
 func TestScenario62_CalibrateProposesCuts(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	decisionEnv(t, repoDir)
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "analyze", analyzeAnswerResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "investigate", readOnlyAnswerResponse)
 	var cfg string
 	// Sizes 0.2, 0.6 and 1.2; no code change, so each run only answers.
 	for _, choice := range [][3]float64{{0.8, 0.2, 0}, {0.4, 0.6, 0}, {0, 0.8, 0.2}} {
-		script := jevScript{PProject: 0.9, Choice: choice, Stages: map[string]float64{"analysis": 0.95}}
+		script := jevScript{PProject: 0.9, Choice: choice}
 		cfg = jevConfig(t, startJev(t, script))
 		stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "explain Add in fixture.go")
 		mustSucceed(t, stdout, stderr, err)

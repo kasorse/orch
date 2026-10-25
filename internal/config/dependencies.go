@@ -59,7 +59,7 @@ type CostChecker interface {
 }
 
 // ValidateDependencies verifies, for every provider referenced by cfg - every action,
-// translation, and an LLM decision provider - that the corresponding CLI executable is
+// translation, the clarify step when it is on, and an LLM decision provider - that the corresponding CLI executable is
 // present in PATH, for the Jev decision provider that its API key is set, and with
 // opts.Jira that the Jira credential variables are set. It must run after Validate and
 // before any provider or decision object is constructed, so a missing dependency is
@@ -99,6 +99,10 @@ func budgetProblems(cfg Config, checker CostChecker) []string {
 		}
 		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (actions.%s) reports no cost",
 			pm.Provider, pm.Action))
+	}
+	// The clarify call is a decision-phase call that counts against the budget (specs/clarify).
+	if clarify := cfg.Clarify; clarify.Active() && clarify.Provider != "" && (checker == nil || !checker.ReportsCost(clarify.Provider)) {
+		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (clarify) reports no cost", clarify.Provider))
 	}
 	return problems
 }

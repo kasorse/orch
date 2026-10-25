@@ -44,7 +44,7 @@ func TestScenario45_SimpleDecisionUsesTheTablesModel(t *testing.T) {
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
 	// research has no by_complexity entry, so it shows the base model next to implement's table
 	// model: a simple decision has no template, and review is not part of it.
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", analyzeResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", readOnlyResponse)
 	script := scriptBugfixLow()
 	script.Stages["research"] = 0.9
 	j := startJev(t, script)

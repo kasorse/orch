@@ -12,6 +12,7 @@ import (
 func hashPolicy() DecisionPolicy {
 	return DecisionPolicy{
 		ProjectContextThreshold: 0.5,
+		ClarityThreshold:        0.8,
 		ComplexityCuts:          ComplexityCuts{Medium: 0.6, Complex: 1.4},
 		StageThreshold:          map[Stage]float64{StageTesting: 0.5, StageReview: 0.4},
 		ForceStages:             map[Complexity][]Stage{ComplexityComplex: {StageReview}},
@@ -37,6 +38,12 @@ func TestPolicyHash(t *testing.T) {
 	p.ComplexityCuts.Medium = 0.61
 	if PolicyHash(p) == h {
 		t.Error("changing a size cut did not change the hash")
+	}
+
+	p = hashPolicy()
+	p.ClarityThreshold = 0.81
+	if PolicyHash(p) == h {
+		t.Error("changing the clarity threshold did not change the hash")
 	}
 }
 
@@ -69,9 +76,11 @@ func TestPolicyHash_MapOrderDoesNotMatter(t *testing.T) {
 // The hash covers DecisionPolicy's encoding, so a renamed, retyped or added field changes
 // every hash and splits the run history into a new group. This pins the encoding: when it
 // fails on purpose, say so in the commit that changes it. specs/decision-shape DS02 changed it
-// on purpose: ComplexityThreshold became ComplexityCuts.
+// on purpose: ComplexityThreshold became ComplexityCuts. specs/clarify CL03 changed it on
+// purpose: ClarityThreshold was added.
 func TestPolicyHash_PinnedEncoding(t *testing.T) {
 	const wantJSON = `{"ProjectContextThreshold":0.5,` +
+		`"ClarityThreshold":0.8,` +
 		`"ComplexityCuts":{"medium":0.6,"complex":1.4},` +
 		`"StageThreshold":{"review":0.4,"testing":0.5},` +
 		`"ForceStages":{"complex":["review"]}}`
@@ -101,7 +110,7 @@ func TestPolicyHash_IgnoresExplore(t *testing.T) {
 }
 
 func TestManualTraceHasNoPolicyHash(t *testing.T) {
-	d, err := ManualDecision([]Stage{StageAnalysis})
+	d, err := ManualDecision([]Stage{StageInvestigation})
 	if err != nil {
 		t.Fatal(err)
 	}

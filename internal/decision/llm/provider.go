@@ -18,10 +18,12 @@ import (
 	"orchestrator/internal/provider"
 )
 
-// Log names of the two decision rounds: logs/decide-{context,classify}.{stdout,stderr}.log.
+// Log names of the decision rounds: logs/decide-{context,classify}.{stdout,stderr}.log, and
+// logs/decide-clarity-<N>.{stdout,stderr}.log per clarity re-check.
 const (
 	logContext  = "decide-context"
 	logClassify = "decide-classify"
+	logClarity  = "decide-clarity"
 )
 
 // maxErrorBody bounds the model output carried by an InvalidResponse error, like the
@@ -59,6 +61,9 @@ type Provider struct {
 	Logger   Logger
 	Observer CallObserver
 	Stream   io.Writer
+
+	// rechecks counts the clarity re-checks made, which number their logs.
+	rechecks int
 }
 
 var _ decision.Provider = (*Provider)(nil)
@@ -72,7 +77,7 @@ func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.Con
 	if err != nil {
 		return domain.ContextDepthDecision{}, p.fail(apperr.DecisionBadRequest, "", err)
 	}
-	out, usage, err := p.call(ctx, logContext, prompt)
+	out, usage, err := p.call(ctx, logContext, logContext, prompt)
 	if err != nil {
 		return domain.ContextDepthDecision{}, err
 	}
@@ -86,12 +91,34 @@ func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.Con
 	return d, nil
 }
 
+// Clarity is the re-check: the clarity question alone, one call (logs/decide-clarity-<N>.*, N
+// counting this provider's re-checks from 1).
+func (p *Provider) Clarity(ctx context.Context, request, clarification string) (domain.ClarityDecision, error) {
+	prompt, err := buildClarityPrompt(request, clarification)
+	if err != nil {
+		return domain.ClarityDecision{}, p.fail(apperr.DecisionBadRequest, "", err)
+	}
+	p.rechecks++
+	out, usage, err := p.call(ctx, logClarity, fmt.Sprintf("%s-%d", logClarity, p.rechecks), prompt)
+	if err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	d, err := parseClarity(out)
+	if err != nil {
+		derr := p.fail(apperr.DecisionInvalidResponse, out, err)
+		derr.Usage = usage
+		return domain.ClarityDecision{}, derr
+	}
+	d.Usage = usage
+	return d, nil
+}
+
 func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInput) (domain.TaskClassification, error) {
 	prompt, err := buildClassifyPrompt(input, p.Sources)
 	if err != nil {
 		return domain.TaskClassification{}, p.fail(apperr.DecisionBadRequest, "", err)
 	}
-	out, usage, err := p.call(ctx, logClassify, prompt)
+	out, usage, err := p.call(ctx, logClassify, logClassify, prompt)
 	if err != nil {
 		return domain.TaskClassification{}, err
 	}
@@ -110,7 +137,7 @@ func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInpu
 // on_failure: fail). There is no retry: a CLI call is slow and its failures are rarely
 // transient in the way an HTTP 529 is. The call's usage is returned whenever the CLI
 // reported it, and also put on the DecisionError of a failed call.
-func (p *Provider) call(ctx context.Context, logName, prompt string) (string, *domain.Usage, error) {
+func (p *Provider) call(ctx context.Context, action, logName, prompt string) (string, *domain.Usage, error) {
 	callCtx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
 
@@ -140,7 +167,7 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, *d
 	var providerErr *apperr.ProviderError
 	if errors.As(err, &providerErr) {
 		if providerErr.Action == "" {
-			providerErr.Action = logName
+			providerErr.Action = action
 		}
 		// Point only at a log that exists: a call killed before it printed anything
 		// (claude --print writes only when done) leaves no file (MVP.md §23).
@@ -170,7 +197,7 @@ func (p *Provider) call(ctx context.Context, logName, prompt string) (string, *d
 		// a configuration error, not an outage.
 		kind = apperr.DecisionKindForStatus(providerErr.APIStatus)
 	}
-	derr := p.fail(kind, "", fmt.Errorf("%s call failed: %w", logName, err))
+	derr := p.fail(kind, "", fmt.Errorf("%s call failed: %w", action, err))
 	derr.Attempts = 1
 	if providerErr != nil {
 		derr.StatusCode = providerErr.APIStatus

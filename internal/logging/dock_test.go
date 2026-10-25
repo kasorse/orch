@@ -11,8 +11,8 @@ import (
 // Every card is exactly dockWidth cells wide, so the sidebar is one straight column.
 func TestDockCardsHaveFixedWidth(t *testing.T) {
 	r := &ConsoleReporter{Pretty: true, MaxFixIterations: 2}
-	r.run = &domain.Run{FixIterations: 1, Workflow: &domain.Workflow{Steps: []domain.Step{{Action: "analyze"}, {Action: "implement"}, {Action: "test"}}},
-		Executions: []domain.StepExecution{{Action: "analyze", Status: domain.StepCompleted}}}
+	r.run = &domain.Run{FixIterations: 1, Workflow: &domain.Workflow{Steps: []domain.Step{{Action: "investigate"}, {Action: "implement"}, {Action: "test"}}},
+		Executions: []domain.StepExecution{{Action: "investigate", Status: domain.StepCompleted}}}
 	r.action, r.inStep = "implement", true
 	r.ProviderUsage(domain.Usage{InputTokens: 10, CacheReadTokens: 9000, OutputTokens: 400, CostUSD: 0.02, Turns: 3,
 		Limits: &domain.RateLimits{FiveHour: &domain.LimitWindow{Utilization: 0.1}, Weekly: &domain.LimitWindow{Utilization: 0.42}}})
@@ -27,7 +27,7 @@ func TestDockCardsHaveFixedWidth(t *testing.T) {
 		}
 	}
 	plain := ansiRE.ReplaceAllString(strings.Join(lines, "\n"), "")
-	for _, want := range []string{"Workflow 1/3", "✓ analyze", "✻ implement  running", "○ test", "↻ fixes 1/2", "$0.020", "5-hour", "Repo · feature/"} {
+	for _, want := range []string{"Workflow 1/3", "✓ investigate", "✻ implement  running", "○ test", "↻ fixes 1/2", "$0.020", "5-hour", "Repo · feature/"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("expected %q in sidebar:\n%s", want, plain)
 		}

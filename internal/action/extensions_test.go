@@ -16,12 +16,12 @@ func TestExtensionsFor(t *testing.T) {
 		"memory":   {URL: "https://mem.example/mcp", Tools: []string{"*"}, Actions: []string{"implement"}},
 	}, UserSettings: true, UserSettingsActions: []string{"implement"}}
 
-	analyze := extensionsFor(cfg, domain.ActionAnalyze, "/work/repo", "/work/repo")
-	if analyze.UserSettings {
+	investigate := extensionsFor(cfg, domain.ActionInvestigate, "/work/repo", "/work/repo")
+	if investigate.UserSettings {
 		t.Error("user settings were opted in for implement only")
 	}
-	if got := strings.Join(analyze.MCPTools, ","); got != "mcp__graphify__get_node,mcp__graphify__query_graph" {
-		t.Errorf("analyze tools = %s", got)
+	if got := strings.Join(investigate.MCPTools, ","); got != "mcp__graphify__get_node,mcp__graphify__query_graph" {
+		t.Errorf("investigate tools = %s", got)
 	}
 	var doc struct {
 		MCPServers map[string]struct {
@@ -29,11 +29,11 @@ func TestExtensionsFor(t *testing.T) {
 			Args    []string `json:"args"`
 		} `json:"mcpServers"`
 	}
-	if err := json.Unmarshal([]byte(analyze.MCPConfig), &doc); err != nil {
+	if err := json.Unmarshal([]byte(investigate.MCPConfig), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if len(doc.MCPServers) != 1 || doc.MCPServers["graphify"].Args[0] != "/work/repo/graphify-out/graph.json" {
-		t.Errorf("analyze mcp config = %s", analyze.MCPConfig)
+		t.Errorf("investigate mcp config = %s", investigate.MCPConfig)
 	}
 
 	impl := extensionsFor(cfg, domain.ActionImplement, "/work/repo", "/work/repo")
@@ -42,19 +42,19 @@ func TestExtensionsFor(t *testing.T) {
 	}
 	// In a worktree run, {source} is the operator's repository, where an ignored graph lies.
 	cfg.MCP["graphify"] = config.MCPServerConfig{Command: "graphify-mcp", Args: []string{"{source}/graphify-out/graph.json", "{repo}"}, Tools: []string{"query_graph"}}
-	wt := extensionsFor(cfg, domain.ActionAnalyze, "/state/worktrees/x/run", "/work/repo")
+	wt := extensionsFor(cfg, domain.ActionInvestigate, "/state/worktrees/x/run", "/work/repo")
 	if !strings.Contains(wt.MCPConfig, `"args":["/work/repo/graphify-out/graph.json","/state/worktrees/x/run"]`) {
 		t.Errorf("worktree mcp config = %s", wt.MCPConfig)
 	}
 	if research := extensionsFor(cfg, domain.ActionResearch, "/r", "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
 		t.Errorf("research must get nothing: %+v", research)
 	}
-	if got := withExtensionsHint("ACTION: analyze\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionAnalyze, "/r", "/r")); got != "ACTION: analyze\nbody" {
+	if got := withExtensionsHint("ACTION: investigate\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionInvestigate, "/r", "/r")); got != "ACTION: investigate\nbody" {
 		t.Errorf("no extensions, no hint: %q", got)
 	}
 	// The hint comes right after the first line, which stays "ACTION: <name>".
-	got := withExtensionsHint("ACTION: analyze\nbody", analyze)
-	if !strings.HasPrefix(got, "ACTION: analyze\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
+	got := withExtensionsHint("ACTION: investigate\nbody", investigate)
+	if !strings.HasPrefix(got, "ACTION: investigate\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
 		t.Errorf("hint = %q", got)
 	}
 }

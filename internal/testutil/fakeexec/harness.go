@@ -35,14 +35,14 @@ func PrependPath(t *testing.T, dir string) {
 //     every invocation, so tests can assert exactly how many AI calls happened (and of
 //     which kind), including "no further AI call happened after X".
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
-//     action ("translate.json", "decide-context.json", "decide-classify.json",
-//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json", and
-//     a story's planning calls, "survey.json" and "specify.json").
-//     For "review" and "implement", a numbered override
-//     "review_<N>.json" / "implement_<N>.json" (N = 1-based call count of that
-//     action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
-//     present, so a test can script review fail-then-pass, or an implement answer per
-//     attempt.
+//     action ("translate.json", "decide-context.json", "decide-clarity.json",
+//     "decide-classify.json", "clarify.json", "research.json", "investigate.json", "implement.json",
+//     "review.json", and a story's planning calls, "survey.json" and "specify.json").
+//     For "review", "implement" and "decide-clarity", a numbered override
+//     "review_<N>.json" / "implement_<N>.json" / "decide-clarity_<N>.json" (N = 1-based call
+//     count of that action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
+//     present, so a test can script review fail-then-pass, an implement answer per attempt, or a
+//     clarity re-check that stays below the threshold and then clears it.
 //   - FAKE_FAIL_ACTION / FAKE_FAIL_EXIT_CODE / FAKE_FAIL_STDERR / FAKE_FAIL_STDOUT: if
 //     FAKE_FAIL_ACTION matches the resolved action, the script exits with
 //     FAKE_FAIL_EXIT_CODE (default 1) after writing FAKE_FAIL_STDERR to stderr and/or
@@ -146,9 +146,10 @@ for arg in "$prompt" "$@"; do
     "ACTION: translate"*)       action="translate" ;;
     "ACTION: decide-context"*)  action="decide-context" ;;
     "ACTION: decide-classify"*) action="decide-classify" ;;
+    "ACTION: decide-clarity"*)  action="decide-clarity" ;;
+    "ACTION: clarify"*)         action="clarify" ;;
     "ACTION: research"*)        action="research" ;;
-    "ACTION: analyze"*)         action="analyze" ;;
-    "ACTION: plan"*)            action="plan" ;;
+    "ACTION: investigate"*)     action="investigate" ;;
     "ACTION: implement"*)       action="implement" ;;
     "ACTION: review"*)          action="review" ;;
     "ACTION: survey"*)          action="survey" ;;
@@ -336,7 +337,7 @@ fi
 
 response_file=""
 if [ -n "${FAKE_RESPONSES_DIR:-}" ]; then
-  if { [ "$action" = "review" ] || [ "$action" = "implement" ]; } && [ -n "$call_count" ] && [ -f "$FAKE_RESPONSES_DIR/${action}_${call_count}.json" ]; then
+  if { [ "$action" = "review" ] || [ "$action" = "implement" ] || [ "$action" = "decide-clarity" ]; } && [ -n "$call_count" ] && [ -f "$FAKE_RESPONSES_DIR/${action}_${call_count}.json" ]; then
     response_file="$FAKE_RESPONSES_DIR/${action}_${call_count}.json"
   elif [ -f "$FAKE_RESPONSES_DIR/${action}.json" ]; then
     response_file="$FAKE_RESPONSES_DIR/${action}.json"

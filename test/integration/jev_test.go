@@ -25,6 +25,8 @@ type jevScript struct {
 	Stages map[string]float64
 	// Scope is the scope_story probability (specs/story/SPEC.md §13); nil answers 0.15.
 	Scope *float64
+	// PClear is the clarity probability (specs/clarify); nil answers 0.95.
+	PClear *float64
 	// Fail lists statuses to answer the first requests with, before answering normally.
 	Fail []int
 	// Models is what GET /v1/models lists (TASKS.md T14); ModelsStatus, when set, is the
@@ -33,13 +35,13 @@ type jevScript struct {
 	ModelsStatus int
 }
 
-// scriptBugfixMedium decides analysis -> development -> testing -> review: size 1.1 is medium
-// under the test cuts, and medium's template is analysis and review.
+// scriptBugfixMedium decides investigation -> development -> testing -> review: size 1.1 is medium
+// under the test cuts, and medium's template is investigation and review.
 func scriptBugfixMedium() jevScript {
 	return jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.95},
+		Stages:   map[string]float64{"development": 0.95},
 	}
 }
 
@@ -130,6 +132,12 @@ func (j *fakeJev) handle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case id == "context_depth":
 			answers[id] = choice(map[string]float64{"none": 1 - j.script.PProject, "project": j.script.PProject})
+		case id == "clarity":
+			p := 0.95
+			if j.script.PClear != nil {
+				p = *j.script.PClear
+			}
+			answers[id] = map[string]any{"type": "noul", "noul": p}
 		case id == "complexity":
 			answers[id] = choice(levels(j.script.Choice, "simple", "medium", "complex"))
 		case id == "complexity_score":

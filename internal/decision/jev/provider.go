@@ -68,6 +68,19 @@ func (p *Provider) ContextDepth(ctx context.Context, request string) (domain.Con
 	return d, nil
 }
 
+func (p *Provider) Clarity(ctx context.Context, request, clarification string) (domain.ClarityDecision, error) {
+	resp, err := p.client.decide(ctx, p.clarityRequest(request, clarification))
+	if err != nil {
+		return domain.ClarityDecision{}, err
+	}
+	d, err := mapClarity(resp)
+	if err != nil {
+		return domain.ClarityDecision{}, withUsage(err, resp)
+	}
+	d.Usage = responseUsage(resp)
+	return d, nil
+}
+
 func (p *Provider) Classify(ctx context.Context, input domain.ClassificationInput) (domain.TaskClassification, error) {
 	resp, err := p.client.decide(ctx, p.classificationRequest(input))
 	if err != nil {
@@ -100,12 +113,25 @@ func withUsage(err error, resp systemOneResponse) error {
 	return err
 }
 
+// contextDepthRequest is the pre-check: the depth question and, beside it, the clarity question
+// (specs/clarify), both against the request alone.
 func (p *Provider) contextDepthRequest(request string) systemOneRequest {
 	q := decision.ContextDepthQuestion()
+	c := decision.ClarityQuestion()
 	return systemOneRequest{
 		Model:     p.model,
 		State:     decision.PreCheckState{Request: request},
-		Questions: map[string]question{q.ID: choiceQuestion(q)},
+		Questions: map[string]question{q.ID: choiceQuestion(q), c.ID: yesNoQuestion(c)},
+	}
+}
+
+// clarityRequest asks the clarity question alone, against the request and its clarification.
+func (p *Provider) clarityRequest(request, clarification string) systemOneRequest {
+	q := decision.ClarityQuestion()
+	return systemOneRequest{
+		Model:     p.model,
+		State:     decision.ClarityState{Request: request, Clarification: clarification},
+		Questions: map[string]question{q.ID: yesNoQuestion(q)},
 	}
 }
 

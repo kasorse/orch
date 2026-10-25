@@ -36,7 +36,7 @@ const (
 const CommonName = "common"
 
 // Stages are the names `--stage` accepts, in the orchestrator's fixed order.
-var Stages = []string{"research", "analysis", "planning", "development", "testing", "review"}
+var Stages = []string{"research", "analysis", "investigation", "development", "testing", "review"}
 
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 

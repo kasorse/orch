@@ -62,7 +62,7 @@ func (r *ConsoleReporter) History(run *domain.Run) {
 	whoWidth, authWidth := 0, 0
 	for i, exec := range run.Executions {
 		ok, result := executionResult(exec)
-		rw := row{mark: "✓", head: fmt.Sprintf("%03d %-9s", exec.Index, exec.Action), result: result}
+		rw := row{mark: "✓", head: fmt.Sprintf("%03d %-11s", exec.Index, exec.Action), result: result}
 		if !ok {
 			rw.mark = "✗"
 		}

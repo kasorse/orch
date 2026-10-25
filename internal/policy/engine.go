@@ -24,6 +24,28 @@ func SelectContextDepth(d domain.ContextDepthDecision, p domain.DecisionPolicy) 
 	return domain.ContextDepthNone
 }
 
+// ClearEnough reports whether P(clear) p reaches pol's ClarityThreshold (policy.clarify.threshold,
+// specs/clarify). The comparison is inclusive, like SelectContextDepth's.
+func ClearEnough(p float64, pol domain.DecisionPolicy) bool {
+	return p >= pol.ClarityThreshold
+}
+
+// Clarity is the trace of the clarity checks made so far: checks holds P(clear) of the
+// pre-check and then of each re-check, and the status is that of the last one. It panics on no
+// checks: there is nothing to trace before the first.
+func Clarity(checks []float64, pol domain.DecisionPolicy) domain.ClarityTrace {
+	last := checks[len(checks)-1]
+	t := domain.ClarityTrace{Threshold: pol.ClarityThreshold, Checks: append([]float64(nil), checks...)}
+	if ClearEnough(last, pol) {
+		t.Status = domain.ClarityClear
+		t.Reason = fmt.Sprintf("p=%.2f >= %.2f", last, pol.ClarityThreshold)
+	} else {
+		t.Status = domain.ClarityUnclear
+		t.Reason = fmt.Sprintf("p=%.2f < %.2f", last, pol.ClarityThreshold)
+	}
+	return t
+}
+
 // SelectComplexity cuts d's Size by p.ComplexityCuts (specs/decision-shape/SPEC.md §5):
 // complex at or above the complex cut, otherwise medium at or above the medium cut,
 // otherwise simple. Both comparisons are inclusive.
@@ -50,8 +72,8 @@ func SelectComplexity(d domain.ComplexityDecision, p domain.DecisionPolicy) doma
 //	        ∪ { testing, if development is enabled }
 //
 // and without development, testing and review are off: there is no diff to test or review.
-// A stage the provider was not asked about (planning, testing, review) has no probability;
-// the template (ForceStages) is what turns it on. If nothing is enabled, analysis alone is
+// A stage the provider was not asked about (investigation, testing, review) has no probability;
+// the template (ForceStages) is what turns it on. If nothing is enabled, investigation alone is
 // (TASKS.md В6) rather than an empty workflow.
 func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p domain.DecisionPolicy) domain.StageSelection {
 	forced := forcedSet(p, complexity)
@@ -88,9 +110,9 @@ func SelectStages(stages domain.StageDecisions, complexity domain.Complexity, p 
 
 	if !anyEnabled(sel) {
 		for i := range sel.Stages {
-			if sel.Stages[i].Stage == domain.StageAnalysis {
+			if sel.Stages[i].Stage == domain.StageInvestigation {
 				sel.Stages[i].Enabled = true
-				sel.Stages[i].Reason = "forced: no stage cleared its threshold, defaulting to analysis"
+				sel.Stages[i].Reason = "forced: no stage cleared its threshold, defaulting to investigation"
 				break
 			}
 		}

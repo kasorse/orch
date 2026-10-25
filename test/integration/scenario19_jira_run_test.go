@@ -32,7 +32,7 @@ func pmc1Rendered(baseURL, notes string) string {
 }
 
 // jiraRun is a scenario-19 setup: fake providers, a fake Jev deciding
-// analyze -> implement -> test -> review, and a fake Jira serving PMC-1.
+// investigate -> implement -> test -> review, and a fake Jira serving PMC-1.
 type jiraRun struct {
 	repoDir, cfg, invocationsLog, promptsDir string
 	jev                                      *fakeJev
@@ -99,7 +99,7 @@ func TestScenario19a_JiraSuccess(t *testing.T) {
 	}
 
 	rendered := pmc1Rendered(r.jira.URL(), "")
-	for _, action := range []string{"analyze", "implement", "review"} {
+	for _, action := range []string{"investigate", "implement", "review"} {
 		prompt, err := os.ReadFile(filepath.Join(r.promptsDir, action+".txt"))
 		if err != nil {
 			t.Fatalf("%s prompt: %v", action, err)
@@ -108,7 +108,7 @@ func TestScenario19a_JiraSuccess(t *testing.T) {
 			t.Errorf("%s prompt lacks the rendered ticket:\n%s", action, prompt)
 		}
 	}
-	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"analyze", "implement", "review"}) {
+	if got := invocations(t, r.invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 

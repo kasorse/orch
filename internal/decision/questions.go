@@ -20,6 +20,7 @@ const (
 	QuestionComplexity      = "complexity"
 	QuestionComplexityScore = "complexity_score"
 	QuestionScopeStory      = "scope_story"
+	QuestionClarity         = "clarity"
 	stageQuestionPrefix     = "stage_"
 )
 
@@ -106,11 +107,6 @@ var stageQuestions = map[domain.Stage]YesNoQuestion{
 		True:         "The request needs information that is not in the repository: comparing approaches, choosing or evaluating libraries or tools, or looking up external standards or APIs.",
 		False:        "Everything needed is in the request, the repository, or common engineering knowledge.",
 	},
-	domain.StageAnalysis: {
-		Instructions: "Does fulfilling `request` require analysing existing code or the problem before acting?",
-		True:         "The cause, the affected code, or the right place to change is not yet known and must be found by reading code, logs or behaviour.",
-		False:        "What to do and where is already clear from the request.",
-	},
 	domain.StageDevelopment: {
 		Instructions: "Does fulfilling `request` require changing code in the repository?",
 		True:         "Files in the repository must be created, modified or deleted.",
@@ -145,6 +141,19 @@ func ScopeQuestion() YesNoQuestion {
 	}
 }
 
+// ClarityQuestion is asked in the pre-check's call, against the request alone, and again
+// against the request and its clarification (specs/clarify): is the task clear enough to act
+// on. Its answer is compared with policy.clarify.threshold by Go. It is not a stage question:
+// Stage is empty, and StageQuestions does not return it.
+func ClarityQuestion() YesNoQuestion { return clarityQuestion }
+
+var clarityQuestion = YesNoQuestion{
+	ID:           QuestionClarity,
+	Instructions: "Is `request` clear enough to act on: is it stated what has to be achieved, where, and how to tell that it is done?",
+	True:         "A competent engineer new to the task could start without asking anything: the goal, the part of the system it concerns and the expected result are stated or follow unambiguously.",
+	False:        "Something essential is missing or ambiguous: the goal, the affected part, the expected behaviour or result, or a choice the request leaves open.",
+}
+
 // QuestionsHash is the lowercase hex sha256 of every shared question as asked, in a fixed
 // order. decision.json records it, and calibration groups by it: an answer to a reworded
 // question is on another scale (specs/decision-shape/SPEC.md §5.3). It is one constant for
@@ -158,7 +167,8 @@ func QuestionsHash() string {
 		ComplexityScore  ScoreQuestion
 		Stages           []YesNoQuestion
 		Scope            YesNoQuestion
-	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions(), ScopeQuestion()})
+		Clarity          YesNoQuestion
+	}{ContextDepthQuestion(), ComplexityChoiceQuestion(), ComplexityScoreQuestion(), StageQuestions(), ScopeQuestion(), ClarityQuestion()})
 	if err != nil {
 		panic(err) // plain strings and slices always encode
 	}

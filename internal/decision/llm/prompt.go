@@ -14,6 +14,7 @@ import (
 const (
 	markerContext  = "ACTION: decide-context"
 	markerClassify = "ACTION: decide-classify"
+	markerClarity  = "ACTION: decide-clarity"
 )
 
 const preamble = `You are the decision layer of a software engineering orchestrator. Answer the
@@ -28,17 +29,40 @@ the state.
 Respond with a single JSON object, no markdown fences, no prose before or after it.
 Every probability is a number between 0 and 1.`
 
-// buildContextPrompt renders the pre-check question.
+// buildContextPrompt renders the pre-check: the context depth question and, beside it, the
+// clarity question (specs/clarify).
 func buildContextPrompt(request string) (string, error) {
 	q := decision.ContextDepthQuestion()
+	c := decision.ClarityQuestion()
 	var b strings.Builder
 	b.WriteString(markerContext + "\n\n" + preamble + "\n\n")
 	writeChoice(&b, q)
-	fmt.Fprintf(&b, "Answer shape:\n{\"%s\": %s}\n\n", q.ID, choiceShape(q))
+	writeYesNo(&b, c)
+	fmt.Fprintf(&b, "Answer shape:\n{\n  %q: %s,\n  %q: <p>\n}\n\n", q.ID, choiceShape(q), c.ID)
 	if err := writeState(&b, decision.PreCheckState{Request: request}); err != nil {
 		return "", err
 	}
 	return b.String(), nil
+}
+
+// buildClarityPrompt renders the clarity question asked alone, against the request and the
+// clarification so far.
+func buildClarityPrompt(request, clarification string) (string, error) {
+	c := decision.ClarityQuestion()
+	var b strings.Builder
+	b.WriteString(markerClarity + "\n\n" + preamble + "\n\n")
+	writeYesNo(&b, c)
+	b.WriteString("The state may carry a clarification: what was agreed about the request after it was written.\nJudge the request together with it.\n\n")
+	fmt.Fprintf(&b, "Answer shape:\n{%q: <p>}\n\n", c.ID)
+	if err := writeState(&b, decision.ClarityState{Request: request, Clarification: clarification}); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// writeYesNo renders a yes/no question: the probability that the answer is yes.
+func writeYesNo(b *strings.Builder, q decision.YesNoQuestion) {
+	fmt.Fprintf(b, "Question %q (the probability that the answer is yes): %s\n  yes: %s\n  no: %s\n\n", q.ID, q.Instructions, q.True, q.False)
 }
 
 // buildClassifyPrompt renders the complexity question(s) asked (TASKS.md В1) and every

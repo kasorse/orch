@@ -16,6 +16,10 @@ type DecisionPolicy struct {
 	// P(project) is at least this.
 	ProjectContextThreshold float64
 
+	// ClarityThreshold: the task is clear enough when P(clear) is at least this
+	// (policy.clarify.threshold, specs/clarify). It is part of PolicyHash.
+	ClarityThreshold float64
+
 	// ComplexityCuts split a complexity distribution's Size into levels
 	// (specs/decision-shape/SPEC.md §5.2).
 	ComplexityCuts ComplexityCuts

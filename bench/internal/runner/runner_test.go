@@ -544,9 +544,9 @@ func TestOrchestratorAnswerOfAQuestion(t *testing.T) {
 	h.runDir(map[string]string{
 		"run.json": `{"status":"completed","executions":[
 {"index":1,"action":"research","status":"completed","artifact_path":"artifacts/001-research.json"},
-{"index":2,"action":"analyze","status":"completed","artifact_path":"artifacts/002-analyze.json"}]}`,
-		"artifacts/001-research.json": `{"answer":"first draft"}`,
-		"artifacts/002-analyze.json":  `{"answer":"It is the mul function in calc.sh."}`,
+{"index":2,"action":"investigate","status":"completed","artifact_path":"artifacts/002-investigate.json"}]}`,
+		"artifacts/001-research.json":    `{"answer":"first draft"}`,
+		"artifacts/002-investigate.json": `{"answer":"It is the mul function in calc.sh."}`,
 	})
 	got, err := h.run("B", questionTask())
 	if err != nil {
@@ -555,7 +555,7 @@ func TestOrchestratorAnswerOfAQuestion(t *testing.T) {
 	if got.Answer != "It is the mul function in calc.sh." {
 		t.Errorf("Answer = %q", got.Answer)
 	}
-	if want := []string{"research", "analysis"}; !reflect.DeepEqual(got.Stages, want) {
+	if want := []string{"research", "investigation"}; !reflect.DeepEqual(got.Stages, want) {
 		t.Errorf("Stages = %v, want %v", got.Stages, want)
 	}
 	if got.Complexity != "" {

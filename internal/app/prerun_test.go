@@ -20,7 +20,7 @@ func TestNeedsPreRunTest(t *testing.T) {
 		}
 		return w
 	}
-	implTest := wf(domain.ActionAnalyze, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
+	implTest := wf(domain.ActionInvestigate, domain.ActionImplement, domain.ActionTest, domain.ActionReview)
 	for name, tc := range map[string]struct {
 		baseline string
 		run      *domain.Run
@@ -31,7 +31,7 @@ func TestNeedsPreRunTest(t *testing.T) {
 		"baseline off":         {config.BaselineOff, &domain.Run{Workflow: implTest}, false},
 		"test only":            {"", &domain.Run{Workflow: wf(domain.ActionTest)}, false},
 		"implement only":       {"", &domain.Run{Workflow: wf(domain.ActionImplement, domain.ActionReview)}, false},
-		"a step already ran":   {"", &domain.Run{Workflow: implTest, Executions: []domain.StepExecution{{Action: domain.ActionAnalyze}}}, false},
+		"a step already ran":   {"", &domain.Run{Workflow: implTest, Executions: []domain.StepExecution{{Action: domain.ActionInvestigate}}}, false},
 		"no workflow (refuse)": {"", &domain.Run{}, false},
 	} {
 		t.Run(name, func(t *testing.T) {

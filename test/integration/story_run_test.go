@@ -92,12 +92,12 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		t.Fatal(err)
 	}
 
-	// Medium: the template gives analysis and review; development is rated under its
+	// Medium: the template gives planning and review; development is rated under its
 	// threshold and a story task adds it all the same.
 	j := startJev(t, jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.1},
+		Stages:   map[string]float64{"development": 0.1},
 	})
 	billing := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, billing)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"orchestrator/internal/apperr"
@@ -40,6 +41,7 @@ type fakeProvider struct {
 
 	depthRequest string
 	input        *domain.ClassificationInput
+	clarityCalls int
 }
 
 func (f *fakeProvider) Name() string { return "jev" }
@@ -49,6 +51,11 @@ func (f *fakeProvider) Source() domain.DecisionSource { return domain.DecisionSo
 func (f *fakeProvider) ContextDepth(_ context.Context, request string) (domain.ContextDepthDecision, error) {
 	f.depthRequest = request
 	return f.depth, f.depthErr
+}
+
+func (f *fakeProvider) Clarity(context.Context, string, string) (domain.ClarityDecision, error) {
+	f.clarityCalls++
+	return domain.ClarityDecision{PClear: f.depth.PClear}, nil
 }
 
 func (f *fakeProvider) Classify(_ context.Context, in domain.ClassificationInput) (domain.TaskClassification, error) {
@@ -91,9 +98,10 @@ func testPolicy() domain.DecisionPolicy {
 	}
 	return domain.DecisionPolicy{
 		ProjectContextThreshold: 0.5,
+		ClarityThreshold:        0.80,
 		ComplexityCuts:          domain.ComplexityCuts{Medium: 0.5, Complex: 1.4},
 		StageThreshold:          th,
-		ForceStages:             map[domain.Complexity][]domain.Stage{domain.ComplexityComplex: {domain.StageAnalysis, domain.StagePlanning, domain.StageReview}},
+		ForceStages:             map[domain.Complexity][]domain.Stage{domain.ComplexityComplex: {domain.StageInvestigation, domain.StageReview}},
 	}
 }
 
@@ -101,13 +109,14 @@ func depthDecision(pProject float64) domain.ContextDepthDecision {
 	return domain.ContextDepthDecision{
 		Probabilities: map[domain.ContextDepth]float64{domain.ContextDepthNone: 1 - pProject, domain.ContextDepthProject: pProject},
 		Confidence:    0.8,
+		PClear:        0.9,
 	}
 }
 
 func classificationFor(depth domain.ContextDepth) domain.TaskClassification {
 	var stages domain.StageDecisions
 	for st, p := range map[domain.Stage]float64{
-		domain.StageResearch: 0.1, domain.StageAnalysis: 0.9, domain.StagePlanning: 0.2,
+		domain.StageResearch: 0.1, domain.StageInvestigation: 0.2,
 		domain.StageDevelopment: 0.95, domain.StageTesting: 0.9, domain.StageReview: 0.3,
 	} {
 		stages.Set(st, domain.ProbabilityDecision{Probability: p})
@@ -165,7 +174,7 @@ func TestClassify_NoneSkipsContextManager(t *testing.T) {
 	if res.Decision.Source != domain.DecisionSourceJev || res.Decision.ContextDepth.Selected != domain.ContextDepthNone {
 		t.Errorf("decision = %+v", res.Decision)
 	}
-	if got := res.Decision.Stages.EnabledStages(); len(got) != 3 { // analysis, development, testing
+	if got := res.Decision.Stages.EnabledStages(); len(got) != 2 { // development, testing
 		t.Errorf("stages = %v", got)
 	}
 }
@@ -236,8 +245,8 @@ func TestClassify_ProviderFailureAsksUser(t *testing.T) {
 			if res.Decision.Source != domain.DecisionSourceUser || res.DecisionError != jevDown {
 				t.Errorf("decision = %+v", res.Decision)
 			}
-			// complex forces analysis, planning, review on top of the user's development.
-			want := []domain.Stage{domain.StageAnalysis, domain.StagePlanning, domain.StageDevelopment, domain.StageReview}
+			// complex forces investigation, review on top of the user's development.
+			want := []domain.Stage{domain.StageInvestigation, domain.StageDevelopment, domain.StageReview}
 			if got := res.Decision.Stages.EnabledStages(); !equalStages(got, want) {
 				t.Errorf("stages = %v, want %v", got, want)
 			}
@@ -343,7 +352,7 @@ func TestResultTrace_ReconstructsTheDecision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	trace := res.Trace(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionAnalyze}, {Action: domain.ActionImplement}}})
+	trace := res.Trace(domain.Workflow{Steps: []domain.Step{{Action: domain.ActionInvestigate}, {Action: domain.ActionImplement}}})
 
 	raw, err := json.Marshal(trace)
 	if err != nil {
@@ -522,6 +531,63 @@ func TestScopeAnswerChangesNothingButItself(t *testing.T) {
 	}
 }
 
+// A task the pre-check rates at or above the threshold is classified with no extra provider call
+// and no clarify step; the check is recorded.
+func TestClassify_RecordsTheClarityCheck(t *testing.T) {
+	for _, tt := range []struct {
+		pClear float64
+		status domain.ClarityStatus
+	}{
+		{0.95, domain.ClarityClear},
+		{0.80, domain.ClarityClear}, // inclusive
+		// With the clarify step off the question is recorded and the run goes on whatever it is.
+		{0.79, domain.ClarityDisabled},
+		{0.05, domain.ClarityDisabled},
+	} {
+		f := newFixture(0.9)
+		f.svc.ClarifyDisabled = tt.status == domain.ClarityDisabled
+		f.provider.depth.PClear = tt.pClear
+		res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := res.Trace(domain.Workflow{}).Clarity
+		if got == nil || len(got.Checks) != 1 || got.Checks[0] != tt.pClear || got.Threshold != 0.80 || got.Status != tt.status {
+			t.Errorf("P(clear) %v: trace clarity = %+v, want one check and status %s", tt.pClear, got, tt.status)
+		}
+		if err := got.Validate(); err != nil {
+			t.Errorf("P(clear) %v: %v", tt.pClear, err)
+		}
+		if f.provider.clarityCalls != 0 {
+			t.Errorf("P(clear) %v: %d re-checks, want none", tt.pClear, f.provider.clarityCalls)
+		}
+		if res.Decision.Source != domain.DecisionSourceJev || len(res.Decision.Stages.EnabledStages()) == 0 {
+			t.Errorf("P(clear) %v: the answer must decide nothing: %+v", tt.pClear, res.Decision)
+		}
+	}
+}
+
+func TestClassify_ClarityIsAbsentWithoutAPreCheckAnswerAndForAStoryTask(t *testing.T) {
+	f := newFixture(0.9)
+	f.provider.depthErr = jevDown
+	res, err := f.svc.Classify(context.Background(), Request{Text: "fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).Clarity; got != nil {
+		t.Errorf("clarity after a failed pre-check = %+v, want none", got)
+	}
+
+	f = newFixture(0.9)
+	res, err = f.svc.Classify(context.Background(), Request{Text: "fix", StoryTask: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Trace(domain.Workflow{}).Clarity; got != nil {
+		t.Errorf("clarity of a story task = %+v, want none", got)
+	}
+}
+
 // Each decision round's usage reaches the trace (specs/benchmark/SPEC.md §11.1), also the
 // usage of a provider call that failed before the manual choice.
 func TestClassify_RecordsUsage(t *testing.T) {
@@ -536,7 +602,7 @@ func TestClassify_RecordsUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := domain.DecisionUsage{Translation: tr, ContextDepth: depth, Classification: tc}
-	if trace := res.Trace(domain.Workflow{}); trace.Usage == nil || *trace.Usage != want {
+	if trace := res.Trace(domain.Workflow{}); trace.Usage == nil || !reflect.DeepEqual(*trace.Usage, want) {
 		t.Errorf("trace usage = %+v, want %+v", trace.Usage, want)
 	}
 

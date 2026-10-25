@@ -22,6 +22,7 @@ func RunSummary(run domain.Run, trace *domain.DecisionTrace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Run %s\n\n", run.ID)
 	writeTotals(&b, run, trace, out)
+	writeClarification(&b, run)
 	writeSteps(&b, run)
 	writeTools(&b, run)
 	writeChanges(&b, run)
@@ -152,6 +153,31 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	}
 	if w := run.Worktree; w != nil {
 		row("Worktree", worktreeLine(run, *w))
+	}
+}
+
+// writeClarification lists what the clarify step agreed about an unclear task (specs/clarify):
+// the P(clear) of every check against the threshold, and the clarification as the stages read it,
+// whose open points are what a run that stopped with "task needs input" still lacks.
+func writeClarification(b *strings.Builder, run domain.Run) {
+	c := run.Task.Clarification
+	if c == nil {
+		return
+	}
+	checks := make([]string, len(c.Checks))
+	for i, p := range c.Checks {
+		checks[i] = fmt.Sprintf("%.2f", p)
+	}
+	b.WriteString("\n## Clarification\n\n")
+	fmt.Fprintf(b, "The task was %s: P(clear) %s against the threshold %.2f.\n", c.Status, strings.Join(checks, " → "), c.Threshold)
+	if run.FailureReason == domain.FailureTaskNeedsInput {
+		b.WriteString("The run stopped because it needs input; start a new run with the open points settled in the task.\n")
+	}
+	if text := c.Render(); text != "" {
+		b.WriteString("\n")
+		for _, line := range strings.Split(text, "\n") {
+			b.WriteString("> " + strings.TrimRight(line, " \t") + "\n")
+		}
 	}
 }
 

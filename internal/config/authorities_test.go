@@ -54,8 +54,7 @@ func TestValidateAuthorities_AsksEveryRoute(t *testing.T) {
 	}
 	want := []string{
 		"claude:web",  // research
-		"claude:read", // analyze
-		"claude:read", // plan
+		"claude:read", // investigate
 		"claude:edit", // implement
 		"claude:read", // review
 		"claude:none", // translation
@@ -118,6 +117,43 @@ func TestValidateAuthorities_UnsupportedTranslationAndDecision(t *testing.T) {
 	}
 }
 
+// The clarify step runs with AuthorityNone, like the translator, and only while it is enabled.
+func TestValidateAuthorities_ClarifyRoute(t *testing.T) {
+	cfg := claudeOnlyConfig()
+	cfg.Clarify = clarifyRoute()
+	checker := &fakeAuthorityChecker{supported: map[string]bool{"claude": true}}
+	if err := ValidateAuthorities(cfg, checker); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	want := []string{"claude:web", "claude:read", "claude:edit", "claude:read", "claude:none", "claude:none"}
+	if strings.Join(checker.asked, " ") != strings.Join(want, " ") {
+		t.Errorf("asked %v, want %v (translation, then clarify, both none)", checker.asked, want)
+	}
+
+	cfg.Clarify.Provider = "gemini"
+	msg := ValidateAuthorities(cfg, checker).Error()
+	for _, want := range []string{
+		`provider "gemini" cannot enforce the "none" authority required by "clarify"`,
+		"(clarify.provider: claude)",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("expected message to contain %q, got:\n%s", want, msg)
+		}
+	}
+
+	cfg.Clarify.Enabled = boolPtr(false)
+	if err := ValidateAuthorities(cfg, checker); err != nil {
+		t.Errorf("a disabled clarify step is not checked: %v", err)
+	}
+	if got := ProvidersInUse(cfg); !slices.Equal(got, []string{"claude"}) {
+		t.Errorf("a disabled clarify step routes no provider: %v", got)
+	}
+	cfg.Clarify.Enabled = nil
+	if got := ProvidersInUse(cfg); !slices.Equal(got, []string{"claude", "gemini"}) {
+		t.Errorf("an enabled clarify step counts: %v", got)
+	}
+}
+
 func TestValidateAuthorities_NoProviderCanEnforce(t *testing.T) {
 	checker := &fakeAuthorityChecker{supported: map[string]bool{}}
 	msg := ValidateAuthorities(claudeOnlyConfig(), checker).Error()
@@ -145,7 +181,7 @@ func TestValidateAuthorities_ExampleConfig(t *testing.T) {
 
 func TestProvidersInUse(t *testing.T) {
 	cfg := validConfig()
-	cfg.Actions.Analyze.Provider, cfg.Actions.Plan.Provider, cfg.Actions.Implement.Provider = "gemini", "gemini", "gemini"
+	cfg.Actions.Investigate.Provider, cfg.Actions.Implement.Provider = "gemini", "gemini"
 	cfg.Translation.Provider = "claude"
 	got := ProvidersInUse(cfg)
 	if want := []string{"claude", "codex", "gemini"}; !slices.Equal(got, want) {

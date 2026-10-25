@@ -13,7 +13,7 @@ var spinnerFrames = []string{"·", "✢", "✳", "✶", "✻", "✽", "✻", "�
 
 const spinnerInterval = 120 * time.Millisecond
 
-// spinner animates one status line ("✻ Analyzing… (12s · ctrl+c to cancel)") in place
+// spinner animates one status line ("✻ Planning… (12s · ctrl+c to cancel)") in place
 // while a model or the test command works. Only the pretty renderer uses it, and only
 // without --verbose, where nothing else writes to the terminal while it runs. Stop clears
 // the line, so whatever is printed next starts on a clean one.

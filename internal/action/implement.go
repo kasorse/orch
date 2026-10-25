@@ -52,8 +52,8 @@ func (d *Dispatcher) supportsMCP(pm config.ProviderModel) bool {
 func (d *Dispatcher) executeImplement(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	in := ImplementPromptInput{
 		Task:                   run.Task.Description,
-		Analysis:               d.lastAnalysis,
-		Plan:                   d.lastPlan,
+		Clarification:          run.Task.Clarification.Render(),
+		Plan:                   d.lastInvestigation,
 		PreviousImplementation: d.lastImpl,
 		LastTestResult:         d.pendingTestFailure,
 		PreRunFailure:          d.preRunFailureForImplement(),
@@ -233,7 +233,7 @@ func violationMessage(heading string, changed []string, restoreRef string) strin
 	return b.String()
 }
 
-// parseImplementation is lenient, matching parseAnalysis - see its comment. An object that
+// parseImplementation is lenient, matching parseInvestigation - see its comment. An object that
 // does not decode (an unescaped quote in a model's summary) still gives the fields written
 // after the break, so summary_short, the commit message (MVP.md §42.2), is not lost.
 func parseImplementation(output string) domain.ImplementationArtifact {

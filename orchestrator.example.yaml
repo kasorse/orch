@@ -22,6 +22,21 @@ translation:
   model: haiku
   timeout: 60s
 
+# Required: a route, or `clarify: {enabled: false}` written out. A task whose P(clear) is under
+# policy.clarify.threshold (below) goes through one call that has no tools and cannot read the
+# code: it finds what is unclear and answers what the repository's rules and documentation say
+# (specs/clarify). The call runs before the decision and counts in limits.max_cost_usd; an
+# operator at a terminal answers the rest, `--mode auto` takes the model's assumptions.
+clarify:
+  enabled: true              # false: no clarify step; the clarity question is still asked and recorded
+  provider: claude
+  model: sonnet
+  # effort: medium           # optional, claude and codex
+  timeout: 120s
+  docs: ["**/*.md"]          # globs over the files git lists; the deny list applies first
+  max_bytes: 16384           # rules + excerpts sent with the task; 1024..131072
+  max_rounds: 2              # additions the operator may make after a re-check; 0..5
+
 # Optional: how the claude and codex CLIs are authenticated. api: a provider API key from the
 # variable api_key_env names, billed per token; login: the CLI's own login; auto (default):
 # api when that variable is set. --claude-auth/--codex-auth overrides the matching auth.
@@ -46,6 +61,8 @@ translation:
 policy:
   context_depth:
     project_threshold: 0.5   # P(project) >= threshold -> collect project context
+  clarify:
+    threshold: 0.80          # P(clear) >= threshold -> the task is clear enough; in (0, 1]
   complexity:
     # size = P(medium) + 2·P(complex), in [0, 2]: size >= complex -> complex, >= medium -> medium,
     # else simple (specs/decision-shape/SPEC.md §5). The cuts are the 50/35/15 quantiles of 43
@@ -53,15 +70,15 @@ policy:
     # task stream answers on another scale, so recalibrate for yours (SPEC.md §7).
     cuts: {medium: 1.24, complex: 1.48}
   stages:
-    # Three stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
-    # if not, the run only answers), research (is outside knowledge needed) and analysis (is the
-    # cause or the place to change unknown). The rest comes from the template below: the stages
-    # on at each complexity. Testing always comes with development; without development,
-    # testing and review are off.
-    thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+    # Two stages are asked (specs/decision-shape/SPEC.md §6): development (are files changed;
+    # if not, the run only answers) and research (is outside knowledge needed). The rest comes
+    # from the template below: the stages on at each complexity. Testing always comes with
+    # development; without development, testing and review are off. If nothing is on, investigation
+    # runs alone.
+    thresholds: {research: 0.81, development: 0.81}
     force:
-      medium: [analysis, review]
-      complex: [analysis, planning, review]
+      medium: [investigation, review]
+      complex: [investigation, review]
   # Path rules (specs/governance/SPEC.md §4): checked on the run's net diff after each implement.
   # Rules apply in file order and every matching rule applies, so requirements add up. A change
   # that matches a rule whose stage the workflow lacks stops the run. To forbid a path outright
@@ -93,11 +110,7 @@ actions:
     model: sonnet
     effort: medium
 
-  analyze:
-    provider: claude
-    model: sonnet
-
-  plan:
+  investigate:
     provider: claude
     model: sonnet
 
@@ -204,7 +217,8 @@ limits:
   # much (USD), with status stopped and exit code 4; one expensive step can still overshoot it.
   # Every provider the actions route to must report a call's cost (only claude does), or
   # validation refuses the budget. A call cut short reports no cost, so the sum is then a lower
-  # bound. The decision phase (translation, classification) is not counted.
+  # bound. The decision phase (translation, classification) is not counted; the clarify call and
+  # the clarity re-checks (the `clarify:` section) are.
   # max_cost_usd: 5.00
   # Optional bounds on repository data embedded in a prompt; artifacts and logs keep it whole.
   # prompt:
@@ -266,7 +280,7 @@ security:
 #       # which in a worktree run is the worktree, without ignored files
 #       args: ["{source}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
-#       actions: [analyze, plan, implement, review]   # default: analyze, plan, review
+#       actions: [investigate, implement, review]     # default: investigate, review
 #   user_settings: true                               # plugins, skills, hooks
 #   user_settings_actions: [implement, review]        # default: every model step
 

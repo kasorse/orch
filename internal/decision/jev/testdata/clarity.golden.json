@@ -1,0 +1,17 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "request": "Add a cache to ProductRepository",
+    "clarification": "- Which cache is meant? In-memory  [operator]"
+  },
+  "questions": {
+    "clarity": {
+      "type": "noul",
+      "instructions": "Is `request` clear enough to act on: is it stated what has to be achieved, where, and how to tell that it is done?",
+      "criteria": {
+        "false": "Something essential is missing or ambiguous: the goal, the affected part, the expected behaviour or result, or a choice the request leaves open.",
+        "true": "A competent engineer new to the task could start without asking anything: the goal, the part of the system it concerns and the expected result are stated or follow unambiguously."
+      }
+    }
+  }
+}

@@ -11,6 +11,14 @@ type PreCheckState struct {
 	Request string `json:"request"`
 }
 
+// ClarityState is the state of a clarity re-check (specs/clarify): text only, the request and
+// the rendered clarification so far (empty when nothing was clarified). It carries no project
+// context and no instruction file: the provider judges the task as it is written.
+type ClarityState struct {
+	Request       string `json:"request"`
+	Clarification string `json:"clarification,omitempty"`
+}
+
 // ClassificationState is the final classification's state (MVP.md §40).
 // ProjectContextAvailable is false both for depth none and for a failed collection;
 // ContextTruncated says the context shown is incomplete.

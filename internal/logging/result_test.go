@@ -15,10 +15,11 @@ func TestStepFinished_PrintsArtifactAsText(t *testing.T) {
 	r := NewConsoleReporter(&buf)
 	r.Verbose = true // keeps the duration line out of the comparison
 
-	exec := domain.StepExecution{Action: domain.ActionPlan, Status: domain.StepCompleted}
-	artifact := domain.PlanArtifact{
+	exec := domain.StepExecution{Action: domain.ActionInvestigate, Status: domain.StepCompleted}
+	artifact := domain.InvestigationArtifact{
 		Summary:       "Stop retrying 404s.",
 		SummaryShort:  "No 404 retries",
+		RootCause:     "client.go retries every status of 400 and above",
 		Steps:         []string{"Classify the status", "Add a test\nfor 404"},
 		AffectedFiles: []string{"client.go"},
 		Answer:        "line one\nline two",
@@ -28,6 +29,7 @@ func TestStepFinished_PrintsArtifactAsText(t *testing.T) {
 	want := "\nResult:\n" +
 		"  In short: No 404 retries\n" +
 		"  Summary: Stop retrying 404s.\n" +
+		"  Root cause: client.go retries every status of 400 and above\n" +
 		"  Steps:\n" +
 		"    1. Classify the status\n" +
 		"    2. Add a test\n" +

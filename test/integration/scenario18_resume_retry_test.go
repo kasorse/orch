@@ -16,13 +16,13 @@ import (
 // its history left off - a failed step is retried with the context it had, limits count
 // the whole history, and a run whose process died is continued as "interrupted".
 
-// scriptWithPlan decides analysis -> planning -> development -> testing -> review: size 1.65
-// is complex under the test cuts, and complex's template is analysis, planning and review.
+// scriptWithPlan decides investigation -> development -> testing -> review: size 1.65
+// is complex under the test cuts, and complex's template is investigation and review.
 func scriptWithPlan() jevScript {
 	return jevScript{
 		PProject: 0.9,
 		Choice:   [3]float64{0.05, 0.25, 0.7},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.95},
+		Stages:   map[string]float64{"development": 0.95},
 	}
 }
 
@@ -49,7 +49,7 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	cfg := jevConfig(t, j)
 
 	failed := failedAtImplement(t, repoDir, cfg)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "plan", "implement"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement"}) {
 		t.Fatalf("first attempt invocations = %v", got)
 	}
 	if err := os.Remove(filepath.Join(promptsDir, "implement.txt")); err != nil {
@@ -59,13 +59,13 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 
 	stdout, stderr, err := resume(t, repoDir, cfg, failed.ID)
 	mustSucceed(t, stdout, stderr, err)
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "plan", "implement", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "implement", "review"}) {
 		t.Errorf("invocations = %v: only implement is retried, then test and review", got)
 	}
 	if len(j.Bodies()) != decisionCalls {
 		t.Error("resume must not decide again")
 	}
-	for _, want := range []string{"Previous attempt: failed — provider execution failed", "✗ 002 implement", "Next: implement — retry implement"} {
+	for _, want := range []string{"Previous attempt: failed — provider execution failed", "✗ 001 implement", "Next: implement — retry implement"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, stdout)
 		}
@@ -76,8 +76,8 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(prompt), "Plan:\nfix the operator") || !strings.Contains(string(prompt), "Root cause: wrong operator") {
-		t.Errorf("the retried implement prompt lacks the plan or analysis:\n%s", prompt)
+	if !strings.Contains(string(prompt), "Plan:\nfix the operator") || !strings.Contains(string(prompt), "Affected files (from plan):\n- fixture.go") {
+		t.Errorf("the retried implement prompt lacks the plan:\n%s", prompt)
 	}
 
 	run := loadResumedRun(t, repoDir)
@@ -85,11 +85,11 @@ func TestScenario18_ResumeRetriesFailedStep(t *testing.T) {
 	for _, e := range run.Executions {
 		got = append(got, e.Action)
 	}
-	if !equalStrings(got, []string{"analyze", "plan", "implement", "implement", "test", "review"}) {
+	if !equalStrings(got, []string{"investigate", "implement", "implement", "test", "review"}) {
 		t.Fatalf("executions = %v: the history must be appended to, never rewritten", got)
 	}
 	for i, e := range run.Executions {
-		if want := map[bool]int{true: 0, false: 1}[i < 3]; e.Attempt != want {
+		if want := map[bool]int{true: 0, false: 1}[i < 2]; e.Attempt != want {
 			t.Errorf("executions[%d] (%s): attempt = %d, want %d", i, e.Action, e.Attempt, want)
 		}
 	}
@@ -196,7 +196,7 @@ func TestScenario18_ResumeInterruptedRun(t *testing.T) {
 	if !strings.Contains(stdout, "Previous attempt: interrupted") {
 		t.Errorf("stdout lacks the interrupted header:\n%s", stdout)
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"analyze", "implement", "implement", "review"}) {
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "implement", "review"}) {
 		t.Errorf("invocations = %v", got)
 	}
 	run := loadResumedRun(t, repoDir)

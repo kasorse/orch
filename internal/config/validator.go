@@ -34,6 +34,16 @@ func Validate(cfg Config) error {
 		problems = append(problems, fmt.Sprintf("unsupported config version %d (expected %d)", cfg.Version, CurrentVersion))
 	}
 
+	if cfg.Actions.Analyze != nil {
+		problems = append(problems, "actions.analyze was removed: analysis is no longer a stage, the clarify step "+
+			"makes the task clear before the decision and a stage that reads the code is actions.investigate "+
+			"(specs/clarify)")
+	}
+	if cfg.Actions.Plan != nil {
+		problems = append(problems, "actions.plan was renamed actions.investigate: planning became the investigation "+
+			"stage, which reads the code and plans a change or answers; move the section under the new name, "+
+			"it takes the same keys, by_complexity included (specs/clarify)")
+	}
 	for _, pm := range cfg.actionProviderModels() {
 		problems = append(problems, validateProviderModel(pm.Action, pm.ProviderModel)...)
 	}
@@ -147,8 +157,7 @@ func verifyProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"analyze", cfg.Actions.Analyze},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"review", cfg.Actions.Review},
 	}
 	for _, o := range others {
@@ -186,8 +195,7 @@ func escalateProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"analyze", cfg.Actions.Analyze},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"review", cfg.Actions.Review},
 	} {
 		if o.a.escalateSet {
@@ -238,8 +246,7 @@ func byComplexityProblems(cfg Config) []string {
 		action ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"analyze", cfg.Actions.Analyze},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 		{"review", cfg.Actions.Review},
 	} {
@@ -294,8 +301,7 @@ func extraReviewerProblems(cfg Config) []string {
 		a    ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"analyze", cfg.Actions.Analyze},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 	} {
 		if o.a.modelsSet || len(o.a.Models) > 0 {
@@ -329,7 +335,7 @@ func extraReviewerProblems(cfg Config) []string {
 
 // allowedModelProblems checks every model the run can call against the org's allowed_models
 // (specs/governance/SPEC.md §6.2): each action's base model and by_complexity models, the
-// extra reviewers, the translator, the LLM decision provider and the model variables of
+// extra reviewers, the translator, the clarify step, the LLM decision provider and the model variables of
 // providers.claude.api_env. A route with no model is an
 // error, because the list cannot check the CLI's default. A by_complexity entry with no model
 // inherits the base, which is checked on its own; an empty extra reviewer is already refused
@@ -349,8 +355,7 @@ func allowedModelProblems(cfg Config) []string {
 		action ActionConfig
 	}{
 		{"research", cfg.Actions.Research},
-		{"analyze", cfg.Actions.Analyze},
-		{"plan", cfg.Actions.Plan},
+		{"investigate", cfg.Actions.Investigate},
 		{"implement", cfg.Actions.Implement},
 		{"review", cfg.Actions.Review},
 	} {
@@ -377,6 +382,9 @@ func allowedModelProblems(cfg Config) []string {
 		}
 	}
 	check("translation", cfg.Translation.Model)
+	if cfg.Clarify.Active() {
+		check("clarify", cfg.Clarify.Model)
+	}
 	if !cfg.Decision.UsesJev() {
 		check("decision", cfg.Decision.Model)
 	}

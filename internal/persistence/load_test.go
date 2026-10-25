@@ -443,14 +443,14 @@ func TestArtifactRelPath_MatchesSaveArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.SaveArtifact(run.ID, 7, domain.ActionPlan, map[string]string{}, "")
+	got, err := store.SaveArtifact(run.ID, 7, domain.ActionInvestigate, map[string]string{}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := ArtifactRelPath(7, domain.ActionPlan); got != want {
+	if want := ArtifactRelPath(7, domain.ActionInvestigate); got != want {
 		t.Errorf("SaveArtifact wrote %q, ArtifactRelPath says %q", got, want)
 	}
-	if filepath.ToSlash(got) != "artifacts/007-plan.json" {
+	if filepath.ToSlash(got) != "artifacts/007-investigate.json" {
 		t.Errorf("unexpected path %q", got)
 	}
 }

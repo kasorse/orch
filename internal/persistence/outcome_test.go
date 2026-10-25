@@ -87,12 +87,12 @@ func TestValidateRun_StepCallAndDiff(t *testing.T) {
 		name string
 		run  *domain.Run
 	}{
-		{"negative prompt bytes", exec(domain.ActionAnalyze, &domain.CallReport{PromptBytes: -1}, nil)},
-		{"unknown prompt part", exec(domain.ActionAnalyze, &domain.CallReport{Truncated: []domain.PromptPart{"task"}}, nil)},
-		{"empty model name", exec(domain.ActionAnalyze, &domain.CallReport{Models: []domain.ModelUse{{}}}, nil)},
-		{"control character in a tool name", exec(domain.ActionAnalyze, &domain.CallReport{Tools: map[string]int{"Read\x1b[2J": 1}}, nil)},
-		{"negative tool count", exec(domain.ActionAnalyze, &domain.CallReport{Tools: map[string]int{"Read": -1}}, nil)},
-		{"NaN model cost", exec(domain.ActionAnalyze, &domain.CallReport{Models: []domain.ModelUse{{Model: "m", CostUSD: math.NaN()}}}, nil)},
+		{"negative prompt bytes", exec(domain.ActionInvestigate, &domain.CallReport{PromptBytes: -1}, nil)},
+		{"unknown prompt part", exec(domain.ActionInvestigate, &domain.CallReport{Truncated: []domain.PromptPart{"task"}}, nil)},
+		{"empty model name", exec(domain.ActionInvestigate, &domain.CallReport{Models: []domain.ModelUse{{}}}, nil)},
+		{"control character in a tool name", exec(domain.ActionInvestigate, &domain.CallReport{Tools: map[string]int{"Read\x1b[2J": 1}}, nil)},
+		{"negative tool count", exec(domain.ActionInvestigate, &domain.CallReport{Tools: map[string]int{"Read": -1}}, nil)},
+		{"NaN model cost", exec(domain.ActionInvestigate, &domain.CallReport{Models: []domain.ModelUse{{Model: "m", CostUSD: math.NaN()}}}, nil)},
 		{"diff on a review step", exec(domain.ActionReview, nil, &domain.StepDiff{})},
 		{"more binary files than files", exec(domain.ActionImplement, nil, &domain.StepDiff{Step: domain.DiffStat{Files: 1, Binary: 2}})},
 		{"path outside the repository", exec(domain.ActionImplement, nil, &domain.StepDiff{NotReported: []string{"../etc/passwd"}})},

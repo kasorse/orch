@@ -78,7 +78,7 @@ func TestScanSecrets_WarnRecordsOnceAndRedactsReview(t *testing.T) {
 		told = append(told, string(step)+" "+file+" "+rule)
 	}
 	put(t, dir, "pkg/cfg.go", "package pkg\n\nconst id = \""+testAWSKey+"\"\n")
-	run := &domain.Run{ID: "r", Executions: []domain.StepExecution{{Index: 0, Action: domain.ActionAnalyze}}}
+	run := &domain.Run{ID: "r", Executions: []domain.StepExecution{{Index: 0, Action: domain.ActionResearch}}}
 
 	if _, err := d.Execute(context.Background(), domain.ActionImplement, run); err != nil {
 		t.Fatalf("warn must not stop the run: %v", err)
