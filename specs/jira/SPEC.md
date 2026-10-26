@@ -1,16 +1,49 @@
-# Spec: Take the task from a Jira ticket
+# Take the task from a Jira ticket
 
-Status: **implemented** (2026-09-30), with the defaults of §18 kept. MVP.md §39 is now the
-normative summary; this document is the design record. Where the build differs from the
-text below, the task's "As built" section in `tasks/` says how and why.
+Status: implemented once by hand (2026-09-30; MVP.md §39 is the normative summary), rewritten on
+2026-10-26 as a story spec: the tasks JR01–JR07 in one chain on `orche`, so that
+`orchestrator story run specs/jira` builds the feature. The decisions the first build made where
+it differed from this text are now part of the tasks themselves.
 Scope: a new `--jira <KEY|URL>` flag on `orchestrator run`. It fetches one issue over the
 Jira REST API (read-only) and renders it into the task text, and the rest of the run is
 unchanged. The decision flow, workflow construction, transitions, static routing,
 authorities, guards and what is trusted (exit codes + git diff) stay the same. `resume`
 never contacts Jira.
-This adds a second HTTP integration next to Jev, so MVP.md §2 and §30 must be amended
-(§15). When this is implemented, MVP.md gets a new §39 as the normative home, as §37 is
-for `specs/resume/` and §38 for `specs/permissions/`.
+This adds a second HTTP integration next to Jev, so MVP.md §2 and §30 are amended (§15), and
+MVP.md gets a new §39 as the normative home, as §37 is for `specs/resume/` and §38 for
+`specs/permissions/`.
+
+## Approach
+
+### Ground rules for the tasks of this story
+
+- This is a story task. `story run` writes `specs/jira/README.md` and each task's `## As built`:
+  **do not edit anything under `specs/jira/`**. CLAUDE.md's bookkeeping for `specs/*/tasks`
+  (ticking, the `Status:` line, As built) is done by `story run` for these tasks.
+- Each task updates, in the same change, the documentation its own change makes out of date: its
+  sections of MVP.md, CLAUDE.md, README.md and `orchestrator.example.yaml`, listed under
+  "Documentation" in the task (§15). JR07 adds MVP.md §39, the summary of the whole feature.
+- The tasks form one chain (JR01 → … → JR07): each starts on the previous one's branch, so no two
+  tasks edit the same file in parallel.
+- `internal/jira` imports only `domain`, `apperr` and the standard library. It does not import
+  `config`: `jira.Options` mirrors the transport fields, as `jev.Options` does.
+- `internal/workflow`, `internal/policy` and `internal/action` do not change. No stage learns where
+  the task came from (J1).
+- Nothing makes a network request before the whole fail-fast chain and `ParseRef` have passed.
+  `resume` never builds a Jira client.
+- A credential value never appears in an error, a log, `run.json`, `ticket.json` or stdout.
+- Tests use `httptest` on loopback only: no network, no real Jira, no real token, no real CLI.
+- `orchestrator.yaml` is the operator's own file, outside the repository: never rely on it or
+  try to edit it. Tests build their configs themselves.
+- Every task leaves `scripts/check.sh` green. Golden files are rewritten with
+  `go test <pkg> -update`; read the diff of every rewritten golden before committing it. Existing
+  integration scenarios keep passing unchanged.
+
+### Where the contracts are
+
+§6 (CLI and `ParseRef`), §7 (configuration), §8 (the request, the response validation, the
+result), §9 (rendering), §10 (order of operations), §11 (persistence and resume), §12 (security),
+§13 (console), §14 (errors and exit codes), §16 (tests). Each task names the sections it builds.
 
 ---
 
@@ -394,20 +427,20 @@ the operator:
 `exitcode.FromError` gets a `JiraError` case, mirroring `DecisionError`. A fetch error is
 returned directly, because no run exists yet to `failRun` (J2).
 
-## 15. Documentation changes (last task)
+## 15. Documentation changes (each task its own)
 
-- **MVP.md** §2 (a second permitted HTTP integration: the Jira REST API, read-only, one
-  GET per run), §4 (`--jira`), §5 (the `jira` section), §6 (its validation), §7 (env
-  check only with `--jira`), §21 (`task.source`, `ticket.json`), §24 (`JiraError`), §27
-  (the task block), §30 (replace "GitHub PR integration / GitLab integration" with
-  "GitHub/GitLab integration; Jira beyond reading one issue for `run --jira` (§39)"), and a
-  new **§39 Task from a Jira ticket** as the normative summary of this spec.
-- **CLAUDE.md**: the decision-flow diagram gains the optional fetch step. The invariants
-  gain "Jira: read-only, one GET before the run exists, never on resume, credentials
-  env-only and scrubbed from child processes". The Jev key bullet mentions the scrub.
-- **README**: usage, Cloud vs DC token setup, what is sent where, the "not protected"
-  line from §12.
-- **orchestrator.example.yaml**: the commented `jira` section.
+No task is set aside for the documentation: each one updates what its own change makes out of
+date, and JR07 adds the section that summarises the whole feature.
+
+| task | MVP.md | CLAUDE.md | README.md, example config |
+|---|---|---|---|
+| JR01 | §21 (`task.source`, `ticket.json`) | run artifacts | — |
+| JR02 | §5, §6, §7 (the section, its validation, the env check only with `--jira`) | fail-fast invariant (`DependencyOptions`) | the commented `jira` block |
+| JR03 | §38.2 (`ScrubbedEnv` drops the credential variables) | guard invariant, the Jev key sentence | security section |
+| JR04 | §23/§24 (`JiraError`, exit codes), §26 (the `jira/` package) | Architecture: `internal/jira` | — |
+| JR05 | — | the `internal/jira` golden files | — |
+| JR06 | §2, §4, §27, §30, §38.5 | decision-flow diagram, the Jira invariant, out of scope | usage, Cloud and DC setup, what is sent to Jira, not protected, run artifacts, limitations |
+| JR07 | new §39, §29 (Jira scenarios) | intro pointer to §39, test harness | — |
 
 ## 16. Tests
 
@@ -450,25 +483,23 @@ Task files: [`tasks/`](tasks/), indexed in [`README.md`](README.md).
 
 | task | title | size | depends on |
 |---|---|---|---|
-| J01 | `jira` config section, validation, `DependencyOptions` | S–M | — |
-| J02 | `internal/jira` client: request, retries, validation, `JiraError`, redaction | M | J01, J05 |
-| J03 | `ParseRef`, `Render`, golden files | S | J05 |
-| J04 | child processes lose the Jira and Jev credential variables | S | J01 |
-| J05 | `domain.Ticket`, `TaskSource`, load validation, `ticket.json` | S | — |
-| J06 | `run --jira`: CLI, `taskFromJira`, console output, exit codes, resume line | M | J01–J05 |
-| J07 | integration scenarios 19a–19h (§16 items 1–8) | M | J06 |
-| J08 | MVP.md §39 and the amendments, CLAUDE.md, README, example config | S | all |
+| JR01 | `domain.Ticket`, `TaskSource`, load validation, `ticket.json` | S | — |
+| JR02 | the `jira` config section, validation, `DependencyOptions` | M | JR01 |
+| JR03 | child processes lose the Jira and Jev credential variables | S | JR02 |
+| JR04 | `internal/jira` client: request, retries, validation, `JiraError`, redaction | M | JR03 |
+| JR05 | `ParseRef`, `Render`, golden files | S | JR04 |
+| JR06 | `run --jira`: CLI, `taskFromJira`, console output, exit codes, resume line | M | JR05 |
+| JR07 | integration scenarios 19a–19h (§16 items 1–8), MVP.md §39 | M | JR06 |
 
 ```
-J05 ──┬── J02 ──┐
-      └── J03 ──┤
-J01 ──┬── J02   ├── J06 ── J07 ── J08
-      └── J04 ──┘
+JR01 ── JR02 ── JR03 ── JR04 ── JR05 ── JR06 ── JR07
 ```
 
-Estimate: 5.5–6 engineering days. Each task ends green on `go build ./...`,
-`go vet ./...`, `go test ./...`, and `gofmt -l .` empty. Existing integration scenarios
-1–18 keep passing unchanged.
+The real dependencies allow more parallelism (JR03 needs only JR02; JR04 and JR05 need only JR01
+and JR02), but the tasks share MVP.md and CLAUDE.md, so they run as one chain.
+
+Estimate: 5.5–6 engineering days. Each task ends green on `scripts/check.sh`. Existing
+integration scenarios 1–18 keep passing unchanged.
 
 ## 18. Decisions
 
@@ -484,7 +515,7 @@ Answered by the operator on 2026-09-30:
 | Q6 | Trust of ticket text in `--mode auto`? | Same as typed text: shown in full, persisted verbatim, no extra gate. |
 | Q7 | Extra fields (e.g. Acceptance Criteria)? | Configurable list of text custom fields with labels. |
 
-Defaults chosen without asking (change before J01 if wrong):
+Defaults chosen without asking (change before JR01 if wrong):
 
 | # | default | alternative |
 |---|---|---|
@@ -492,7 +523,7 @@ Defaults chosen without asking (change before J01 if wrong):
 | D2 | Over `max_bytes`: **refuse** with exit 2. | Truncate with a marker and a warning. |
 | D3 | Wiki markup passed through verbatim. | Convert to Markdown (more code, lossy either way). |
 | D4 | REST v2 on both Cloud and DC. | v3 + an ADF renderer on Cloud. |
-| D5 | Scrub `decision.jev.api_key_env` from child processes in the same change (J04), since it is the same gap. | A separate fix. |
+| D5 | Scrub `decision.jev.api_key_env` from child processes in the same change (JR03), since it is the same gap. | A separate fix. |
 | D6 | DC "Epic Link" not resolved. On DC only a sub-task's parent is shown. | `jira.epic_link_field: customfield_N` plus a second GET for the epic's summary. |
 | D7 | A fetch failure creates no run directory. | Create a failed run for the record. |
 

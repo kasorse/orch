@@ -29,6 +29,9 @@ const (
 	MaxTitleBytes      = 200
 	MaxAcceptanceItems = 10
 	MaxAcceptanceRunes = 300
+	// MaxAcceptanceRunesCeiling bounds an acceptance item wherever it is read back (a task
+	// input, run.json); story.max_acceptance_chars may raise the limit of a task file up to it.
+	MaxAcceptanceRunesCeiling = 2000
 	// MaxTaskTextBytes bounds a task's title, goal, acceptance items and notes together, so
 	// the task file rendered from them stays well under MaxBodyBytes.
 	MaxTaskTextBytes = 8 << 10

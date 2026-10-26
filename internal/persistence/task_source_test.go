@@ -78,7 +78,7 @@ func TestValidateRun_StoryTaskRefusals(t *testing.T) {
 		}, "task.acceptance on a task that is not a story task"},
 		{"blank acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{"one", " "} }, "task.acceptance[1] is empty"},
 		{"multi-line acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{"a\nb"} }, "more than one line"},
-		{"oversized acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{strings.Repeat("я", 301)} }, "301 characters"},
+		{"oversized acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{strings.Repeat("я", 2001)} }, "2001 characters"},
 		{"too many acceptance items", func(r *domain.Run) { r.Task.Acceptance = make([]string, 11) }, "11 items"},
 		{"worktree on the run's own branch", func(r *domain.Run) { r.Worktree.Branch = "orchestrator/r" }, "worktree.branch"},
 		{"worktree on another story's branch", func(r *domain.Run) { r.Worktree.Branch = "story/other/RF02" }, "worktree.branch"},

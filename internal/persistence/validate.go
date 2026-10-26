@@ -41,7 +41,7 @@ func validateRun(run *domain.Run, runID string) error {
 		if run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceStory {
 			return fmt.Errorf("task.acceptance on a task that is not a story task")
 		}
-		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance); err != nil {
+		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance, story.MaxAcceptanceRunesCeiling); err != nil {
 			return err
 		}
 	}

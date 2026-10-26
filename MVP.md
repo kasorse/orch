@@ -4910,6 +4910,7 @@ story:
   max_tasks: 12                   # 2..30
   max_cost_usd: 20                # optional; the whole story, every call and run
   max_parallel: 1                 # 1..8; ready tasks run at once; story run --parallel N overrides
+  max_acceptance_chars: 300       # 50..2000; one acceptance item of a task file story run reads
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
 jira:
   create:                         # absent: story run creates nothing in Jira

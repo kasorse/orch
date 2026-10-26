@@ -260,7 +260,7 @@ func (r *storyRunner) load() error {
 	}
 	r.order = story.Order(spec.tasks)
 	for _, id := range r.order {
-		if err := story.CheckAcceptance(id+": acceptance", r.byID[id].Acceptance); err != nil {
+		if err := story.CheckAcceptance(id+": acceptance", r.byID[id].Acceptance, r.cfg.Story.MaxAcceptanceChars); err != nil {
 			return &apperr.ConfigError{Msg: err.Error()}
 		}
 	}
