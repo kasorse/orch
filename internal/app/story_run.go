@@ -1355,20 +1355,122 @@ func (r *storyRunner) hints(id string) {
 	case status == story.TaskConflict:
 		r.reporter.StoryConflict(id, rt.Conflict.Parents, rt.Conflict.Files, persistence.StorySpecBranch(r.loc.slug), r.conflictHints(rt)...)
 	case status == story.TaskBlocked:
-		where := "the kept worktree"
-		if run, err := r.loadRun(rt); err == nil && run.Worktree != nil && run.Worktree.Path != "" {
-			where = run.Worktree.Path
+		r.reporter.StoryHint(r.blockedHints(id, rt, dir, next)...)
+	case rt.RunID != "":
+		r.reporter.StoryHint(append(r.runFailureHints(id, rt),
+			fmt.Sprintf("Fix the cause, then: orchestrator story run %s - resumes run %s from the step that did not finish (a timeout, a cancel, a fixed config or environment)", dir, rt.RunID),
+			fmt.Sprintf("Or, when the task itself was wrong or too big: edit %s, then: orchestrator story run %s --retry %s - abandons the run and starts the task again on %s", r.spec.files[id], dir, id, next))...)
+	default:
+		where := "the output above"
+		if p := filepath.Join(r.loc.storyDir, "logs", fmt.Sprintf("task-%s.%d.log", id, rt.Attempt)); fileExists(p) {
+			where = p
 		}
 		r.reporter.StoryHint(
-			fmt.Sprintf("Commit the work on %s in %s, or drop it, then: orchestrator story run %s", rt.Branch, where, dir),
-			fmt.Sprintf("A task whose branch has a commit counts as done. To run it again instead: orchestrator story run %s --retry %s (branch %s)", dir, id, next))
-	case rt.RunID != "":
-		r.reporter.StoryHint(
-			fmt.Sprintf("orchestrator story run %s resumes run %s", dir, rt.RunID),
-			fmt.Sprintf("orchestrator story run %s --retry %s abandons it and runs the task again on %s", dir, id, next))
-	default:
-		r.reporter.StoryHint(fmt.Sprintf("orchestrator story run %s dispatches %s again", dir, id))
+			"Why: the task's child run stopped before it created a run: its checks before any model call refused it (the config, a missing or unverified CLI, a dirty or red repository, the task's input).",
+			"Where: the error is in "+where+".",
+			fmt.Sprintf("Fix that, then: orchestrator story run %s - dispatches %s again", dir, id))
 	}
+}
+
+// runFailureHints say how a task's run ended: its status, the step that failed, the reason the
+// run recorded (which names its own fixes), and where the summary and the step's logs are.
+func (r *storyRunner) runFailureHints(id string, rt persistence.StoryTask) []string {
+	run, err := r.loadRun(rt)
+	if err != nil {
+		return []string{fmt.Sprintf("Why: run %s of %s cannot be read: %v", rt.RunID, id, err)}
+	}
+	store := persistence.NewStore(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+	why := fmt.Sprintf("Why: run %s is %s", run.ID, run.Status)
+	var failed *domain.StepExecution
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		if run.Executions[i].Status == domain.StepFailed {
+			failed = &run.Executions[i]
+			break
+		}
+	}
+	if failed != nil {
+		why += fmt.Sprintf(" at step %d (%s)", failed.Index, failed.Action)
+	}
+	reason := run.FailureReason
+	if reason == "" && failed != nil {
+		reason = failed.Error
+	}
+	if reason == "" {
+		reason = "no reason was recorded: the child was stopped or its process died"
+	}
+	hints := []string{why + ":"}
+	for _, l := range strings.Split(strings.TrimSpace(reason), "\n") {
+		hints = append(hints, "  "+l)
+	}
+	where := "Details: " + filepath.Join(store.RunDir(run.ID), "summary.md")
+	if failed != nil {
+		where += ", the step's output: " + store.LogPath(run.ID, failed.Index, failed.Action, "stderr") + " (and .stdout.log)"
+	}
+	return append(hints, where)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// blockedHints says why a blocked task's run made no commit and what each way on is, read from
+// the run: an empty change and a change held back want different steps.
+func (r *storyRunner) blockedHints(id string, rt persistence.StoryTask, dir, next string) []string {
+	again := "then: orchestrator story run " + dir + " (a task whose branch has a commit beyond its base counts as done)"
+	retry := fmt.Sprintf("orchestrator story run %s --retry %s (a new run on %s)", dir, id, next)
+	run, err := r.loadRun(rt)
+	if err != nil {
+		return []string{
+			fmt.Sprintf("Why: its run %s made no commit on %s (the run cannot be read: %v).", rt.RunID, rt.Branch, err),
+			"Fix: commit the work on " + rt.Branch + ", " + again,
+			"Or run the task again: " + retry,
+		}
+	}
+	repoDir := logging.ShellWord(r.rec.Services[rt.Repo])
+	wt := ""
+	if w := run.Worktree; w != nil && !w.Removed && w.Path != "" && fileExists(w.Path) {
+		wt = logging.ShellWord(w.Path)
+	}
+
+	if o := run.Outcome; o == nil || o.Diff == nil || o.Diff.Files == 0 {
+		why := "Why: the run completed, but implement changed no file, so there was nothing to commit."
+		store := persistence.NewStore(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+		if s := implementSummary(store, run); s != "" {
+			why += fmt.Sprintf(" Its summary: %q.", s)
+		}
+		mark := fmt.Sprintf("git -C %s branch -f %s \"$(git -C %s commit-tree -p %s -m '%s: nothing to change' %s^{tree})\"",
+			repoDir, rt.Branch, repoDir, rt.Branch, id, rt.Branch)
+		if wt != "" {
+			mark = fmt.Sprintf("git -C %s commit --allow-empty -m '%s: nothing to change'", wt, id)
+		}
+		return []string{
+			why,
+			"If the work is already in the code base, mark the task done with an empty commit: " + mark + ", " + again,
+			"If the task still needs work, make its file " + r.spec.files[id] + " say what is missing, and: " + retry,
+		}
+	}
+
+	var reasons []string
+	if run.Outcome.ReviewVerdict == domain.ReviewFail {
+		reasons = append(reasons, "the review failed")
+	}
+	if run.Outcome.ApprovalRequired {
+		reasons = append(reasons, "a policy.paths rule with approval: manual matched the change")
+	}
+	if n := len(run.SecretFindings); n > 0 {
+		reasons = append(reasons, fmt.Sprintf("the secret scan reported %d new finding(s)", n))
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "the implementation gave no commit message (summary_short)")
+	}
+	hints := []string{fmt.Sprintf("Why: the run changed %d file(s) but did not commit them: %s.", run.Outcome.Diff.Files, strings.Join(reasons, "; "))}
+	if wt != "" {
+		hints = append(hints, fmt.Sprintf("Fix: check the change (git -C %s diff HEAD), commit it: git -C %s add -A && git -C %s commit, %s", wt, wt, wt, again))
+	} else {
+		hints = append(hints, "Its worktree is gone, and the uncommitted change with it.")
+	}
+	return append(hints, "Or drop the change and run the task again: "+retry)
 }
 
 // finish ends a story whose tasks are all done (§10.4): the story is completed, and the table of

@@ -5087,9 +5087,13 @@ directory; the state is flocked by the one `story run` that owns it.
    * **Ctrl-C**: every running child gets SIGINT, each is waited for and settled, and the story
      is `stopped`.
 4. A task is **done** when its run is `completed` and has a `commit`. `completed` without a commit
-   (a failing review, a secret warning, `approval: manual`) makes the task and the story
-   `blocked`: the operator commits in the kept worktree or drops the work, and runs `story run`
-   again, which counts the task done once its branch has a commit beyond its base. `failed` or
+   (a failing review, a secret warning, `approval: manual`, or an implement that changed no file)
+   makes the task and the story `blocked`: the operator commits in the kept worktree or drops the
+   work, and runs `story run` again, which counts the task done once its branch has a commit
+   beyond its base. The hints say which case it is, read from the run: for a change held back,
+   why and the commit to make in the worktree; for no change, the empty commit that marks the
+   task done (`git commit-tree` on the branch when the worktree is gone) or `--retry` after the
+   task file says what is missing. `failed` or
    `stopped` stops the story. `story run --retry RF02` abandons a failed task's run (its branch
    stays) and dispatches the task again on `story/<slug>/RF02.<n>`, re-reading its file: the one
    way to edit a dispatched task. A task whose parents do not merge is `conflict` (§48.4).
