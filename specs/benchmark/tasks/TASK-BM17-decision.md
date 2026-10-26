@@ -26,3 +26,12 @@ Write down the go / pivot decision by the rule fixed before the data (`SPEC.md` 
 
 - `bench/DECISION.md` names the rule, the numbers, the verdict and the consequences for
   TODO.md; the owner signs off.
+
+## As built (2026-10-26)
+
+`bench/DECISION.md`: the second branch of §12. B is not worse than A in pass rate (+2 pp,
+[−2, +8]), but it costs more ($0.32 against $0.20), so the value is in the gates and the
+governance. TODO.md now has B4 ticked, phase 3 next, and Q8 raised and moved after a run of the
+new config E (the current pipeline, clarify included) added to `round2`. Without B′ and without an en/ru pair, the translation and context-depth
+questions have no data: translation stays as it is, and context depth goes into Q8's single
+classification. The owner's sign-off line is still empty.

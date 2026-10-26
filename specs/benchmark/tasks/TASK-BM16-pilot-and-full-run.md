@@ -81,3 +81,13 @@ raised (MVP.md §9.1).
 
 **Left:** the 30 tasks (BM15), B′, `d7403e6` and the round again with the
 new thresholds on a new `--out` (the B config's hash changed).
+
+## As built (2026-10-24): round 2
+
+The full run, `round2`, on 2026-10-20 … 2026-10-24: 31 tasks × A, B, C, D × 3 reps, 372 cells,
+0 `infra_error`, about $92. B′ was not run: the config was dropped on 2026-10-20 together with
+E–H (TODO.md, phase 1). B is the owner's config and C the example's defaults, so the round
+measures configurations as they are used, not one stage setting at a time. The summary is
+committed as `bench/results/2026-10-24-round2/summary.md`, and the per-cell results stay in the
+private directory. The `runs report` appendix (step 5) was not made. The round ran before
+`specs/clarify`, on the workflow with `analysis` and `planning`.
