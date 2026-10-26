@@ -98,3 +98,9 @@ jira: none
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J02 of the old
+`specs/jira` plan: commit 41a2ebf on `master` ("Fetch one Jira issue read-only, with strict validation and redaction (J02)"). Marked done by hand on 2026-10-26:
+no story run built it.

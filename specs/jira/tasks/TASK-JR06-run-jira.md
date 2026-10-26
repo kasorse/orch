@@ -92,3 +92,9 @@ resumed Jira run.
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J06 of the old
+`specs/jira` plan: commit cf79455 on `master` ("Take the task from a Jira ticket with run --jira (J06)"). Marked done by hand on 2026-10-26:
+no story run built it.

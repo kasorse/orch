@@ -82,3 +82,9 @@ The operator's `--jira` value becomes a key without any network access, and a va
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J03 of the old
+`specs/jira` plan: commit 94435c9 on `master` ("Parse the --jira reference and render the ticket into the task (J03)"). Marked done by hand on 2026-10-26:
+no story run built it.

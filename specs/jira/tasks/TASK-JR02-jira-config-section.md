@@ -92,3 +92,9 @@ them, and always by `orchestrator validate` when the section is present (`SPEC.m
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J01 of the old
+`specs/jira` plan: commit 601cc23 on `master` ("Add the jira config section, its validation and DependencyOptions (J01)"). Marked done by hand on 2026-10-26:
+no story run built it.

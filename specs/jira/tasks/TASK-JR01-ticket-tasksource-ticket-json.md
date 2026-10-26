@@ -66,3 +66,10 @@ reads back (`SPEC.md` §8.3, §11).
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J05 of the old
+`specs/jira` plan: commit 91f504d on `master` ("Record a task's Jira source and keep ticket.json as an audit copy (J05)"). Marked done by hand on 2026-10-26:
+no story run built it. Its one run `a3613a0f-68af-414f-88d1-68060d98dea7` (cost $0.32) found the work
+already in the code base and changed nothing.

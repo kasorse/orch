@@ -71,3 +71,9 @@ also closes the existing gap for `JEV_API_KEY`.
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J04 of the old
+`specs/jira` plan: commit f4b58f5 on `master` ("Keep the Jira and Jev credential variables from every child process (J04)"). Marked done by hand on 2026-10-26:
+no story run built it.

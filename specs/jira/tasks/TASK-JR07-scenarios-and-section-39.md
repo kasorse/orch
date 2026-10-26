@@ -81,3 +81,9 @@ normative summary of the whole feature, which exists only once every task is don
 ## Notes
 
 Do not edit anything under `specs/jira/`.
+
+## As built (2026-10-26)
+
+Built by hand on 2026-09-30, before this spec was rewritten as a story, as task J07 (2d593df) and J08 of the old
+`specs/jira` plan: commit 3cadcf9 on `master` ("Document run --jira as built: MVP.md §39, CLAUDE.md, README, example config (J08)"). Marked done by hand on 2026-10-26:
+no story run built it.
