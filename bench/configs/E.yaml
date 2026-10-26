@@ -1,0 +1,116 @@
+# E: the orchestrator as the owner runs it now (~/orchestrator_v2.yaml, 2026-10-26): B plus what
+# came after round 2 (bench/DECISION.md) - the clarify step, verify in implement (run_tests and
+# run_check without a shell), the graphify MCP server for investigate, implement and review, a
+# fix loop of 3 and no pre-run test. The replace tool and the parallel-calls rule are built into
+# the orchestrator since 2026-10-25 and need no key: every orchestrator config of a newer build
+# has them. Left out as in B: jira, providers, auto_commit, secret-scan allow paths, story, and
+# the owner's checks (gofmt is this repository's). setup builds the code graph of the task's
+# tree offline (AST only, no model) and ignores it, so it is neither the model's change nor a
+# dirty tree. The fields filled per task are {{.Model}}, {{.TestCommand}}, {{.RoBinds}},
+# {{.RwBinds}} and {{.Timeout}}.
+kind: orchestrator
+setup: "graphify update . && echo '*' > graphify-out/.gitignore"
+config: |
+  version: 2
+
+  decision:
+    provider: claude
+    model: opus
+    timeout: 30s
+    on_failure: fail
+    complexity:
+      primary: choice
+      shadow: true
+
+  translation:
+    provider: claude
+    model: opus
+    timeout: 60s
+
+  clarify:
+    enabled: true
+    provider: claude
+    model: sonnet
+    effort: medium
+    timeout: 120s
+    docs: ["**/*.md"]
+    max_bytes: 16384
+    max_rounds: 2
+
+  policy:
+    context_depth:
+      project_threshold: 0.5
+    clarify:
+      threshold: 0.80
+    complexity:
+      cuts: {medium: 1.24, complex: 1.48}
+    stages:
+      thresholds: {research: 0.81, development: 0.81}
+      force:
+        medium: [investigation, review]
+        complex: [investigation, review]
+
+  context:
+    max_files: 20
+    max_bytes: 24576
+    extra_deny: []
+
+  actions:
+    research:
+      provider: claude
+      model: haiku
+    investigate:
+      provider: claude
+      model: opus
+      effort: medium
+      timeout: 5m
+      by_complexity:
+        simple: {model: sonnet, effort: high}
+        complex: {model: opus, effort: high}
+    implement:
+      provider: claude
+      model: "{{.Model}}"
+      effort: high
+      by_complexity:
+        simple: {model: sonnet, effort: medium}
+        medium: {model: sonnet, effort: high, escalate: {model: opus}}
+        complex: {model: sonnet, effort: high, escalate: {model: opus, effort: high}}
+      escalate: true
+      timeout: 30m
+      verify: true
+    review:
+      provider: claude
+      model: opus
+      effort: medium
+      by_complexity:
+        simple: {model: sonnet, effort: high}
+        complex: {model: opus, effort: high}
+      timeout: 10m
+
+  test:
+    command: "{{.TestCommand}}"
+    sandbox: bwrap
+    ro_binds: {{.RoBinds}}
+    rw_binds: {{.RwBinds}}
+    baseline: off
+
+  limits:
+    max_steps: 14
+    max_fix_iterations: 3
+
+  execution:
+    timeout: "{{.Timeout}}"
+    isolation: inplace   # the bench's final check reads the workspace tree
+    rate_limit_wait: 0s  # fail at once on a usage limit: orchbench waits for the reset and reruns the cell
+
+  security:
+    require_clean_worktree: true
+    protected_paths: []
+
+  extensions:
+    mcp:
+      graphify:
+        command: graphify-mcp
+        args: ["--graph", "{source}/graphify-out/graph.json"]
+        tools: [query_graph, get_node, get_neighbors, shortest_path, god_nodes]
+        actions: [investigate, implement, review]

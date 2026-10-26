@@ -188,6 +188,10 @@ func runOrchestrator(ctx context.Context, cfg config.Config, t task.Task, ws Wor
 // shortcut: parses the core's error wording; upgrade when run.json records the failure kind.
 var authFailureLine = regexp.MustCompile(`^detail: claude auth \((api|login)\)`)
 
+// reasonNeedsInput is the core's failure_reason of a run its clarify step stopped before any
+// step (domain.FailureTaskNeedsInput, MVP.md §49): the pipeline's result, not a crash.
+const reasonNeedsInput = "task needs input"
+
 // classifyOrchestrator turns a finished orchestrator process and the run directory it left
 // into an Outcome or an *InfraError. The order is the rule: what is certainly not the model's
 // comes first, then the timeout, then the run's own record.
@@ -253,7 +257,8 @@ func classifyOrchestrator(out Outcome, t task.Task, workDir string, proc process
 			return out, limitError("the provider", line, texts, resetsAtText(texts...))
 		}
 	}
-	if len(run.Executions) == 0 && proc.ExitCode != 0 {
+	needsInput := run.Status == StatusStopped && run.FailureReason == reasonNeedsInput
+	if len(run.Executions) == 0 && proc.ExitCode != 0 && !needsInput {
 		return Outcome{ConfigPath: out.ConfigPath, ConfigSHA256: out.ConfigSHA256, RunDir: runDir, ExitCode: proc.ExitCode},
 			infra("the orchestrator crashed before any step (exit %d)%s", proc.ExitCode, tailNote(proc.Stderr))
 	}

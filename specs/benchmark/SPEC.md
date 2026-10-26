@@ -693,9 +693,13 @@ config: |                        # orchestrator config; {{...}} filled per task
   execution: {timeout: "{{.Timeout}}"}
 ```
 
-The config generated for a task is saved as `<out>/configs/<task>-<config>.yaml` and its hash
+An optional `setup:` (any kind) is a shell command run in the workspace's sandbox, without
+network, after the task's `setup_command` and before the config; its failure is an infra error,
+and what it writes must be git-ignored (config E: `graphify update .` and a `*` .gitignore in
+`graphify-out/`). The config generated for a task is saved as `<out>/configs/<task>-<config>.yaml` and its hash
 goes into the result line. Another config is a new file and `--configs <name>` on the same
-`--out`; by the 2026-10-20 decision (§8) a setting is measured by changing B instead.
+`--out`; by the 2026-10-20 decision (§8) a setting is measured by changing B instead. E (2026-10-26) is
+the owner's exception: the current pipeline as one config, next to B.
 
 ### 13.8 The results directory
 

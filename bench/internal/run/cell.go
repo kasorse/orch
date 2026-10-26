@@ -177,6 +177,15 @@ func (e Env) attempt(ctx context.Context, c Cell) (fin Finished, cost float64, e
 	if exit != 0 {
 		return fin, 0, fmt.Errorf("setup: %s", exited(exit))
 	}
+	if c.Config.Setup != "" {
+		exit, err := check.Sandboxed(ctx, ws.Dir, t, c.Config.Setup, false, filepath.Join(logDir, "config-setup.log"), e.Workspaces.Log)
+		if err != nil {
+			return fin, 0, fmt.Errorf("config setup: %w", err)
+		}
+		if exit != 0 {
+			return fin, 0, fmt.Errorf("config setup: %s", exited(exit))
+		}
+	}
 	// The test files before the config ran: the final check removes the ones the model added.
 	beforeConfig, err := check.TestFiles(ws.Dir, t)
 	if err != nil {

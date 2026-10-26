@@ -68,7 +68,7 @@ func TestShippedConfigs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"A", "B", "C", "D"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"A", "B", "C", "D", "E"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("configs = %v, want %v", names, want)
 	}
 
@@ -81,6 +81,7 @@ func TestShippedConfigs(t *testing.T) {
 		{"B", KindOrchestrator, nil},
 		{"C", KindOrchestrator, nil},
 		{"D", KindOrchestrator, []string{"development", "testing"}},
+		{"E", KindOrchestrator, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,6 +98,9 @@ func TestShippedConfigs(t *testing.T) {
 		})
 	}
 
+	if e := load(t, "E"); !strings.Contains(e.Setup, "graphify update .") {
+		t.Errorf("E setup = %q, want the graph built", e.Setup)
+	}
 	a := load(t, "A")
 	if want := []string{"Read", "Grep", "Glob", "Edit", "Write", "Bash"}; !reflect.DeepEqual(a.Tools, want) {
 		t.Errorf("A tools = %v, want %v", a.Tools, want)
@@ -107,7 +111,7 @@ func TestShippedConfigs(t *testing.T) {
 // orchestrator that waited instead would be killed at the task's timeout and the cell recorded as
 // a timeout fail, so every orchestrator config turns the orchestrator's own wait off.
 func TestOrchestratorConfigsDoNotWaitForTheLimit(t *testing.T) {
-	for _, name := range []string{"B", "C", "D"} {
+	for _, name := range []string{"B", "C", "D", "E"} {
 		execution, ok := renderedMap(t, name)["execution"].(map[string]any)
 		if !ok || execution["rate_limit_wait"] != "0s" {
 			t.Errorf("%s: execution = %v, want rate_limit_wait: 0s", name, execution)
@@ -116,7 +120,7 @@ func TestOrchestratorConfigsDoNotWaitForTheLimit(t *testing.T) {
 }
 
 func TestRenderGolden(t *testing.T) {
-	for _, name := range []string{"B", "C", "D"} {
+	for _, name := range []string{"B", "C", "D", "E"} {
 		t.Run(name, func(t *testing.T) {
 			c := load(t, name)
 			out, sha, err := c.RenderConfig(goldenTask())
@@ -387,7 +391,7 @@ func TestRenderedConfigsPassOrchestratorValidate(t *testing.T) {
 	tk.TestCommand = "true"
 	tk.Sandbox = task.Sandbox{}
 
-	for _, name := range []string{"B", "C", "D"} {
+	for _, name := range []string{"B", "C", "D", "E"} {
 		t.Run(name, func(t *testing.T) {
 			out, _, err := load(t, name).RenderConfig(tk)
 			if err != nil {

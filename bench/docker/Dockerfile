@@ -31,6 +31,14 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
  && claude --version | grep -E '^2\.1\.(28[3-9]|29[0-9]|[3-9][0-9]{2}|[0-9]{4,})([^0-9.]|$)'
 ENV DISABLE_AUTOUPDATER=1
 
+# graphify for config E, pinned: its setup builds the code graph (`graphify update .`, AST only,
+# no network) and its implement, investigate and review read it through graphify-mcp, which needs
+# the mcp extra.
+ARG GRAPHIFY_VERSION=0.9.26
+RUN python3 -m venv /opt/graphify \
+ && /opt/graphify/bin/pip install --no-cache-dir "graphifyy[mcp]==${GRAPHIFY_VERSION}" \
+ && ln -s /opt/graphify/bin/graphify /opt/graphify/bin/graphify-mcp /usr/local/bin/
+
 COPY --from=build /out/orchestrator /out/orchbench /usr/local/bin/
 
 # The commit the binaries were built from: `orchestrator version` does not name one yet (TODO P9).

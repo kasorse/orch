@@ -605,6 +605,7 @@ func TestOrchestratorClassification(t *testing.T) {
 		{name: "generic failure", run: runFiles("failed", "tests did not pass", execImpl), exit: "1", status: StatusFailed, reason: "tests did not pass"},
 		{name: "provider failure", run: runFiles("failed", "claude exited with code 1", execImplFailed), exit: "3", status: StatusFailed, reason: "claude exited with code 1"},
 		{name: "failure without a reason", run: runFiles("failed", "", execImpl), exit: "1", status: StatusFailed, reason: "exited with code 1"},
+		{name: "stopped by clarify before any step", run: runFiles("stopped", "task needs input", ""), exit: "4", status: StatusStopped, reason: "task needs input"},
 		{name: "run left unfinished", run: runFiles("running", "", execImpl), exit: "1", status: StatusFailed, reason: "before the run finished"},
 
 		{name: "rate limit on stderr", run: runFiles("failed", "claude exited with code 1", execImplFailed), exit: "3", stderr: "API Error: 429 rate_limit_error", infra: "rate limit"},
