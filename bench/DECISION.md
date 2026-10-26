@@ -92,7 +92,11 @@ bare Claude Code without a shell, and it does not win either.
    ```
 
    `--allow-mixed` is needed because the orchestrator binary differs; `manifest.json: mixed`
-   records it. E against A answers whether the current pipeline beats bare Claude Code; E against
+   records it. `ai-orchestrator-27b3ee5` is out of the set (2026-10-26): its suite hit the
+   repository's `test/integration` timeout flake in both E pilots, once as the final check's
+   `regression`. Its round-2 cells are removed from `round2/results.jsonl` (a copy is kept), so
+   E and A–D are compared on the same 30 tasks; without it round 2 reads A 88%, B 90%, C 91%,
+   D 79%, the differences to A as above. E against A answers whether the current pipeline beats bare Claude Code; E against
    round 2's B answers what the work since round 2 adds, as one bundle. The run does not split
    the build's share from the config's; that needs B, C and D on the new build, and nobody needs
    that split yet. Two conditions: the claude CLI in the image stays 2.1.287 (another version
