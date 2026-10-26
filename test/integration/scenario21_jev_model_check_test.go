@@ -129,14 +129,48 @@ func TestScenario21_ValidateReportsTheModel(t *testing.T) {
 	}
 }
 
-func TestScenario21_StageRunAsksNothing(t *testing.T) {
+// A --stage run does not check the model and decides nothing; the one thing it asks Jev is the
+// clarity question (specs/clarify), recorded beside the manual decision.
+func TestScenario21_StageRunAsksOnlyTheClarityQuestion(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "analysis", "explain Add")
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j, withClarify("claude")), "run", "--stage", "investigation", "explain Add")
 	mustSucceed(t, stdout, stderr, err)
-	if j.ModelRequests() != 0 || len(j.Bodies()) != 0 {
-		t.Errorf("run --stage contacted Jev: %d model, %d decision requests", j.ModelRequests(), len(j.Bodies()))
+	if bodies := j.Bodies(); j.ModelRequests() != 0 || len(bodies) != 1 || !clarityOnly(bodies[0]) {
+		t.Errorf("run --stage contacted Jev: %d model requests, decision requests %v; want the clarity question alone", j.ModelRequests(), bodies)
+	}
+
+	d := readDecision(t, repoDir)
+	if d.Source != "manual" || d.Provider != "" {
+		t.Errorf("the decision must stay manual: %+v", d)
+	}
+	if d.Clarity == nil || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.95 || d.Clarity.Status != "clear" {
+		t.Errorf("decision.json clarity = %+v, want one check of 0.95, clear", d.Clarity)
+	}
+}
+
+// With the clarify step off, an unclear task changes nothing in a --stage run: the stages are the
+// operator's, and the trace says the check was disabled.
+func TestScenario21_StageRunWithAnUnclearTaskAndClarifyOffRunsAsBefore(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	invocationsLog, _ := decisionEnv(t, repoDir)
+	script := scriptBugfixMedium()
+	unclear := 0.42
+	script.PClear = &unclear
+	j := startJev(t, script)
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, jevConfig(t, j), "run", "--stage", "investigation", "explain it")
+	mustSucceed(t, stdout, stderr, err)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate"}) {
+		t.Errorf("invocations = %v, want only the stage", got)
+	}
+	d := readDecision(t, repoDir)
+	if d.Source != "manual" || !equalStrings(d.Workflow, []string{"investigate"}) {
+		t.Errorf("decision = %+v", d)
+	}
+	if d.Clarity == nil || d.Clarity.Status != "disabled" || len(d.Clarity.Checks) != 1 || d.Clarity.Checks[0] != 0.42 {
+		t.Errorf("decision.json clarity = %+v, want one disabled check of 0.42", d.Clarity)
 	}
 }

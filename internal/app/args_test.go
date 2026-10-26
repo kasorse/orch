@@ -48,7 +48,13 @@ func TestParseArgs(t *testing.T) {
 			cliArgs{configPath: defaultConfigPath, stages: []domain.Stage{domain.StageTesting}, rest: []string{"run", "x"}}, ""},
 		{"stage with jira", []string{"run", "--stage", "review", "--jira", "PMC-1"},
 			cliArgs{configPath: defaultConfigPath, jiraRef: "PMC-1", stages: []domain.Stage{domain.StageReview}, rest: []string{"run"}}, ""},
-		{"stage unknown", []string{"run", "--stage", "reveiw", "x"}, cliArgs{}, `unknown stage "reveiw"; valid: research, analysis`},
+		{"stage unknown", []string{"run", "--stage", "reveiw", "x"}, cliArgs{}, `unknown stage "reveiw"; valid: research, investigation`},
+		{"stage investigate alias", []string{"run", "--stage", "investigate", "x"},
+			cliArgs{configPath: defaultConfigPath, stages: []domain.Stage{domain.StageInvestigation}, rest: []string{"run", "x"}}, ""},
+		{"stage analysis removed", []string{"run", "--stage", "analysis", "x"}, cliArgs{}, "specs/clarify"},
+		{"stage analyze removed", []string{"run", "--stage=analyze", "x"}, cliArgs{}, "specs/clarify"},
+		{"stage planning renamed", []string{"run", "--stage", "planning", "x"}, cliArgs{}, "specs/clarify"},
+		{"stage plan renamed", []string{"run", "--stage=plan", "x"}, cliArgs{}, "specs/clarify"},
 		{"stage missing value", []string{"run", "--stage"}, cliArgs{}, "--stage requires a value"},
 		{"stage comma", []string{"run", "--stage", "test,review", "x"}, cliArgs{}, "one stage per flag"},
 		{"bad mode", []string{"--mode", "yolo"}, cliArgs{}, "yolo"},
@@ -304,6 +310,34 @@ func TestParseArgs_StoryRun(t *testing.T) {
 	}
 }
 
+// --parallel is a number from 1 to 8, and belongs to story run alone.
+func TestParseArgs_Parallel(t *testing.T) {
+	for args, want := range map[string]int{"--parallel 1": 1, "--parallel=8": 8, "--parallel 2": 2} {
+		got, err := parseArgs(append(strings.Fields(args), "story", "run", "d"))
+		if err != nil || got.parallel != want {
+			t.Errorf("%s: parallel = %d, err = %v; want %d", args, got.parallel, err, want)
+		}
+	}
+	for _, args := range [][]string{
+		{"--parallel", "0"}, {"--parallel", "9"}, {"--parallel=-1"}, {"--parallel", "two"}, {"--parallel"},
+		{"--parallel", "2", "--parallel", "3"},
+	} {
+		if _, err := parseArgs(append(args, "story", "run", "d")); err == nil || !strings.Contains(err.Error(), "--parallel") {
+			t.Errorf("parseArgs(%q) error = %v, want a --parallel usage error", args, err)
+		}
+	}
+
+	for _, command := range [][]string{{"run", "x"}, {"validate"}, {"story", "plan", "x"}, {"story", "status", "specs/x"}} {
+		var out bytes.Buffer
+		args := append([]string{"--config", "/nonexistent.yaml", "--parallel", "2"}, command...)
+		err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
+		var cerr *apperr.ConfigError
+		if !errors.As(err, &cerr) || err.Error() != "--parallel is only valid with story run" {
+			t.Errorf("%v: got %v, want the --parallel usage error", command, err)
+		}
+	}
+}
+
 // --retry is a usage error with any command but story run, before any config is read.
 func TestRun_RetryOnlyWithStoryRun(t *testing.T) {
 	for _, command := range [][]string{{"run", "x"}, {"validate"}, {"story", "plan", "x"}, {"story", "status", "specs/x"}} {
@@ -360,5 +394,23 @@ func TestRun_StageOnlyWithRun(t *testing.T) {
 				t.Errorf("printed %q", out.String())
 			}
 		})
+	}
+}
+
+// run story <dir> is not a story run: it is refused before any config is read, with the command
+// that runs the spec's tasks.
+func TestRun_RunStoryDirIsRefused(t *testing.T) {
+	spec := t.TempDir()
+	var out bytes.Buffer
+	err := Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "story", spec}, strings.NewReader(""), &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "story plan") {
+		t.Fatalf("got %v, want a hint to story plan", err)
+	}
+	if err := os.Mkdir(filepath.Join(spec, "tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(context.Background(), []string{"--config", "/nonexistent.yaml", "run", "story", spec}, strings.NewReader(""), &out, &out)
+	if err == nil || !strings.Contains(err.Error(), "orchestrator story run "+spec) {
+		t.Fatalf("got %v, want a hint to story run", err)
 	}
 }

@@ -84,7 +84,7 @@ func TestSaveRun_WritesWorkflowOnceSet(t *testing.T) {
 	}
 	assertMissing("workflow.json")
 
-	run.Workflow = &domain.Workflow{Steps: []domain.Step{{Action: domain.ActionPlan}, {Action: domain.ActionImplement}}}
+	run.Workflow = &domain.Workflow{Steps: []domain.Step{{Action: domain.ActionInvestigate}, {Action: domain.ActionImplement}}}
 
 	if err := store.SaveRun(run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -111,12 +111,12 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	artifact := domain.AnalysisArtifact{Summary: "root cause found"}
-	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionAnalyze, artifact, "")
+	artifact := domain.InvestigationArtifact{Summary: "root cause found", RootCause: "Put writes to a nil map"}
+	relPath, err := store.SaveArtifact(run.ID, 1, domain.ActionInvestigate, artifact, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantRel := filepath.Join("artifacts", "001-analyze.json")
+	wantRel := filepath.Join("artifacts", "001-investigate.json")
 	if relPath != wantRel {
 		t.Errorf("expected relative path %q, got %q", wantRel, relPath)
 	}
@@ -125,12 +125,12 @@ func TestSaveArtifact_WritesFileAndReturnsRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected artifact file to exist: %v", err)
 	}
-	var saved domain.AnalysisArtifact
+	var saved domain.InvestigationArtifact
 	if err := json.Unmarshal(data, &saved); err != nil {
 		t.Fatalf("artifact file is not valid JSON: %v", err)
 	}
-	if saved.Summary != "root cause found" {
-		t.Errorf("expected summary to round-trip, got %q", saved.Summary)
+	if saved.Summary != "root cause found" || saved.RootCause != "Put writes to a nil map" {
+		t.Errorf("expected summary and root cause to round-trip, got %+v", saved)
 	}
 }
 
@@ -142,15 +142,15 @@ func TestSaveArtifact_PromptIsWrittenAndNotReadBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt := "ACTION: plan\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"
-	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionPlan, domain.PlanArtifact{Summary: "p", Steps: []string{"s"}}, prompt); err != nil {
+	prompt := "ACTION: investigate\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"
+	if _, err := store.SaveArtifact(run.ID, 0, domain.ActionInvestigate, domain.InvestigationArtifact{Summary: "p", Steps: []string{"s"}}, prompt); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SaveArtifact(run.ID, 1, domain.ActionTest, domain.TestResult{Command: "go test"}, ""); err != nil {
 		t.Fatal(err)
 	}
 
-	raw, err := os.ReadFile(filepath.Join(store.runDir(run.ID), ArtifactRelPath(0, domain.ActionPlan)))
+	raw, err := os.ReadFile(filepath.Join(store.runDir(run.ID), ArtifactRelPath(0, domain.ActionInvestigate)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,17 +161,17 @@ func TestSaveArtifact_PromptIsWrittenAndNotReadBack(t *testing.T) {
 	if err := json.Unmarshal(raw, &onDisk); err != nil || onDisk.Prompt != prompt || onDisk.Summary != "p" {
 		t.Errorf("on disk = %+v (%v), want the summary and the prompt", onDisk, err)
 	}
-	if !strings.HasSuffix(string(raw), `"prompt": "ACTION: plan\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"`+"\n}") {
+	if !strings.HasSuffix(string(raw), `"prompt": "ACTION: investigate\n\n\"quoted\" <<<TASK-X\nfix\n>>>TASK-X"`+"\n}") {
 		t.Errorf("prompt is not the last field, unescaped:\n%s", raw)
 	}
 
-	data, err := store.ReadArtifact(run.ID, 0, domain.ActionPlan)
+	data, err := store.ReadArtifact(run.ID, 0, domain.ActionInvestigate)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.DisallowUnknownFields()
-	var plan domain.PlanArtifact
+	var plan domain.InvestigationArtifact
 	if err := dec.Decode(&plan); err != nil || plan.Summary != "p" || len(plan.Steps) != 1 {
 		t.Errorf("read back = %+v (%v), want the plan without the prompt", plan, err)
 	}
@@ -266,7 +266,7 @@ func TestSaveDecisionAndProjectContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Workflow: []domain.ActionType{domain.ActionAnalyze}}
+	trace := domain.DecisionTrace{Request: "fix", Source: domain.DecisionSourceJev, Provider: "jev", Workflow: []domain.ActionType{domain.ActionInvestigate}}
 	if err := store.SaveDecision(run.ID, trace); err != nil {
 		t.Fatal(err)
 	}

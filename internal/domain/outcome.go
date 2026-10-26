@@ -111,13 +111,16 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 	out.DurationMS = executionsDurationMS(run.Executions)
 	out.ApprovalRequired = len(ManualApprovalMatches(LastImplementPathRules(run))) > 0
 
-	if trace != nil && trace.Source != DecisionSourceManual {
+	if trace != nil {
+		// A manual decision asked nothing but the clarity question and the clarify step
+		// (run --stage), so only those calls are counted.
 		if trace.Usage != nil {
-			for _, u := range []*Usage{trace.Usage.Translation, trace.Usage.ContextDepth, trace.Usage.Classification} {
-				if u == nil {
-					continue
-				}
-				out.Usage.Usage.Add(*u)
+			calls := trace.Usage.Calls()
+			if trace.Source == DecisionSourceManual {
+				calls = trace.Usage.ClarifyCalls()
+			}
+			for _, u := range calls {
+				out.Usage.Usage.Add(u)
 				out.Usage.Calls++
 				if u.Partial {
 					out.Usage.PartialCalls++
@@ -126,10 +129,12 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 				out.DecisionOverhead.Calls++
 			}
 		}
-		// The time is in the trace even when no round reported usage (a trace written
-		// before usage was recorded, a provider that failed before answering).
-		l := trace.Latency
-		out.DecisionOverhead.MS = l.TranslationMS + l.PreCheckMS + l.ContextMS + l.ClassificationMS
+		if trace.Source != DecisionSourceManual {
+			// The time is in the trace even when no round reported usage (a trace written
+			// before usage was recorded, a provider that failed before answering).
+			l := trace.Latency
+			out.DecisionOverhead.MS = l.TranslationMS + l.PreCheckMS + l.ContextMS + l.ClassificationMS
+		}
 	}
 	// The account's rate-limit state is not a cost, and is never recorded; a sum is not
 	// one partial call (PartialCalls counts those).

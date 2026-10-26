@@ -55,7 +55,7 @@ type LogPathBuilder interface {
 	LogPath(runID string, stepIndex int, actionType domain.ActionType, stream string) string
 }
 
-// Dispatcher holds per-run in-memory state (last analysis/plan/implementation/test/review)
+// Dispatcher holds per-run in-memory state (last research/plan/implementation/test/review)
 // so later actions can build context-aware prompts without re-reading artifacts from disk
 // mid-run. One Dispatcher instance must be scoped to exactly one run.
 type Dispatcher struct {
@@ -86,14 +86,17 @@ type Dispatcher struct {
 	// OnWarning, if set, is told of a problem a step went on despite (nothing a run stops
 	// for), such as context it could not add to a prompt.
 	OnWarning func(step domain.ActionType, msg string)
+	// SourceDir is the operator's repository when Repo is a run's worktree, "" otherwise. It
+	// is what "{source}" in extensions.mcp stands for: files git does not carry into the
+	// worktree, such as a generated knowledge graph, stay there.
+	SourceDir string
 	// VerifyExecutable is the orchestrator binary the verify server is started from; empty
 	// means this process's own executable, with symlinks resolved. Tests set it.
 	VerifyExecutable string
 
-	lastResearch *domain.ResearchArtifact
-	lastAnalysis *domain.AnalysisArtifact
-	lastPlan     *domain.PlanArtifact
-	lastImpl     *domain.ImplementationArtifact
+	lastResearch      *domain.ResearchArtifact
+	lastInvestigation *domain.InvestigationArtifact
+	lastImpl          *domain.ImplementationArtifact
 	// commitImpl is the run's first implementation with a summary_short: the commit
 	// describes the whole change, not the last fix iteration (MVP.md §42.2).
 	commitImpl *domain.ImplementationArtifact
@@ -193,7 +196,11 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 
 	// The hint is about the operator's tools only: the verify tools have their own paragraph
 	// in the implement prompt.
-	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir)
+	sourceDir := d.SourceDir
+	if sourceDir == "" {
+		sourceDir = d.Repo.Dir
+	}
+	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir, sourceDir)
 	prompt = withExtensionsHint(prompt, ext)
 	ext, err = mergeExtensions(ext, builtin)
 	if err != nil {

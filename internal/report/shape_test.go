@@ -9,9 +9,9 @@ import (
 	"orchestrator/internal/domain"
 )
 
-// sizedEntry is a used run whose primary distribution has the given size, with planning's
-// probability set to planning (nil leaves the stage without one).
-func sizedEntry(size float64, planning *float64, questions string) RunEntry {
+// sizedEntry is a used run whose primary distribution has the given size, with investigation's
+// probability set to investigation (nil leaves the stage without one).
+func sizedEntry(size float64, investigation *float64, questions string) RunEntry {
 	probs := map[domain.Complexity]float64{domain.ComplexitySimple: 1 - size, domain.ComplexityMedium: size}
 	if size > 1 {
 		probs = map[domain.Complexity]float64{domain.ComplexityMedium: 2 - size, domain.ComplexityComplex: size - 1}
@@ -25,7 +25,7 @@ func sizedEntry(size float64, planning *float64, questions string) RunEntry {
 				domain.ComplexitySourceChoice: {Decision: domain.ComplexityDecision{Probabilities: probs}},
 			},
 		},
-		Stages: []domain.StageOutcome{{Stage: domain.StagePlanning, Probability: planning}},
+		Stages: []domain.StageOutcome{{Stage: domain.StageInvestigation, Probability: investigation}},
 	}
 	return RunEntry{Trace: t}
 }
@@ -42,8 +42,8 @@ func TestShape_RedundantStage(t *testing.T) {
 		t.Fatalf("Shape = %+v", g)
 	}
 	c := g[0].Correlations[0]
-	if c.Stage != domain.StagePlanning || math.Abs(c.R-1) > 1e-9 || !c.Redundant() || c.Runs != 10 {
-		t.Errorf("planning = %+v, want r = 1 and redundant", c)
+	if c.Stage != domain.StageInvestigation || math.Abs(c.R-1) > 1e-9 || !c.Redundant() || c.Runs != 10 {
+		t.Errorf("investigation = %+v, want r = 1 and redundant", c)
 	}
 }
 

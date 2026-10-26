@@ -188,12 +188,12 @@ func TestTerminalGate_ShowsChangesAfterImplement(t *testing.T) {
 		return " M fixture.go", nil
 	}
 
-	afterAnalyze := &domain.Run{Executions: []domain.StepExecution{{Action: domain.ActionAnalyze, Status: domain.StepCompleted}}}
-	if _, err := g.BeforeStep(context.Background(), afterAnalyze, 1, domain.ActionImplement); err != nil {
+	afterInvestigate := &domain.Run{Executions: []domain.StepExecution{{Action: domain.ActionInvestigate, Status: domain.StepCompleted}}}
+	if _, err := g.BeforeStep(context.Background(), afterInvestigate, 1, domain.ActionImplement); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 0 || strings.Contains(out.String(), "Changes") {
-		t.Errorf("no summary expected after analyze, got %q", out.String())
+		t.Errorf("no summary expected after investigate, got %q", out.String())
 	}
 
 	afterImplement := &domain.Run{Executions: []domain.StepExecution{{Action: domain.ActionImplement, Status: domain.StepCompleted}}}

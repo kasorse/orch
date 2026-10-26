@@ -1,4 +1,4 @@
-# D: implement + test, the pipeline without planning or review (SPEC.md §8). `stages` become
+# D: implement + test, the pipeline without investigation or review (SPEC.md §8). `stages` become
 # --stage flags, so the decision section is not called; it is only here because the config
 # must be valid. The rest is C's template, which a test holds.
 kind: orchestrator
@@ -25,16 +25,20 @@ config: |
     model: haiku
     timeout: 60s
 
+  clarify: {enabled: false}
+
   policy:
     context_depth:
       project_threshold: 0.5
+    clarify:
+      threshold: 0.80
     complexity:
       cuts: {medium: 1.24, complex: 1.48}
     stages:
-      thresholds: {research: 0.81, analysis: 0.81, development: 0.81}
+      thresholds: {research: 0.81, development: 0.81}
       force:
-        medium: [analysis, review]
-        complex: [analysis, planning, review]
+        medium: [investigation, review]
+        complex: [investigation, review]
 
   context:
     max_files: 20
@@ -46,10 +50,7 @@ config: |
       provider: claude
       model: sonnet
       effort: medium
-    analyze:
-      provider: claude
-      model: sonnet
-    plan:
+    investigate:
       provider: claude
       model: sonnet
     implement:

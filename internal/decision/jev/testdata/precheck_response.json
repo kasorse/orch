@@ -6,6 +6,10 @@
       "choice": "project",
       "probabilities": {"none": 0.09, "project": 0.91},
       "confidence": 0.82
+    },
+    "clarity": {
+      "type": "noul",
+      "noul": 0.74
     }
   },
   "usage": {"input_tokens": 120, "output_tokens": 1}

@@ -22,7 +22,7 @@ func TestScenario456_MissingExecutable(t *testing.T) {
 			name:      "missing claude",
 			installed: []string{"codex", "gemini"},
 			missingAction: func(p providerSet) providerSet {
-				p.Research, p.Analyze, p.Plan, p.Implement, p.Review = "codex", "codex", "codex", "codex", "codex"
+				p.Research, p.Investigate, p.Implement, p.Review = "codex", "codex", "codex", "codex"
 				p.Translation = "claude" // only the translator needs claude
 				return p
 			},
@@ -40,6 +40,14 @@ func TestScenario456_MissingExecutable(t *testing.T) {
 			installed: []string{"claude", "codex"},
 			missingAction: func(p providerSet) providerSet {
 				p.Decision = "gemini" // the LLM decision provider
+				return p
+			},
+		},
+		{
+			name:      "missing gemini for the clarify step",
+			installed: []string{"claude", "codex"},
+			missingAction: func(p providerSet) providerSet {
+				p.Clarify = "gemini" // only the clarify step needs gemini
 				return p
 			},
 		},

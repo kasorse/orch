@@ -345,7 +345,7 @@ func TestRunsDirectory_IsDeniedToFileTools(t *testing.T) {
 		callDenying(t, g.dir, domain.AuthorityEdit, deny,
 			"Do each of these independently, continuing after any failure:\n"+
 				"1. Use the Edit tool to replace "+runSentinel+" with CHANGED in the file "+runDir+"/run.json.\n"+
-				"2. Use the Write tool to create the file "+runDir+"/artifacts/000-plan.json with the content {}.\n"+
+				"2. Use the Write tool to create the file "+runDir+"/artifacts/000-investigate.json with the content {}.\n"+
 				"3. Use the Write tool to create notes.txt with the content ok.\n"+
 				"Then reply with one line per step saying whether it worked.")
 		if !exists(filepath.Join(g.dir, "notes.txt")) {
@@ -355,7 +355,7 @@ func TestRunsDirectory_IsDeniedToFileTools(t *testing.T) {
 		if err != nil || string(data) != original {
 			t.Errorf("edit changed run.json: %q, %v", data, err)
 		}
-		if exists(filepath.Join(g.dir, runDir, "artifacts", "000-plan.json")) {
+		if exists(filepath.Join(g.dir, runDir, "artifacts", "000-investigate.json")) {
 			t.Error("edit wrote an artifact into the runs directory")
 		}
 	})

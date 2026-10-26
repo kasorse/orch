@@ -26,12 +26,12 @@ func TestValidateRun_VerifyCalls(t *testing.T) {
 		t.Fatalf("valid verify calls: %v", err)
 	}
 
-	many := make([]domain.VerifyCall, domain.MaxVerifyCalls+1)
+	many := make([]domain.VerifyCall, domain.MaxRecordedCalls+1)
 	for i := range many {
 		many[i] = domain.VerifyCall{Tool: domain.VerifyToolRunTests, Success: true}
 	}
-	if err := validateRun(run(domain.ActionImplement, many[:domain.MaxVerifyCalls]...), "r"); err != nil {
-		t.Fatalf("%d entries: %v", domain.MaxVerifyCalls, err)
+	if err := validateRun(run(domain.ActionImplement, many[:domain.MaxRecordedCalls]...), "r"); err != nil {
+		t.Fatalf("%d entries: %v", domain.MaxRecordedCalls, err)
 	}
 
 	one := func(c domain.VerifyCall) []domain.VerifyCall { return []domain.VerifyCall{c} }
@@ -41,7 +41,7 @@ func TestValidateRun_VerifyCalls(t *testing.T) {
 		want string
 	}{
 		{"on a review step", run(domain.ActionReview, good[:1]...), "recorded on a review step"},
-		{"too many", run(domain.ActionImplement, many...), "at most 50"},
+		{"too many", run(domain.ActionImplement, many...), "at most 100"},
 		{"unknown tool", run(domain.ActionImplement, one(domain.VerifyCall{Tool: "rm"})...), `unknown tool "rm"`},
 		{"check on run_tests", run(domain.ActionImplement, one(domain.VerifyCall{Tool: domain.VerifyToolRunTests, Check: "vet", Success: true})...), "check"},
 		{"run_check without a check", run(domain.ActionImplement, one(domain.VerifyCall{Tool: domain.VerifyToolRunCheck, Success: true})...), "without a check"},

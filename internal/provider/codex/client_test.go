@@ -28,7 +28,13 @@ func TestClient_BuildsExpectedArgs(t *testing.T) {
 	if call.Executable != "codex" {
 		t.Errorf("expected executable codex, got %q", call.Executable)
 	}
-	want := []string{"exec", "do the thing", "--model", "gpt"}
+	if call.Stdin != "do the thing" {
+		t.Errorf("expected the prompt on stdin, got %q", call.Stdin)
+	}
+	want := []string{
+		"--ask-for-approval", "never", "exec", "--ephemeral", "--json",
+		"--ignore-user-config", "--ignore-rules", "--sandbox", "read-only", "--model", "gpt", "-",
+	}
 	if len(call.Args) != len(want) {
 		t.Fatalf("expected args %v, got %v", want, call.Args)
 	}
@@ -129,19 +135,22 @@ func TestClient_SpawnFailure(t *testing.T) {
 	}
 }
 
-// TestClient_SupportsNothing pins the fail-closed default: no translation for codex is
-// verified, so every route to it is refused (specs/permissions/SPEC.md §6.4).
-func TestClient_SupportsNothing(t *testing.T) {
+// TestClient_SupportsOnlySandboxedAuthorities pins that exec always exposes its shell tool, so
+// only the read-only and workspace-write sandboxes are supported (specs/permissions/SPEC.md §6.4).
+func TestClient_SupportsOnlySandboxedAuthorities(t *testing.T) {
 	c := New(&execution.FakeProcessExecutor{})
-	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit} {
-		if c.Supports(a) {
-			t.Errorf("Supports(%q) = true, want false", a)
+	for a, want := range map[domain.Authority]bool{
+		domain.AuthorityNone: false, domain.AuthorityWeb: false,
+		domain.AuthorityRead: true, domain.AuthorityEdit: true,
+	} {
+		if got := c.Supports(a); got != want {
+			t.Errorf("Supports(%q) = %v, want %v", a, got, want)
 		}
 	}
 }
 
 func TestClient_ExecuteRefusesEveryAuthority(t *testing.T) {
-	for _, a := range []domain.Authority{"", domain.AuthorityNone, domain.AuthorityRead, domain.AuthorityEdit} {
+	for _, a := range []domain.Authority{"", domain.AuthorityNone, domain.AuthorityWeb} {
 		fake := &execution.FakeProcessExecutor{}
 		_, err := New(fake).Execute(context.Background(), provider.Request{Prompt: "x", Model: "m", Authority: a})
 		var authErr *apperr.AuthorityError

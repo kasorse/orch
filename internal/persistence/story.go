@@ -184,6 +184,49 @@ type StoryRecord struct {
 type StoryBase struct {
 	Branch string `json:"branch"`
 	SHA    string `json:"sha"`
+	// SpecBranch is the story's own branch in the service, story/<slug>/spec, created at SHA
+	// by the first story run (a record from before it has none, and gets it when it continues).
+	// The tasks with several parents are merged on it.
+	SpecBranch string `json:"spec_branch,omitempty"`
+}
+
+// StorySpecBranch is the story's own branch, where the parents of a task are merged:
+// story/<slug>/spec. It cannot clash with a task's branch, spec not being a task ID.
+func StorySpecBranch(slug string) string {
+	return "story/" + slug + "/spec"
+}
+
+// MaxConflictFiles is how many conflicting paths a conflict task records.
+const MaxConflictFiles = 50
+
+// StoryConflict is why a task is in the conflict status: its parents (task IDs) do not merge
+// cleanly on the spec branch, and Files are the paths that conflict.
+type StoryConflict struct {
+	Parents []string `json:"parents"`
+	Files   []string `json:"files"`
+}
+
+// validConflictFile reports whether p is a clean, relative, slash-separated repository path.
+func validConflictFile(p string) bool {
+	if p == "" || strings.ContainsAny(p, "\\\x00\n\r") || path.IsAbs(p) || path.Clean(p) != p {
+		return false
+	}
+	return p != ".." && !strings.HasPrefix(p, "../")
+}
+
+// ConflictFiles keeps the paths of files a conflict task can record: clean relative ones, at most
+// MaxConflictFiles of them.
+func ConflictFiles(files []string) []string {
+	kept := []string{}
+	for _, f := range files {
+		if len(kept) == MaxConflictFiles {
+			break
+		}
+		if validConflictFile(f) {
+			kept = append(kept, f)
+		}
+	}
+	return kept
 }
 
 // StoryTask is what story run knows about one task. Everything but Status is empty while the
@@ -213,6 +256,9 @@ type StoryTask struct {
 	// cost of the runs that --retry left behind.
 	CostUSD          float64 `json:"cost_usd,omitempty"`
 	AbandonedCostUSD float64 `json:"abandoned_cost_usd,omitempty"`
+	// Conflict is present only in the conflict status: the task was not dispatched because its
+	// parents do not merge.
+	Conflict *StoryConflict `json:"conflict,omitempty"`
 }
 
 // StoryTaskBranch is the branch of attempt n of task id of story slug: story/<slug>/<ID> for
@@ -243,10 +289,44 @@ func (r StoryRecord) TotalCostUSD() float64 {
 // validStoryTaskStatus reports whether s is one of the task statuses.
 func validStoryTaskStatus(s story.TaskStatus) bool {
 	switch s {
-	case story.TaskPending, story.TaskRunning, story.TaskDone, story.TaskFailed, story.TaskBlocked, story.TaskStopped:
+	case story.TaskPending, story.TaskRunning, story.TaskDone, story.TaskFailed, story.TaskBlocked, story.TaskStopped, story.TaskConflict:
 		return true
 	}
 	return false
+}
+
+func orPendingStatus(s story.TaskStatus) story.TaskStatus {
+	if s == "" {
+		return story.TaskPending
+	}
+	return s
+}
+
+// validate checks the conflict of a task in the conflict status, repo being the task's repository.
+func (c *StoryConflict) validate(repo string) error {
+	switch {
+	case c == nil:
+		return fmt.Errorf("a conflict task has no conflict")
+	case repo == "":
+		return fmt.Errorf("a conflict task has no repo")
+	case len(c.Parents) == 0:
+		return fmt.Errorf("conflict.parents is empty")
+	case len(c.Files) > MaxConflictFiles:
+		return fmt.Errorf("conflict.files has %d paths, at most %d are recorded", len(c.Files), MaxConflictFiles)
+	}
+	seen := map[string]bool{}
+	for _, p := range c.Parents {
+		if !story.ValidID(p) || seen[p] {
+			return fmt.Errorf("conflict.parents: %q is not a task ID, or is listed twice", p)
+		}
+		seen[p] = true
+	}
+	for _, f := range c.Files {
+		if !validConflictFile(f) {
+			return fmt.Errorf("conflict.files: %q is not a clean repository-relative path", f)
+		}
+	}
+	return nil
 }
 
 // validate checks one task's state; slug is the story's and services its services.
@@ -287,7 +367,14 @@ func (t StoryTask) validate(slug, id string, services map[string]string) error {
 			return fmt.Errorf("%s is %v", name, cost)
 		}
 	}
-	if t.Status != story.TaskPending {
+	if t.Status == story.TaskConflict {
+		if err := t.Conflict.validate(t.Repo); err != nil {
+			return err
+		}
+	} else if t.Conflict != nil {
+		return fmt.Errorf("a %s task has a conflict", orPendingStatus(t.Status))
+	}
+	if t.Status != story.TaskPending && t.Status != story.TaskConflict {
 		switch {
 		case t.Attempt < 1:
 			return fmt.Errorf("a %s task has no attempt", t.Status)
@@ -351,6 +438,9 @@ func (r StoryRecord) Validate() error {
 		}
 		if !story.ValidBaseRef(b.SHA) {
 			return fmt.Errorf("bases.%s: sha %q is not a full commit SHA", name, b.SHA)
+		}
+		if b.SpecBranch != "" && b.SpecBranch != StorySpecBranch(r.Slug) {
+			return fmt.Errorf("bases.%s: spec_branch %q is not %s", name, b.SpecBranch, StorySpecBranch(r.Slug))
 		}
 	}
 	dispatched := false

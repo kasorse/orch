@@ -15,11 +15,22 @@ const (
 	DefaultStoryMaxServices = 5
 	DefaultStorySpecDir     = "specs"
 	DefaultStoryMaxTasks    = 12
+	// DefaultStoryMaxParallel is one slot: the tasks run one at a time.
+	DefaultStoryMaxParallel = 1
+	// DefaultStoryMaxAcceptanceChars and MaxStoryMaxAcceptanceChars are story.MaxAcceptanceRunes
+	// and story.MaxAcceptanceRunesCeiling (story_test.go keeps them equal).
+	DefaultStoryMaxAcceptanceChars = 300
+	MaxStoryMaxAcceptanceChars     = 2000
+	minStoryMaxAcceptanceChars     = 50
 
 	minStoryMaxServices = 1
 	maxStoryMaxServices = 20
 	minStoryMaxTasks    = 2
 	maxStoryMaxTasks    = 30
+
+	// MinStoryMaxParallel and MaxStoryMaxParallel bound story.max_parallel and story run --parallel.
+	MinStoryMaxParallel = 1
+	MaxStoryMaxParallel = 8
 )
 
 // StoryConfig is the story section. Absent keys take their defaults; an explicit 0 stays 0 and
@@ -32,6 +43,10 @@ type StoryConfig struct {
 	// SpecDir is where the spec of a story is written, relative to the story home.
 	SpecDir  string
 	MaxTasks int
+	// MaxParallel is how many ready tasks story run runs at once.
+	MaxParallel int
+	// MaxAcceptanceChars bounds one acceptance item of a task file story run reads.
+	MaxAcceptanceChars int
 	// MaxCostUSD bounds the whole story, every call and run; nil means no budget.
 	MaxCostUSD *float64
 	// JiraIssueTypes are the Jira issue types run --jira refuses in favour of story plan.
@@ -45,6 +60,8 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxServices    *int     `yaml:"max_services"`
 		SpecDir        *string  `yaml:"spec_dir"`
 		MaxTasks       *int     `yaml:"max_tasks"`
+		MaxParallel    *int     `yaml:"max_parallel"`
+		MaxAcceptance  *int     `yaml:"max_acceptance_chars"`
 		MaxCostUSD     *float64 `yaml:"max_cost_usd"`
 		JiraIssueTypes []string `yaml:"jira_issue_types"`
 	}
@@ -52,12 +69,14 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return err
 	}
 	*s = StoryConfig{
-		Roots:          raw.Roots,
-		MaxServices:    DefaultStoryMaxServices,
-		SpecDir:        DefaultStorySpecDir,
-		MaxTasks:       DefaultStoryMaxTasks,
-		MaxCostUSD:     raw.MaxCostUSD,
-		JiraIssueTypes: raw.JiraIssueTypes,
+		Roots:              raw.Roots,
+		MaxServices:        DefaultStoryMaxServices,
+		SpecDir:            DefaultStorySpecDir,
+		MaxTasks:           DefaultStoryMaxTasks,
+		MaxParallel:        DefaultStoryMaxParallel,
+		MaxAcceptanceChars: DefaultStoryMaxAcceptanceChars,
+		MaxCostUSD:         raw.MaxCostUSD,
+		JiraIssueTypes:     raw.JiraIssueTypes,
 	}
 	if raw.MaxServices != nil {
 		s.MaxServices = *raw.MaxServices
@@ -67,6 +86,12 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	}
 	if raw.MaxTasks != nil {
 		s.MaxTasks = *raw.MaxTasks
+	}
+	if raw.MaxParallel != nil {
+		s.MaxParallel = *raw.MaxParallel
+	}
+	if raw.MaxAcceptance != nil {
+		s.MaxAcceptanceChars = *raw.MaxAcceptance
 	}
 	return nil
 }
@@ -126,6 +151,14 @@ func validateStory(s StoryConfig) []string {
 		problems = append(problems, fmt.Sprintf("story.max_tasks must be between %d and %d, got %d",
 			minStoryMaxTasks, maxStoryMaxTasks, s.MaxTasks))
 	}
+	if s.MaxParallel < MinStoryMaxParallel || s.MaxParallel > MaxStoryMaxParallel {
+		problems = append(problems, fmt.Sprintf("story.max_parallel must be between %d and %d, got %d",
+			MinStoryMaxParallel, MaxStoryMaxParallel, s.MaxParallel))
+	}
+	if s.MaxAcceptanceChars < minStoryMaxAcceptanceChars || s.MaxAcceptanceChars > MaxStoryMaxAcceptanceChars {
+		problems = append(problems, fmt.Sprintf("story.max_acceptance_chars must be between %d and %d, got %d",
+			minStoryMaxAcceptanceChars, MaxStoryMaxAcceptanceChars, s.MaxAcceptanceChars))
+	}
 	if v := s.MaxCostUSD; v != nil && (*v <= 0 || math.IsNaN(*v) || math.IsInf(*v, 0)) {
 		problems = append(problems, fmt.Sprintf("story.max_cost_usd must be positive and finite, got %v", *v))
 	}
@@ -147,7 +180,7 @@ func validateStory(s StoryConfig) []string {
 }
 
 // storyBudgetProblems refuses story.max_cost_usd when a provider a story's own calls route to
-// reports no cost: the survey runs on actions.analyze and specify on actions.plan, so the
+// reports no cost: the survey and specify run on actions.investigate, so the
 // budget could then never be reached. The children's routes are their repositories' own.
 func storyBudgetProblems(cfg Config, checker CostChecker) []string {
 	if cfg.Story == nil || cfg.Story.MaxCostUSD == nil {
@@ -155,8 +188,7 @@ func storyBudgetProblems(cfg Config, checker CostChecker) []string {
 	}
 	var problems []string
 	for _, a := range []struct{ name, provider string }{
-		{"analyze", cfg.Actions.Analyze.Provider},
-		{"plan", cfg.Actions.Plan.Provider},
+		{"investigate", cfg.Actions.Investigate.Provider},
 	} {
 		if a.provider == "" || (checker != nil && checker.ReportsCost(a.provider)) {
 			continue

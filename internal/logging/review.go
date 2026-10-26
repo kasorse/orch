@@ -26,7 +26,7 @@ type ReviewInput struct {
 	DefaultMode domain.RunMode
 	// Editable allows changing stages and complexity (a fresh run; a resume only approves).
 	Editable bool
-	// Build turns the stages into the workflow line ("analyze → implement"); it reports
+	// Build turns the stages into the workflow line ("plan → implement"); it reports
 	// the steps so the screen can preview exactly what will run.
 	Build func(domain.StageSelection) ([]domain.ActionType, error)
 }
@@ -340,7 +340,7 @@ func (st *reviewState) render(s style) []string {
 			if st.on[so.Stage] {
 				box = s.green("[✓]")
 			}
-			name := fmt.Sprintf("%-12s", so.Stage)
+			name := fmt.Sprintf("%-13s", so.Stage)
 			switch {
 			case focused:
 				name = s.bold(name)

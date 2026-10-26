@@ -29,6 +29,9 @@ const (
 	MaxTitleBytes      = 200
 	MaxAcceptanceItems = 10
 	MaxAcceptanceRunes = 300
+	// MaxAcceptanceRunesCeiling bounds an acceptance item wherever it is read back (a task
+	// input, run.json); story.max_acceptance_chars may raise the limit of a task file up to it.
+	MaxAcceptanceRunesCeiling = 2000
 	// MaxTaskTextBytes bounds a task's title, goal, acceptance items and notes together, so
 	// the task file rendered from them stays well under MaxBodyBytes.
 	MaxTaskTextBytes = 8 << 10
@@ -292,14 +295,8 @@ func (a SpecifyAnswer) check(repos []string, maxTasks int, specDirExists func(st
 		}
 	}
 
-	tasks := a.Tasks()
-	if err := Validate(tasks, repos, maxTasks); err != nil {
+	if err := Validate(a.Tasks(), repos, maxTasks); err != nil {
 		return answerErr("tasks", "%v", err)
-	}
-	for i, t := range tasks {
-		if _, err := Base(tasks, t.ID); err != nil {
-			return answerErr(fmt.Sprintf("tasks[%d].depends_on", i), "%v", err)
-		}
 	}
 	return nil
 }

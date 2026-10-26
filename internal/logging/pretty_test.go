@@ -34,16 +34,15 @@ func prettyRun(t *testing.T) string {
 			}},
 		Stages: []domain.StageOutcome{
 			{Stage: "research", Probability: ptr(0.05), Threshold: ptr(0.7)},
-			{Stage: "analysis", Probability: ptr(0.92), Threshold: ptr(0.6), Enabled: true},
-			{Stage: "planning", Probability: ptr(0.40), Threshold: ptr(0.65)},
+			{Stage: "investigation", Probability: ptr(0.92), Threshold: ptr(0.6), Enabled: true},
 			{Stage: "development", Probability: ptr(0.99), Threshold: ptr(0.6), Enabled: true},
 			{Stage: "testing", Probability: ptr(0.95), Threshold: ptr(0.6), Enabled: true},
 			{Stage: "review", Probability: ptr(0.55), Threshold: ptr(0.7), Enabled: true, Forced: true},
 		},
-		Workflow: []domain.ActionType{"analyze", "implement", "test", "review"},
+		Workflow: []domain.ActionType{"investigate", "implement", "test", "review"},
 	}
 	r.Decided(trace)
-	wf := domain.Workflow{Steps: []domain.Step{{Action: "analyze"}, {Action: "implement"}, {Action: "test"}, {Action: "review"}}}
+	wf := domain.Workflow{Steps: []domain.Step{{Action: "investigate"}, {Action: "implement"}, {Action: "test"}, {Action: "review"}}}
 	r.Authority(wf, "npm test", false)
 	r.RestorePoint("3c6b929")
 
@@ -65,7 +64,7 @@ func prettyRun(t *testing.T) string {
 		run.TotalSteps++
 		r.StepFinished(run, idx, exec, outcome)
 	}
-	step("analyze", workflow.StepOutcome{Outcome: workflow.OutcomeSuccess, Artifact: domain.AnalysisArtifact{
+	step("investigate", workflow.StepOutcome{Outcome: workflow.OutcomeSuccess, Artifact: domain.InvestigationArtifact{
 		Summary: "Email is not validated on signup.", AffectedFiles: []string{"src/signup.ts"}}}, domain.StepExecution{})
 	step("implement", workflow.StepOutcome{Outcome: workflow.OutcomeSuccess, Artifact: domain.ImplementationArtifact{
 		Summary: "Added validateEmail.", ChangedFiles: []string{"src/signup.ts", "src/signup.test.ts"}}}, domain.StepExecution{})
@@ -97,14 +96,14 @@ func TestPretty_FullRun(t *testing.T) {
 		"✻ AI Orchestrator v0.1.0",
 		"run   20261002-120000-ab12cd34",
 		"⏺ Decision  claude · opus",
-		"workflow    analyze → implement → test → review",
-		"⏺ Analyze  step 1 · read access",
+		"workflow    investigate → implement → test → review",
+		"⏺ Investigate  step 1 · read access",
 		"✓ Done (claude · sonnet · 12.3s)",
 		"✗ Tests failed (exit 1 · 12.3s)",
 		"↻ Returning to implement (fix 1/2)",
 		"✓ Tests passed (npm test · 12.3s)",
 		"✓ Run completed",
-		"analyze ✓ → implement ✓ → test ✗ → implement ✓ → test ✓ → review ✓",
+		"investigate ✓ → implement ✓ → test ✗ → implement ✓ → test ✓ → review ✓",
 		"[low] src/signup.ts: name the regex",
 	} {
 		if !strings.Contains(plain, want) {
@@ -131,7 +130,7 @@ func TestPlainReporterNeverEmitsANSI(t *testing.T) {
 	r := NewConsoleReporter(&buf)
 	r.RunHeader("id", "dir")
 	r.Deciding()
-	r.StepStarted(&domain.Run{}, 0, domain.ActionAnalyze)
+	r.StepStarted(&domain.Run{}, 0, domain.ActionInvestigate)
 	r.ProviderCallStarted("claude", "sonnet")
 	r.RunFinished(&domain.Run{Status: domain.RunCompleted})
 	if strings.Contains(buf.String(), "\x1b") {
@@ -170,12 +169,12 @@ func TestStylePrompt(t *testing.T) {
 
 func TestSpinnerStopClearsLine(t *testing.T) {
 	var buf syncBuffer
-	s := startSpinner(&buf, style{on: true}, "Analyzing", "claude · sonnet")
+	s := startSpinner(&buf, style{on: true}, "Planning", "claude · sonnet")
 	time.Sleep(3 * spinnerInterval)
 	s.Stop()
 	s.Stop() // idempotent
 	out := buf.String()
-	if !strings.Contains(out, "Analyzing…") || !strings.HasSuffix(out, "\r\x1b[K\r\x1b[?25h") {
+	if !strings.Contains(out, "Planning…") || !strings.HasSuffix(out, "\r\x1b[K\r\x1b[?25h") {
 		t.Errorf("unexpected spinner output %q", out)
 	}
 }

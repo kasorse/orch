@@ -24,6 +24,7 @@ At most 12 tasks.
 Every task follows these rules:
 - it is a vertical slice that one run can implement, test and review (size S or M; an L is split);
 - after it, that repository's tests pass;
+- it updates, in the same task, the documentation its own change makes out of date (the sections of the specification, README and other docs that describe what it changes); no task is set aside to write the documentation of the others;
 - it changes exactly one repository;
 - it lists the tasks it needs in "depends_on"; within one repository the tasks a task needs form a chain: of any two of them, one depends on the other;
 - work it finds necessary in a repository that is not listed above goes into the spec's "out_of_scope" or "risks", never into a task;

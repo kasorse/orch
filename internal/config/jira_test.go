@@ -243,14 +243,16 @@ func TestConfig_CredentialEnvNames(t *testing.T) {
 		mutate func(*Config)
 		want   []string
 	}{
-		{"jev and the default claude key", func(*Config) {}, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY"}},
-		{"llm provider keeps the jev variable", func(c *Config) { c.Decision.Provider = "claude" }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY"}},
-		{"no jev variable", func(c *Config) { c.Decision.Jev.APIKeyEnv = "  " }, []string{"ANTHROPIC_API_KEY"}},
-		{"basic", func(c *Config) { c.Jira = &basic }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "JIRA_API_TOKEN", "JIRA_EMAIL"}},
-		{"bearer has no email", func(c *Config) { c.Jira = &bearer }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "JIRA_PAT"}},
-		{"duplicates", func(c *Config) { c.Jira = &shared }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY"}},
-		{"configured claude key variable", func(c *Config) { c.Providers.Claude.APIKeyEnv = "ORCH_CLAUDE_KEY" }, []string{"JEV_API_KEY", "ORCH_CLAUDE_KEY"}},
-		{"claude key shared with another credential", func(c *Config) { c.Providers.Claude.APIKeyEnv = "JEV_API_KEY" }, []string{"JEV_API_KEY"}},
+		// validConfig runs review on codex, so the default codex key is always named.
+		{"jev and the default claude key", func(*Config) {}, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "OPENAI_API_KEY"}},
+		{"llm provider keeps the jev variable", func(c *Config) { c.Decision.Provider = "claude" }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "OPENAI_API_KEY"}},
+		{"no jev variable", func(c *Config) { c.Decision.Jev.APIKeyEnv = "  " }, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"}},
+		{"basic", func(c *Config) { c.Jira = &basic }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "JIRA_API_TOKEN", "JIRA_EMAIL", "OPENAI_API_KEY"}},
+		{"bearer has no email", func(c *Config) { c.Jira = &bearer }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "JIRA_PAT", "OPENAI_API_KEY"}},
+		{"duplicates", func(c *Config) { c.Jira = &shared }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY", "OPENAI_API_KEY"}},
+		{"configured claude key variable", func(c *Config) { c.Providers.Claude.APIKeyEnv = "ORCH_CLAUDE_KEY" }, []string{"JEV_API_KEY", "OPENAI_API_KEY", "ORCH_CLAUDE_KEY"}},
+		{"claude key shared with another credential", func(c *Config) { c.Providers.Claude.APIKeyEnv = "JEV_API_KEY" }, []string{"JEV_API_KEY", "OPENAI_API_KEY"}},
+		{"no codex action", func(c *Config) { c.Actions.Review.Provider = "gemini" }, []string{"ANTHROPIC_API_KEY", "JEV_API_KEY"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

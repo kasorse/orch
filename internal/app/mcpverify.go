@@ -55,7 +55,8 @@ func runMCPVerify(ctx context.Context, dir string, stdin io.Reader, stdout, stde
 	if err != nil {
 		return err
 	}
-	// The sandbox is mandatory (ReadSpec refuses a spec without one), and the environment
+	// The sandbox is mandatory for the test tools (ReadSpec refuses a spec with a test command
+	// and without one; without a test command the runner is never reached), and the environment
 	// is the one the orchestrator computed, never rebuilt from this process's own. An empty
 	// list stays empty rather than meaning "inherit".
 	env := slices.Clone(spec.TestEnv)
@@ -71,6 +72,7 @@ func runMCPVerify(ctx context.Context, dir string, stdin io.Reader, stdout, stde
 		return &apperr.ConfigError{Msg: "mcp-verify", Err: err}
 	}
 	tools.Log = stderr
+	tools.Files = repo
 	server := &verify.Server{Tools: tools, Version: Version, Log: stderr}
 	return server.Serve(ctx, stdin, stdout)
 }

@@ -52,7 +52,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -80,6 +80,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cli.retry != "" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--retry is only valid with story run"}
+	}
+	if cli.parallel != 0 && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--parallel is only valid with story run"}
 	}
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
@@ -113,6 +116,9 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
+		if err := checkNotAStory(rest[1:]); err != nil {
+			return err
+		}
 		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
@@ -134,7 +140,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			}
 			return storyRun(ctx, rest[2], storyRunOptions{
 				configPath: cli.configPath, explicitConfig: cli.configGiven, mode: cli.mode, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth,
-				retry: cli.retry, verbose: cli.verbose,
+				retry: cli.retry, parallel: cli.parallel, verbose: cli.verbose,
 			}, stdin, stdout, stderr)
 		case "status":
 			if len(rest) != 3 {
@@ -178,6 +184,23 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+// checkNotAStory refuses `run story <dir>`: run would take it for the text of one task and do
+// a whole spec in a single session. The tasks of a spec directory run with story run.
+func checkNotAStory(text []string) error {
+	if len(text) != 2 || text[0] != "story" {
+		return nil
+	}
+	if info, err := os.Stat(text[1]); err != nil || !info.IsDir() {
+		return nil
+	}
+	if info, err := os.Stat(filepath.Join(text[1], "tasks")); err == nil && info.IsDir() {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("run takes %q for the text of one task; to run the tasks of %s one by one, each in its own run: orchestrator story run %s",
+			strings.Join(text, " "), text[1], logging.ShellWord(text[1]))}
+	}
+	return &apperr.ConfigError{Msg: fmt.Sprintf("run takes %q for the text of one task; %s has no tasks/ to run. Plan a story first: orchestrator story plan \"<request>\"",
+		strings.Join(text, " "), text[1])}
+}
+
 // checkStoryTaskFlags refuses the hidden --story-task where it does not belong: outside run,
 // and with anything else that says what the task is or where it runs (specs/story/SPEC.md
 // §11.1). The input file gives the text, the stages are the policy's plus development, and the
@@ -201,6 +224,10 @@ func checkStoryTaskFlags(cli cliArgs, rest []string) error {
 // storyTaskReason is the reason decision.json gives development, and testing with it, for a
 // story task (specs/story/SPEC.md §11.2).
 const storyTaskReason = "story task"
+
+// storyTaskPlannedReason is the reason decision.json gives research and investigation a
+// story task turned off: its task file is already the plan.
+const storyTaskPlannedReason = "story task: the task file is the plan"
 
 // maxStoryTaskFileBytes bounds the task input file read: its text may be 32 KiB, which JSON can
 // spell in up to six times as many bytes.
@@ -292,6 +319,9 @@ type cliArgs struct {
 	// retry is --retry's value, a task ID: story run abandons that task's run and dispatches it
 	// again on the next attempt's branch (specs/story/SPEC.md §10.2).
 	retry string
+	// parallel is --parallel's value, 1..8: how many ready tasks story run runs at once, in place
+	// of story.max_parallel; 0 if not given (specs/parallel-story/SPEC.md §2).
+	parallel int
 	// rest are the positional arguments.
 	rest []string
 }
@@ -409,6 +439,19 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--retry requires a task ID (two capital letters and two digits, like RF02), got %q", v)
 			}
 			cli.retry = v
+		case arg == "--parallel" || strings.HasPrefix(arg, "--parallel="):
+			if cli.parallel != 0 {
+				return cliArgs{}, fmt.Errorf("--parallel given twice")
+			}
+			v, err := value(&i, "--parallel")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n < config.MinStoryMaxParallel || n > config.MaxStoryMaxParallel {
+				return cliArgs{}, fmt.Errorf("--parallel requires a number from %d to %d, got %q", config.MinStoryMaxParallel, config.MaxStoryMaxParallel, v)
+			}
+			cli.parallel = n
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":
@@ -1107,13 +1150,14 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
-		out, err = decideManual(stages, task.Description, reporter)
+		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
+			reporter, prompter, interactive, stream, stderr)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
 			reporter, prompter, interactive, storyIn != nil, stream, stderr)
 	}
 	if err != nil {
-		return failRun(store, run, err)
+		return stopUndecided(store, run, out, err)
 	}
 
 	wf, err := workflow.Build(out.decision.Stages)
@@ -1477,6 +1521,11 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 		Persist:  store.SaveRun,
 		Limits:   limitsView(*cfg),
 	}
+	// The clarify step and the clarity re-checks are paid from limits.max_cost_usd too
+	// (specs/clarify). They are read from decision.json, so a resume counts them as well.
+	if trace := loadTrace(store, run.ID); trace != nil && trace.Usage != nil {
+		engine.DecisionCalls = trace.Usage.ClarifyCalls()
+	}
 
 	if mode == domain.ModeManual {
 		gate := interaction.NewTerminalGate(s.prompter, s.reporter.PausingWriter())
@@ -1719,7 +1768,7 @@ func worktreeRel(ctx context.Context, repo *repository.Repository, p string) str
 // newDecisionProvider builds the configured decision provider (TASKS.md T22): Jev over
 // HTTP, its offline mock, or a CLI provider. The Jev API key is read from the
 // environment here and handed only to the client's constructor.
-func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, stream, stderr io.Writer) (decision.Provider, error) {
+func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *persistence.Store, runID string, reporter *logging.ConsoleReporter, label string, stream, stderr io.Writer) (decision.Provider, error) {
 	d := cfg.Decision
 	sources := d.Complexity.Sources()
 
@@ -1744,7 +1793,7 @@ func newDecisionProvider(cfg config.Config, registry *provider.Registry, store *
 	}
 	return &llm.Provider{
 		Client: client, ProviderID: d.Provider, Model: d.Model, Timeout: d.Timeout, Sources: sources,
-		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: "Deciding the workflow"}, Stream: stream,
+		RunID: runID, Logger: store, Observer: logging.CallReporter{ConsoleReporter: reporter, Label: label}, Stream: stream,
 	}, nil
 }
 
@@ -1845,12 +1894,18 @@ func failRun(store *persistence.Store, run *domain.Run, err error) error {
 // loader refuses) the outcome leaves the decision calls out rather than failing a run that
 // already ended.
 func writeOutcome(store *persistence.Store, run *domain.Run) error {
+	return writeOutcomeWith(store, run, loadTrace(store, run.ID))
+}
+
+// writeOutcomeWith is writeOutcome with the decision trace given: a run that ended before its
+// decision.json was written passes the trace its decision step had so far, so the decision calls
+// it made are counted in its outcome all the same.
+func writeOutcomeWith(store *persistence.Store, run *domain.Run, trace *domain.DecisionTrace) error {
 	switch run.Status {
 	case domain.RunCompleted, domain.RunFailed, domain.RunStopped:
 	default:
 		return nil
 	}
-	trace := loadTrace(store, run.ID)
 	outcome := domain.ComputeOutcome(*run, trace)
 	run.Outcome = &outcome
 	if err := store.SaveRun(run); err != nil {

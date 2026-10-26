@@ -68,7 +68,7 @@ func (m *Manager) Build(ctx context.Context, request, requestEN string) (*domain
 		Dependencies: md.dependencies,
 		TestInfo:     testInfo(m.root, files),
 		Rules:        projectRules(m.root, files),
-		Docs:         docExcerpts(m.root, files, q),
+		Docs:         docExcerpts(m.root, contextDocFiles(files), q, maxDocExcerpts),
 	}
 
 	// One more than fits, so the budget can tell that something was left out.

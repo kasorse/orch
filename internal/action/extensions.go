@@ -13,17 +13,18 @@ import (
 
 // extensionsFor resolves the operator's opt-in extensions (config.ExtensionsConfig) for
 // one action: the --mcp-config document with only the servers offered to it, "{repo}"
-// replaced with the repository root, the allowlisted tool names, and whether the user's
-// Claude settings load. An action with nothing configured gets the zero value, so its
-// argv is exactly what it was before extensions existed.
-func extensionsFor(cfg config.ExtensionsConfig, action domain.ActionType, repoDir string) provider.Extensions {
+// replaced with the root the step works in and "{source}" with the operator's repository
+// (the same directory unless the run is in a worktree), the allowlisted tool names, and
+// whether the user's Claude settings load. An action with nothing configured gets the zero
+// value, so its argv is exactly what it was before extensions existed.
+func extensionsFor(cfg config.ExtensionsConfig, action domain.ActionType, repoDir, sourceDir string) provider.Extensions {
 	var ext provider.Extensions
 	ext.UserSettings = cfg.UserSettingsFor(action)
 
 	servers := map[string]map[string]any{}
 	for _, name := range cfg.ServersFor(action) {
 		s := cfg.MCP[name]
-		sub := func(v string) string { return strings.ReplaceAll(v, "{repo}", repoDir) }
+		sub := strings.NewReplacer("{repo}", repoDir, "{source}", sourceDir).Replace
 		entry := map[string]any{}
 		if s.Command != "" {
 			entry["command"] = sub(s.Command)
@@ -60,19 +61,16 @@ func extensionsFor(cfg config.ExtensionsConfig, action domain.ActionType, repoDi
 // and so the middle part of its tool names. config rejects an operator server of this name.
 const verifyServer = "orch"
 
-// verifyExtensions is the built-in extension of an implement step with verify on: the stdio
-// server `<exe> mcp-verify --dir <dir>` and the tools the model may call on it
-// (specs/quality/SPEC.md §6.3). run_check is offered only when there are checks.
-func verifyExtensions(dir, exe string, hasChecks bool) provider.Extensions {
+// verifyExtensions is the built-in extension of an implement step with verify or replace on:
+// the stdio server `<exe> mcp-verify --dir <dir>` and the tools the model may call on it
+// (specs/quality/SPEC.md §6.3), the ones verify.Spec.ToolNames gives.
+func verifyExtensions(dir, exe string, tools []string) provider.Extensions {
 	doc, _ := json.Marshal(map[string]any{"mcpServers": map[string]any{
 		verifyServer: map[string]any{"command": exe, "args": []string{"mcp-verify", "--dir", dir}},
 	}})
-	ext := provider.Extensions{
-		MCPConfig: string(doc),
-		MCPTools:  []string{"mcp__" + verifyServer + "__" + domain.VerifyToolRunTests},
-	}
-	if hasChecks {
-		ext.MCPTools = append(ext.MCPTools, "mcp__"+verifyServer+"__"+domain.VerifyToolRunCheck)
+	ext := provider.Extensions{MCPConfig: string(doc)}
+	for _, t := range tools {
+		ext.MCPTools = append(ext.MCPTools, "mcp__"+verifyServer+"__"+t)
 	}
 	return ext
 }

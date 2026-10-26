@@ -58,6 +58,7 @@ type SurveyInput struct {
 const specifyRules = `Every task follows these rules:
 - it is a vertical slice that one run can implement, test and review (size S or M; an L is split);
 - after it, that repository's tests pass;
+- it updates, in the same task, the documentation its own change makes out of date (the sections of the specification, README and other docs that describe what it changes); no task is set aside to write the documentation of the others;
 - it changes exactly one repository;
 - it lists the tasks it needs in "depends_on"; within one repository the tasks a task needs form a chain: of any two of them, one depends on the other;
 - work it finds necessary in a repository that is not listed above goes into the spec's "out_of_scope" or "risks", never into a task;
@@ -136,7 +137,7 @@ type PlanningLogger interface {
 
 // PlanningCall is what a planning call runs with besides its prompt. Route and Timeout are the
 // base route and the timeout of the action the call runs on (SPEC A2): for a survey the
-// surveyed repository's own actions.analyze, for specify the story home's actions.plan.
+// surveyed repository's own actions.investigate, for specify the story home's actions.investigate.
 type PlanningCall struct {
 	Registry *provider.Registry
 	Route    config.ProviderModel
@@ -197,7 +198,7 @@ func Survey(ctx context.Context, call PlanningCall, repo SurveyRepo, request str
 	if repo.Dir == "" {
 		return res, &apperr.WorkflowError{Msg: fmt.Sprintf("survey of %s: the repository has no checkout directory", repo.Name)}
 	}
-	kind := planningKind{action: "survey", log: "survey-" + repo.Name, timeout: "actions.analyze.timeout"}
+	kind := planningKind{action: "survey", log: "survey-" + repo.Name, timeout: "actions.investigate.timeout"}
 	var err error
 	res.Output, res.Usage, err = call.run(ctx, kind, provider.Request{
 		Prompt: res.Prompt, WorkingDir: repo.Dir, Authority: domain.AuthorityRead,
@@ -223,7 +224,7 @@ func Survey(ctx context.Context, call PlanningCall, repo SurveyRepo, request str
 // *apperr.InvalidResponseError naming the field; the raw answer is in the result either way.
 func Specify(ctx context.Context, call PlanningCall, in SpecifyInput) (SpecifyResult, error) {
 	res := SpecifyResult{Prompt: BuildSpecifyPrompt(in.Request, in.Surveys, in.Repos, in.MaxTasks)}
-	kind := planningKind{action: "specify", log: "specify", timeout: "actions.plan.timeout"}
+	kind := planningKind{action: "specify", log: "specify", timeout: "actions.investigate.timeout"}
 	var err error
 	res.Output, res.Usage, err = call.run(ctx, kind, provider.Request{Prompt: res.Prompt, Authority: domain.AuthorityNone})
 	if err != nil {

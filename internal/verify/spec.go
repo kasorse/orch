@@ -1,7 +1,9 @@
 // Package verify is the in-session verify server (specs/quality/SPEC.md §6): a stdio MCP
-// server, started as `orchestrator mcp-verify --dir <dir>`, that serves two tools to an
-// implement session, run_tests and run_check. Each call checks the guard, runs a command
-// chosen in Go from verify.json in the sandbox, and records the call.
+// server, started as `orchestrator mcp-verify --dir <dir>`, that serves an implement session
+// run_tests and run_check (actions.implement.verify) and replace (actions.implement.replace).
+// Each call checks the guard and records the call; run_tests and run_check run a command
+// chosen in Go from verify.json in the sandbox, replace rewrites text in the repository's
+// files in Go, with no process at all.
 //
 // The server reads no config file, opens no run directory and makes no network call. Its
 // inputs are dir/verify.json and its stdin; its outputs are its stdout (the MCP channel,
@@ -44,12 +46,14 @@ type Check struct {
 }
 
 // Spec is everything the server needs (specs/quality/SPEC.md §6.4). Go computes it before
-// the implement call; the model cannot write the file it is stored in.
+// the implement call; the model cannot write the file it is stored in. An empty TestCommand
+// means the test tools are off: then Checks, Sandbox, TestEnv and the call limits are unused,
+// and Replace must be set.
 type Spec struct {
 	Version int `json:"version"`
-	// RepoRoot is the directory every command runs in.
+	// RepoRoot is the directory every command runs in, and the one replace rewrites files of.
 	RepoRoot    string  `json:"repo_root"`
-	TestCommand string  `json:"test_command"`
+	TestCommand string  `json:"test_command,omitempty"`
 	Checks      []Check `json:"checks"`
 	// PreRunRef becomes ORCH_BASE_REF of every run.
 	PreRunRef string `json:"pre_run_ref"`
@@ -67,6 +71,33 @@ type Spec struct {
 	CallTimeout time.Duration `json:"call_timeout"`
 	// OutputBytes is the bound on the output of one answer; 0 keeps everything.
 	OutputBytes int `json:"output_bytes"`
+	// Replace turns the replace tool on.
+	Replace *ReplaceSpec `json:"replace,omitempty"`
+}
+
+// ReplaceSpec is what the replace tool needs besides the repository and the guard state.
+type ReplaceSpec struct {
+	// ExtraDeny is context.extra_deny: files it matches, like the built-in secret deny list,
+	// are never read or rewritten.
+	ExtraDeny []string `json:"extra_deny"`
+}
+
+// Tests reports whether the spec turns run_tests (and run_check, with checks) on.
+func (s *Spec) Tests() bool { return s.TestCommand != "" }
+
+// ToolNames are the tools the spec turns on, in the order tools/list gives them.
+func (s *Spec) ToolNames() []string {
+	var names []string
+	if s.Tests() {
+		names = append(names, domain.VerifyToolRunTests)
+		if len(s.Checks) > 0 {
+			names = append(names, domain.VerifyToolRunCheck)
+		}
+	}
+	if s.Replace != nil {
+		names = append(names, domain.VerifyToolReplace)
+	}
+	return names
 }
 
 // envNameRE is what the name of a TestEnv pair must look like.
@@ -80,8 +111,20 @@ func (s *Spec) Validate() error {
 	if !filepath.IsAbs(s.RepoRoot) {
 		return fmt.Errorf("repo_root %q is not an absolute path", s.RepoRoot)
 	}
+	if len(s.Before.Patterns()) == 0 {
+		return errors.New("before: the guard state is empty")
+	}
+	if !s.Tests() {
+		if s.Replace == nil {
+			return errors.New("test_command is empty and replace is off: the server would offer no tool")
+		}
+		if len(s.Checks) > 0 {
+			return errors.New("checks without a test_command")
+		}
+		return nil
+	}
 	if strings.TrimSpace(s.TestCommand) == "" {
-		return errors.New("test_command is empty")
+		return errors.New("test_command is blank")
 	}
 	if err := s.validateSandbox(); err != nil {
 		return err
@@ -109,9 +152,6 @@ func (s *Spec) Validate() error {
 		case strings.HasPrefix(name, "ORCH_"):
 			return fmt.Errorf("test_env must not carry %s: ORCH_* variables are set per call", name)
 		}
-	}
-	if len(s.Before.Patterns()) == 0 {
-		return errors.New("before: the guard state is empty")
 	}
 	if s.MaxCalls < 1 || s.MaxCalls > domain.MaxVerifyCalls {
 		return fmt.Errorf("max_calls %d is outside 1..%d", s.MaxCalls, domain.MaxVerifyCalls)

@@ -119,7 +119,7 @@ func TestReadSpec_Rejects(t *testing.T) {
 		{"relative sandbox home", func(m map[string]any) { m["sandbox"].(map[string]any)["home"] = "home/u" }, "not absolute"},
 		{"relative bind", func(m map[string]any) { m["sandbox"].(map[string]any)["ro_binds"] = []string{"-x"} }, "not absolute"},
 		{"relative repo root", func(m map[string]any) { m["repo_root"] = "repo" }, "not an absolute path"},
-		{"empty test command", func(m map[string]any) { m["test_command"] = "  " }, "test_command is empty"},
+		{"empty test command", func(m map[string]any) { m["test_command"] = "  " }, "test_command is blank"},
 		{"bad check name", func(m map[string]any) { m["checks"] = []map[string]string{{"name": "Vet;", "command": "x"}} }, "invalid"},
 		{"duplicate check", func(m map[string]any) {
 			m["checks"] = []map[string]string{{"name": "vet", "command": "x"}, {"name": "vet", "command": "y"}}
@@ -136,6 +136,12 @@ func TestReadSpec_Rejects(t *testing.T) {
 		{"no timeout", func(m map[string]any) { m["call_timeout"] = 0 }, "call_timeout"},
 		{"negative output bound", func(m map[string]any) { m["output_bytes"] = -1 }, "output_bytes"},
 		{"wrong type", func(m map[string]any) { m["max_calls"] = "8" }, "max_calls"},
+		{"no tool at all", func(m map[string]any) { delete(m, "test_command") }, "offer no tool"},
+		{"checks without a test command", func(m map[string]any) {
+			delete(m, "test_command")
+			m["replace"] = map[string]any{"extra_deny": []string{}}
+		}, "checks without a test_command"},
+		{"unknown field in replace", func(m map[string]any) { m["replace"] = map[string]any{"regex": true} }, "unknown field"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,5 +243,25 @@ func TestSpec_ChecksAreOptional(t *testing.T) {
 	got, err := ReadSpec(dir)
 	if err != nil || len(got.Checks) != 0 || len(got.TestEnv) != 0 {
 		t.Errorf("got %+v, %v", got, err)
+	}
+}
+
+func TestSpec_ReplaceWithoutTheTestTools(t *testing.T) {
+	dir := t.TempDir()
+	spec := &Spec{
+		Version:  SpecVersion,
+		RepoRoot: "/repo",
+		Before:   testState(t),
+		Replace:  &ReplaceSpec{ExtraDeny: []string{"vault/**"}},
+	}
+	if err := WriteSpec(dir, spec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadSpec(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, spec) || got.Tests() {
+		t.Errorf("got %+v", got)
 	}
 }

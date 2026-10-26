@@ -161,8 +161,8 @@ func TestParseTaskInput_Refusals(t *testing.T) {
 		{name: "blank acceptance item", mutate: func(m map[string]any) { m["acceptance"] = []any{"ok", " "} }, want: "acceptance[1] is empty"},
 		{name: "multi-line acceptance item", mutate: func(m map[string]any) { m["acceptance"] = []any{"a\nb"} }, want: "acceptance[0] is more than one line"},
 		{name: "long acceptance item", mutate: func(m map[string]any) {
-			m["acceptance"] = []any{strings.Repeat("я", MaxAcceptanceRunes+1)}
-		}, want: "acceptance[0] is 301 characters"},
+			m["acceptance"] = []any{strings.Repeat("я", MaxAcceptanceRunesCeiling+1)}
+		}, want: "acceptance[0] is 2001 characters"},
 		{name: "not an object", raw: `["a"]`, want: "not a JSON object"},
 		{name: "empty", raw: ``, want: "not a JSON object"},
 		{name: "not JSON", raw: `{"story":`, want: "not valid JSON"},

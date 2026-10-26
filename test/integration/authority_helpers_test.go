@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// assertAuthorities checks, for a completed analyze -> implement -> test -> review run
+// assertAuthorities checks, for a completed investigate -> implement -> test -> review run
 // with an LLM decision provider on claude, that every call ran with its authority
 // (specs/permissions/SPEC.md §5.1): the tools on the real argv, the secret deny rules for
 // the steps that read files, the authority recorded in run.json, and the authority line
@@ -20,7 +20,7 @@ func assertAuthorities(t *testing.T, repoDir, argsDir, stdout string) {
 	wantTools := map[string]string{
 		"decide-context":  "",
 		"decide-classify": "",
-		"analyze":         "Read,Grep,Glob",
+		"investigate":     "Read,Grep,Glob",
 		"implement":       "Read,Grep,Glob,Edit,Write",
 		"review":          "Read,Grep,Glob",
 	}
@@ -60,7 +60,7 @@ func assertAuthorities(t *testing.T, repoDir, argsDir, stdout string) {
 	if err := json.Unmarshal([]byte(raw), &run); err != nil {
 		t.Fatalf("run.json: %v", err)
 	}
-	wantAuthority := map[string]string{"analyze": "read", "implement": "edit", "review": "read"}
+	wantAuthority := map[string]string{"investigate": "read", "implement": "edit", "review": "read"}
 	for _, e := range run.Executions {
 		want, isAI := wantAuthority[e.Action]
 		switch {
@@ -71,7 +71,7 @@ func assertAuthorities(t *testing.T, repoDir, argsDir, stdout string) {
 		}
 	}
 
-	if want := "authority: analyze=read, implement=edit, review=read; test runs: go test ./..."; !strings.Contains(stdout, want) {
+	if want := "authority: investigate=read, implement=edit, review=read; test runs: go test ./..."; !strings.Contains(stdout, want) {
 		t.Errorf("expected %q in the console output:\n%s", want, stdout)
 	}
 }

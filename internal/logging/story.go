@@ -216,6 +216,17 @@ func (r *ConsoleReporter) StoryTaskHeader(id, repo string, n, total int) {
 	fmt.Fprintf(r.Out, "\n%s\n", line)
 }
 
+// StoryTaskStarted is the one line of a task started beside others, whose output goes to a log
+// file instead of the console: "▶ RF02 · gateway · 2/6 · log <path>".
+func (r *ConsoleReporter) StoryTaskStarted(id, repo string, n, total int, log string) {
+	r.stopSpin()
+	line := fmt.Sprintf("▶ %s · %s · %d/%d · log %s", id, repo, n, total, log)
+	if r.Pretty {
+		line = r.st().bold(r.st().accent(line))
+	}
+	fmt.Fprintf(r.Out, "%s\n", line)
+}
+
 // StoryResume says that the run of a failed or stopped task is continued instead of a new one
 // being started.
 func (r *ConsoleReporter) StoryResume(id, runID string) {
@@ -265,6 +276,29 @@ func (r *ConsoleReporter) StoryHint(lines ...string) {
 		}
 		fmt.Fprintf(r.Out, "  %s\n", l)
 	}
+}
+
+// StoryConflict says that the parents of a task do not merge cleanly on the spec branch, so the
+// task is not dispatched: the conflicting files, then one line each of hints - the manual merge
+// and the command that goes on.
+func (r *ConsoleReporter) StoryConflict(id string, parents, files []string, specBranch string, hints ...string) {
+	r.stopSpin()
+	text := fmt.Sprintf("%s: conflict (%s do not merge cleanly on %s)", id, strings.Join(parents, " + "), specBranch)
+	if r.Pretty {
+		fmt.Fprintf(r.Out, "\n%s\n", r.st().yellow(text))
+		if len(files) > 0 {
+			r.detail("conflicting files: " + strings.Join(files, ", "))
+		}
+	} else {
+		fmt.Fprintf(r.Out, "\n%s\n", text)
+		if len(files) > 0 {
+			fmt.Fprintf(r.Out, "  Conflicting files:\n")
+			for _, f := range files {
+				fmt.Fprintf(r.Out, "    %s\n", f)
+			}
+		}
+	}
+	r.StoryHint(hints...)
 }
 
 // StoryEnd prints the table that ends a completed story (§10.4): per task the repository, the

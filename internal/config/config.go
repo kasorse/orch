@@ -203,12 +203,17 @@ func parseDurationField(name, raw string) (time.Duration, error) {
 	return d, nil
 }
 
+// ActionsConfig is the actions section. Analyze and Plan are declared only so strict decoding
+// accepts the keys and the validator can reject them with the replacement: the analyze action is
+// gone and plan became investigate (specs/clarify), and a route kept under the old name would
+// silently mean something else.
 type ActionsConfig struct {
-	Research  ActionConfig `yaml:"research"`
-	Analyze   ActionConfig `yaml:"analyze"`
-	Plan      ActionConfig `yaml:"plan"`
-	Implement ActionConfig `yaml:"implement"`
-	Review    ActionConfig `yaml:"review"`
+	Research    ActionConfig `yaml:"research"`
+	Analyze     any          `yaml:"analyze"`
+	Plan        any          `yaml:"plan"`
+	Investigate ActionConfig `yaml:"investigate"`
+	Implement   ActionConfig `yaml:"implement"`
+	Review      ActionConfig `yaml:"review"`
 }
 
 // For returns the configuration of a workflow action that makes a provider call; ok is false
@@ -217,10 +222,8 @@ func (a ActionsConfig) For(t domain.ActionType) (ac ActionConfig, ok bool) {
 	switch t {
 	case domain.ActionResearch:
 		return a.Research, true
-	case domain.ActionAnalyze:
-		return a.Analyze, true
-	case domain.ActionPlan:
-		return a.Plan, true
+	case domain.ActionInvestigate:
+		return a.Investigate, true
 	case domain.ActionImplement:
 		return a.Implement, true
 	case domain.ActionReview:
@@ -328,7 +331,8 @@ type LimitsConfig struct {
 	// explicit false still means false; read it through StopsWithoutProgress.
 	StopWithoutProgress *bool `yaml:"stop_without_progress"`
 	// MaxCostUSD is the budget of the workflow steps (specs/governance/SPEC.md §5): optional,
-	// nil means no budget. Only the steps' cost counts, not the decision phase's.
+	// nil means no budget. The steps' cost counts, and of the decision phase only the clarify
+	// step and the clarity re-checks (specs/clarify).
 	MaxCostUSD *float64 `yaml:"max_cost_usd"`
 	// Prompt bounds the repository data embedded in a prompt (specs/hardening/SPEC.md §5).
 	// The section and each key are optional.
@@ -532,6 +536,10 @@ type Config struct {
 	Policy      PolicyConfig      `yaml:"policy"`
 	Context     ContextConfig     `yaml:"context"`
 
+	// Clarify configures the clarify step (specs/clarify). The section is required, so nil is
+	// a config error: a route, or `clarify: {enabled: false}` written out.
+	Clarify *ClarifyConfig `yaml:"clarify"`
+
 	// Security holds the knobs of the execution-authority guards (specs/permissions/
 	// SPEC.md §7, §9). None of them widens what a step may do.
 	Security SecurityConfig `yaml:"security"`
@@ -642,8 +650,7 @@ func (c Config) CredentialEnvNames() []string {
 func (c Config) actionProviderModels() []namedProviderModel {
 	return []namedProviderModel{
 		{Action: "research", ProviderModel: c.Actions.Research.ProviderModel},
-		{Action: "analyze", ProviderModel: c.Actions.Analyze.ProviderModel},
-		{Action: "plan", ProviderModel: c.Actions.Plan.ProviderModel},
+		{Action: "investigate", ProviderModel: c.Actions.Investigate.ProviderModel},
 		{Action: "implement", ProviderModel: c.Actions.Implement.ProviderModel},
 		{Action: "review", ProviderModel: c.Actions.Review.ProviderModel},
 	}
@@ -659,8 +666,7 @@ type namedProviderModel struct {
 func (c Config) actionTimeouts() []namedTimeout {
 	return []namedTimeout{
 		{Action: "research", Timeout: c.Actions.Research.Timeout},
-		{Action: "analyze", Timeout: c.Actions.Analyze.Timeout},
-		{Action: "plan", Timeout: c.Actions.Plan.Timeout},
+		{Action: "investigate", Timeout: c.Actions.Investigate.Timeout},
 		{Action: "implement", Timeout: c.Actions.Implement.Timeout},
 		{Action: "review", Timeout: c.Actions.Review.Timeout},
 	}

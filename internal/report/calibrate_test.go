@@ -317,7 +317,7 @@ func TestCalibrate_ComparisonOfAStageWithAndWithout(t *testing.T) {
 	out := renderCalibration(es, nil, 1)
 	sp := func(n int) string { return strings.Repeat(" ", n) }
 	for _, want := range []string{
-		"research, analysis, planning: with and without the stage (no proposal)",
+		"research, investigation: with and without the stage (no proposal)",
 		"medium" + sp(5) + "research" + sp(2) + "with" + sp(9) + "2" + sp(3) + "2 (100.0%)" + sp(5) + "0.50",
 		"medium" + sp(5) + "research" + sp(2) + "without" + sp(6) + "1" + sp(5) + "0 (0.0%)" + sp(5) + "1.00",
 	} {
@@ -432,6 +432,60 @@ func TestRaiseProposal_IgnoresExploredRuns(t *testing.T) {
 	p := raiseProposal(samples, 0.5, 2)
 	if p == nil || p.To != 0.6 || p.Runs != 2 {
 		t.Errorf("proposal %+v, want 0.5 -> 0.6 on the two runs above the threshold", p)
+	}
+}
+
+// The clarity section shows the first P(clear) per questions hash and the share of runs that
+// stopped for input; it proposes nothing (specs/clarify A1).
+func TestRenderCalibration_ClarityDistributionAndNeedsInput(t *testing.T) {
+	asked := func(id, hash string, status domain.ClarityStatus, checks ...float64) RunEntry {
+		e := calibCase{id: id, key: jev113, threshold: 0.5, p: 0.6}.entry()
+		e.Trace.QuestionsHash = hash
+		e.Trace.Clarity = &domain.ClarityTrace{Threshold: 0.8, Checks: checks, Status: status}
+		return e
+	}
+	stopped := RunEntry{RunID: "s1", Run: domain.Run{
+		ID: "s1", Status: domain.RunStopped, FailureReason: domain.FailureTaskNeedsInput,
+		Task: domain.Task{Clarification: &domain.Clarification{Threshold: 0.8, Checks: []float64{0.42, 0.55}, Status: domain.ClarityUnclear}},
+	}}
+	es := []RunEntry{
+		asked("a1", hashA, domain.ClarityClear, 0.9),
+		asked("a2", hashA, domain.ClarityClear, 0.42, 0.86),
+		asked("b1", hashB, domain.ClarityUnclear, 0.3, 0.5),
+		stopped,
+	}
+
+	c := Calibrate(es, nil, 4)
+	if len(c.Clarity) != 2 || c.Clarity[0].Key.QuestionsHash != hashA || c.Clarity[0].Runs != 2 || c.Clarity[0].Rechecked != 1 {
+		t.Fatalf("clarity groups = %+v, want one per questions hash, the first of 2 runs and 1 re-check", c.Clarity)
+	}
+	if got := c.Clarity[0].First; got[4] != 1 || got[9] != 1 {
+		t.Errorf("first checks = %v, want one in 0.4-0.5 and one in 0.9-1.0", got)
+	}
+	if c.NeedsInput.Runs != 1 || c.NeedsInput.Total != 4 || c.NeedsInput.Last[5] != 1 {
+		t.Errorf("needs input = %+v, want 1 of 4 with its last check in 0.5-0.6", c.NeedsInput)
+	}
+
+	out := renderCalibration(es, nil, 4)
+	for _, want := range []string{
+		"clarity: P(clear) of the first check (specs/clarify; no proposal)",
+		"questions " + hashA[:12] + "  threshold 0.80  (2 runs)",
+		"re-checked in 1 runs; last check: clear 2\n",
+		"re-checked in 1 runs; last check: unclear 1\n",
+		`stopped "task needs input": 1 of 4 runs (25.0%)`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "policy.clarify") {
+		t.Errorf("the report proposes a clarity threshold:\n%s", out)
+	}
+
+	// Without a clarity trace and a stopped run the section is not there.
+	plain := renderCalibration(calibEntries(calibCase{id: "r1", key: jev113, threshold: 0.5, p: 0.6}), nil, 4)
+	if strings.Contains(plain, "clarity") {
+		t.Errorf("the report has a clarity section for runs that never asked:\n%s", plain)
 	}
 }
 

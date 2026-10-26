@@ -13,7 +13,7 @@ import (
 // Nothing about the prompt is in argv, so Linux's per-argument limit cannot break the call.
 func TestScenario23_LargeTaskOnStdin(t *testing.T) {
 	r := newStageRun(t, fakeexec.InitGitFixture(t))
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", analyzeResponse)
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "research", readOnlyResponse)
 	argsDir := t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
 

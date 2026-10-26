@@ -492,6 +492,45 @@ In `test/security`, with the real CLI:
 - **V-verify-4:** with verify on, the argv still has `--tools Read,Grep,Glob,Edit,Write`, and
   `Bash` is not callable (positive control: `run_tests` works in the same session).
 
+### 6.11 Replace (always on)
+
+Every implement session whose adapter passes an MCP server to its CLI (claude, codex:
+`provider.MCPSupporter`) gets `mcp__orch__replace` from the same `orch` server, with no
+config key. Verify off, the server offers replace alone and `verify.json` carries no test
+command, sandbox or test environment; verify on, it offers all three tools. A provider
+without MCP support (gemini) gets no server and the step runs as before. When replace alone
+cannot be set up (the orchestrator executable cannot be found, the directory cannot be
+written), the step warns and runs without it; with verify on, that is still a step failure.
+
+| argument | type | meaning |
+|---|---|---|
+| `old` | string, 1..1000 bytes, no NUL, required | the literal text to replace |
+| `new` | string, 0..1000 bytes, no NUL, required | its replacement; must differ from `old` |
+| `word` | boolean | only where `old` is not part of a longer identifier (`\b` on each side whose edge is a word character) |
+| `paths` | at most 20 strings | a file, a directory, a `path.Match` glob over the whole path, or a glob without a slash over the file name (`*.go`); relative, no `..` |
+| `dry_run` | boolean | count, write nothing |
+
+* **Which files.** The files git lists (`ls-files --cached --others --exclude-standard`), so
+  ignored files are never touched. A file matching the secret deny list (the built-in list
+  and `context.extra_deny`) or a protected pattern of the step's before-state is never read;
+  the answer counts them. A file that is not regular (a symlink), over 1 MiB, binary (a NUL in
+  its first 8 KiB) or whose directory resolves outside the repository is skipped.
+* **How.** In Go, in the server's process: no process is started, nothing is sandboxed because
+  nothing runs. A file is rewritten through a temporary file in its directory and a rename,
+  keeping its mode. A write that fails stops the call; the files before it stay rewritten and
+  the answer says so (`exit_code: 1` in the record).
+* **Guard.** As for the test tools (§6.6): the before-state is compared before every call, a
+  change refuses this call and every later one, and `violation` fails the step.
+* **Limits.** At most `domain.MaxReplaceCalls` (50) per step, refused calls included, counted
+  apart from `limits.verify.max_calls_per_step`; `calls.jsonl` and `verify_calls` hold at most
+  100 entries. A restarted server counts each recorded line against its own tool's limit.
+* **Record.** One `verify_calls` entry per call: `{tool: replace, success, duration, files,
+  replacements, dry_run}` or a `refused` reason. Neither `old` nor `new` is recorded; the diff
+  shows what changed. `summary.md` shows a `Replace` row apart from `Verify`.
+* **Why it is not a shell** (D18). The model chooses two literal strings and a file filter;
+  replace writes only what the Edit tool of authority `edit` could write, file by file, and
+  never touches a deny-listed or protected file. It runs nothing and opens no way out.
+
 ---
 
 ## 7. Review (QL02, QL11, QL12) — TODO Q6

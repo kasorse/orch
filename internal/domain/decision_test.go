@@ -72,11 +72,11 @@ func TestStageDecisions_GetSetAll(t *testing.T) {
 	}
 
 	var partial StageDecisions
-	partial.Set(StageAnalysis, ProbabilityDecision{Probability: 0.4})
+	partial.Set(StageInvestigation, ProbabilityDecision{Probability: 0.4})
 	if _, ok := partial.Get(StageReview); ok {
 		t.Error("Get of a stage that was not set reported success")
 	}
-	if all := partial.All(); len(all) != 1 || all[0].Stage != StageAnalysis {
+	if all := partial.All(); len(all) != 1 || all[0].Stage != StageInvestigation {
 		t.Errorf("All() of one set stage = %+v", all)
 	}
 
@@ -105,7 +105,6 @@ func validClassification() TaskClassification {
 		},
 		Stages: StageDecisions{
 			Research:    &ProbabilityDecision{Probability: 0.2},
-			Analysis:    &ProbabilityDecision{Probability: 0.9},
 			Development: &ProbabilityDecision{Probability: 0.99},
 		},
 		Provider: "jev",
@@ -177,10 +176,10 @@ func TestTaskClassification_Validate(t *testing.T) {
 			d.Score = &s
 			c.Complexity[ComplexitySourceChoice] = d
 		}, "must not carry a score"},
-		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Analysis.Probability = 1.01 }, "stage analysis"},
+		{"stage probability above 1", func(c *TaskClassification) { c.Stages.Research.Probability = 1.01 }, "stage research"},
 		{"negative stage probability", func(c *TaskClassification) { c.Stages.Research.Probability = -0.01 }, "stage research"},
 		{"NaN stage probability", func(c *TaskClassification) { c.Stages.Development.Probability = math.NaN() }, "stage development"},
-		{"asked stage missing", func(c *TaskClassification) { c.Stages.Analysis = nil }, "stage analysis has no probability"},
+		{"asked stage missing", func(c *TaskClassification) { c.Stages.Research = nil }, "stage research has no probability"},
 		{"stage not asked answered", func(c *TaskClassification) {
 			c.Stages.Review = &ProbabilityDecision{Probability: 0.5}
 		}, "stage review is not asked"},
@@ -225,10 +224,50 @@ func TestContextDepthDecision_Validate(t *testing.T) {
 		{Probabilities: map[ContextDepth]float64{ContextDepthProject: 1}, Confidence: 1},
 		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.6, ContextDepthProject: 0.6}, Confidence: 0.2},
 		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: -0.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: 1.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: -0.1},
+		{Probabilities: map[ContextDepth]float64{ContextDepthNone: 0.1, ContextDepthProject: 0.9}, Confidence: 0.8, PClear: math.NaN()},
 	}
 	for i, d := range invalid {
 		if err := d.Validate(); err == nil {
 			t.Errorf("invalid decision %d accepted", i)
+		}
+	}
+}
+
+func TestClarityDecision_Validate(t *testing.T) {
+	for _, p := range []float64{0, 0.42, 0.8, 1} {
+		if err := (ClarityDecision{PClear: p}).Validate(); err != nil {
+			t.Errorf("P(clear) %v rejected: %v", p, err)
+		}
+	}
+	for _, p := range []float64{-0.01, 1.01, math.NaN(), math.Inf(1)} {
+		if err := (ClarityDecision{PClear: p}).Validate(); err == nil {
+			t.Errorf("P(clear) %v accepted", p)
+		}
+	}
+}
+
+func TestClarityTrace_Validate(t *testing.T) {
+	valid := ClarityTrace{Threshold: 0.8, Checks: []float64{0.42, 0.86}, Status: ClarityClear, Reason: "p=0.86 >= 0.80"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid trace rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(c *ClarityTrace){
+		"zero threshold":    func(c *ClarityTrace) { c.Threshold = 0 },
+		"threshold above 1": func(c *ClarityTrace) { c.Threshold = 1.1 },
+		"NaN threshold":     func(c *ClarityTrace) { c.Threshold = math.NaN() },
+		"no checks":         func(c *ClarityTrace) { c.Checks = nil },
+		"too many checks":   func(c *ClarityTrace) { c.Checks = make([]float64, MaxClarityChecks+1) },
+		"check above 1":     func(c *ClarityTrace) { c.Checks = []float64{1.5} },
+		"check below 0":     func(c *ClarityTrace) { c.Checks = []float64{0.5, -0.5} },
+		"unknown status":    func(c *ClarityTrace) { c.Status = "maybe" },
+		"empty status":      func(c *ClarityTrace) { c.Status = "" },
+	} {
+		c := valid
+		mutate(&c)
+		if err := c.Validate(); err == nil {
+			t.Errorf("%s: accepted %+v", name, c)
 		}
 	}
 }

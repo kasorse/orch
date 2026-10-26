@@ -305,6 +305,27 @@ func TestServe_ToolsListWithoutChecks(t *testing.T) {
 	}
 }
 
+func TestServe_ToolsListOfReplace(t *testing.T) {
+	spec := testSpec(t)
+	spec.Replace = &ReplaceSpec{}
+	s, _ := testServer(t, spec, &fakeRunner{}, &fakeGuard{})
+	got := serve(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n")
+	if names := toolNames(t, got[0]); strings.Join(names, ",") != "run_tests,run_check,replace" {
+		t.Errorf("tools = %v", names)
+	}
+
+	spec.TestCommand, spec.Checks, spec.Sandbox = "", nil, nil
+	s, _ = testServer(t, spec, &fakeRunner{}, &fakeGuard{})
+	got = serve(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n"+
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_tests","arguments":{}}}`+"\n")
+	if names := toolNames(t, got[0]); strings.Join(names, ",") != "replace" {
+		t.Errorf("tools = %v, want replace only", names)
+	}
+	if got[1].Error == nil || got[1].Error.Code != codeInvalidParams {
+		t.Errorf("run_tests without a test command = %+v, want -32602", got[1])
+	}
+}
+
 func TestServe_ALongLineIsAnErrorAndTheStreamGoesOn(t *testing.T) {
 	s, _ := testServer(t, testSpec(t), &fakeRunner{}, &fakeGuard{})
 	input := strings.Repeat("x", 2<<20) + "\n" + `{"jsonrpc":"2.0","id":11,"method":"ping"}` + "\n"

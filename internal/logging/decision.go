@@ -70,7 +70,7 @@ func RenderDecision(w io.Writer, t domain.DecisionTrace, verbose bool) {
 			if s.Enabled {
 				state = "on"
 			}
-			fmt.Fprintf(w, "  %-12s %-3s  %s\n", s.Stage, state, s.Reason)
+			fmt.Fprintf(w, "  %-13s %-3s  %s\n", s.Stage, state, s.Reason)
 		}
 	}
 }

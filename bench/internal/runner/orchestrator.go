@@ -103,12 +103,12 @@ type decisionJSON struct {
 // stageOfAction is the fixed stage → action mapping of the orchestrator, read backwards: the
 // stage a recorded execution belongs to.
 var stageOfAction = map[string]string{
-	"research":  "research",
-	"analyze":   "analysis",
-	"plan":      "planning",
-	"implement": "development",
-	"test":      "testing",
-	"review":    "review",
+	"research":    "research",
+	"analyze":     "analysis",
+	"investigate": "investigation",
+	"implement":   "development",
+	"test":        "testing",
+	"review":      "review",
 }
 
 // runOrchestrator runs configs B, C, D and B′: render the config for the task, run
@@ -413,13 +413,13 @@ func stages(run runJSON, decision *decisionJSON) []string {
 }
 
 // lastAnswer is the `answer` of the last completed read-only step's artifact: without
-// implement the last of research, analyze and plan writes the reply to the user's request. It
+// implement the last of research, analyze and investigate writes the reply to the user's request. It
 // is empty when there is none.
 func lastAnswer(runDir string, run runJSON) string {
 	for i := len(run.Executions) - 1; i >= 0; i-- {
 		ex := run.Executions[i]
 		switch ex.Action {
-		case "research", "analyze", "plan":
+		case "research", "analyze", "investigate":
 		default:
 			continue
 		}

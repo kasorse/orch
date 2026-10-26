@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	storyRunUsage    = "usage: orchestrator story run <spec-dir> [--retry <ID>] [--mode auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login]"
+	storyRunUsage    = "usage: orchestrator story run <spec-dir> [--retry <ID>] [--parallel <N>] [--mode auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login]"
 	storyStatusUsage = "usage: orchestrator story status <spec-dir>"
 	storyUsage       = `usage: orchestrator story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"   or   ` +
-		`orchestrator story run <spec-dir> [--retry <ID>]   or   orchestrator story status <spec-dir>`
+		`orchestrator story run <spec-dir> [--retry <ID>] [--parallel <N>]   or   orchestrator story status <spec-dir>`
 )
 
 // childWaitDelay is how long a child that was told to stop (SIGINT) has to finish its work -
@@ -46,8 +46,11 @@ type storyRunOptions struct {
 	claudeAuth     string
 	codexAuth      string
 	// retry is the task --retry names, or "".
-	retry   string
-	verbose bool
+	retry string
+	// parallel is --parallel: how many ready tasks run at once, in place of story.max_parallel; 0
+	// when not given.
+	parallel int
+	verbose  bool
 }
 
 // selfExecutable is the path of this binary, symlinks resolved: the children of a story run are
@@ -157,10 +160,18 @@ type storyRunner struct {
 	order []string
 	roots []string
 	cands []serviceCandidate
+
+	// fingerprints are the git fingerprints the pre-run checks took, by service; merged is the
+	// services whose fingerprint was compared again before their first merge in this run.
+	fingerprints map[string]string
+	merged       map[string]bool
 }
 
 func (r *storyRunner) run() error {
 	if err := r.load(); err != nil {
+		return err
+	}
+	if err := r.checkLiveRuns(); err != nil {
 		return err
 	}
 	if err := r.checkServices(); err != nil {
@@ -172,7 +183,12 @@ func (r *storyRunner) run() error {
 	if err := r.checkJiraChildren(); err != nil {
 		return err
 	}
+	continued := r.rec.ApprovedAt != nil
 	if err := r.approve(); err != nil {
+		return err
+	}
+	// The spec branch exists before the Jira children and any dispatch (§1).
+	if err := r.createSpecBranches(continued); err != nil {
 		return err
 	}
 	// Nothing is written to Jira before the operator's answer (§6), and nothing is dispatched
@@ -244,11 +260,8 @@ func (r *storyRunner) load() error {
 	}
 	r.order = story.Order(spec.tasks)
 	for _, id := range r.order {
-		if err := story.CheckAcceptance(id+": acceptance", r.byID[id].Acceptance); err != nil {
+		if err := story.CheckAcceptance(id+": acceptance", r.byID[id].Acceptance, r.cfg.Story.MaxAcceptanceChars); err != nil {
 			return &apperr.ConfigError{Msg: err.Error()}
-		}
-		if _, err := story.Base(spec.tasks, id); err != nil {
-			return &apperr.ConfigError{Msg: fmt.Sprintf("the spec in %s is not valid: %v", r.loc.specRel, err)}
 		}
 	}
 
@@ -261,7 +274,8 @@ func (r *storyRunner) load() error {
 			}
 			return &apperr.ConfigError{Msg: fmt.Sprintf("%s: story.json has the state of this task, but it has no task file in %s", id, r.loc.specRel)}
 		}
-		if rt.Status == story.TaskPending || id == r.opts.retry {
+		// A conflict task was never dispatched: its file is read again when it is.
+		if rt.Status == story.TaskPending || rt.Status == story.TaskConflict || id == r.opts.retry {
 			continue
 		}
 		if story.FrozenHash(r.spec.data[id]) != rt.FileSHA256 {
@@ -356,6 +370,14 @@ func (r *storyRunner) checkRepository(name, path string) error {
 		} else if !exists {
 			return &apperr.ConfigError{Msg: fmt.Sprintf("service %s: the story base branch %s (story.json) does not exist any more in %s", name, b.Branch, path)}
 		}
+		if b.SpecBranch != "" {
+			if _, exists, err := repo.BranchTip(r.ctx, b.SpecBranch); err != nil {
+				return err
+			} else if !exists {
+				return &apperr.ConfigError{Msg: fmt.Sprintf("service %s: the spec branch %s (story.json) does not exist any more in %s; "+
+					"create it again at the commit it had, or restore it from the reflog", name, b.SpecBranch, path)}
+			}
+		}
 	} else {
 		branch, err := repo.Branch(r.ctx)
 		if err != nil {
@@ -379,6 +401,10 @@ func (r *storyRunner) checkRepository(name, path string) error {
 		return err
 	}
 	known := r.knownBranches()
+	// The spec branch is known where the record names it.
+	if r.rec.Bases[name].SpecBranch != "" {
+		known[r.rec.Bases[name].SpecBranch] = true
+	}
 	for _, b := range branches {
 		if !known[b] {
 			return &apperr.ConfigError{Msg: fmt.Sprintf("service %s: the branch %s exists in %s, but story.json does not know it; a story never reuses a branch. "+
@@ -390,6 +416,17 @@ func (r *storyRunner) checkRepository(name, path string) error {
 	if code := r.child(path, "validate"); code != 0 {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("orchestrator validate failed in service %s (%s, exit code %d): no task was started", name, path, code)}
 	}
+
+	// What makes git run code in this repository (config, hooks), kept until the first merge-tree:
+	// a configured merge driver would run there.
+	fingerprint, err := repo.GitFingerprint(r.ctx)
+	if err != nil {
+		return err
+	}
+	if r.fingerprints == nil {
+		r.fingerprints = map[string]string{}
+	}
+	r.fingerprints[name] = fingerprint
 	return nil
 }
 
@@ -408,11 +445,17 @@ func (r *storyRunner) knownBranches() map[string]bool {
 // checkBudget refuses when the cost recorded so far has reached story.max_cost_usd (§10.1 point
 // 4, and before every dispatch). Nothing is dispatched on a total that cannot be told.
 func (r *storyRunner) checkBudget() error {
+	return r.checkBudgetAt(r.rec.TotalCostUSD())
+}
+
+// checkBudgetAt is checkBudget for a total that is not only the recorded one: the running
+// children's cost so far is in it.
+func (r *storyRunner) checkBudgetAt(total float64) error {
 	limit := r.cfg.Story.MaxCostUSD
 	if limit == nil {
 		return nil
 	}
-	if total := r.rec.TotalCostUSD(); total >= *limit {
+	if total >= *limit {
 		return &apperr.LimitExceededError{Reason: fmt.Sprintf("Story status: stopped\nReason: the story has cost $%.2f, story.max_cost_usd is $%.2f\n\n"+
 			"Raise story.max_cost_usd to continue it.", total, *limit)}
 	}
@@ -438,8 +481,8 @@ func (r *storyRunner) approve() error {
 			t := r.byID[id]
 			repos[t.Repo] = true
 			base := fmt.Sprintf("%s@%s", r.rec.Bases[t.Repo].Branch, shortSHA(r.rec.Bases[t.Repo].SHA))
-			if dep, _ := story.Base(r.spec.tasks, id); dep != "" {
-				base = persistence.StoryTaskBranch(r.loc.slug, dep, 1)
+			if label := r.startLabel(id); label != "" {
+				base = label
 			}
 			plan = append(plan, logging.StoryPlanTask{
 				ID: id, Repo: t.Repo, Base: base, Branch: persistence.StoryTaskBranch(r.loc.slug, id, 1), Jira: jiraKey(t, persistence.StoryTask{}),
@@ -459,6 +502,37 @@ func (r *storyRunner) approve() error {
 	}
 	r.rec.Status = story.StatusRunning
 	return r.persist()
+}
+
+// parentBranch is the branch of a parent task: the one its record has, else its first attempt's.
+func (r *storyRunner) parentBranch(id string) string {
+	if b := r.rec.Tasks[id].Branch; b != "" {
+		return b
+	}
+	return persistence.StoryTaskBranch(r.loc.slug, id, 1)
+}
+
+// startLabel names what a task with parents starts from, for the plan and As built: its only
+// parent's branch, or the spec branch with the parents merged on it, "story/<slug>/spec
+// (PS02 + PS03)". "" for a task without parents: it starts from the story base.
+func (r *storyRunner) startLabel(id string) string {
+	parents, _ := story.Parents(r.spec.tasks, id)
+	switch len(parents) {
+	case 0:
+		return ""
+	case 1:
+		return r.parentBranch(parents[0])
+	}
+	return fmt.Sprintf("%s (%s)", persistence.StorySpecBranch(r.loc.slug), strings.Join(parents, " + "))
+}
+
+// targetBranch is the branch a task's merge request targets: its only parent's branch, else the
+// spec branch.
+func (r *storyRunner) targetBranch(id string) string {
+	if parents, _ := story.Parents(r.spec.tasks, id); len(parents) == 1 {
+		return r.parentBranch(parents[0])
+	}
+	return persistence.StorySpecBranch(r.loc.slug)
 }
 
 // readAnswer reads one line from in a byte at a time, so nothing past it is consumed: the
@@ -528,15 +602,21 @@ func (r *storyRunner) halt(status story.Status) {
 	}
 }
 
-// child runs the orchestrator itself in dir, with the terminal's stdio and auth overrides when
-// the operator gave it, and returns its exit code.
-func (r *storyRunner) child(dir string, args ...string) int {
+// childArgs are the arguments of a child: the auth overrides the operator gave, then args.
+func (r *storyRunner) childArgs(args ...string) []string {
 	if r.opts.claudeAuth != "" {
 		args = append([]string{"--claude-auth", r.opts.claudeAuth}, args...)
 	}
 	if r.opts.codexAuth != "" {
 		args = append([]string{"--codex-auth", r.opts.codexAuth}, args...)
 	}
+	return args
+}
+
+// child runs the orchestrator itself in dir, with the terminal's stdio and auth overrides when
+// the operator gave it, and returns its exit code.
+func (r *storyRunner) child(dir string, args ...string) int {
+	args = r.childArgs(args...)
 	code, err := runChild(r.ctx, r.exe, dir, args, r.stdin, r.stdout, r.stderr)
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Error: cannot run %s in %s: %v\n", args[len(args)-1], dir, err)
@@ -581,66 +661,334 @@ func (r *storyRunner) applyRetry() error {
 	return r.persist()
 }
 
-// dispatchAll walks the tasks in the story's order and takes each to done, or stops at the first
-// that does not get there. A task that is done is skipped.
+// slots is how many tasks run at once: --parallel, else story.max_parallel.
+func (r *storyRunner) slots() int {
+	n := r.opts.parallel
+	if n == 0 {
+		n = r.cfg.Story.MaxParallel
+	}
+	return max(n, 1)
+}
+
+// childJob is a task whose child is ready to start: the task is recorded as running, and its
+// input is written.
+type childJob struct {
+	id   string
+	pos  int
+	repo string
+	dir  string
+	args []string
+	// resume is the run the child continues, "" for a new run.
+	resume string
+	// log is where the child's output goes with more than one slot, and logPath its name.
+	log     *os.File
+	logPath string
+}
+
+// childEnd is what a child goroutine tells the loop: how its process ended.
+type childEnd struct {
+	id   string
+	exit int
+	err  error
+}
+
+// dispatchLoop is the state of the loop that runs the tasks. Only the goroutine that runs the loop
+// reads or writes it, or the story's record, README, task files and the console.
+type dispatchLoop struct {
+	slots   int
+	running map[string]*childJob
+	ends    chan childEnd
+	// notDone are the tasks that ended without a commit, in the order they ended.
+	notDone []string
+	// err is the first error that is not a task's status; budgetErr the budget refusal;
+	// stoppedBefore the task that was ready when the operator pressed Ctrl-C.
+	err           error
+	budgetErr     error
+	stoppedBefore string
+}
+
+// draining is whether nothing new is started: something ended without a commit, the budget is
+// reached, the operator cancelled, or the loop failed.
+func (lp *dispatchLoop) draining() bool {
+	return lp.err != nil || len(lp.notDone) > 0 || lp.budgetErr != nil || lp.stoppedBefore != ""
+}
+
+// ended records how a task came out of a settle or of looking at it again.
+func (lp *dispatchLoop) ended(id string, status story.TaskStatus, err error) {
+	switch {
+	case err != nil:
+		if lp.err == nil {
+			lp.err = err
+		}
+	case status != story.TaskDone:
+		lp.notDone = append(lp.notDone, id)
+	}
+}
+
+// dispatchAll takes the tasks to done, up to slots of them at once: the loop fills the free slots
+// with the ready tasks in the story's order, waits for one child to end, settles it, and repeats
+// until nothing runs and nothing is ready. A task that does not end done, the budget, a Ctrl-C or
+// an error stop it from starting anything new; the children that run are waited for and settled
+// first (§2).
 func (r *storyRunner) dispatchAll() error {
-	for pos, id := range r.order {
-		if r.rec.Tasks[id].Status == story.TaskDone {
+	slots := r.slots()
+	lp := &dispatchLoop{slots: slots, running: map[string]*childJob{}, ends: make(chan childEnd, slots)}
+	for {
+		r.fill(lp)
+		if len(lp.running) == 0 {
+			break
+		}
+		r.settleEnd(lp, <-lp.ends)
+	}
+	return r.conclude(lp)
+}
+
+// nextReady is the first task story.Ready names, "" for none.
+func (r *storyRunner) nextReady() string {
+	states := make(map[string]story.TaskStatus, len(r.rec.Tasks))
+	for id, rt := range r.rec.Tasks {
+		states[id] = rt.Status
+	}
+	if ready := story.Ready(r.spec.tasks, states); len(ready) > 0 {
+		return ready[0]
+	}
+	return ""
+}
+
+// fill starts ready tasks while a slot is free and nothing asks the loop to drain. A blocked task
+// is looked at again, a failed or stopped one with a run is resumed, anything else is dispatched.
+// A conflict task is dispatched too: its parents are merged again on the spec branch, which the
+// operator may have merged by hand, and it goes from the tip if they are all in it.
+func (r *storyRunner) fill(lp *dispatchLoop) {
+	for !lp.draining() && len(lp.running) < lp.slots {
+		id := r.nextReady()
+		if id == "" {
+			return
+		}
+		if r.ctx.Err() != nil {
+			lp.stoppedBefore = id
+			return
+		}
+		pos := slices.Index(r.order, id)
+		rt := r.rec.Tasks[id]
+		if rt.Status == story.TaskBlocked {
+			status, err := r.settleBlocked(id)
+			lp.ended(id, status, err)
 			continue
 		}
-		if err := r.ctx.Err(); err != nil {
-			r.halt(story.StatusStopped)
-			return fmt.Errorf("story %s stopped before %s: %w", r.loc.slug, id, err)
+		if err := r.checkBudgetAt(r.liveCostUSD(lp)); err != nil {
+			lp.budgetErr = err
+			return
 		}
-		status, err := r.advance(pos, id)
-		if err != nil {
-			return err
+		job, status, err := r.prepare(pos, id, lp.slots > 1)
+		if err != nil || job == nil {
+			lp.ended(id, status, err)
+			continue
 		}
-		if status != story.TaskDone {
-			return r.stop(id, status)
+		r.launch(lp, job)
+	}
+}
+
+// prepare gets a task ready to run: a failed or stopped one with a run is resumed, anything else
+// is dispatched. A nil job is a task that cannot start (its parents conflict): its status is
+// returned.
+func (r *storyRunner) prepare(pos int, id string, logged bool) (*childJob, story.TaskStatus, error) {
+	rt := r.rec.Tasks[id]
+	if (rt.Status == story.TaskFailed || rt.Status == story.TaskStopped) && rt.RunID != "" {
+		return r.prepareResume(pos, id, logged)
+	}
+	return r.prepareDispatch(pos, id, logged)
+}
+
+// launch starts the child of a job in a goroutine that only runs the process. With one slot the
+// child has the terminal, under a header; with more it has no stdin and writes to its log, and
+// the console gets one line.
+func (r *storyRunner) launch(lp *dispatchLoop, job *childJob) {
+	stdin, stdout, stderr := r.stdin, r.stdout, r.stderr
+	if lp.slots > 1 {
+		stdin, stdout, stderr = nil, job.log, job.log
+		r.reporter.StoryTaskStarted(job.id, job.repo, job.pos+1, len(r.order), job.logPath)
+	} else {
+		r.reporter.StoryTaskHeader(job.id, job.repo, job.pos+1, len(r.order))
+		if job.resume != "" {
+			r.reporter.StoryResume(job.id, job.resume)
+		}
+	}
+	lp.running[job.id] = job
+	go func() {
+		exit, err := runChild(r.ctx, r.exe, job.dir, job.args, stdin, stdout, stderr)
+		lp.ends <- childEnd{id: job.id, exit: exit, err: err}
+	}()
+}
+
+// settleEnd settles a task whose child ended.
+func (r *storyRunner) settleEnd(lp *dispatchLoop, end childEnd) {
+	job := lp.running[end.id]
+	delete(lp.running, end.id)
+	if job.log != nil {
+		job.log.Close()
+	}
+	if end.err != nil {
+		fmt.Fprintf(r.stderr, "Error: cannot run %s in %s: %v\n", job.args[len(job.args)-1], job.dir, end.err)
+	}
+	status, err := r.settle(end.id, end.exit)
+	lp.ended(end.id, status, err)
+}
+
+// conclude ends the story once nothing runs. An error comes first; then the tasks that did not
+// end done, the first of them in the story's order giving the story its status; then the budget,
+// and a Ctrl-C before a task was started.
+func (r *storyRunner) conclude(lp *dispatchLoop) error {
+	switch {
+	case lp.err != nil:
+		return lp.err
+	case len(lp.notDone) > 0:
+		slices.SortFunc(lp.notDone, func(a, b string) int { return slices.Index(r.order, a) - slices.Index(r.order, b) })
+		return r.stopAll(lp.notDone)
+	case lp.budgetErr != nil:
+		r.halt(story.StatusStopped)
+		return lp.budgetErr
+	case lp.stoppedBefore != "":
+		r.halt(story.StatusStopped)
+		return fmt.Errorf("story %s stopped before %s: %w", r.loc.slug, lp.stoppedBefore, r.ctx.Err())
+	}
+	for _, id := range r.order {
+		if r.rec.Tasks[id].Status != story.TaskDone {
+			r.halt(story.StatusFailed)
+			return &apperr.WorkflowError{Msg: fmt.Sprintf("story %s: %s is %s and nothing else is ready", r.loc.slug, id, orPending(r.rec.Tasks[id].Status))}
 		}
 	}
 	return r.finish()
 }
 
-// advance takes one task a step on: a blocked one is looked at again, a failed or stopped one
-// with a run is resumed, anything else is dispatched.
-func (r *storyRunner) advance(pos int, id string) (story.TaskStatus, error) {
-	rt := r.rec.Tasks[id]
-	switch {
-	case rt.Status == story.TaskBlocked:
-		return r.settleBlocked(id)
-	case (rt.Status == story.TaskFailed || rt.Status == story.TaskStopped) && rt.RunID != "":
-		return r.resume(pos, id)
+// liveCostUSD is the cost the story has now: the recorded total, with each running task's recorded
+// cost replaced by what its run has cost so far, from the executions in its run.json (the run is
+// found as settle finds it). A run that is not there yet, or cannot be read, costs what is
+// recorded. The unreadable directories are not reported: a run being written is a sibling at work.
+// A run another process holds locked is not skipped here, unlike in settle: the running children's
+// own runs are locked, and their cost so far is what this adds.
+func (r *storyRunner) liveCostUSD(lp *dispatchLoop) float64 {
+	total := r.rec.TotalCostUSD()
+	if r.cfg.Story.MaxCostUSD == nil {
+		return total
 	}
-	return r.dispatch(pos, id)
+	foundBy := map[string][]persistence.FoundRun{}
+	for _, id := range r.order {
+		if lp.running[id] == nil {
+			continue
+		}
+		rt := r.rec.Tasks[id]
+		found, ok := foundBy[rt.Repo]
+		if !ok {
+			found, _, _ = persistence.LoadRunDirs(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+			foundBy[rt.Repo] = found
+		}
+		if run := pickStoryRun(found, r.loc.slug, id, rt.Attempt, rt.RunID); run != nil {
+			total += max(executionsCostUSD(run), rt.CostUSD) - rt.CostUSD
+		}
+	}
+	return total
 }
 
-// dispatch writes the task's input, freezes its file and runs the child (§10.2).
-func (r *storyRunner) dispatch(pos int, id string) (story.TaskStatus, error) {
-	if err := r.checkBudget(); err != nil {
-		r.halt(story.StatusStopped)
-		return "", err
+// executionsCostUSD is what the steps of a run have cost so far.
+func executionsCostUSD(run *domain.Run) float64 {
+	spent := 0.0
+	for _, ex := range run.Executions {
+		if ex.Usage != nil {
+			spent += ex.Usage.CostUSD
+		}
 	}
+	return spent
+}
+
+// checkLiveRuns stops the story run, before anything else, when a task the record has as running
+// has its run directory locked by a live process: a child of an earlier story run that is still
+// working. The other running tasks are settled by reconcile.
+func (r *storyRunner) checkLiveRuns() error {
+	for _, id := range r.order {
+		rt := r.rec.Tasks[id]
+		if rt.Status != story.TaskRunning || r.rec.Services[rt.Repo] == "" {
+			continue
+		}
+		found, _, _ := persistence.LoadRunDirs(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+		run := pickStoryRun(found, r.loc.slug, id, rt.Attempt, rt.RunID)
+		if run == nil {
+			continue
+		}
+		if dir := foundRunDir(found, run); dir != "" && persistence.DirLocked(dir) {
+			return &apperr.ConfigError{Msg: fmt.Sprintf("%s: run %s is still running (its run directory is locked by another process); "+
+				"wait for it to end, then run the story again", id, run.ID)}
+		}
+	}
+	return nil
+}
+
+// foundRunDir is the directory of a run pickStoryRun took from found, "" if it is not there.
+func foundRunDir(found []persistence.FoundRun, run *domain.Run) string {
+	for i := range found {
+		if &found[i].Run == run {
+			return found[i].Dir
+		}
+	}
+	return ""
+}
+
+// pickSettledRun is pickStoryRun without the runs another process holds locked: such a run is a
+// sibling in progress, and what is read of it is not an end.
+func pickSettledRun(found []persistence.FoundRun, slug, id string, attempt int, runID string) *domain.Run {
+	found = slices.Clone(found)
+	for {
+		run := pickStoryRun(found, slug, id, attempt, runID)
+		if run == nil {
+			return nil
+		}
+		dir := foundRunDir(found, run)
+		if dir == "" || !persistence.DirLocked(dir) {
+			return run
+		}
+		found = slices.DeleteFunc(found, func(f persistence.FoundRun) bool { return f.Dir == dir })
+	}
+}
+
+// openLog opens the log of a task's attempt for append (the file is kept when a run is resumed).
+func (r *storyRunner) openLog(id string, attempt int) (*os.File, string, error) {
+	dir := filepath.Join(r.loc.storyDir, "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: cannot create %s", id, dir), Err: err}
+	}
+	path := filepath.Join(dir, fmt.Sprintf("task-%s.%d.log", id, attempt))
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: cannot open the log %s", id, path), Err: err}
+	}
+	return f, path, nil
+}
+
+// prepareDispatch writes the task's input and freezes its file (§10.2); the child is started by
+// the loop. The log is opened when logged.
+func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJob, story.TaskStatus, error) {
 	t := r.byID[id]
 	rt := r.rec.Tasks[id]
 	attempt := max(rt.Attempt, 1)
 	branch := persistence.StoryTaskBranch(r.loc.slug, id, attempt)
 
-	// None stacked: the repository's story base. One: that task's commit as it was recorded -
-	// not its branch's tip now, which an operator's commit may have moved.
+	// No parent: the repository's story base. One: that task's commit as it was recorded - not
+	// its branch's tip now, which an operator's commit may have moved. Several: the spec branch's
+	// tip after their commits are merged on it.
 	base := r.rec.Bases[t.Repo]
-	baseRef := base.SHA
-	dep, err := story.Base(r.spec.tasks, id)
+	baseRef, conflict, err := r.startRef(id)
 	if err != nil {
-		return "", &apperr.ConfigError{Msg: err.Error()}
-	}
-	if dep != "" {
-		d := r.rec.Tasks[dep]
-		if d.Status != story.TaskDone || d.Commit == "" {
-			return "", &apperr.WorkflowError{Msg: fmt.Sprintf("%s is stacked on %s, which is not done", id, dep)}
+		if r.ctx.Err() != nil {
+			r.halt(story.StatusStopped)
+		} else {
+			r.halt(story.StatusFailed)
 		}
-		baseRef = d.Commit
+		return nil, "", err
+	}
+	if conflict != nil {
+		rt.Status, rt.Repo, rt.Conflict = story.TaskConflict, t.Repo, conflict
+		r.rec.Tasks[id] = rt
+		return nil, story.TaskConflict, r.persist()
 	}
 
 	var notes []story.DepNote
@@ -649,7 +997,7 @@ func (r *storyRunner) dispatch(pos int, id string) (story.TaskStatus, error) {
 	}
 	text, err := story.RenderInputText(r.spec.title, pos+1, len(r.order), t, r.spec.approach, r.spec.contracts, notes)
 	if err != nil {
-		return "", &apperr.ConfigError{Msg: err.Error()}
+		return nil, "", &apperr.ConfigError{Msg: err.Error()}
 	}
 	acceptance := t.Acceptance
 	if acceptance == nil {
@@ -661,7 +1009,16 @@ func (r *storyRunner) dispatch(pos int, id string) (story.TaskStatus, error) {
 		Jira: jira, Acceptance: acceptance, Text: text,
 	})
 	if err != nil {
-		return "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: %v", id, err)}
+		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: %v", id, err)}
+	}
+	job := &childJob{
+		id: id, pos: pos, repo: t.Repo, dir: r.rec.Services[t.Repo],
+		args: r.childArgs("run", "--mode", "auto", "--story-task", file),
+	}
+	if logged {
+		if job.log, job.logPath, err = r.openLog(id, attempt); err != nil {
+			return nil, "", err
+		}
 	}
 
 	// Recorded before the child starts, so a story run that dies meanwhile finds the task running.
@@ -671,40 +1028,47 @@ func (r *storyRunner) dispatch(pos int, id string) (story.TaskStatus, error) {
 	}
 	r.rec.Status = story.StatusRunning
 	if err := r.persist(); err != nil {
-		return "", err
+		job.closeLog()
+		return nil, "", err
 	}
-
-	r.reporter.StoryTaskHeader(id, t.Repo, pos+1, len(r.order))
-	exit := r.child(r.rec.Services[t.Repo], "run", "--mode", "auto", "--story-task", file)
-	return r.settle(id, exit)
+	return job, "", nil
 }
 
-// resume continues the run of a failed or stopped task (`resume <id> --mode auto` in its
-// repository); no new run is started.
-func (r *storyRunner) resume(pos int, id string) (story.TaskStatus, error) {
-	if err := r.checkBudget(); err != nil {
-		r.halt(story.StatusStopped)
-		return "", err
+// closeLog closes the job's log, if it has one.
+func (j *childJob) closeLog() {
+	if j.log != nil {
+		j.log.Close()
 	}
+}
+
+// prepareResume continues the run of a failed or stopped task (`resume <id> --mode auto` in its
+// repository); no new run is started.
+func (r *storyRunner) prepareResume(pos int, id string, logged bool) (*childJob, story.TaskStatus, error) {
 	rt := r.rec.Tasks[id]
 	run, err := r.loadRun(rt)
 	if err != nil {
-		return "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: cannot resume run %s of its repository", id, rt.RunID), Err: err}
+		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: cannot resume run %s of its repository", id, rt.RunID), Err: err}
 	}
 	if src := run.Task.Source; src == nil || src.Kind != domain.TaskSourceStory || src.Story != r.loc.slug || src.Task != id || src.Attempt != rt.Attempt {
-		return "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: run %s is not a run of this task's attempt %d", id, rt.RunID, rt.Attempt)}
+		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: run %s is not a run of this task's attempt %d", id, rt.RunID, rt.Attempt)}
+	}
+	job := &childJob{
+		id: id, pos: pos, repo: rt.Repo, dir: r.rec.Services[rt.Repo], resume: rt.RunID,
+		args: r.childArgs("resume", rt.RunID, "--mode", "auto"),
+	}
+	if logged {
+		if job.log, job.logPath, err = r.openLog(id, rt.Attempt); err != nil {
+			return nil, "", err
+		}
 	}
 	rt.Status = story.TaskRunning
 	r.rec.Tasks[id] = rt
 	r.rec.Status = story.StatusRunning
 	if err := r.persist(); err != nil {
-		return "", err
+		job.closeLog()
+		return nil, "", err
 	}
-
-	r.reporter.StoryTaskHeader(id, rt.Repo, pos+1, len(r.order))
-	r.reporter.StoryResume(id, rt.RunID)
-	exit := r.child(r.rec.Services[rt.Repo], "resume", rt.RunID, "--mode", "auto")
-	return r.settle(id, exit)
+	return job, "", nil
 }
 
 // settleBlocked counts a blocked task done once its branch has a commit beyond its base: the
@@ -799,9 +1163,13 @@ func (r *storyRunner) settle(id string, exit int) (story.TaskStatus, error) {
 		fmt.Fprintf(r.stderr, "Warning: cannot list the runs of %s: %v\n", rt.Repo, err)
 	}
 	for _, b := range bad {
+		// A run another process holds locked is a sibling in progress, not a damaged run.
+		if persistence.DirLocked(b.Dir) {
+			continue
+		}
 		fmt.Fprintf(r.stderr, "Warning: %s is not a readable run and is ignored: %v\n", b.Dir, b.Err)
 	}
-	run := pickStoryRun(found, r.loc.slug, id, rt.Attempt, rt.RunID)
+	run := pickSettledRun(found, r.loc.slug, id, rt.Attempt, rt.RunID)
 
 	// No run: the child failed before it made one (its own fail-fast chain, a refused input).
 	// The task is failed - or stopped, if the operator cancelled - and dispatched again.
@@ -911,8 +1279,8 @@ func (r *storyRunner) writeAsBuilt(id string, rt persistence.StoryTask, run *dom
 func (r *storyRunner) asBuilt(id string, rt persistence.StoryTask, run *domain.Run) story.AsBuilt {
 	base := r.rec.Bases[rt.Repo]
 	stackedOn := base.Branch
-	if dep, _ := story.Base(r.spec.tasks, id); dep != "" {
-		stackedOn = r.rec.Tasks[dep].Branch
+	if label := r.startLabel(id); label != "" {
+		stackedOn = label
 	}
 	ab := story.AsBuilt{
 		Date: time.Now().Format("2006-01-02"), RunID: run.ID, Repo: rt.Repo, Status: string(run.Status),
@@ -953,42 +1321,156 @@ func implementSummary(store *persistence.Store, run *domain.Run) string {
 	return ""
 }
 
-// stop ends the story at a task that did not get to done: the story takes the matching status,
-// the operator is told what to do next, and the error is the command's.
-func (r *storyRunner) stop(id string, status story.TaskStatus) error {
-	rt := r.rec.Tasks[id]
+// stopAll ends the story at the tasks that did not get to done, given in the story's order: the
+// story takes the status of the first, the operator is told what to do next for each of them,
+// and the error is the command's.
+func (r *storyRunner) stopAll(ids []string) error {
+	id := ids[0]
+	status := r.rec.Tasks[id].Status
 	storyStatus := story.StatusFailed
 	switch status {
-	case story.TaskBlocked:
+	case story.TaskBlocked, story.TaskConflict:
 		storyStatus = story.StatusBlocked
 	case story.TaskStopped:
 		storyStatus = story.StatusStopped
 	}
 	r.halt(storyStatus)
 
-	dir := logging.ShellWord(r.dirArg)
-	next := persistence.StoryTaskBranch(r.loc.slug, id, rt.Attempt+1)
-	switch {
-	case status == story.TaskBlocked:
-		where := "the kept worktree"
-		if run, err := r.loadRun(rt); err == nil && run.Worktree != nil && run.Worktree.Path != "" {
-			where = run.Worktree.Path
-		}
-		r.reporter.StoryHint(
-			fmt.Sprintf("Commit the work on %s in %s, or drop it, then: orchestrator story run %s", rt.Branch, where, dir),
-			fmt.Sprintf("A task whose branch has a commit counts as done. To run it again instead: orchestrator story run %s --retry %s (branch %s)", dir, id, next))
-	case rt.RunID != "":
-		r.reporter.StoryHint(
-			fmt.Sprintf("orchestrator story run %s resumes run %s", dir, rt.RunID),
-			fmt.Sprintf("orchestrator story run %s --retry %s abandons it and runs the task again on %s", dir, id, next))
-	default:
-		r.reporter.StoryHint(fmt.Sprintf("orchestrator story run %s dispatches %s again", dir, id))
+	for _, notDone := range ids {
+		r.hints(notDone)
 	}
-
 	if status == story.TaskStopped && r.ctx.Err() != nil {
 		return fmt.Errorf("story %s stopped at %s: %w", r.loc.slug, id, r.ctx.Err())
 	}
 	return &apperr.WorkflowError{Msg: fmt.Sprintf("story %s is %s: %s is %s", r.loc.slug, storyStatus, id, status)}
+}
+
+// hints tells the operator what to do next for a task that did not get to done.
+func (r *storyRunner) hints(id string) {
+	rt := r.rec.Tasks[id]
+	status := rt.Status
+	dir := logging.ShellWord(r.dirArg)
+	next := persistence.StoryTaskBranch(r.loc.slug, id, rt.Attempt+1)
+	switch {
+	case status == story.TaskConflict:
+		r.reporter.StoryConflict(id, rt.Conflict.Parents, rt.Conflict.Files, persistence.StorySpecBranch(r.loc.slug), r.conflictHints(rt)...)
+	case status == story.TaskBlocked:
+		r.reporter.StoryHint(r.blockedHints(id, rt, dir, next)...)
+	case rt.RunID != "":
+		r.reporter.StoryHint(append(r.runFailureHints(id, rt),
+			fmt.Sprintf("Fix the cause, then: orchestrator story run %s - resumes run %s from the step that did not finish (a timeout, a cancel, a fixed config or environment)", dir, rt.RunID),
+			fmt.Sprintf("Or, when the task itself was wrong or too big: edit %s, then: orchestrator story run %s --retry %s - abandons the run and starts the task again on %s", r.spec.files[id], dir, id, next))...)
+	default:
+		where := "the output above"
+		if p := filepath.Join(r.loc.storyDir, "logs", fmt.Sprintf("task-%s.%d.log", id, rt.Attempt)); fileExists(p) {
+			where = p
+		}
+		r.reporter.StoryHint(
+			"Why: the task's child run stopped before it created a run: its checks before any model call refused it (the config, a missing or unverified CLI, a dirty or red repository, the task's input).",
+			"Where: the error is in "+where+".",
+			fmt.Sprintf("Fix that, then: orchestrator story run %s - dispatches %s again", dir, id))
+	}
+}
+
+// runFailureHints say how a task's run ended: its status, the step that failed, the reason the
+// run recorded (which names its own fixes), and where the summary and the step's logs are.
+func (r *storyRunner) runFailureHints(id string, rt persistence.StoryTask) []string {
+	run, err := r.loadRun(rt)
+	if err != nil {
+		return []string{fmt.Sprintf("Why: run %s of %s cannot be read: %v", rt.RunID, id, err)}
+	}
+	store := persistence.NewStore(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+	why := fmt.Sprintf("Why: run %s is %s", run.ID, run.Status)
+	var failed *domain.StepExecution
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		if run.Executions[i].Status == domain.StepFailed {
+			failed = &run.Executions[i]
+			break
+		}
+	}
+	if failed != nil {
+		why += fmt.Sprintf(" at step %d (%s)", failed.Index, failed.Action)
+	}
+	reason := run.FailureReason
+	if reason == "" && failed != nil {
+		reason = failed.Error
+	}
+	if reason == "" {
+		reason = "no reason was recorded: the child was stopped or its process died"
+	}
+	hints := []string{why + ":"}
+	for _, l := range strings.Split(strings.TrimSpace(reason), "\n") {
+		hints = append(hints, "  "+l)
+	}
+	where := "Details: " + filepath.Join(store.RunDir(run.ID), "summary.md")
+	if failed != nil {
+		where += ", the step's output: " + store.LogPath(run.ID, failed.Index, failed.Action, "stderr") + " (and .stdout.log)"
+	}
+	return append(hints, where)
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// blockedHints says why a blocked task's run made no commit and what each way on is, read from
+// the run: an empty change and a change held back want different steps.
+func (r *storyRunner) blockedHints(id string, rt persistence.StoryTask, dir, next string) []string {
+	again := "then: orchestrator story run " + dir + " (a task whose branch has a commit beyond its base counts as done)"
+	retry := fmt.Sprintf("orchestrator story run %s --retry %s (a new run on %s)", dir, id, next)
+	run, err := r.loadRun(rt)
+	if err != nil {
+		return []string{
+			fmt.Sprintf("Why: its run %s made no commit on %s (the run cannot be read: %v).", rt.RunID, rt.Branch, err),
+			"Fix: commit the work on " + rt.Branch + ", " + again,
+			"Or run the task again: " + retry,
+		}
+	}
+	repoDir := logging.ShellWord(r.rec.Services[rt.Repo])
+	wt := ""
+	if w := run.Worktree; w != nil && !w.Removed && w.Path != "" && fileExists(w.Path) {
+		wt = logging.ShellWord(w.Path)
+	}
+
+	if o := run.Outcome; o == nil || o.Diff == nil || o.Diff.Files == 0 {
+		why := "Why: the run completed, but implement changed no file, so there was nothing to commit."
+		store := persistence.NewStore(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir))
+		if s := implementSummary(store, run); s != "" {
+			why += fmt.Sprintf(" Its summary: %q.", s)
+		}
+		mark := fmt.Sprintf("git -C %s branch -f %s \"$(git -C %s commit-tree -p %s -m '%s: nothing to change' %s^{tree})\"",
+			repoDir, rt.Branch, repoDir, rt.Branch, id, rt.Branch)
+		if wt != "" {
+			mark = fmt.Sprintf("git -C %s commit --allow-empty -m '%s: nothing to change'", wt, id)
+		}
+		return []string{
+			why,
+			"If the work is already in the code base, mark the task done with an empty commit: " + mark + ", " + again,
+			"If the task still needs work, make its file " + r.spec.files[id] + " say what is missing, and: " + retry,
+		}
+	}
+
+	var reasons []string
+	if run.Outcome.ReviewVerdict == domain.ReviewFail {
+		reasons = append(reasons, "the review failed")
+	}
+	if run.Outcome.ApprovalRequired {
+		reasons = append(reasons, "a policy.paths rule with approval: manual matched the change")
+	}
+	if n := len(run.SecretFindings); n > 0 {
+		reasons = append(reasons, fmt.Sprintf("the secret scan reported %d new finding(s)", n))
+	}
+	if len(reasons) == 0 {
+		reasons = append(reasons, "the implementation gave no commit message (summary_short)")
+	}
+	hints := []string{fmt.Sprintf("Why: the run changed %d file(s) but did not commit them: %s.", run.Outcome.Diff.Files, strings.Join(reasons, "; "))}
+	if wt != "" {
+		hints = append(hints, fmt.Sprintf("Fix: check the change (git -C %s diff HEAD), commit it: git -C %s add -A && git -C %s commit, %s", wt, wt, wt, again))
+	} else {
+		hints = append(hints, "Its worktree is gone, and the uncommitted change with it.")
+	}
+	return append(hints, "Or drop the change and run the task again: "+retry)
 }
 
 // finish ends a story whose tasks are all done (§10.4): the story is completed, and the table of
@@ -1001,11 +1483,7 @@ func (r *storyRunner) finish() error {
 	rows := make([]logging.StoryEndRow, 0, len(r.order))
 	for _, id := range r.order {
 		rt := r.rec.Tasks[id]
-		target := r.rec.Bases[rt.Repo].Branch
-		if dep, _ := story.Base(r.spec.tasks, id); dep != "" {
-			target = r.rec.Tasks[dep].Branch
-		}
-		row := logging.StoryEndRow{ID: id, Repo: rt.Repo, Branch: rt.Branch, Target: target, Commit: rt.Commit, Jira: rt.Jira}
+		row := logging.StoryEndRow{ID: id, Repo: rt.Repo, Branch: rt.Branch, Target: r.targetBranch(id), Commit: rt.Commit, Jira: rt.Jira}
 		if run, err := r.loadRun(rt); err == nil && run.Worktree != nil {
 			row.Conflicts = strings.Join(run.Worktree.Conflicts, ", ")
 		}

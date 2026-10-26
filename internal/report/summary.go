@@ -22,6 +22,7 @@ func RunSummary(run domain.Run, trace *domain.DecisionTrace) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Run %s\n\n", run.ID)
 	writeTotals(&b, run, trace, out)
+	writeClarification(&b, run)
 	writeSteps(&b, run)
 	writeTools(&b, run)
 	writeChanges(&b, run)
@@ -87,17 +88,29 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	row("Tokens", tokenLine)
 	row("Provider calls", fmt.Sprintf("%d", out.Usage.Calls))
 
-	if out.VerifyCalls > 0 {
-		// A refused call ran nothing, so it never passed.
-		passed := 0
-		for _, e := range run.Executions {
-			for _, c := range e.VerifyCalls {
-				if c.Refused == "" && c.Success {
-					passed++
+	// verify_calls holds the test tools' calls and replace's; each gets its own row. A refused
+	// call ran nothing, so it never passed and changed nothing.
+	var verifyCalls, passed, replaceCalls, files, replacements int
+	for _, e := range run.Executions {
+		for _, c := range e.VerifyCalls {
+			if c.Tool == domain.VerifyToolReplace {
+				replaceCalls++
+				if !c.DryRun {
+					files, replacements = files+c.Files, replacements+c.Replacements
 				}
+				continue
+			}
+			verifyCalls++
+			if c.Refused == "" && c.Success {
+				passed++
 			}
 		}
-		row("Verify", fmt.Sprintf("%s, %d passed", plural(out.VerifyCalls, "call"), passed))
+	}
+	if verifyCalls > 0 {
+		row("Verify", fmt.Sprintf("%s, %d passed", plural(verifyCalls, "call"), passed))
+	}
+	if replaceCalls > 0 {
+		row("Replace", fmt.Sprintf("%s, %s in %s", plural(replaceCalls, "call"), plural(replacements, "occurrence"), plural(files, "file")))
 	}
 
 	tests := "not run"
@@ -140,6 +153,31 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	}
 	if w := run.Worktree; w != nil {
 		row("Worktree", worktreeLine(run, *w))
+	}
+}
+
+// writeClarification lists what the clarify step agreed about an unclear task (specs/clarify):
+// the P(clear) of every check against the threshold, and the clarification as the stages read it,
+// whose open points are what a run that stopped with "task needs input" still lacks.
+func writeClarification(b *strings.Builder, run domain.Run) {
+	c := run.Task.Clarification
+	if c == nil {
+		return
+	}
+	checks := make([]string, len(c.Checks))
+	for i, p := range c.Checks {
+		checks[i] = fmt.Sprintf("%.2f", p)
+	}
+	b.WriteString("\n## Clarification\n\n")
+	fmt.Fprintf(b, "The task was %s: P(clear) %s against the threshold %.2f.\n", c.Status, strings.Join(checks, " → "), c.Threshold)
+	if run.FailureReason == domain.FailureTaskNeedsInput {
+		b.WriteString("The run stopped because it needs input; start a new run with the open points settled in the task.\n")
+	}
+	if text := c.Render(); text != "" {
+		b.WriteString("\n")
+		for _, line := range strings.Split(text, "\n") {
+			b.WriteString("> " + strings.TrimRight(line, " \t") + "\n")
+		}
 	}
 }
 

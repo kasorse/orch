@@ -35,14 +35,14 @@ func PrependPath(t *testing.T, dir string) {
 //     every invocation, so tests can assert exactly how many AI calls happened (and of
 //     which kind), including "no further AI call happened after X".
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
-//     action ("translate.json", "decide-context.json", "decide-classify.json",
-//     "research.json", "analyze.json", "plan.json", "implement.json", "review.json", and
-//     a story's planning calls, "survey.json" and "specify.json").
-//     For "review" and "implement", a numbered override
-//     "review_<N>.json" / "implement_<N>.json" (N = 1-based call count of that
-//     action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
-//     present, so a test can script review fail-then-pass, or an implement answer per
-//     attempt.
+//     action ("translate.json", "decide-context.json", "decide-clarity.json",
+//     "decide-classify.json", "clarify.json", "research.json", "investigate.json", "implement.json",
+//     "review.json", and a story's planning calls, "survey.json" and "specify.json").
+//     For "review", "implement" and "decide-clarity", a numbered override
+//     "review_<N>.json" / "implement_<N>.json" / "decide-clarity_<N>.json" (N = 1-based call
+//     count of that action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
+//     present, so a test can script review fail-then-pass, an implement answer per attempt, or a
+//     clarity re-check that stays below the threshold and then clears it.
 //   - FAKE_FAIL_ACTION / FAKE_FAIL_EXIT_CODE / FAKE_FAIL_STDERR / FAKE_FAIL_STDOUT: if
 //     FAKE_FAIL_ACTION matches the resolved action, the script exits with
 //     FAKE_FAIL_EXIT_CODE (default 1) after writing FAKE_FAIL_STDERR to stderr and/or
@@ -53,7 +53,17 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_SLEEP_ACTION / FAKE_SLEEP_SECONDS: if FAKE_SLEEP_ACTION matches the
 //     resolved action (including "translate" and "decide-*"), the script sleeps for FAKE_SLEEP_SECONDS
 //     (default 1) before doing anything else - simulates a hung provider call for
-//     timeout scenarios.
+//     timeout scenarios. With FAKE_SLEEP_UNTIL_FILE set, the sleep ends early once that path
+//     exists, so a test can let a call go on at a moment of its choosing.
+//   - FAKE_SLEEP_BRANCH / FAKE_FAIL_BRANCH: if set, FAKE_SLEEP_ACTION (FAKE_FAIL_ACTION)
+//     applies only to a call whose working directory has this branch checked out (a story
+//     task's worktree: story/<slug>/<ID>), so two tasks that run at once can behave differently.
+//   - FAKE_RENDEZVOUS_DIR /FAKE_RENDEZVOUS_ACTION / FAKE_RENDEZVOUS_COUNT: if the resolved
+//     action is FAKE_RENDEZVOUS_ACTION, the call creates a file named by its process ID in
+//     FAKE_RENDEZVOUS_DIR and waits until FAKE_RENDEZVOUS_COUNT (default 2) files are there,
+//     at most 30 seconds, then fails: calls that run at the same time meet, calls that run one
+//     after the other do not - proof that tasks ran in parallel. The meeting comes before
+//     FAKE_SLEEP_ACTION's sleep.
 //   - FAKE_PROMPTS_DIR: if set, the prompt of each call is saved to
 //     <dir>/<action>.txt (the last call of an action wins), so tests can assert what
 //     text a step was given. With FAKE_STATE_DIR also set, it is saved to
@@ -92,6 +102,11 @@ func PrependPath(t *testing.T, dir string) {
 //     (migrations/x.sql, for a path rule). From the implement call number in
 //     FAKE_IMPLEMENT_REVERT_ON_CALL on, the call removes the file instead, as a later attempt
 //     reverting an earlier one.
+//   - FAKE_IMPLEMENT_BRANCH_FILE / FAKE_IMPLEMENT_BRANCH_DIR: every implement call writes the
+//     name of the branch checked out where it runs (a story task's worktree: story/<slug>/<ID>)
+//     to the path FAKE_IMPLEMENT_BRANCH_FILE, and to <FAKE_IMPLEMENT_BRANCH_DIR>/<branch with
+//     "/" as "-">.txt. Two tasks that name the same file change it differently (a merge
+//     conflict); in the directory each adds a file of its own (a clean merge).
 //   - FAKE_PLANT_HOOK_BEFORE_CALL: 1-based implement call number before which the script
 //     writes an executable .git/hooks/pre-commit that touches FAKE_HOOK_MARKER (default
 //     $FAKE_STATE_DIR/hook-ran), as a model planting a hook would. A test asserts the
@@ -131,9 +146,10 @@ for arg in "$prompt" "$@"; do
     "ACTION: translate"*)       action="translate" ;;
     "ACTION: decide-context"*)  action="decide-context" ;;
     "ACTION: decide-classify"*) action="decide-classify" ;;
+    "ACTION: decide-clarity"*)  action="decide-clarity" ;;
+    "ACTION: clarify"*)         action="clarify" ;;
     "ACTION: research"*)        action="research" ;;
-    "ACTION: analyze"*)         action="analyze" ;;
-    "ACTION: plan"*)            action="plan" ;;
+    "ACTION: investigate"*)     action="investigate" ;;
     "ACTION: implement"*)       action="implement" ;;
     "ACTION: review"*)          action="review" ;;
     "ACTION: survey"*)          action="survey" ;;
@@ -177,11 +193,43 @@ fi
 if [ -n "${FAKE_CWD_DIR:-}" ]; then
   pwd -P > "$FAKE_CWD_DIR/$action.cwd"
 fi
-if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ]; then
-  sleep "${FAKE_SLEEP_SECONDS:-1}"
+current_branch=""
+if [ -n "${FAKE_SLEEP_BRANCH:-}" ] || [ -n "${FAKE_FAIL_BRANCH:-}" ]; then
+  current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+fi
+sleep_ok=1
+if [ -n "${FAKE_SLEEP_BRANCH:-}" ] && [ "$current_branch" != "$FAKE_SLEEP_BRANCH" ]; then
+  sleep_ok=0
+fi
+fail_ok=1
+if [ -n "${FAKE_FAIL_BRANCH:-}" ] && [ "$current_branch" != "$FAKE_FAIL_BRANCH" ]; then
+  fail_ok=0
+fi
+if [ -n "${FAKE_RENDEZVOUS_DIR:-}" ] && [ "${FAKE_RENDEZVOUS_ACTION:-}" = "$action" ]; then
+  : > "$FAKE_RENDEZVOUS_DIR/$$"
+  waited=0
+  while [ "$(ls "$FAKE_RENDEZVOUS_DIR" | wc -l)" -lt "${FAKE_RENDEZVOUS_COUNT:-2}" ]; do
+    waited=$((waited + 1))
+    if [ "$waited" -gt 150 ]; then
+      echo "fakeexec: the other calls did not arrive in 30 seconds" >&2
+      exit 1
+    fi
+    sleep 0.2
+  done
+fi
+if [ -n "${FAKE_SLEEP_ACTION:-}" ] && [ "$FAKE_SLEEP_ACTION" = "$action" ] && [ "$sleep_ok" = 1 ]; then
+  if [ -n "${FAKE_SLEEP_UNTIL_FILE:-}" ]; then
+    waited=0
+    while [ ! -e "$FAKE_SLEEP_UNTIL_FILE" ] && [ "$waited" -lt $(( ${FAKE_SLEEP_SECONDS:-1} * 5 )) ]; do
+      waited=$((waited + 1))
+      sleep 0.2
+    done
+  else
+    sleep "${FAKE_SLEEP_SECONDS:-1}"
+  fi
 fi
 
-if [ -n "${FAKE_FAIL_ACTION:-}" ] && [ "$FAKE_FAIL_ACTION" = "$action" ]; then
+if [ -n "${FAKE_FAIL_ACTION:-}" ] && [ "$FAKE_FAIL_ACTION" = "$action" ] && [ "$fail_ok" = 1 ]; then
   if [ -n "${FAKE_FAIL_STDERR:-}" ]; then
     printf '%s\n' "$FAKE_FAIL_STDERR" >&2
   fi
@@ -228,6 +276,17 @@ if [ "$action" = "implement" ] && [ -n "$call_count" ]; then
     else
       mkdir -p "$(dirname "$FAKE_IMPLEMENT_TOUCH_FILE")"
       printf '%s\n' "-- implement call $call_count" > "$FAKE_IMPLEMENT_TOUCH_FILE"
+    fi
+  fi
+
+  if [ -n "${FAKE_IMPLEMENT_BRANCH_FILE:-}" ] || [ -n "${FAKE_IMPLEMENT_BRANCH_DIR:-}" ]; then
+    branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo detached)
+    if [ -n "${FAKE_IMPLEMENT_BRANCH_FILE:-}" ]; then
+      printf '%s\n' "$branch" > "$FAKE_IMPLEMENT_BRANCH_FILE"
+    fi
+    if [ -n "${FAKE_IMPLEMENT_BRANCH_DIR:-}" ]; then
+      mkdir -p "$FAKE_IMPLEMENT_BRANCH_DIR"
+      printf '%s\n' "$branch" > "$FAKE_IMPLEMENT_BRANCH_DIR/$(printf '%s' "$branch" | tr '/' '-').txt"
     fi
   fi
 
@@ -278,7 +337,7 @@ fi
 
 response_file=""
 if [ -n "${FAKE_RESPONSES_DIR:-}" ]; then
-  if { [ "$action" = "review" ] || [ "$action" = "implement" ]; } && [ -n "$call_count" ] && [ -f "$FAKE_RESPONSES_DIR/${action}_${call_count}.json" ]; then
+  if { [ "$action" = "review" ] || [ "$action" = "implement" ] || [ "$action" = "decide-clarity" ]; } && [ -n "$call_count" ] && [ -f "$FAKE_RESPONSES_DIR/${action}_${call_count}.json" ]; then
     response_file="$FAKE_RESPONSES_DIR/${action}_${call_count}.json"
   elif [ -f "$FAKE_RESPONSES_DIR/${action}.json" ]; then
     response_file="$FAKE_RESPONSES_DIR/${action}.json"

@@ -199,8 +199,8 @@ func ValidBaseBranch(name string) bool {
 }
 
 // CheckAcceptance checks the acceptance items of a task: at most MaxAcceptanceItems, each one
-// line, not blank and at most MaxAcceptanceRunes. field names the list in the error.
-func CheckAcceptance(field string, items []string) error {
+// line, not blank and at most maxRunes. field names the list in the error.
+func CheckAcceptance(field string, items []string, maxRunes int) error {
 	if len(items) > MaxAcceptanceItems {
 		return fmt.Errorf("%s has %d items, more than %d", field, len(items), MaxAcceptanceItems)
 	}
@@ -211,8 +211,8 @@ func CheckAcceptance(field string, items []string) error {
 			return fmt.Errorf("%s is empty", f)
 		case strings.ContainsAny(item, "\r\n"):
 			return fmt.Errorf("%s is more than one line", f)
-		case utf8.RuneCountInString(item) > MaxAcceptanceRunes:
-			return fmt.Errorf("%s is %d characters, more than %d", f, utf8.RuneCountInString(item), MaxAcceptanceRunes)
+		case utf8.RuneCountInString(item) > maxRunes:
+			return fmt.Errorf("%s is %d characters, more than %d; raise story.max_acceptance_chars or split the item", f, utf8.RuneCountInString(item), maxRunes)
 		}
 	}
 	return nil
@@ -266,7 +266,7 @@ func ParseTaskInput(data []byte) (TaskInput, error) {
 	case len(in.Text) > MaxInputTextBytes:
 		return TaskInput{}, fmt.Errorf("the task input: text is %d bytes, over the %d-byte limit", len(in.Text), MaxInputTextBytes)
 	}
-	if err := CheckAcceptance("the task input: acceptance", in.Acceptance); err != nil {
+	if err := CheckAcceptance("the task input: acceptance", in.Acceptance, MaxAcceptanceRunesCeiling); err != nil {
 		return TaskInput{}, err
 	}
 	return in, nil

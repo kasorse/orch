@@ -34,11 +34,14 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("task.source: %w", err)
 		}
 	}
+	if err := run.Task.Clarification.Validate(); err != nil {
+		return fmt.Errorf("task.clarification: %w", err)
+	}
 	if len(run.Task.Acceptance) > 0 {
 		if run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceStory {
 			return fmt.Errorf("task.acceptance on a task that is not a story task")
 		}
-		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance); err != nil {
+		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance, story.MaxAcceptanceRunesCeiling); err != nil {
 			return err
 		}
 	}
@@ -248,8 +251,8 @@ func validateVerifyCalls(exec domain.StepExecution) error {
 	if exec.Action != domain.ActionImplement {
 		return fmt.Errorf("recorded on a %s step", exec.Action)
 	}
-	if len(calls) > domain.MaxVerifyCalls {
-		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxVerifyCalls)
+	if len(calls) > domain.MaxRecordedCalls {
+		return fmt.Errorf("%d entries, at most %d", len(calls), domain.MaxRecordedCalls)
 	}
 	for i, c := range calls {
 		if err := c.Validate(); err != nil {
@@ -561,7 +564,8 @@ func validateDecisionUsage(u *domain.DecisionUsage) error {
 	calls := []struct {
 		name  string
 		usage *domain.Usage
-	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification}}
+	}{{"translation", u.Translation}, {"context_depth", u.ContextDepth}, {"classification", u.Classification},
+		{"translation_clarified", u.TranslationClarified}}
 	for _, c := range calls {
 		if c.usage == nil {
 			continue
@@ -569,6 +573,36 @@ func validateDecisionUsage(u *domain.DecisionUsage) error {
 		if err := c.usage.Validate(); err != nil {
 			return fmt.Errorf("usage.%s: %w", c.name, err)
 		}
+	}
+	if n := len(u.Clarify); n > 1 {
+		return fmt.Errorf("usage.clarify: %d entries, at most 1", n)
+	}
+	for i, c := range u.Clarify {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("usage.clarify[%d]: %w", i, err)
+		}
+	}
+	if n := len(u.ClarityRecheck); n > domain.MaxClarityChecks {
+		return fmt.Errorf("usage.clarity_recheck: %d entries, at most %d", n, domain.MaxClarityChecks)
+	}
+	for i, c := range u.ClarityRecheck {
+		if err := c.Validate(); err != nil {
+			return fmt.Errorf("usage.clarity_recheck[%d]: %w", i, err)
+		}
+	}
+	return nil
+}
+
+// validateDecisionClarity checks decision.json's clarity (specs/clarify): when present, a
+// threshold in (0, 1], one to domain.MaxClarityChecks probabilities in [0, 1] and a known
+// status. It is absent after a failed pre-check, for a story task and in a trace written before
+// the question existed.
+func validateDecisionClarity(c *domain.ClarityTrace) error {
+	if c == nil {
+		return nil
+	}
+	if err := c.Validate(); err != nil {
+		return fmt.Errorf("clarity: %w", err)
 	}
 	return nil
 }

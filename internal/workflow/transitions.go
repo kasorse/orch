@@ -9,14 +9,13 @@ import (
 type State string
 
 const (
-	StateResearch  State = State(domain.ActionResearch)
-	StateAnalyze   State = State(domain.ActionAnalyze)
-	StatePlan      State = State(domain.ActionPlan)
-	StateImplement State = State(domain.ActionImplement)
-	StateTest      State = State(domain.ActionTest)
-	StateReview    State = State(domain.ActionReview)
-	StateDone      State = "done"
-	StateFailed    State = "failed"
+	StateResearch    State = State(domain.ActionResearch)
+	StateInvestigate State = State(domain.ActionInvestigate)
+	StateImplement   State = State(domain.ActionImplement)
+	StateTest        State = State(domain.ActionTest)
+	StateReview      State = State(domain.ActionReview)
+	StateDone        State = "done"
+	StateFailed      State = "failed"
 )
 
 type Outcome string
@@ -33,7 +32,7 @@ const (
 // integration/SPEC.md §13, TASKS.md T05). Forward progress follows wf.Steps' own
 // fixed order - current's successor in wf.Steps, or StateDone once current is the
 // last step - rather than a hardcoded per-action jump table (there is no more
-// "analyze/plan always goes to implement": whatever Build put after current in the
+// "investigate always goes to implement": whatever Build put after current in the
 // selected stages is what runs next). wf is consulted only to look up that order and
 // whether Implement is part of this run - it is never walked as a queue.
 //
@@ -101,7 +100,7 @@ func forward(current State, wf domain.Workflow) (next State, ok bool) {
 }
 
 // isBackwardEntryToImplement flags a transition as a fix-iteration retry: entering
-// Implement from Test or Review (as opposed to the forward Analyze/Plan -> Implement
+// Implement from Test or Review (as opposed to the forward Investigate -> Implement
 // transition, which is not a retry).
 func isBackwardEntryToImplement(from, to State) bool {
 	if to != StateImplement {

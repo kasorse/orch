@@ -68,12 +68,17 @@ type storyRunFixtureOpts struct {
 	maxCostUSD float64
 	// jira, when set, is the home's jira section (with jira.create) at a fake Jira.
 	jira *jiraOptions
+	// tasks, when set, are the spec's tasks in place of storyRunTasks.
+	tasks []story.Task
+	// simple decides every task simple: implement and test, with no review.
+	simple bool
 }
 
 type storyRunFixture struct {
 	home, specDir, storyDir, cfg string
 	repos                        map[string]string
 	invocationsLog, responses    string
+	tasks                        []story.Task
 }
 
 func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *storyRunFixture {
@@ -89,12 +94,16 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		t.Fatal(err)
 	}
 
-	// Medium: the template gives analysis and review; development is rated under its
+	// Medium: the template gives planning and review; development is rated under its
 	// threshold and a story task adds it all the same.
+	choice := [3]float64{0.1, 0.7, 0.2}
+	if o.simple {
+		choice = [3]float64{0.9, 0.05, 0.05}
+	}
 	j := startJev(t, jevScript{
 		PProject: 0.9,
-		Choice:   [3]float64{0.1, 0.7, 0.2},
-		Stages:   map[string]float64{"analysis": 0.9, "development": 0.1},
+		Choice:   choice,
+		Stages:   map[string]float64{"development": 0.1},
 	})
 	billing := fakeexec.InitGitFixture(t)
 	invocationsLog, _ := decisionEnv(t, billing)
@@ -103,7 +112,10 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 	t.Setenv("FAKE_CWD_DIR", t.TempDir())
 	t.Setenv("FAKE_FIX_TARGET_FILE", "fixture.go")
 	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "added.txt")
-	f := &storyRunFixture{repos: map[string]string{}, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR")}
+	f := &storyRunFixture{repos: map[string]string{}, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR"), tasks: storyRunTasks}
+	if o.tasks != nil {
+		f.tasks = o.tasks
+	}
 	writeResponse(t, f.responses, "implement", storyImplementResponse)
 	writeResponse(t, f.responses, "review", storyReviewPass)
 
@@ -164,7 +176,7 @@ func (f *storyRunFixture) writeSpec(t *testing.T) {
 		Risks:      "None.",
 	}))
 	var tasks []story.Task
-	for _, task := range storyRunTasks {
+	for _, task := range f.tasks {
 		task.Body = "\n## Goal\n\nDo " + task.ID + ".\n\n## Acceptance\n\n- the change is made\n- a test covers it\n"
 		writeStoryFile(t, f.taskPath(task.ID), story.RenderTaskFile(task, "M"))
 		tasks = append(tasks, task)
@@ -173,7 +185,7 @@ func (f *storyRunFixture) writeSpec(t *testing.T) {
 }
 
 func (f *storyRunFixture) taskPath(id string) string {
-	for _, task := range storyRunTasks {
+	for _, task := range f.tasks {
 		if task.ID == id {
 			return filepath.Join(f.specDir, "tasks", story.TaskFileName(id, task.Title))
 		}
@@ -502,7 +514,7 @@ func TestStoryRun_OrderStackingAsBuiltAndTheEnd(t *testing.T) {
 	assertContains(t, "stdout", stdout, "Story plan: 4 tasks in 2 repositories", "── RF01 · billing · 1/4 ──",
 		"── RF03 · gateway · 3/4 ──", "✓ Story completed: all 4 tasks done",
 		"RF02 · billing · story/refunds/RF02 → story/refunds/RF01",
-		"RF03 · gateway · story/refunds/RF03 → "+f.baseBranch(t, "gateway"))
+		"RF03 · gateway · story/refunds/RF03 → story/refunds/spec")
 	f.assertCheckoutsUnchanged(t, before)
 
 	// story status reads: nothing in the story or spec directory changes, and it shows the README.
@@ -549,7 +561,8 @@ func TestStoryRun_FailThenResume(t *testing.T) {
 	if run := f.runRecord(t, "billing", "RF01", 1); run.ID != rt.RunID || run.Status != domain.RunFailed {
 		t.Errorf("run = %s %s, want the failed %s", run.ID, run.Status, rt.RunID)
 	}
-	assertContains(t, "stdout", stdout, "RF01: failed", "resumes run "+rt.RunID, "--retry RF01")
+	assertContains(t, "stdout", stdout, "RF01: failed", "Why: run "+rt.RunID+" is failed at step", "Details: ", "summary.md, the step's output: ",
+		"resumes run "+rt.RunID, "--retry RF01")
 	assertContains(t, "README.md", readFile(t, filepath.Join(f.specDir, "README.md")), "Status: **failed** (0 of 4 tasks done)")
 	if strings.Contains(readFile(t, f.taskPath("RF01")), "## As built") {
 		t.Error("a failed task got an As built section")
@@ -603,7 +616,8 @@ func TestStoryRun_BlockedCountsDoneOnceItsBranchHasACommit(t *testing.T) {
 	if rec.Status != story.StatusBlocked || rt.Status != story.TaskBlocked || rt.RunID == "" || rt.Commit != "" {
 		t.Fatalf("status = %s, RF01 = %+v; want a blocked story and task, with a run and no commit", rec.Status, rt)
 	}
-	assertContains(t, "stdout", stdout, "RF01: blocked", "Commit the work on story/refunds/RF01 in ")
+	assertContains(t, "stdout", stdout, "RF01: blocked", "Why: the run changed 2 file(s) but did not commit them: the implementation gave no commit message",
+		"Fix: check the change (git -C ", "Or drop the change and run the task again: orchestrator story run ")
 
 	// Nothing committed yet: it stays blocked, and nothing is dispatched.
 	calls := invocations(t, f.invocationsLog)
@@ -640,6 +654,50 @@ func TestStoryRun_BlockedCountsDoneOnceItsBranchHasACommit(t *testing.T) {
 	}
 	assertContains(t, "RF01 As built", story.AsBuiltText([]byte(readFile(t, f.taskPath("RF01")))), "commit "+tip[:7])
 	f.assertCheckoutsUnchanged(t, before)
+}
+
+// A task whose run changed nothing is blocked with nothing to commit: the hint says so, and the
+// empty commit it prints - here without the worktree, which the operator removed - marks it done.
+func TestStoryRun_BlockedWithoutAChangeIsMarkedDoneByAnEmptyCommit(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) { o.simple = true })
+	t.Setenv("FAKE_FIX_TARGET_FILE", "")
+	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "")
+	// The fix is already on the base, so the tests pass without a change.
+	if err := os.WriteFile(filepath.Join(f.repos["billing"], "fixture.go"), []byte(readFile(t, os.Getenv("FAKE_FIX_CONTENT_FILE"))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, f.repos["billing"], "commit", "-q", "-am", "fixed already")
+	writeResponse(t, f.responses, "implement", `{"summary":"already there","summary_short":"Nothing to do","changed_files":[],"tests_added":[]}`)
+
+	stdout, stderr, err := f.run(t)
+	if err == nil {
+		t.Fatalf("a story with a task without a change succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if rt := f.record(t).Tasks["RF01"]; rt.Status != story.TaskBlocked {
+		t.Fatalf("RF01 = %+v, want blocked", rt)
+	}
+	assertContains(t, "stdout", stdout, "RF01: blocked", "implement changed no file, so there was nothing to commit", `Its summary: "Nothing to do"`)
+
+	run := f.runRecord(t, "billing", "RF01", 1)
+	gitRun(t, f.repos["billing"], "worktree", "remove", "--force", run.Worktree.Path)
+	stdout, _, _ = f.run(t)
+	_, rest, ok := strings.Cut(stdout, "mark the task done with an empty commit: ")
+	mark, _, _ := strings.Cut(rest, ", then: ")
+	if !ok || !strings.Contains(mark, "commit-tree") {
+		t.Fatalf("no commit-tree hint for a removed worktree in:\n%s", stdout)
+	}
+	if out, err := exec.Command("sh", "-c", mark).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v\n%s", mark, err, out)
+	}
+
+	writeResponse(t, f.responses, "implement", storyImplementResponse)
+	t.Setenv("FAKE_FIX_TARGET_FILE", "fixture.go")
+	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "added.txt")
+	stdout, stderr, err = f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+	if rt := f.record(t).Tasks["RF01"]; rt.Status != story.TaskDone || rt.Commit == rt.BaseRef {
+		t.Fatalf("RF01 = %+v, want done at the empty commit", rt)
+	}
 }
 
 // --retry abandons a failed task's run and runs it again on <branch>.2, re-reading its file; the

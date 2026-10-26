@@ -90,6 +90,10 @@ func TestProvider_RequestsMatchGolden(t *testing.T) {
 			_, err := p.ContextDepth(context.Background(), "Add a cache to ProductRepository")
 			return err
 		}},
+		{"clarity", bothSources, func(p *Provider) error {
+			_, err := p.Clarity(context.Background(), "Add a cache to ProductRepository", "- Which cache is meant? In-memory  [operator]")
+			return err
+		}},
 		{"classification_shadow_project", bothSources, func(p *Provider) error {
 			_, err := p.Classify(context.Background(), domain.ClassificationInput{
 				Request: "Add a cache to ProductRepository", ContextDepth: domain.ContextDepthProject, Project: testProject(),
@@ -160,6 +164,78 @@ func TestProvider_ContextDepthMapsFixture(t *testing.T) {
 	if d.Probabilities[domain.ContextDepthProject] != 0.91 || d.Probabilities[domain.ContextDepthNone] != 0.09 || d.Confidence != 0.82 {
 		t.Errorf("decision = %+v", d)
 	}
+	if d.PClear != 0.74 {
+		t.Errorf("PClear = %v, want 0.74", d.PClear)
+	}
+}
+
+// The pre-check asks clarity beside context_depth, in one request.
+func TestProvider_PreCheckAsksClarityBesideContextDepth(t *testing.T) {
+	stub := &stubClient{err: errors.New("not needed")}
+	_, _ = newTestProvider(t, stub, bothSources).ContextDepth(context.Background(), "x")
+	if len(stub.got.Questions) != 2 {
+		t.Fatalf("got %d questions, want context_depth and clarity", len(stub.got.Questions))
+	}
+	if q, ok := stub.got.Questions[decision.QuestionClarity]; !ok || q.Type != questionNoul {
+		t.Errorf("clarity question = %+v (asked: %v), want a noul question", q, ok)
+	}
+	if _, ok := stub.got.Questions[decision.QuestionContextDepth]; !ok {
+		t.Error("context_depth was not asked")
+	}
+}
+
+func TestProvider_ClarityAsksOnlyClarity(t *testing.T) {
+	stub := &stubClient{resp: clarityResponse(0.42)}
+	d, err := newTestProvider(t, stub, bothSources).Clarity(context.Background(), "make it faster", "")
+	if err != nil {
+		t.Fatalf("Clarity: %v", err)
+	}
+	if d.PClear != 0.42 {
+		t.Errorf("PClear = %v, want 0.42", d.PClear)
+	}
+	if len(stub.got.Questions) != 1 {
+		t.Errorf("got %d questions, want only clarity", len(stub.got.Questions))
+	}
+	if _, ok := stub.got.Questions[decision.QuestionClarity]; !ok {
+		t.Error("clarity was not asked")
+	}
+	if d.Usage == nil || *d.Usage != (domain.Usage{InputTokens: 30, OutputTokens: 1}) {
+		t.Errorf("usage = %+v", d.Usage)
+	}
+}
+
+// clarityResponse is the answer to a request that asks clarity alone.
+func clarityResponse(p float64) systemOneResponse {
+	return systemOneResponse{
+		Model:   "jev-1.13.0",
+		Answers: map[string]answer{decision.QuestionClarity: {Type: questionNoul, Noul: &p}},
+		Usage:   usage{InputTokens: 30, OutputTokens: 1},
+	}
+}
+
+func TestProvider_InvalidClarityResponses(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	cases := map[string]func(r *systemOneResponse){
+		"no model":       func(r *systemOneResponse) { r.Model = "" },
+		"missing answer": func(r *systemOneResponse) { delete(r.Answers, "clarity") },
+		"unexpected answer": func(r *systemOneResponse) {
+			r.Answers["context_depth"] = answer{Type: questionNoul, Noul: f(0.5)}
+		},
+		"choice instead of noul": func(r *systemOneResponse) {
+			r.Answers["clarity"] = answer{Type: questionChoice, Probabilities: map[string]float64{"true": 1}}
+		},
+		"missing value": func(r *systemOneResponse) { r.Answers["clarity"] = answer{Type: questionNoul} },
+		"above one":     func(r *systemOneResponse) { r.Answers["clarity"] = answer{Type: questionNoul, Noul: f(1.01)} },
+		"below zero":    func(r *systemOneResponse) { r.Answers["clarity"] = answer{Type: questionNoul, Noul: f(-0.01)} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			resp := clarityResponse(0.5)
+			mutate(&resp)
+			_, err := newTestProvider(t, &stubClient{resp: resp}, bothSources).Clarity(context.Background(), "x", "")
+			assertInvalidResponse(t, err)
+		})
+	}
 }
 
 func TestProvider_ClassifyMapsFixture(t *testing.T) {
@@ -189,13 +265,13 @@ func TestProvider_ClassifyMapsFixture(t *testing.T) {
 		t.Errorf("score = %+v", score)
 	}
 
-	want := map[domain.Stage]float64{domain.StageResearch: 0.05, domain.StageAnalysis: 0.92, domain.StageDevelopment: 0.99}
+	want := map[domain.Stage]float64{domain.StageResearch: 0.05, domain.StageDevelopment: 0.99}
 	for st, p := range want {
 		if got, _ := tc.Stages.Get(st); got.Probability != p {
 			t.Errorf("stage %s = %v, want %v", st, got.Probability, p)
 		}
 	}
-	for _, st := range []domain.Stage{domain.StagePlanning, domain.StageTesting, domain.StageReview} {
+	for _, st := range []domain.Stage{domain.StageInvestigation, domain.StageTesting, domain.StageReview} {
 		if _, ok := tc.Stages.Get(st); ok {
 			t.Errorf("stage %s has a probability, but is not asked", st)
 		}
@@ -220,8 +296,8 @@ func TestProvider_ScopeIsAskedUnlessSkipped(t *testing.T) {
 	if _, ok := stub.got.Questions[decision.QuestionScopeStory]; ok {
 		t.Error("the scope question was sent although it is skipped")
 	}
-	if len(stub.got.Questions) != 5 {
-		t.Errorf("got %d questions, want the 5 others", len(stub.got.Questions))
+	if len(stub.got.Questions) != 4 {
+		t.Errorf("got %d questions, want the 4 others", len(stub.got.Questions))
 	}
 }
 
@@ -266,9 +342,12 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	cases := map[string]func(r *systemOneResponse){
 		"no model":             func(r *systemOneResponse) { r.Model = "" },
-		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_analysis") },
+		"missing stage answer": func(r *systemOneResponse) { delete(r.Answers, "stage_research") },
 		"answer to a stage no longer asked": func(r *systemOneResponse) {
 			r.Answers["stage_review"] = answer{Type: questionNoul, Noul: f(0.7)}
+		},
+		"answer to stage_analysis, which specs/clarify removed": func(r *systemOneResponse) {
+			r.Answers["stage_analysis"] = answer{Type: questionNoul, Noul: f(0.92)}
 		},
 		"missing complexity": func(r *systemOneResponse) { delete(r.Answers, "complexity") },
 		"unexpected answer":  func(r *systemOneResponse) { r.Answers["stage_deploy"] = answer{Type: questionNoul, Noul: f(0.5)} },
@@ -338,8 +417,24 @@ func TestProvider_InvalidClassificationResponses(t *testing.T) {
 }
 
 func TestProvider_InvalidPreCheckResponses(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
 	cases := map[string]func(r *systemOneResponse){
 		"missing answer": func(r *systemOneResponse) { delete(r.Answers, "context_depth") },
+		"missing clarity": func(r *systemOneResponse) {
+			delete(r.Answers, "clarity")
+		},
+		"clarity wrong type": func(r *systemOneResponse) {
+			r.Answers["clarity"] = answer{Type: questionChoice}
+		},
+		"clarity missing value": func(r *systemOneResponse) {
+			r.Answers["clarity"] = answer{Type: questionNoul}
+		},
+		"clarity above one": func(r *systemOneResponse) {
+			r.Answers["clarity"] = answer{Type: questionNoul, Noul: f(1.2)}
+		},
+		"unexpected extra answer": func(r *systemOneResponse) {
+			r.Answers["stage_research"] = answer{Type: questionNoul, Noul: f(0.5)}
+		},
 		"wrong options": func(r *systemOneResponse) {
 			a := r.Answers["context_depth"]
 			a.Probabilities = map[string]float64{"none": 0.5, "repo": 0.5}

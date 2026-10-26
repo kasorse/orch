@@ -73,14 +73,14 @@ func TestScenario28_ReviewSeesTheRealChangeSet(t *testing.T) {
 	write("internal/newpkg/new.go", "package newpkg\n\n// Needle is new.\nfunc Needle() int { return 42 }\n")
 	write("go.sum", "example.com/a v1.0.0 h1:AAAA\n"+strings.Repeat("example.com/b v1.0.0 h1:LOCKLINE\n", 2000))
 	write("go.mod", "module fixture\n\nrequire example.com/b v1.0.0\n")
-	write("config/secrets.yaml", "db_password: hunter2-never-in-a-prompt\n")
+	write("config/credentials.yaml", "db_password: hunter2-never-in-a-prompt\n")
 
 	r := newStageRun(t, repoDir)
 	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "review", "review my change")
 	mustSucceed(t, stdout, stderr, err)
 
 	prompt := readPrompt(t, r.promptsDir, "review")
-	for _, want := range []string{"+func Needle() int { return 42 }", "go.sum", "summarized", "+require example.com/b v1.0.0", "config/secrets.yaml", "withheld"} {
+	for _, want := range []string{"+func Needle() int { return 42 }", "go.sum", "summarized", "+require example.com/b v1.0.0", "config/credentials.yaml", "withheld"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the review prompt lacks %q", want)
 		}

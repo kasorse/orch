@@ -31,6 +31,55 @@ func TestOrder(t *testing.T) {
 	}
 }
 
+func TestParents(t *testing.T) {
+	tasks := []Task{
+		tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b", "RF01"),
+		tk("RF04", "a"), tk("RF05", "a", "RF04", "RF02"), tk("RF06", "a", "RF03"),
+	}
+	cases := []struct {
+		id   string
+		want []string
+	}{
+		{"RF01", nil},
+		{"RF02", []string{"RF01"}},
+		{"RF03", nil},
+		{"RF05", []string{"RF02", "RF04"}},
+		{"RF06", []string{"RF01"}},
+	}
+	for _, tc := range cases {
+		got, err := Parents(tasks, tc.id)
+		if err != nil || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("Parents(%s) = %v, %v; want %v", tc.id, got, err, tc.want)
+		}
+	}
+	if _, err := Parents(tasks, "RF99"); err == nil {
+		t.Error("unknown ID: want an error")
+	}
+}
+
+func TestReady(t *testing.T) {
+	tasks := []Task{tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b"), tk("RF04", "a", "RF02", "RF03")}
+	cases := []struct {
+		name   string
+		states map[string]TaskStatus
+		want   []string
+	}{
+		{"nothing started", nil, []string{"RF01", "RF03"}},
+		{"running and done are skipped", map[string]TaskStatus{"RF01": TaskDone, "RF03": TaskRunning}, []string{"RF02"}},
+		{"all dependencies done", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskDone, "RF03": TaskDone}, []string{"RF04"}},
+		{"retryable states", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskFailed, "RF03": TaskConflict}, []string{"RF02", "RF03"}},
+		{"blocked and stopped", map[string]TaskStatus{"RF01": TaskBlocked, "RF03": TaskStopped}, []string{"RF01", "RF03"}},
+		{"all done", map[string]TaskStatus{"RF01": TaskDone, "RF02": TaskDone, "RF03": TaskDone, "RF04": TaskDone}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Ready(tasks, tc.states); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Ready = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestOrderDoesNotDependOnInputOrder(t *testing.T) {
 	a := []Task{tk("RF01", "a"), tk("RF02", "a", "RF01"), tk("RF03", "b", "RF01"), tk("RF04", "a", "RF02", "RF03")}
 	b := []Task{a[3], a[2], a[1], a[0]}
@@ -115,73 +164,20 @@ func TestValidateIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestBase(t *testing.T) {
-	cases := []struct {
-		name  string
-		tasks []Task
-		id    string
-		want  string
-	}{
-		{"none", []Task{tk("RF01", "billing")}, "RF01", ""},
-		{"no dependencies in its repository", []Task{tk("RF01", "billing"), tk("RF02", "gateway", "RF01")}, "RF02", ""},
-		{"one, stacked", []Task{tk("RF01", "billing"), tk("RF02", "billing", "RF01")}, "RF02", "RF01"},
-		{"a chain stacks on the last", []Task{tk("RF01", "billing"), tk("RF02", "billing", "RF01"), tk("RF03", "billing", "RF01", "RF02")}, "RF03", "RF02"},
-		{"a chain of three, the third lists only the second", []Task{tk("RF01", "billing"), tk("RF02", "billing", "RF01"), tk("RF03", "billing", "RF02")}, "RF03", "RF02"},
-		{"an ancestor in the same repository reached through another repository", []Task{tk("RF01", "billing"), tk("RF02", "gateway", "RF01"), tk("RF03", "billing", "RF02")}, "RF03", "RF01"},
-		{"a nearer ancestor reached through another repository", []Task{tk("RF01", "billing"), tk("RF02", "gateway", "RF01"), tk("RF03", "billing", "RF02"), tk("RF04", "billing", "RF01", "RF03")}, "RF04", "RF03"},
-		{"an ancestor covered through another repository", []Task{tk("RF01", "billing"), tk("RF02", "billing", "RF03"), tk("RF03", "gateway", "RF01"), tk("RF04", "billing", "RF01", "RF02")}, "RF04", "RF02"},
-		{"other repositories are ignored", []Task{tk("RF01", "gateway"), tk("RF02", "billing"), tk("RF03", "billing", "RF01", "RF02")}, "RF03", "RF02"},
-		{"a task that is not an ancestor is ignored", []Task{tk("RF01", "billing"), tk("RF02", "billing"), tk("RF03", "billing", "RF01")}, "RF03", "RF01"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := Base(tc.tasks, tc.id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != tc.want {
-				t.Errorf("Base(%s) = %q, want %q", tc.id, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestBaseRefusesTwoBranches(t *testing.T) {
+// Several parents are no error: the story merges them on its spec branch.
+func TestParentsSeveral(t *testing.T) {
 	diamond := []Task{tk("RF01", "billing"), tk("RF02", "billing", "RF01"), tk("RF03", "billing", "RF01"), tk("RF04", "billing", "RF02", "RF03")}
-	_, err := Base(diamond, "RF04")
-	want := "RF04 needs RF02 and RF03 in billing on different branches; make one depend on the other"
-	if err == nil || err.Error() != want {
-		t.Errorf("error %v, want %q", err, want)
+	if got, err := Parents(diamond, "RF04"); err != nil || !reflect.DeepEqual(got, []string{"RF02", "RF03"}) {
+		t.Errorf("Parents(RF04) = %v, %v; want RF02 and RF03", got, err)
 	}
-
-	two := []Task{tk("RF02", "billing"), tk("RF03", "billing"), tk("RF05", "billing", "RF02", "RF03")}
-	_, err = Base(two, "RF05")
-	want = "RF05 needs RF02 and RF03 in billing on different branches; make one depend on the other"
-	if err == nil || err.Error() != want {
-		t.Errorf("error %v, want %q", err, want)
-	}
-
-	three := []Task{tk("RF01", "billing"), tk("RF02", "billing"), tk("RF03", "billing"), tk("RF04", "billing", "RF01", "RF02", "RF03")}
-	_, err = Base(three, "RF04")
-	if err == nil || !strings.Contains(err.Error(), "RF01, RF02 and RF03 in billing") {
-		t.Errorf("error %v", err)
-	}
-
 	// the two branches are met through another repository
 	across := []Task{tk("RF01", "billing"), tk("RF02", "billing"), tk("RF03", "gateway", "RF01", "RF02"), tk("RF04", "billing", "RF03")}
-	_, err = Base(across, "RF04")
-	if err == nil || !strings.Contains(err.Error(), "RF04 needs RF01 and RF02 in billing") {
-		t.Errorf("error %v", err)
+	if got, err := Parents(across, "RF04"); err != nil || !reflect.DeepEqual(got, []string{"RF01", "RF02"}) {
+		t.Errorf("Parents(RF04) = %v, %v; want RF01 and RF02", got, err)
 	}
-}
-
-func TestBaseUnknownTaskAndCycle(t *testing.T) {
-	if _, err := Base([]Task{tk("RF01", "a")}, "RF09"); err == nil {
-		t.Error("an unknown task must be an error")
-	}
-	// a cycle must not hang Base
+	// a cycle must not hang Parents
 	cyc := []Task{tk("RF01", "a", "RF02"), tk("RF02", "a", "RF01")}
-	if _, err := Base(cyc, "RF01"); err != nil {
+	if _, err := Parents(cyc, "RF01"); err != nil {
 		t.Errorf("RF01: %v", err)
 	}
 }

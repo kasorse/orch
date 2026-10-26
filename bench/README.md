@@ -206,7 +206,7 @@ Output: a header with the number of cells, one progress line per finished cell a
 
 ```
 [ 1/20] go-pgqueue-retry-backoff  A  rep1  pass   $0.62   3m10s
-[ 2/20] go-pgqueue-retry-backoff  B  rep1  pass   $0.91   6m02s  analysis,development,testing
+[ 2/20] go-pgqueue-retry-backoff  B  rep1  pass   $0.91   6m02s  investigation,development,testing
 [ 4/20] go-pgqueue-retry-backoff  D  rep1  fail   $0.55   4m20s  oracle: hidden tests exit 1
 ...
 total $18.70 of $30.00, 1h47m0s, 19 results, 1 infra error
@@ -250,8 +250,8 @@ A config is a file named after it in `bench/configs/`; `common.yaml` is shared b
 | config | what | file |
 |---|---|---|
 | `A` | bare Claude Code, the baseline: `claude -p` with Read, Grep, Glob, Edit, Write and Bash, the task text and one line naming `test_command` on stdin | `A.yaml` |
-| `B` | the orchestrator as the owner runs it (`~/orchestrator_v2.yaml`): `--mode auto`, decision and translation on opus, `by_complexity` routes for analyze, plan, implement and review, implement `escalate` to opus, analysis threshold 0.86. Left out: jira, providers, the graphify extension, `auto_commit`, secret-scan allow paths (see the file's comment) | `B.yaml` |
-| `C` | the orchestrator with its defaults: `--mode auto`, everything from `orchestrator.example.yaml` | `C.yaml` |
+| `B` | the orchestrator as the owner runs it (`~/orchestrator_v2.yaml`): `--mode auto`, decision and translation on opus, `by_complexity` routes for investigate, implement and review, implement `escalate` to opus. Left out: jira, providers, the graphify extension, `auto_commit`, secret-scan allow paths (see the file's comment) | `B.yaml` |
+| `C` | the orchestrator with its defaults: `--mode auto`, everything from `orchestrator.example.yaml` except `clarify` (below) | `C.yaml` |
 | `D` | the orchestrator, `development` and `testing` only (`--stage`), C's template otherwise | `D.yaml` |
 
 Every orchestrator config sets `execution.rate_limit_wait: 0s`: the orchestrator stops at once on
@@ -260,6 +260,18 @@ pipeline as it is used beats bare Claude Code; C against A the same for the defa
 what the owner's choices change; D against C what the decision and the read-only stages add.
 Another setting is measured by editing B and running into a new `--out`, not by a new config;
 the config's hash is in every result line, so the two B files stay apart.
+
+**Why every orchestrator config sets `clarify: {enabled: false}`.** The `clarify:` section is
+required in an orchestrator config (MVP.md §49, `specs/clarify/`): a route, or the step switched
+off. A benchmark task is a problem statement a human wrote for a hidden oracle, and it runs
+unattended in `--mode auto`. With the step on, a task rated under `policy.clarify.threshold` would
+cost an extra call that config A does not make and, when still unclear after the re-check, would
+end the run `task needs input` (exit 4) before any stage: a stop that the report would count as
+the pipeline failing the task, not as a property of the task. Off, the pipeline is measured on the
+task as given, in every cell alike. The clarity question is still asked and recorded in
+`decision.json` (`clarity.status: disabled`), so the P(clear) of the tasks can be read from the
+results and `decisions calibrate` shows its distribution. `policy.clarify.threshold` stays in the
+configs because the policy requires it and its value is part of `policy_hash`.
 
 ```yaml
 # bench/configs/common.yaml
@@ -367,8 +379,7 @@ each is there, are in `run.sh` and in
 cd bench && go test ./...
 ```
 
-or `scripts/check.sh` from the repository root, which runs build, vet, test and `gofmt -l` in
-the root module and here. The tests need no network and no real `claude`: `bench/test` runs
+(`scripts/check.sh` at the repository root covers only the root module, not this one). The tests need no network and no real `claude`: `bench/test` runs
 the whole pipeline once against a local fixture repository with fake `orchestrator` and
 `claude` programs. `bench/cmd/orchbench/readme_test.go` keeps this file and `orchbench --help`
 listing the same commands and flags.

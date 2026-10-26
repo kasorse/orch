@@ -25,7 +25,7 @@ func TestScenario48_BudgetWithAProviderThatReportsNoCost(t *testing.T) {
 		t.Fatalf("expected a DependencyError (exit 2), got %T: %v", err, err)
 	}
 	assertContains(t, "the error", err.Error(), "limits.max_cost_usd cannot be enforced: codex (actions.review) reports no cost")
-	assertNotContains(t, "the error", err.Error(), "(actions.analyze)", "(actions.implement)")
+	assertNotContains(t, "the error", err.Error(), "(actions.investigate)", "(actions.implement)")
 
 	if got := invocations(t, r.invocationsLog); len(got) != 0 {
 		t.Errorf("invocations = %v, want none", got)

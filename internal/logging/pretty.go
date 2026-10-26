@@ -17,12 +17,11 @@ import (
 func (r *ConsoleReporter) st() style { return style{on: r.Pretty} }
 
 var actionVerbs = map[domain.ActionType]string{
-	domain.ActionResearch:  "Researching",
-	domain.ActionAnalyze:   "Analyzing",
-	domain.ActionPlan:      "Planning",
-	domain.ActionImplement: "Implementing",
-	domain.ActionTest:      "Running tests",
-	domain.ActionReview:    "Reviewing",
+	domain.ActionResearch:    "Researching",
+	domain.ActionInvestigate: "Investigating",
+	domain.ActionImplement:   "Implementing",
+	domain.ActionTest:        "Running tests",
+	domain.ActionReview:      "Reviewing",
 }
 
 func titleCase(s string) string {
@@ -273,7 +272,7 @@ func (r *ConsoleReporter) prettyRunFinished(run *domain.Run) {
 }
 
 // executionChain renders the steps that ran, in order, each marked by how it ended:
-// "analyze ✓ → implement ✓ → test ✗ → implement ✓ → test ✓".
+// "plan ✓ → implement ✓ → test ✗ → implement ✓ → test ✓".
 func executionChain(st style, execs []domain.StepExecution) string {
 	parts := make([]string, 0, len(execs))
 	for _, exec := range execs {
@@ -388,10 +387,10 @@ func (r *ConsoleReporter) prettyComplexity(t domain.DecisionTrace) string {
 const barWidth = 12
 
 // stageRow renders one stage as a probability bar with its threshold marked:
-// "     analysis     ████████░░│░  0.92  on".
+// "     research      ████████░░│░  0.92  on".
 func (r *ConsoleReporter) stageRow(s domain.StageOutcome) {
 	st := r.st()
-	name := fmt.Sprintf("%-12s", s.Stage)
+	name := fmt.Sprintf("%-13s", s.Stage)
 	var bar, num string
 	if s.Probability != nil {
 		p := *s.Probability

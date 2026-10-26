@@ -33,7 +33,7 @@ import (
 const referenceAnswer = "It is the mul function in calc.sh: it adds its arguments instead of multiplying them."
 
 // stageOrder is the orchestrator's fixed order of stages.
-var stageOrder = []string{"research", "analysis", "planning", "development", "testing", "review"}
+var stageOrder = []string{"research", "investigation", "development", "testing", "review"}
 
 // marker names the task in a prompt.
 var marker = regexp.MustCompile(`\[e2e:([a-z0-9-]+)\]`)
@@ -244,7 +244,7 @@ func writeRun(kind string, cost float64, stages []string) error {
 		overhead = map[string]any{"cost_usd": 0.01, "ms": 500, "calls": 2}
 		enabled = []string{"development", "testing"}
 		if question {
-			enabled = []string{"analysis"}
+			enabled = []string{"investigation"}
 		}
 	}
 	var decided []any
@@ -255,8 +255,8 @@ func writeRun(kind string, cost float64, stages []string) error {
 
 	var executions []any
 	if question {
-		executions = append(executions, map[string]any{"index": 1, "action": "analyze", "status": "completed", "artifact_path": "artifacts/001-analyze.json", "usage": usage})
-		if err := writeJSON(filepath.Join(dir, "artifacts", "001-analyze.json"), map[string]any{"answer": answer(kind)}); err != nil {
+		executions = append(executions, map[string]any{"index": 1, "action": "investigate", "status": "completed", "artifact_path": "artifacts/001-investigate.json", "usage": usage})
+		if err := writeJSON(filepath.Join(dir, "artifacts", "001-investigate.json"), map[string]any{"answer": answer(kind)}); err != nil {
 			return err
 		}
 	} else {

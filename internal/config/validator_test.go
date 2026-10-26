@@ -16,11 +16,10 @@ func validConfig() Config {
 	return Config{
 		Version: CurrentVersion,
 		Actions: ActionsConfig{
-			Research:  ActionConfig{ProviderModel: ProviderModel{Provider: "gemini", Model: "pro"}},
-			Analyze:   ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
-			Plan:      ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
-			Implement: ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "opus"}},
-			Review:    ActionConfig{ProviderModel: ProviderModel{Provider: "codex", Model: "gpt"}},
+			Research:    ActionConfig{ProviderModel: ProviderModel{Provider: "gemini", Model: "pro"}},
+			Investigate: ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}},
+			Implement:   ActionConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "opus"}},
+			Review:      ActionConfig{ProviderModel: ProviderModel{Provider: "codex", Model: "gpt"}},
 		},
 		Test:      TestConfig{Command: "go test ./..."},
 		Limits:    LimitsConfig{MaxSteps: 12, MaxFixIterations: 2},
@@ -41,12 +40,14 @@ func validConfig() Config {
 			ProviderModel: ProviderModel{Provider: "claude", Model: "haiku"},
 			Timeout:       60 * time.Second,
 		},
+		Clarify: &ClarifyConfig{Enabled: boolPtr(false)},
 		Policy: PolicyConfig{
 			ContextDepth: ContextDepthPolicyConfig{ProjectThreshold: float64Ptr(0.5)},
+			Clarify:      ClarifyPolicyConfig{Threshold: float64Ptr(0.80)},
 			Complexity:   ComplexityPolicyConfig{Cuts: &ComplexityCutsConfig{Medium: float64Ptr(0.50), Complex: float64Ptr(1.40)}},
 			Stages: StagePolicyConfig{
-				Thresholds: map[string]float64{"research": 0.70, "analysis": 0.60, "development": 0.60},
-				Force:      map[string][]string{"complex": {"analysis", "planning", "review"}},
+				Thresholds: map[string]float64{"research": 0.70, "development": 0.60},
+				Force:      map[string][]string{"complex": {"investigation", "review"}},
 			},
 		},
 		Context: ContextConfig{MaxFiles: 20, MaxBytes: 24576},
@@ -206,7 +207,7 @@ func TestValidate_AggregatesAllProblems(t *testing.T) {
 	}
 	msg := err.Error()
 	// Every missing action's provider/model should be reported, not just the first.
-	for _, action := range []string{"research", "analyze", "plan", "implement", "review", "translation"} {
+	for _, action := range []string{"research", "investigate", "implement", "review", "translation"} {
 		if !strings.Contains(msg, action+".provider is required") {
 			t.Errorf("expected aggregated error to mention %s.provider, got: %s", action, msg)
 		}
@@ -276,17 +277,17 @@ func TestResolveBinds(t *testing.T) {
 
 func TestValidate_Effort(t *testing.T) {
 	cfg := validConfig()
-	cfg.Actions.Plan.Provider, cfg.Actions.Plan.Effort = "claude", "high"
+	cfg.Actions.Investigate.Provider, cfg.Actions.Investigate.Effort = "claude", "high"
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("valid effort rejected: %v", err)
 	}
 
-	cfg.Actions.Plan.Effort = "turbo"
-	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "plan.effort") {
+	cfg.Actions.Investigate.Effort = "turbo"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "investigate.effort") {
 		t.Errorf("bad level not reported: %v", err)
 	}
 
-	cfg.Actions.Plan.Effort, cfg.Actions.Plan.Provider = "high", "gemini"
+	cfg.Actions.Investigate.Effort, cfg.Actions.Investigate.Provider = "high", "gemini"
 	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "only supported with provider claude") {
 		t.Errorf("effort on gemini not refused: %v", err)
 	}
@@ -409,9 +410,9 @@ func TestValidate_Verify(t *testing.T) {
 	}{
 		{"no sandbox", func(c *Config) { c.Test.Sandbox = SandboxNone }, "actions.implement.verify needs test.sandbox bwrap"},
 		{"no test command", func(c *Config) { c.Test.Command = "" }, "actions.implement.verify needs test.command"},
-		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "codex" }, "actions.implement.verify is only supported with provider claude"},
+		{"not claude", func(c *Config) { c.Actions.Implement.Provider = "gemini" }, "actions.implement.verify is only supported with provider claude or codex"},
 		{"on review", func(c *Config) { c.Actions.Review.Verify = true }, "actions.review.verify: unknown key"},
-		{"written on plan", func(c *Config) { c.Actions.Plan.verifySet = true }, "actions.plan.verify: unknown key"},
+		{"written on investigate", func(c *Config) { c.Actions.Investigate.verifySet = true }, "actions.investigate.verify: unknown key"},
 		{"zero calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &zero }, "limits.verify.max_calls_per_step must be between 1 and 50, got 0"},
 		{"too many calls", func(c *Config) { c.Limits.Verify.MaxCallsPerStep = &fiftyOne }, "limits.verify.max_calls_per_step must be between 1 and 50, got 51"},
 		{"negative timeout", func(c *Config) { c.Limits.Verify.CallTimeout = -time.Second }, "limits.verify.call_timeout must be a positive duration"},
@@ -532,8 +533,8 @@ func TestValidate_AllowedModels(t *testing.T) {
 		"base model, the spec's example": {func(c *Config) { c.AllowedModels = []string{"pro", "sonnet", "gpt", "haiku"} },
 			"actions.implement: model opus is not in allowed_models (" + org + ")"},
 		"by_complexity": {func(c *Config) {
-			c.Actions.Plan.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "mythos"}}
-		}, "actions.plan.by_complexity.complex: model mythos is not in allowed_models (" + org + ")"},
+			c.Actions.Investigate.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Model: "mythos"}}
+		}, "actions.investigate.by_complexity.complex: model mythos is not in allowed_models (" + org + ")"},
 		"by_complexity escalate": {func(c *Config) {
 			c.Actions.Implement.ByComplexity = map[domain.Complexity]ModelEffort{domain.ComplexityComplex: {Effort: "high", Escalate: &Escalation{Model: "mythos"}}}
 		}, "actions.implement.by_complexity.complex.escalate: model mythos is not in allowed_models (" + org + ")"},
@@ -544,10 +545,14 @@ func TestValidate_AllowedModels(t *testing.T) {
 		"LLM decision provider": {func(c *Config) {
 			c.Decision.Provider, c.Decision.Model = "claude", "tiny"
 		}, "decision: model tiny is not in allowed_models (" + org + ")"},
-		"route without a model": {func(c *Config) { c.Actions.Analyze.Model = "" },
-			"actions.analyze: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+		"route without a model": {func(c *Config) { c.Actions.Investigate.Model = "" },
+			"actions.investigate: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 		"translator without a model": {func(c *Config) { c.Translation.Model = "" },
 			"translation: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
+		"clarify step": {func(c *Config) { c.Clarify = clarifyRoute(); c.Clarify.Model = "tiny" },
+			"clarify: model tiny is not in allowed_models (" + org + ")"},
+		"clarify step without a model": {func(c *Config) { c.Clarify = clarifyRoute(); c.Clarify.Model = "" },
+			"clarify: no model is named; allowed_models (" + org + ") cannot check the CLI default"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := allowedConfig()

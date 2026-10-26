@@ -3,11 +3,15 @@ package app
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"os"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
+	"orchestrator/internal/config"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/story"
@@ -76,6 +80,95 @@ func TestPickStoryRun(t *testing.T) {
 	}
 	if got := pick("refunds", "RF04", 1, ""); got != "" {
 		t.Errorf("a task without a run = %q", got)
+	}
+}
+
+// --parallel wins over story.max_parallel, which wins over nothing at all (one slot).
+func TestStoryRunnerSlots(t *testing.T) {
+	cases := []struct {
+		flag, cfg, want int
+	}{{0, 0, 1}, {0, 1, 1}, {0, 4, 4}, {2, 4, 2}, {8, 1, 8}}
+	for _, tc := range cases {
+		r := &storyRunner{opts: storyRunOptions{parallel: tc.flag}, cfg: config.Config{Story: &config.StoryConfig{MaxParallel: tc.cfg}}}
+		if got := r.slots(); got != tc.want {
+			t.Errorf("--parallel %d, max_parallel %d: slots = %d, want %d", tc.flag, tc.cfg, got, tc.want)
+		}
+	}
+}
+
+// Nothing new is started once a task ends without a commit, the loop failed, the budget is reached
+// or the operator cancelled.
+func TestDispatchLoop_Draining(t *testing.T) {
+	lp := &dispatchLoop{}
+	if lp.draining() {
+		t.Fatal("a fresh loop drains")
+	}
+	lp.ended("RF01", story.TaskDone, nil)
+	if lp.draining() || len(lp.notDone) != 0 {
+		t.Errorf("a done task stops the loop: %+v", lp)
+	}
+	lp.ended("RF02", story.TaskFailed, nil)
+	if !lp.draining() || len(lp.notDone) != 1 || lp.notDone[0] != "RF02" {
+		t.Errorf("a failed task does not stop the loop: %+v", lp)
+	}
+	first := errors.New("first")
+	lp = &dispatchLoop{}
+	lp.ended("RF01", "", first)
+	lp.ended("RF02", "", errors.New("second"))
+	if !lp.draining() || lp.err != first {
+		t.Errorf("err = %v, want the first error and a draining loop", lp.err)
+	}
+	for _, lp := range []*dispatchLoop{{budgetErr: errors.New("budget")}, {stoppedBefore: "RF03"}} {
+		if !lp.draining() {
+			t.Errorf("%+v does not drain", lp)
+		}
+	}
+}
+
+func TestExecutionsCostUSD(t *testing.T) {
+	run := &domain.Run{Executions: []domain.StepExecution{
+		{Usage: &domain.Usage{CostUSD: 0.5}}, {}, {Usage: &domain.Usage{CostUSD: 0.25}},
+	}}
+	if got := executionsCostUSD(run); got != 0.75 {
+		t.Errorf("cost = %v, want 0.75", got)
+	}
+	if got := executionsCostUSD(&domain.Run{}); got != 0 {
+		t.Errorf("a run without executions costs %v", got)
+	}
+}
+
+// A run another process holds locked is a sibling in progress: settle takes the task's run from
+// the others, and none at all when that is the only one.
+func TestPickSettledRun(t *testing.T) {
+	t0 := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	older, newer := t.TempDir(), t.TempDir()
+	found := []persistence.FoundRun{storyRunAt("older", "refunds", "RF02", 1, t0), storyRunAt("newer", "refunds", "RF02", 1, t0.Add(time.Hour))}
+	found[0].Dir, found[1].Dir = older, newer
+
+	if run := pickSettledRun(found, "refunds", "RF02", 1, ""); run == nil || run.ID != "newer" {
+		t.Fatalf("unlocked: run = %+v, want the newest", run)
+	}
+	hold := func(dir string) {
+		t.Helper()
+		f, err := os.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { f.Close() })
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hold(newer)
+	if run := pickSettledRun(found, "refunds", "RF02", 1, ""); run == nil || run.ID != "older" {
+		t.Errorf("the newest is locked: run = %+v, want the older", run)
+	}
+	hold(older)
+	if run := pickSettledRun(found, "refunds", "RF02", 1, ""); run != nil {
+		t.Errorf("both are locked: run = %+v, want none", run)
+	}
+	if found[0].Dir != older || found[1].Dir != newer {
+		t.Error("the caller's runs were changed")
 	}
 }
 

@@ -11,8 +11,9 @@ import (
 
 func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
 	prompt := BuildResearchPrompt(ResearchPromptInput{
-		Task:        run.Task.Description,
-		FinalAnswer: isFinalReadOnlyStep(run, domain.ActionResearch),
+		Task:          run.Task.Description,
+		Clarification: run.Task.Clarification.Render(),
+		FinalAnswer:   isFinalReadOnlyStep(run, domain.ActionResearch),
 	})
 
 	pm, source := d.route(run, domain.ActionResearch)
@@ -34,7 +35,7 @@ func (d *Dispatcher) executeResearch(ctx context.Context, run *domain.Run) (work
 	}, nil
 }
 
-// parseResearch is lenient, matching parseAnalysis - see its comment.
+// parseResearch is lenient, matching parseInvestigation - see its comment.
 func parseResearch(output string) domain.ResearchArtifact {
 	var artifact domain.ResearchArtifact
 	if obj := extractJSONObject(output); obj != "" {
@@ -47,9 +48,8 @@ func parseResearch(output string) domain.ResearchArtifact {
 
 // readOnlyActions are the stages that inspect without changing the repository.
 var readOnlyActions = map[domain.ActionType]bool{
-	domain.ActionResearch: true,
-	domain.ActionAnalyze:  true,
-	domain.ActionPlan:     true,
+	domain.ActionResearch:    true,
+	domain.ActionInvestigate: true,
 }
 
 // isFinalReadOnlyStep reports whether action is the last read-only step of a workflow
@@ -81,14 +81,9 @@ func (d *Dispatcher) FinalAnswer(run *domain.Run) string {
 		switch run.Workflow.Steps[i].Action {
 		case domain.ActionImplement:
 			return ""
-		case domain.ActionPlan:
-			if d.lastPlan != nil {
-				return d.lastPlan.Answer
-			}
-			return ""
-		case domain.ActionAnalyze:
-			if d.lastAnalysis != nil {
-				return d.lastAnalysis.Answer
+		case domain.ActionInvestigate:
+			if d.lastInvestigation != nil {
+				return d.lastInvestigation.Answer
 			}
 			return ""
 		case domain.ActionResearch:

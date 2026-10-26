@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"orchestrator/internal/story"
 )
 
 func loadStoryConfig(t *testing.T, extra string) (Config, error) {
@@ -23,6 +25,68 @@ func TestStoryConfig_Defaults(t *testing.T) {
 	}
 	if s.MaxServices != 5 || s.MaxTasks != 12 || s.SpecDir != "specs" || s.MaxCostUSD != nil || len(s.JiraIssueTypes) != 0 {
 		t.Errorf("defaults = %+v", s)
+	}
+}
+
+// story.max_parallel is 1 to 8 and defaults to 1.
+func TestStoryConfig_MaxParallel(t *testing.T) {
+	cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Story.MaxParallel != 1 {
+		t.Errorf("default max_parallel = %d, want 1", cfg.Story.MaxParallel)
+	}
+	for _, n := range []string{"1", "8"} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n  max_parallel: "+n+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := validConfig()
+		valid.Story = cfg.Story
+		if err := Validate(valid); err != nil {
+			t.Errorf("max_parallel %s: %v", n, err)
+		}
+	}
+	for _, n := range []string{"0", "9", "-1"} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n  max_parallel: "+n+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		invalid := validConfig()
+		invalid.Story = cfg.Story
+		if err := Validate(invalid); err == nil || !strings.Contains(err.Error(), "story.max_parallel must be between 1 and 8") {
+			t.Errorf("max_parallel %s: err = %v, want a config error", n, err)
+		}
+	}
+}
+
+// story.max_acceptance_chars is 50 to 2000 and defaults to 300, the story package's own limits.
+func TestStoryConfig_MaxAcceptanceChars(t *testing.T) {
+	if DefaultStoryMaxAcceptanceChars != story.MaxAcceptanceRunes || MaxStoryMaxAcceptanceChars != story.MaxAcceptanceRunesCeiling {
+		t.Fatalf("the config's limits drifted from the story package's")
+	}
+	cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Story.MaxAcceptanceChars != 300 {
+		t.Errorf("default max_acceptance_chars = %d, want 300", cfg.Story.MaxAcceptanceChars)
+	}
+	for _, c := range []struct {
+		n  string
+		ok bool
+	}{{"50", true}, {"2000", true}, {"49", false}, {"2001", false}, {"0", false}} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n  max_acceptance_chars: "+c.n+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := validConfig()
+		valid.Story = cfg.Story
+		err = Validate(valid)
+		if c.ok != (err == nil) || (!c.ok && !strings.Contains(err.Error(), "story.max_acceptance_chars must be between 50 and 2000")) {
+			t.Errorf("max_acceptance_chars %s: err = %v", c.n, err)
+		}
 	}
 }
 
@@ -92,11 +156,10 @@ func TestStoryBudgetProblems(t *testing.T) {
 	cfg := validConfig()
 	cost := 5.0
 	cfg.Story = &StoryConfig{MaxServices: 5, MaxTasks: 12, SpecDir: "specs", MaxCostUSD: &cost}
-	cfg.Actions.Analyze.Provider = "codex"
-	cfg.Actions.Plan.Provider = "claude"
+	cfg.Actions.Investigate.Provider = "codex"
 
 	got := storyBudgetProblems(cfg, costStub{"claude": true})
-	if len(got) != 1 || !strings.Contains(got[0], "story.max_cost_usd") || !strings.Contains(got[0], "actions.analyze") {
+	if len(got) != 1 || !strings.Contains(got[0], "story.max_cost_usd") || !strings.Contains(got[0], "actions.investigate") {
 		t.Errorf("problems = %v", got)
 	}
 	if got := storyBudgetProblems(cfg, costStub{"claude": true, "codex": true}); len(got) != 0 {

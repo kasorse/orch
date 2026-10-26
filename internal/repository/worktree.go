@@ -281,3 +281,109 @@ func (r *Repository) MergeConflicts(ctx context.Context, ours, theirs string) (f
 	}
 	return nil, true, &apperr.RepositoryError{Msg: "git merge-tree failed: " + strings.TrimSpace(result.Stderr)}
 }
+
+// checkRefs refuses, without running git, a ref that is empty or starts with "-": it would be
+// read as an option.
+func checkRefs(what string, refs ...string) error {
+	for _, ref := range refs {
+		if ref == "" || strings.HasPrefix(ref, "-") {
+			return &apperr.RepositoryError{Msg: fmt.Sprintf("cannot %s: invalid ref %q", what, ref)}
+		}
+	}
+	return nil
+}
+
+// MergeTreeWrite merges theirs into ours with merge-tree --write-tree, which writes objects only
+// (no checkout, no index, no hook). A clean merge returns its tree; a conflict returns the
+// conflicted paths and no tree. Git older than 2.38 is an error: the merge cannot be made.
+func (r *Repository) MergeTreeWrite(ctx context.Context, ours, theirs string) (tree string, conflicts []string, err error) {
+	if err := checkRefs("merge", ours, theirs); err != nil {
+		return "", nil, err
+	}
+	ok, err := r.mergeTreeSupported(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return "", nil, &apperr.RepositoryError{Msg: "git merge-tree --write-tree needs git 2.38 or newer"}
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", ours, theirs}, WorkingDir: r.Dir})
+	if err != nil {
+		return "", nil, &apperr.RepositoryError{Msg: "failed to run git merge-tree", Err: err}
+	}
+	fields := strings.Split(result.Stdout, "\x00")
+	switch result.ExitCode {
+	case 0:
+		if tree = strings.TrimSpace(fields[0]); tree == "" {
+			return "", nil, &apperr.RepositoryError{Msg: "git merge-tree answered no tree"}
+		}
+		return tree, nil, nil
+	case 1:
+		// The first field is the tree id, the rest the conflicted paths. git also exits 1,
+		// with no tree, for a ref it cannot resolve.
+		if strings.TrimSpace(fields[0]) == "" {
+			return "", nil, &apperr.RepositoryError{Msg: "git merge-tree failed: " + strings.TrimSpace(result.Stderr)}
+		}
+		for _, f := range fields[1:] {
+			if f != "" {
+				conflicts = append(conflicts, f)
+			}
+		}
+		if len(conflicts) == 0 {
+			return "", nil, &apperr.RepositoryError{Msg: "git merge-tree reported a conflict without a path"}
+		}
+		return "", conflicts, nil
+	}
+	return "", nil, &apperr.RepositoryError{Msg: "git merge-tree failed: " + strings.TrimSpace(result.Stderr)}
+}
+
+// CommitTree writes a commit of tree on top of parents, in that order, with message, and returns
+// it. No ref moves. The author and committer are the operator's git identity.
+func (r *Repository) CommitTree(ctx context.Context, tree string, parents []string, message string) (string, error) {
+	if err := checkRefs("commit a tree", append([]string{tree}, parents...)...); err != nil {
+		return "", err
+	}
+	args := []string{"commit-tree", tree}
+	for _, p := range parents {
+		args = append(args, "-p", p)
+	}
+	args = append(args, "-m", message)
+	out, err := r.git(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// UpdateRef points ref (a full name, refs/heads/...) at newSHA, but only if it points at oldSHA
+// now; an empty oldSHA means the ref must not exist yet. A ref that moved meanwhile is an error.
+func (r *Repository) UpdateRef(ctx context.Context, ref, newSHA, oldSHA string) error {
+	if err := checkRefs("update a ref", ref, newSHA); err != nil {
+		return err
+	}
+	if strings.HasPrefix(oldSHA, "-") {
+		return &apperr.RepositoryError{Msg: fmt.Sprintf("cannot update a ref: invalid ref %q", oldSHA)}
+	}
+	// An empty old value is an argument of its own: git reads it as "must not exist".
+	_, err := r.git(ctx, "update-ref", ref, newSHA, oldSHA)
+	return err
+}
+
+// IsAncestor reports whether ancestor is reachable from descendant (a commit is its own
+// ancestor).
+func (r *Repository) IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error) {
+	if err := checkRefs("compare commits", ancestor, descendant); err != nil {
+		return false, err
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git", Args: []string{"merge-base", "--is-ancestor", ancestor, descendant}, WorkingDir: r.Dir})
+	if err != nil {
+		return false, &apperr.RepositoryError{Msg: "failed to run git merge-base", Err: err}
+	}
+	switch result.ExitCode {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	}
+	return false, &apperr.RepositoryError{Msg: "git merge-base failed: " + strings.TrimSpace(result.Stderr)}
+}

@@ -20,7 +20,7 @@ func TestScenario3_TestLoop(t *testing.T) {
 	invocationsLog := filepath.Join(t.TempDir(), "invocations.log")
 	fixedContent := writeFixedFixtureFile(t)
 
-	writeResponse(t, responsesDir, "analyze", analyzeResponse)
+	writeResponse(t, responsesDir, "investigate", readOnlyResponse)
 	writeResponse(t, responsesDir, "implement", implementResponse)
 	writeResponse(t, responsesDir, "review", reviewPassResponse)
 
@@ -41,7 +41,7 @@ func TestScenario3_TestLoop(t *testing.T) {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	want := []string{"analyze", "implement", "implement", "review"}
+	want := []string{"investigate", "implement", "implement", "review"}
 	if got := invocations(t, invocationsLog); !equalStrings(got, want) {
 		t.Errorf("invocations = %v, want %v", got, want)
 	}

@@ -38,7 +38,7 @@ func clearAuthEnv(t *testing.T) {
 const authRequest = "исправь Add() в fixture.go, чтобы она складывала, а не вычитала"
 
 // authCalls are the calls of a full run with the LLM decision provider, in order.
-var authCalls = []string{"translate", "decide-context", "decide-classify", "analyze", "implement", "review"}
+var authCalls = []string{"translate", "decide-context", "decide-classify", "investigate", "implement", "review"}
 
 // authRun prepares a full run whose translator and decision provider are claude (or what
 // mutate sets) and returns its config and the directory FAKE_ENV_DIR points to.
@@ -49,10 +49,10 @@ func authRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) (cfg,
 	t.Setenv("JEV_API_KEY", "")
 	for name, body := range map[string]string{
 		"translate":      "Fix Add() in fixture.go so that it adds instead of subtracting",
-		"decide-context": `{"context_depth": {"none": 0.9, "project": 0.1}}`,
+		"decide-context": `{"context_depth": {"none": 0.9, "project": 0.1}, "clarity": 0.9}`,
 		"decide-classify": `{"complexity": {"simple": 0.1, "medium": 0.7, "complex": 0.2},
  "complexity_score": {"0": 0.1, "1": 0.7, "2": 0.2},
- "stages": {"research": 0.05, "analysis": 0.9, "development": 0.95},
+ "stages": {"research": 0.05, "development": 0.95},
  "scope": 0.2}`,
 	} {
 		writeResponse(t, responses, name, body)

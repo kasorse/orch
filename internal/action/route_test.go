@@ -10,8 +10,8 @@ import (
 
 func routedDispatcher(client *fakeClient) *Dispatcher {
 	d := newDispatcher(client)
-	d.Config.Actions.Analyze.Effort = "medium"
-	d.Config.Actions.Analyze.ByComplexity = map[domain.Complexity]config.ModelEffort{
+	d.Config.Actions.Investigate.Effort = "medium"
+	d.Config.Actions.Investigate.ByComplexity = map[domain.Complexity]config.ModelEffort{
 		domain.ComplexitySimple: {Model: "haiku", Effort: "low"},
 	}
 	return d
@@ -38,7 +38,7 @@ func TestExecute_RoutesByDecidedComplexity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &fakeClient{output: `{"summary":"s"}`}
 			d := routedDispatcher(client)
-			outcome, err := d.Execute(context.Background(), domain.ActionAnalyze, tc.run)
+			outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, tc.run)
 			if err != nil {
 				t.Fatalf("Execute: %v", err)
 			}
@@ -57,7 +57,7 @@ func TestExecute_RoutesByDecidedComplexity(t *testing.T) {
 func TestExecute_FailedCallRecordsModelSource(t *testing.T) {
 	client := &fakeClient{err: context.DeadlineExceeded}
 	d := routedDispatcher(client)
-	outcome, err := d.Execute(context.Background(), domain.ActionAnalyze, runDecided(domain.DecisionSourceJev, domain.ComplexitySimple))
+	outcome, err := d.Execute(context.Background(), domain.ActionInvestigate, runDecided(domain.DecisionSourceJev, domain.ComplexitySimple))
 	if err == nil {
 		t.Fatal("expected the call error")
 	}
@@ -89,7 +89,7 @@ func TestRoute_EscalatesAFix(t *testing.T) {
 		source string
 	}{
 		{"first implement", runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), "haiku", "by_complexity.simple"},
-		{"after analysis", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionAnalyze)), "haiku", "by_complexity.simple"},
+		{"after an investigation", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionInvestigate)), "haiku", "by_complexity.simple"},
 		{"after a failed test", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest)), "sonnet", "escalated.medium"},
 		{"after a review", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest, domain.ActionReview)), "sonnet", "escalated.medium"},
 		{"resume repeats a failed fix", withHistory(runDecided(domain.DecisionSourceLLM, domain.ComplexitySimple), history(domain.ActionImplement, domain.ActionTest, domain.ActionImplement)), "sonnet", "escalated.medium"},

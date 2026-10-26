@@ -25,8 +25,8 @@ func TestScenario25_TestEnvAllowlist(t *testing.T) {
 		o.testCommand = "env > '" + envOut + "'"
 		o.testEnvPass = []string{"ORCH_SCENARIO25_EXTRA"}
 	})
-	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "analyze", analyzeResponse)
-	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "analysis", "--stage", "testing", "check the tests")
+	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "investigate", readOnlyResponse)
+	stdout, stderr, err := runOrchestrator(t, r.repoDir, r.cfg, "run", "--stage", "investigation", "--stage", "testing", "check the tests")
 	mustSucceed(t, stdout, stderr, err)
 
 	testEnv := readEnvDump(t, envOut)
@@ -41,7 +41,7 @@ func TestScenario25_TestEnvAllowlist(t *testing.T) {
 		}
 	}
 
-	providerEnv := readEnvDump(t, filepath.Join(envDir, "analyze.env"))
+	providerEnv := readEnvDump(t, filepath.Join(envDir, "investigate.env"))
 	// ANTHROPIC_API_KEY is a credential of the config now (specs/claude-auth/SPEC.md §5), so
 	// no child inherits it. The claude adapter passes it on only in api mode, from the key it
 	// was given (specs/claude-auth/SPEC.md §7); this run is in api mode (auto with the key set).

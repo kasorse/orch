@@ -13,6 +13,8 @@ import (
 
 func float64Ptr(v float64) *float64 { return &v }
 
+func boolPtr(v bool) *bool { return &v }
+
 func TestValidateDecision_Valid(t *testing.T) {
 	if err := Validate(validConfig()); err != nil {
 		t.Fatalf("expected valid config to pass, got: %v", err)
@@ -221,6 +223,11 @@ func TestValidateDecision_Policy(t *testing.T) {
 		{"missing project_threshold", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = nil }, "policy.context_depth.project_threshold is required"},
 		{"project_threshold above 1", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(1.5) }, "project_threshold must be in [0, 1]"},
 		{"project_threshold negative", func(c *Config) { c.Policy.ContextDepth.ProjectThreshold = float64Ptr(-0.1) }, "project_threshold must be in [0, 1]"},
+		{"missing clarify.threshold", func(c *Config) { c.Policy.Clarify.Threshold = nil }, "policy.clarify.threshold is required"},
+		{"clarify.threshold at 0", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(0) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold negative", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(-0.1) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold above 1", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(1.01) }, "policy.clarify.threshold must be in (0, 1]"},
+		{"clarify.threshold NaN", func(c *Config) { c.Policy.Clarify.Threshold = float64Ptr(math.NaN()) }, "policy.clarify.threshold must be in (0, 1]"},
 		{"missing complexity.cuts", func(c *Config) { c.Policy.Complexity.Cuts = nil }, "policy.complexity.cuts is required"},
 		{"missing cuts.complex", func(c *Config) { c.Policy.Complexity.Cuts.Complex = nil }, "policy.complexity.cuts.complex is required"},
 		{"missing cuts.medium", func(c *Config) { c.Policy.Complexity.Cuts.Medium = nil }, "policy.complexity.cuts.medium is required"},
@@ -230,11 +237,26 @@ func TestValidateDecision_Policy(t *testing.T) {
 		{"old complexity.medium", func(c *Config) { c.Policy.Complexity.Medium = 0.7 }, "policy.complexity.medium was replaced by policy.complexity.cuts"},
 		{"old complexity.complex", func(c *Config) { c.Policy.Complexity.Complex = 0.55 }, "policy.complexity.complex was replaced by policy.complexity.cuts"},
 		{"missing stage threshold", func(c *Config) {
-			delete(c.Policy.Stages.Thresholds, "analysis")
-		}, "policy.stages.thresholds.analysis is required"},
+			delete(c.Policy.Stages.Thresholds, "research")
+		}, "policy.stages.thresholds.research is required"},
 		{"stage threshold out of range", func(c *Config) {
-			c.Policy.Stages.Thresholds["analysis"] = 1.5
-		}, "policy.stages.thresholds.analysis must be in [0, 1]"},
+			c.Policy.Stages.Thresholds["research"] = 1.5
+		}, "policy.stages.thresholds.research must be in [0, 1]"},
+		{"analysis threshold names its replacement", func(c *Config) {
+			c.Policy.Stages.Thresholds["analysis"] = 0.6
+		}, "policy.clarify.threshold"},
+		{"analysis threshold names the spec", func(c *Config) {
+			c.Policy.Stages.Thresholds["analysis"] = 0.6
+		}, "policy.stages.thresholds.analysis: analysis is not a stage any more"},
+		{"analysis in the template", func(c *Config) {
+			c.Policy.Stages.Force = map[string][]string{"complex": {"analysis", "review"}}
+		}, "policy.stages.force.complex: analysis is not a stage any more"},
+		{"actions.analyze", func(c *Config) {
+			c.Actions.Analyze = map[string]any{"provider": "claude", "model": "sonnet"}
+		}, "actions.analyze was removed"},
+		{"actions.analyze names the spec", func(c *Config) {
+			c.Actions.Analyze = map[string]any{"provider": "claude", "model": "sonnet"}
+		}, "specs/clarify"},
 		{"threshold of a stage no longer asked", func(c *Config) {
 			c.Policy.Stages.Thresholds["review"] = 0.7
 		}, "policy.stages.thresholds.review: review is not asked any more"},
@@ -262,9 +284,17 @@ func TestValidateDecision_Policy(t *testing.T) {
 	// distinct from an omitted one.
 	cfg := validConfig()
 	cfg.Policy.ContextDepth.ProjectThreshold = float64Ptr(0)
-	cfg.Policy.Stages.Thresholds["analysis"] = 0
+	cfg.Policy.Stages.Thresholds["research"] = 0
 	if err := Validate(cfg); err != nil {
 		t.Errorf("threshold of exactly 0 rejected: %v", err)
+	}
+
+	// The clarity threshold is in (0, 1]: 1 is a deliberate (if extreme) choice, 0 would pass
+	// every task.
+	cfg = validConfig()
+	cfg.Policy.Clarify.Threshold = float64Ptr(1)
+	if err := Validate(cfg); err != nil {
+		t.Errorf("clarify.threshold of exactly 1 rejected: %v", err)
 	}
 }
 
@@ -331,6 +361,95 @@ func TestValidateDecision_Context(t *testing.T) {
 	}
 }
 
+func TestValidateClarifyDocs(t *testing.T) {
+	hundred, ok := 100, 4096
+	off := boolPtr(false)
+	tests := []struct {
+		name    string
+		clarify *ClarifyConfig
+		wantErr string
+	}{
+		{"defaults", &ClarifyConfig{Enabled: off}, ""},
+		{"valid", &ClarifyConfig{Enabled: off, Docs: []string{"docs/**/*.md"}, MaxBytes: &ok}, ""},
+		{"invalid glob", &ClarifyConfig{Enabled: off, Docs: []string{"docs/["}}, "clarify.docs[0]"},
+		{"max_bytes too small", &ClarifyConfig{Enabled: off, MaxBytes: &hundred}, "clarify.max_bytes must be between 1024 and 131072, got 100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Clarify = tt.clarify
+			err := Validate(cfg)
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("Validate() = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+	var c *ClarifyConfig
+	if g := c.DocGlobs(); len(g) != 1 || g[0] != "**/*.md" || c.InstructionBytes() != 16384 {
+		t.Errorf("defaults = %v, %d", g, c.InstructionBytes())
+	}
+}
+
+// clarifyRoute is an enabled clarify section: a route and a timeout.
+func clarifyRoute() *ClarifyConfig {
+	return &ClarifyConfig{ProviderModel: ProviderModel{Provider: "claude", Model: "sonnet"}, Timeout: 2 * time.Minute}
+}
+
+func TestValidateClarifySection(t *testing.T) {
+	rounds := func(n int) *int { return &n }
+	tests := []struct {
+		name    string
+		clarify func() *ClarifyConfig
+		wantErr string
+	}{
+		{"absent", func() *ClarifyConfig { return nil }, "clarify is required"},
+		{"disabled alone", func() *ClarifyConfig { return &ClarifyConfig{Enabled: boolPtr(false)} }, ""},
+		{"disabled with a route", func() *ClarifyConfig { c := clarifyRoute(); c.Enabled = boolPtr(false); return c }, ""},
+		{"disabled needs no valid route", func() *ClarifyConfig {
+			return &ClarifyConfig{Enabled: boolPtr(false), ProviderModel: ProviderModel{Provider: "openrouter"}}
+		}, ""},
+		{"enabled by default needs a route", func() *ClarifyConfig { return &ClarifyConfig{} }, "clarify.provider is required"},
+		{"enabled explicitly", func() *ClarifyConfig { c := clarifyRoute(); c.Enabled = boolPtr(true); return c }, ""},
+		{"a route", clarifyRoute, ""},
+		{"no model", func() *ClarifyConfig { c := clarifyRoute(); c.Model = ""; return c }, "clarify.model is required"},
+		{"unsupported provider", func() *ClarifyConfig { c := clarifyRoute(); c.Provider = "openrouter"; return c },
+			`clarify.provider "openrouter" is not a supported provider`},
+		{"no timeout", func() *ClarifyConfig { c := clarifyRoute(); c.Timeout = 0; return c }, "clarify.timeout must be a positive duration"},
+		{"unknown effort", func() *ClarifyConfig { c := clarifyRoute(); c.Effort = "extreme"; return c }, "clarify.effort"},
+		{"effort", func() *ClarifyConfig { c := clarifyRoute(); c.Effort = "medium"; return c }, ""},
+		{"max_rounds 0", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(0); return c }, ""},
+		{"max_rounds 5", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(5); return c }, ""},
+		{"max_rounds 6", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(6); return c },
+			"clarify.max_rounds must be between 0 and 5, got 6"},
+		{"max_rounds negative", func() *ClarifyConfig { c := clarifyRoute(); c.MaxRounds = rounds(-1); return c },
+			"clarify.max_rounds must be between 0 and 5, got -1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Clarify = tt.clarify()
+			err := Validate(cfg)
+			if tt.wantErr == "" && err != nil || tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("Validate() = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	var absent *ClarifyConfig
+	if absent.Active() || absent.AdditionRounds() != 2 {
+		t.Errorf("an absent section: Active %t, rounds %d", absent.Active(), absent.AdditionRounds())
+	}
+	if c := clarifyRoute(); !c.Active() || c.AdditionRounds() != 2 {
+		t.Errorf("a route: Active %t, rounds %d", c.Active(), c.AdditionRounds())
+	}
+	if c := (&ClarifyConfig{Enabled: boolPtr(false)}); c.Active() {
+		t.Error("enabled: false is active")
+	}
+	if c := (&ClarifyConfig{MaxRounds: rounds(0)}); c.AdditionRounds() != 0 {
+		t.Errorf("max_rounds 0 reads as %d", c.AdditionRounds())
+	}
+}
+
 func TestValidateDecision_Research(t *testing.T) {
 	cfg := validConfig()
 	cfg.Actions.Research.Provider = ""
@@ -365,8 +484,11 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 	if p.ProjectContextThreshold != 0.5 {
 		t.Errorf("ProjectContextThreshold = %v, want 0.5", p.ProjectContextThreshold)
 	}
-	if got := len(p.StageThreshold); got != 3 {
-		t.Fatalf("StageThreshold has %d entries, want 3", got)
+	if p.ClarityThreshold != 0.80 {
+		t.Errorf("ClarityThreshold = %v, want 0.80", p.ClarityThreshold)
+	}
+	if got := len(p.StageThreshold); got != 2 {
+		t.Fatalf("StageThreshold has %d entries, want 2", got)
 	}
 	if p.StageThreshold["research"] != 0.70 {
 		t.Errorf(`StageThreshold["research"] = %v, want 0.70`, p.StageThreshold["research"])
@@ -375,7 +497,7 @@ func TestConfig_DecisionPolicy(t *testing.T) {
 		t.Errorf("ComplexityCuts = %+v", p.ComplexityCuts)
 	}
 	force := p.ForceStages["complex"]
-	if len(force) != 3 {
-		t.Fatalf("ForceStages[complex] = %v, want 3 stages", force)
+	if len(force) != 2 {
+		t.Fatalf("ForceStages[complex] = %v, want 2 stages", force)
 	}
 }

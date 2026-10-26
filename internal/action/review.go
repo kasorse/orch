@@ -27,7 +27,7 @@ var DefaultDiffSummarize = []string{
 }
 
 // executeReview requires strict, well-formed structured output - unlike
-// research/analyze/plan/implement, a malformed review has no actionable severity to safely
+// research/plan/implement, a malformed review has no actionable severity to safely
 // resume on, so it ends the run as a hard error rather than being treated as a
 // retryable "fail" (MVP.md §19, mirroring the classifier's strictness).
 func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {
@@ -62,9 +62,9 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	}
 	prompt := BuildReviewPrompt(ReviewPromptInput{
 		Task:           run.Task.Description,
+		Clarification:  run.Task.Clarification.Render(),
 		Acceptance:     run.Task.Acceptance,
-		Analysis:       d.lastAnalysis,
-		Plan:           d.lastPlan,
+		Plan:           d.lastInvestigation,
 		Implementation: d.lastImpl,
 		TestResult:     d.lastTest,
 		GitDiff:        diff.Text,
@@ -79,7 +79,7 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	if err != nil {
 		return d.failureOutcome(ref, result), err
 	}
-	criteria := reviewCriteria(run.Task.Acceptance, d.lastPlan)
+	criteria := reviewCriteria(run.Task.Acceptance, d.lastInvestigation)
 	first, err := parseReviewStrict(result.Output, criteria)
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "malformed review output", Err: err}

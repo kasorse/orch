@@ -73,7 +73,7 @@ func TestScenario30_OutcomeOfCompletedRun(t *testing.T) {
 	if o.TestsPassedFinal == nil || !*o.TestsPassedFinal || o.ReviewVerdict != "pass" {
 		t.Errorf("tests_passed_final = %v, review_verdict = %q", o.TestsPassedFinal, o.ReviewVerdict)
 	}
-	// analyze + implement + review, and the three decision calls.
+	// plan + implement + review, and the three decision calls.
 	if o.Usage.Calls != 6 || !near(o.Usage.CostUSD, 0.11+0.33+0.44+0.01+0.02+0.03) ||
 		o.Usage.InputTokens != 60 || o.Usage.OutputTokens != 120 || o.Usage.CacheReadTokens != 1800 {
 		t.Errorf("usage = %+v", o.Usage)
@@ -110,7 +110,7 @@ func TestScenario30_OutcomeOfFailedRun(t *testing.T) {
 	if o.TestsPassedFinal != nil || o.ReviewVerdict != "" {
 		t.Errorf("no test or review ran: tests_passed_final = %v, review_verdict = %q", o.TestsPassedFinal, o.ReviewVerdict)
 	}
-	// analyze, the failed implement, and the three decision calls.
+	// plan, the failed implement, and the three decision calls.
 	if o.Usage.Calls != 5 || !near(o.Usage.CostUSD, 0.11+0.07+0.06) {
 		t.Errorf("usage = %+v", o.Usage)
 	}
@@ -145,7 +145,7 @@ func TestScenario30_ResumedOutcomeCoversBothAttempts(t *testing.T) {
 	if o.TestsPassedFinal == nil || !*o.TestsPassedFinal || o.ReviewVerdict != "pass" {
 		t.Errorf("tests_passed_final = %v, review_verdict = %q", o.TestsPassedFinal, o.ReviewVerdict)
 	}
-	// analyze, the failed implement, the retried implement, review, and the decision calls:
+	// plan, the failed implement, the retried implement, review, and the decision calls:
 	// the money spent before the resume is still spent.
 	if o.Usage.Calls != 7 || !near(o.Usage.CostUSD, 0.11+0.07+0.33+0.44+0.06) {
 		t.Errorf("usage = %+v", o.Usage)

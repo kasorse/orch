@@ -8,13 +8,13 @@ import (
 )
 
 // belowDevelopment is what SelectStages gives a task whose development is under its threshold:
-// analysis on, development off, testing and review dropped for lack of a code change.
+// research on, development off, testing and review dropped for lack of a code change.
 func belowDevelopment(reviewProb float64, reviewForced bool) domain.Decision {
 	return domain.Decision{
 		Source:     domain.DecisionSourceJev,
 		Complexity: domain.ComplexityOutcome{Selected: domain.ComplexityMedium},
 		Stages: domain.StageSelection{Stages: []domain.StageOutcome{
-			{Stage: domain.StageAnalysis, Probability: fp(0.8), Threshold: fp(0.5), Enabled: true, Reason: "p=0.80 >= 0.50"},
+			{Stage: domain.StageResearch, Probability: fp(0.8), Threshold: fp(0.5), Enabled: true, Reason: "p=0.80 >= 0.50"},
 			{Stage: domain.StageDevelopment, Probability: fp(0.3), Threshold: fp(0.6), Reason: "p=0.30 < 0.60"},
 			{Stage: domain.StageTesting, Probability: fp(0.2), Threshold: fp(0.5), Reason: "p=0.20 < 0.50"},
 			{Stage: domain.StageReview, Probability: fp(reviewProb), Threshold: fp(0.5), Forced: reviewForced, Reason: droppedNoCode},
@@ -38,8 +38,8 @@ func TestForceDevelopment_TurnsDevelopmentAndTestingOn(t *testing.T) {
 	if r := stageOf(t, got, domain.StageReview); r.Enabled || r.Reason != droppedNoCode {
 		t.Errorf("review = %+v, want still dropped: its probability is under its threshold", r)
 	}
-	if a := stageOf(t, got, domain.StageAnalysis); a.Reason != "p=0.80 >= 0.50" {
-		t.Errorf("analysis = %+v, want untouched", a)
+	if a := stageOf(t, got, domain.StageResearch); a.Reason != "p=0.80 >= 0.50" {
+		t.Errorf("research = %+v, want untouched", a)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestForceDevelopment_DevelopmentAlreadyOnIsReturnedAsItWas(t *testing.T) {
 }
 
 func TestForceDevelopment_ManualDecisionWithoutDevelopment(t *testing.T) {
-	dec, err := domain.ManualDecision([]domain.Stage{domain.StageAnalysis})
+	dec, err := domain.ManualDecision([]domain.Stage{domain.StageResearch})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestForceDevelopment_ManualDecisionWithoutDevelopment(t *testing.T) {
 func TestForceDevelopment_AfterAnEditThatSwitchedDevelopmentOff(t *testing.T) {
 	dec := belowDevelopment(0.7, false)
 	on := ForceDevelopment(dec, "story task")
-	edited := on.WithEdit(domain.ComplexityMedium, []domain.Stage{domain.StageAnalysis}, nil)
+	edited := on.WithEdit(domain.ComplexityMedium, []domain.Stage{domain.StageResearch}, nil)
 	if stageOf(t, edited, domain.StageDevelopment).Enabled {
 		t.Fatal("the edit should have switched development off")
 	}
@@ -115,6 +115,24 @@ func TestForceDevelopment_DoesNotMutateTheInput(t *testing.T) {
 	before := belowDevelopment(0.7, false)
 	ForceDevelopment(dec, "story task")
 	if !reflect.DeepEqual(dec, before) {
+		t.Errorf("input changed: %+v", dec)
+	}
+}
+
+func TestSkipPlanning_TurnsTheReadOnlyStagesOff(t *testing.T) {
+	dec := belowDevelopment(0.7, false)
+	dec.Stages.Stages = append(dec.Stages.Stages, domain.StageOutcome{Stage: domain.StageInvestigation, Enabled: true, Forced: true, Reason: "forced: complexity=complex"})
+	before := belowDevelopment(0.7, false)
+	got := SkipPlanning(ForceDevelopment(dec, "story task"), "story task: planned")
+	for _, st := range []domain.Stage{domain.StageResearch, domain.StageInvestigation} {
+		if s := stageOf(t, got, st); s.Enabled || s.Forced || s.Reason != "story task: planned" {
+			t.Errorf("%s = %+v, want off with the reason", st, s)
+		}
+	}
+	if dev := stageOf(t, got, domain.StageDevelopment); !dev.Enabled {
+		t.Errorf("development = %+v, want it kept on", dev)
+	}
+	if !reflect.DeepEqual(dec.Stages.Stages[:4], before.Stages.Stages) {
 		t.Errorf("input changed: %+v", dec)
 	}
 }

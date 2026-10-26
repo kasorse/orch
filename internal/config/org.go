@@ -216,8 +216,8 @@ func orgProblems(org OrgConfig) []string {
 			continue
 		}
 		for _, s := range stages {
-			if _, err := domain.ParseStage(s); err != nil {
-				problems = append(problems, fmt.Sprintf("policy.stages.force.%s has unknown stage %q", key, s))
+			if msg := forceStageProblem(key, s); msg != "" {
+				problems = append(problems, msg)
 			}
 		}
 	}

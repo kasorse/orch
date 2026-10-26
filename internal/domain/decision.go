@@ -86,6 +86,9 @@ func ParseComplexitySource(s string) (ComplexitySource, error) {
 type ContextDepthDecision struct {
 	Probabilities map[ContextDepth]float64 `json:"probabilities"`
 	Confidence    float64                  `json:"confidence"`
+	// PClear is P(clear): the probability that the request is clear enough to act on
+	// (specs/clarify), asked in the same call. Go compares it with policy.clarify.threshold.
+	PClear float64 `json:"p_clear"`
 	// Usage is what the call that answered cost, when the provider reports it. It is not
 	// part of the answer: the trace records it separately (DecisionTrace.Usage).
 	Usage *Usage `json:"-"`
@@ -98,7 +101,23 @@ func (d ContextDepthDecision) Validate() error {
 	if err := validateUnit("context depth confidence", d.Confidence); err != nil {
 		return err
 	}
+	if err := validateUnit("clarity probability", d.PClear); err != nil {
+		return err
+	}
 	return nil
+}
+
+// ClarityDecision is a provider's answer to the clarity question asked alone, on a request and
+// the clarification so far (decision.Provider.Clarity): P(clear), compared by the policy with
+// policy.clarify.threshold.
+type ClarityDecision struct {
+	PClear float64 `json:"p_clear"`
+	// Usage is what the call cost, like ContextDepthDecision.Usage.
+	Usage *Usage `json:"-"`
+}
+
+func (d ClarityDecision) Validate() error {
+	return validateUnit("clarity probability", d.PClear)
 }
 
 // ComplexityDecision is a provider's raw complexity distribution. Score is set only
@@ -145,9 +164,9 @@ type ProbabilityDecision struct {
 }
 
 // askedStages are the stages a decision provider is asked about (specs/decision-shape/SPEC.md
-// §6.1), in stage order: facts about the task that its size does not already carry. Planning,
+// §6.1), in stage order: facts about the task that its size does not already carry. Investigation,
 // testing and review come from the level and from development instead.
-var askedStages = []Stage{StageResearch, StageAnalysis, StageDevelopment}
+var askedStages = []Stage{StageResearch, StageDevelopment}
 
 // AskedStages returns the stages a decision provider answers a probability for.
 func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
@@ -155,12 +174,11 @@ func AskedStages() []Stage { return append([]Stage(nil), askedStages...) }
 // StageDecisions holds the probability of each stage a provider was asked about; a stage that
 // was not asked is nil.
 type StageDecisions struct {
-	Research    *ProbabilityDecision `json:"research,omitempty"`
-	Analysis    *ProbabilityDecision `json:"analysis,omitempty"`
-	Planning    *ProbabilityDecision `json:"planning,omitempty"`
-	Development *ProbabilityDecision `json:"development,omitempty"`
-	Testing     *ProbabilityDecision `json:"testing,omitempty"`
-	Review      *ProbabilityDecision `json:"review,omitempty"`
+	Research      *ProbabilityDecision `json:"research,omitempty"`
+	Investigation *ProbabilityDecision `json:"investigation,omitempty"`
+	Development   *ProbabilityDecision `json:"development,omitempty"`
+	Testing       *ProbabilityDecision `json:"testing,omitempty"`
+	Review        *ProbabilityDecision `json:"review,omitempty"`
 }
 
 // field returns a pointer to s's field for stage, or nil for an unknown stage.
@@ -168,10 +186,8 @@ func (s *StageDecisions) field(stage Stage) **ProbabilityDecision {
 	switch stage {
 	case StageResearch:
 		return &s.Research
-	case StageAnalysis:
-		return &s.Analysis
-	case StagePlanning:
-		return &s.Planning
+	case StageInvestigation:
+		return &s.Investigation
 	case StageDevelopment:
 		return &s.Development
 	case StageTesting:

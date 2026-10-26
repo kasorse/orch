@@ -227,13 +227,6 @@ func TestParseSpecify_Errors(t *testing.T) {
 		{"empty acceptance item", func(m map[string]any) { task(m, 0)["acceptance"] = []any{" \n "} }, false, "tasks[0].acceptance[0]"},
 		{"task text too long", func(m map[string]any) { task(m, 0)["notes"] = strings.Repeat("x", MaxTaskTextBytes) }, false, "tasks[0]"},
 		{"cycle", func(m map[string]any) { task(m, 0)["depends_on"] = []any{"RF02"} }, false, "tasks"},
-		{"two bases in one repository", func(m map[string]any) {
-			m["tasks"] = []any{
-				map[string]any{"id": "RF01", "repo": "billing", "title": "a", "size": "S", "goal": "g"},
-				map[string]any{"id": "RF02", "repo": "billing", "title": "b", "size": "S", "goal": "g"},
-				map[string]any{"id": "RF03", "repo": "billing", "title": "c", "size": "S", "goal": "g", "depends_on": []any{"RF01", "RF02"}},
-			}
-		}, false, "tasks[2].depends_on"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,6 +239,19 @@ func TestParseSpecify_Errors(t *testing.T) {
 			_, err := ParseSpecify(marshal(t, m), repos, maxTasks, func(string) bool { return tc.exists })
 			wantAnswerErr(t, err, tc.field)
 		})
+	}
+}
+
+// Several parents in one repository are merged on the spec branch: no longer a spec error.
+func TestParseSpecify_SeveralParentsInOneRepository(t *testing.T) {
+	m := goodSpecify()
+	m["tasks"] = []any{
+		map[string]any{"id": "RF01", "repo": "billing", "title": "a", "size": "S", "goal": "g"},
+		map[string]any{"id": "RF02", "repo": "billing", "title": "b", "size": "S", "goal": "g"},
+		map[string]any{"id": "RF03", "repo": "billing", "title": "c", "size": "S", "goal": "g", "depends_on": []any{"RF01", "RF02"}},
+	}
+	if _, err := ParseSpecify(marshal(t, m), []string{"billing", "gateway"}, 12, nil); err != nil {
+		t.Errorf("err = %v", err)
 	}
 }
 

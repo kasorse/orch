@@ -10,7 +10,7 @@ import (
 
 // defaultDeny names files that must never be read or mentioned (SPEC.md §18). Patterns
 // are path.Match globs, compared case-insensitively.
-var defaultDeny = []string{".env", ".env.*", "*.pem", "*.key", "credentials*", "secrets*"}
+var defaultDeny = []string{".env", ".env.*", "*.pem", "*.key", "credentials*"}
 
 // skipDirs are never part of project context: VCS internals and the orchestrator's own
 // run artifacts, which hold previous requests and model output.

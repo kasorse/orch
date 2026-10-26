@@ -79,6 +79,14 @@ func TestRenderREADMEKeepsTasksThatCannotRun(t *testing.T) {
 	}
 }
 
+func TestRenderREADMEShowsConflict(t *testing.T) {
+	states := map[string]TaskState{"RF01": {Status: TaskConflict}}
+	got := RenderREADME("T", StatusBlocked, []Task{{ID: "RF01", Repo: "a", Title: "One"}}, states)
+	if !strings.Contains(got, "| conflict |") {
+		t.Errorf("status cell missing:\n%s", got)
+	}
+}
+
 func TestRenderREADMEEscapesCells(t *testing.T) {
 	tasks := []Task{{ID: "RF01", Repo: "a", Title: "a | b\nsecond line"}}
 	got := RenderREADME("one\ntwo", StatusPlanned, tasks, nil)

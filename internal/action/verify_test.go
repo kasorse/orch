@@ -396,3 +396,75 @@ func TestReadVerifyDir_Bounds(t *testing.T) {
 		t.Errorf("a long log must be cut and marked: %d bytes", len(v.logs[0].Stdout))
 	}
 }
+
+// mcpClient is a session whose adapter passes an MCP server to its CLI, as claude and codex do.
+type mcpClient struct{ sessionClient }
+
+func (c *mcpClient) SupportsMCP() bool { return true }
+
+func TestExecuteImplement_ReplaceIsOnWheneverTheProviderSpeaksMCP(t *testing.T) {
+	client := &mcpClient{}
+	d := newDispatcher(client)
+	d.VerifyExecutable = verifyTestExe
+	d.Guard = &verifyGuard{}
+	d.Config.Context.ExtraDeny = []string{"vault/**"}
+	var spec *verify.Spec
+	client.run = func(_ context.Context, dir string) (provider.Result, error) {
+		var err error
+		if spec, err = verify.ReadSpec(dir); err != nil {
+			t.Errorf("the server could not read its input: %v", err)
+		}
+		writeVerifyFile(t, dir, verify.CallsFile, `{"tool":"replace","exit_code":0,"success":true,"duration":1000,"files":3,"replacements":7}`+"\n")
+		return provider.Result{Output: `{"summary":"done"}`}, nil
+	}
+
+	outcome, err := d.Execute(context.Background(), domain.ActionImplement, verifyRun())
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := strings.Join(client.lastReq.Extensions.MCPTools, ","); got != "mcp__orch__replace" {
+		t.Errorf("tools = %s, want replace alone without verify", got)
+	}
+	if spec == nil || spec.Tests() || spec.Replace == nil || strings.Join(spec.Replace.ExtraDeny, ",") != "vault/**" || spec.Sandbox != nil {
+		t.Errorf("spec = %+v", spec)
+	}
+	if p := client.lastReq.Prompt; !strings.Contains(p, "`mcp__orch__replace`") || strings.Contains(p, "run_tests") {
+		t.Errorf("the prompt does not name replace alone:\n%s", p)
+	}
+	if len(outcome.VerifyCalls) != 1 || outcome.VerifyCalls[0].Replacements != 7 {
+		t.Errorf("verify calls = %+v", outcome.VerifyCalls)
+	}
+	assertGone(t, client.dir)
+
+	// With verify on as well, the one server serves all three tools.
+	client = &mcpClient{}
+	d = newVerifyDispatcher(client)
+	d.Config.Checks = []config.CheckConfig{{Name: "vet", Command: "go vet ./..."}}
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, verifyRun()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(client.lastReq.Extensions.MCPTools, ","); got != "mcp__orch__run_tests,mcp__orch__run_check,mcp__orch__replace" {
+		t.Errorf("tools = %s", got)
+	}
+}
+
+// replace alone is a convenience: a server that cannot be set up is a warning, and the step
+// runs without it.
+func TestExecuteImplement_ReplaceSetupFailureIsAWarning(t *testing.T) {
+	client := &mcpClient{}
+	d := newDispatcher(client)
+	d.VerifyExecutable = "relative/orchestrator"
+	d.Guard = &verifyGuard{}
+	var warnings []string
+	d.OnWarning = func(_ domain.ActionType, msg string) { warnings = append(warnings, msg) }
+
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, verifyRun()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !client.called || client.lastReq.Extensions.MCPConfig != "" || strings.Contains(client.lastReq.Prompt, "mcp__orch") {
+		t.Errorf("the step did not run plainly: %+v", client.lastReq.Extensions)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "replace tool is not available") {
+		t.Errorf("warnings = %v", warnings)
+	}
+}

@@ -279,20 +279,14 @@ type ResearchArtifact struct {
 	Answer string `json:"answer,omitempty"`
 }
 
-type AnalysisArtifact struct {
-	Summary        string   `json:"summary"`
-	SummaryShort   string   `json:"summary_short,omitempty"`
-	RootCause      string   `json:"root_cause"`
-	AffectedFiles  []string `json:"affected_files"`
-	Recommendation string   `json:"recommendation"`
-	Risks          []string `json:"risks"`
-	// Answer: see ResearchArtifact.Answer.
-	Answer string `json:"answer,omitempty"`
-}
-
-type PlanArtifact struct {
-	Summary       string   `json:"summary"`
-	SummaryShort  string   `json:"summary_short,omitempty"`
+// InvestigationArtifact is the output of the read-only investigation stage: with development
+// it is the plan the implement step starts from, without it the investigation answers.
+type InvestigationArtifact struct {
+	Summary      string `json:"summary"`
+	SummaryShort string `json:"summary_short,omitempty"`
+	// RootCause is the analysis of why the code behaves as the task describes, when the task
+	// is about a defect or an unexpected behaviour; the model leaves it out otherwise.
+	RootCause     string   `json:"root_cause,omitempty"`
 	Steps         []string `json:"steps"`
 	AffectedFiles []string `json:"affected_files"`
 	Risks         []string `json:"risks"`
