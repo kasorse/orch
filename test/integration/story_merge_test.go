@@ -87,8 +87,8 @@ func TestStoryRun_SeveralParentsAreMergedOnTheSpecBranch(t *testing.T) {
 	if tip := f.git(t, "billing", "rev-parse", specBranch); in.BaseRef != tip || rec.Tasks["RF03"].BaseRef != tip {
 		t.Errorf("RF03 base_ref = %s (record %s), want the tip of %s: %s", in.BaseRef, rec.Tasks["RF03"].BaseRef, specBranch, tip)
 	}
-	if in.BaseBranch != f.baseBranch(t, "billing") {
-		t.Errorf("RF03 base_branch = %s, want the story base branch %s", in.BaseBranch, f.baseBranch(t, "billing"))
+	if in.BaseBranch != specBranch {
+		t.Errorf("RF03 base_branch = %s, want its merge request's target, the spec branch %s", in.BaseBranch, specBranch)
 	}
 	parents := strings.Fields(f.git(t, "billing", "rev-list", "--parents", "-n", "1", in.BaseRef))
 	if len(parents) != 3 || parents[1] != rf01 || parents[2] != rf02 {
@@ -105,7 +105,7 @@ func TestStoryRun_SeveralParentsAreMergedOnTheSpecBranch(t *testing.T) {
 	}
 
 	// The base and the target of RF03 are the spec branch.
-	assertContains(t, "stdout", stdout, "RF03 · billing · story/refunds/RF03 · from story/refunds/spec (RF01 + RF02)",
+	assertContains(t, "stdout", stdout, "RF03 · billing · story/refunds/RF03 or by billing's rules · from story/refunds/spec (RF01 + RF02)",
 		"RF01 · billing · story/refunds/RF01 → story/refunds/spec", "RF03 · billing · story/refunds/RF03 → story/refunds/spec")
 	assertContains(t, "RF03 As built", story.AsBuiltText([]byte(readFile(t, f.taskPath("RF03")))),
 		"on `story/refunds/spec (RF01 + RF02)`")
@@ -155,7 +155,7 @@ func TestStoryRun_ContinuesARecordWithoutASpecBranch(t *testing.T) {
 	// A record from before: no spec_branch in it.
 	rec := f.record(t)
 	b := rec.Bases["billing"]
-	b.SpecBranch = ""
+	b.SpecBranch, b.SpecPush = "", nil
 	rec.Bases["billing"] = b
 	if err := persistence.SaveStoryRecord(f.storyDir, rec); err != nil {
 		t.Fatal(err)

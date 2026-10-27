@@ -4,8 +4,9 @@
 // objects, through a throwaway index; the tree and the index are untouched. The one ref it
 // writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint. CommitAll, the
 // one exception, stages and commits a finished run's changes on the operator's explicit
-// approval.) The orchestrator also writes a run's own linked worktree and its branch
-// orchestrator/<run-id> (AddWorktree, RemoveWorktree); never the operator's tree, index or branch.
+// approval.) The orchestrator also writes a run's own linked worktree and its branch, named when
+// the worktree is created, orchestrator/<run-id> by default (AddWorktree, RemoveWorktree); never
+// the operator's tree, index or branch.
 package repository
 
 import (
@@ -172,6 +173,20 @@ func (r *Repository) ChangedOrIgnoredPaths(ctx context.Context, pathspecs []stri
 // HeadRef returns the commit HEAD points to.
 func (r *Repository) HeadRef(ctx context.Context) (string, error) {
 	out, err := r.git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RemoteURL returns the URL of the named remote (git remote get-url). It is an error, whose
+// message is git's, when the repository has no such remote. The URL may carry credentials: it
+// is for checking and for the host of a result, never for printing as it is.
+func (r *Repository) RemoteURL(ctx context.Context, remote string) (string, error) {
+	if remote == "" || strings.HasPrefix(remote, "-") {
+		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a valid remote name", remote)}
+	}
+	out, err := r.git(ctx, "remote", "get-url", "--", remote)
 	if err != nil {
 		return "", err
 	}

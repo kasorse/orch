@@ -82,6 +82,27 @@ func (r *Repository) AddWorktree(ctx context.Context, path, branch, base string)
 	return strings.TrimSpace(out), nil
 }
 
+// AddDetachedWorktree creates a linked worktree at path (absolute) with a detached HEAD at
+// commit, which must be a full SHA, and returns its administrative directory. Git runs the
+// operator's post-checkout hook and filters.
+func (r *Repository) AddDetachedWorktree(ctx context.Context, path, commit string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("cannot add a worktree: %q is not an absolute path", path)}
+	}
+	if !isFullSHA(commit) {
+		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("cannot add a worktree: %q is not a full commit SHA", commit)}
+	}
+	if _, err := r.git(ctx, "worktree", "add", "--quiet", "--detach", path, commit); err != nil {
+		return "", err
+	}
+	wt := &Repository{Dir: path, Executor: r.Executor}
+	out, err := wt.git(ctx, "rev-parse", "--path-format=absolute", "--git-dir")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // BranchExists reports whether refs/heads/<name> exists. An invalid name is refused without
 // running git.
 func (r *Repository) BranchExists(ctx context.Context, name string) (bool, error) {

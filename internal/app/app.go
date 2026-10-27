@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, story plan|run|status, decisions report|calibrate, runs report). This is the composition root - no other package
+// (version, validate, run, review, resume, story plan|run|status, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -51,17 +51,39 @@ const defaultConfigPath = "orchestrator.yaml"
 
 const runsBaseDir = ".orchestrator/runs"
 
-const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--output json] [--verbose] ` +
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
 // exitcode.FromError.
+//
+// With --output json (run, resume, review) stdout gets exactly one line when Run returns, the
+// result of specs/delivery/SPEC.md §11.2; everything else goes to stderr.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cli, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
+	if cli.output == "" {
+		return dispatch(ctx, cli, stdin, stdout, stderr)
+	}
+	if len(cli.rest) == 0 || !headlessCommand(cli.rest[0]) {
+		return &apperr.ConfigError{Msg: "--output is only valid with run, resume and review"}
+	}
+	ctx, rec := withResultRecorder(ctx)
+	// The reporter writes to what it is given as stdout: a writer that is no terminal makes it the
+	// plain one, and it is stderr, so stdout stays the result line's alone.
+	err = dispatch(ctx, cli, stdin, plainWriter{stderr}, stderr)
+	writeResult(stdout, rec, err)
+	return err
+}
+
+// plainWriter hides the file behind a writer, so that nothing takes it for a terminal.
+type plainWriter struct{ io.Writer }
+
+// dispatch runs the command parseArgs found.
+func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr io.Writer) error {
 	rest := cli.rest
 	if len(rest) == 0 {
 		return &apperr.ConfigError{Msg: usage}
@@ -72,8 +94,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	storyPlanCmd := storySub == "plan"
 	storyRunCmd := storySub == "run"
-	if cli.jiraRef != "" && rest[0] != "run" && !storyPlanCmd {
+	if cli.jiraRef != "" && rest[0] != "run" && rest[0] != "review" && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--jira is only valid with run and story plan"}
+	}
+	if rest[0] != "review" {
+		switch {
+		case cli.base != "":
+			return &apperr.ConfigError{Msg: "--base is only valid with review"}
+		case cli.head != "":
+			return &apperr.ConfigError{Msg: "--head is only valid with review"}
+		case cli.reviewTask != "":
+			return &apperr.ConfigError{Msg: "--task is only valid with review"}
+		}
 	}
 	if len(cli.repos) > 0 && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--repo is only valid with story plan"}
@@ -93,10 +125,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.isolation != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--" + cli.isolation + " is only valid with run"}
 	}
-	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, validate and story run"}
 	}
-	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, validate and story run"}
 	}
 	if cli.storyTaskFile != "" {
@@ -119,10 +151,27 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err := checkNotAStory(rest[1:]); err != nil {
 			return err
 		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
+		}
 		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+	case "review":
+		if len(rest) != 1 {
+			return &apperr.ConfigError{Msg: reviewUsage}
+		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
+		}
+		return reviewChange(ctx, reviewOptions{
+			configPath: cli.configPath, base: cli.base, head: cli.head, task: cli.reviewTask, jiraRef: cli.jiraRef,
+			mode: cli.mode, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth, verbose: cli.verbose,
+		}, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
+		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "story":
@@ -255,22 +304,29 @@ func readStoryTask(path string) (story.TaskInput, error) {
 	return in, nil
 }
 
-// storyTaskSource is the task.source a story task records: who it is, and the branch and base
-// it was asked to run on, so that a resume needs no story file.
+// storyTaskSource is the task.source a story task records: who it is, its title, the fallback
+// branch and the base it was asked to run from, so that a resume needs no story file. The branch
+// the worktree is on is named when it is created (specs/delivery/SPEC.md §9.1) and recorded in
+// worktree.branch.
 func storyTaskSource(in story.TaskInput) *domain.TaskSource {
 	return &domain.TaskSource{
-		Kind: domain.TaskSourceStory, Story: in.Story, Task: in.Task, Attempt: in.Attempt, Jira: in.Jira,
+		Kind: domain.TaskSourceStory, Story: in.Story, Task: in.Task, Attempt: in.Attempt, Jira: in.Jira, Title: in.Title,
 		Branch: in.Branch, BaseRef: in.BaseRef, BaseBranch: in.BaseBranch,
 	}
 }
 
-// checkStoryTarget refuses a story task whose base_ref is not a commit of repo or whose branch
-// exists already, before a run is created (specs/story/SPEC.md §11.1).
-func checkStoryTarget(ctx context.Context, repo *repository.Repository, in story.TaskInput) error {
+// checkStoryTarget refuses a story task whose base_ref is not a commit of repo or whose fallback
+// branch exists already and will be the name used, before a run is created (specs/story/SPEC.md
+// §11.1). With rules in the child's config (worktree.branch) the name is chosen when the worktree
+// is created and may be another one, so a fallback that exists is refused there, only if it is used.
+func checkStoryTarget(ctx context.Context, repo *repository.Repository, cfg config.Config, in story.TaskInput) error {
 	if ok, err := repo.CommitExists(ctx, in.BaseRef); err != nil {
 		return err
 	} else if !ok {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("the story task's base_ref %s is not a commit in this repository", in.BaseRef)}
+	}
+	if b := cfg.Worktree.Branch; b.Template != "" || b.FromInstructions != nil {
+		return nil
 	}
 	if exists, err := repo.BranchExists(ctx, in.Branch); err != nil {
 		return err
@@ -322,12 +378,21 @@ type cliArgs struct {
 	// parallel is --parallel's value, 1..8: how many ready tasks story run runs at once, in place
 	// of story.max_parallel; 0 if not given (specs/parallel-story/SPEC.md §2).
 	parallel int
+	// output is --output's value, "json" or empty: the one result line on stdout (specs/delivery/SPEC.md
+	// §11.2).
+	output string
+	// base and head are --base and --head: the refs of `review`, which reviews
+	// merge-base(base, head)..head (specs/delivery/SPEC.md §12.1); empty if not given.
+	base, head string
+	// reviewTask is --task's value: the task text of `review`; empty if not given.
+	reviewTask string
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
-// --codex-auth/--codex-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
+// --codex-auth/--codex-auth=X, --output/--output=X, --jira/--jira=X, --retry/--retry=X, --base/--base=X, --head/--head=X,
+// --task/--task=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -452,6 +517,51 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--parallel requires a number from %d to %d, got %q", config.MinStoryMaxParallel, config.MaxStoryMaxParallel, v)
 			}
 			cli.parallel = n
+		case arg == "--output" || strings.HasPrefix(arg, "--output="):
+			if cli.output != "" {
+				return cliArgs{}, fmt.Errorf("--output given twice")
+			}
+			v, err := value(&i, "--output")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if v != outputJSON {
+				return cliArgs{}, fmt.Errorf("--output must be %s, got %q", outputJSON, v)
+			}
+			cli.output = v
+		case arg == "--base" || strings.HasPrefix(arg, "--base="):
+			if cli.base != "" {
+				return cliArgs{}, fmt.Errorf("--base given twice")
+			}
+			v, err := value(&i, "--base")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.base = v; cli.base == "" {
+				return cliArgs{}, fmt.Errorf("--base requires a ref")
+			}
+		case arg == "--head" || strings.HasPrefix(arg, "--head="):
+			if cli.head != "" {
+				return cliArgs{}, fmt.Errorf("--head given twice")
+			}
+			v, err := value(&i, "--head")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.head = v; cli.head == "" {
+				return cliArgs{}, fmt.Errorf("--head requires a ref")
+			}
+		case arg == "--task" || strings.HasPrefix(arg, "--task="):
+			if cli.reviewTask != "" {
+				return cliArgs{}, fmt.Errorf("--task given twice")
+			}
+			v, err := value(&i, "--task")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.reviewTask = v; strings.TrimSpace(cli.reviewTask) == "" {
+				return cliArgs{}, fmt.Errorf("--task requires the text of the task")
+			}
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":
@@ -786,6 +896,9 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
 		}
 	}
+	if err := checkValidateDelivery(ctx, cfg, executor); err != nil {
+		return err
+	}
 	checked, err := checkJevModel(ctx, cfg, stderr)
 	if checked {
 		reporter.JevModelServed(cfg.Decision.Model)
@@ -1024,7 +1137,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	// or translator exists and before any provider is called. With --jira it includes the
 	// credential variables, and the reference is resolved before any request.
 	cfg, clis, org, auth, codexAuth, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, osExec, reporter,
-		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Jira: jiraRef != ""} })
+		func(c config.Config) config.DependencyOptions {
+			return config.DependencyOptions{Jira: jiraRef != "" || jiraWriteDependencies(c, storyIn)}
+		})
 	if err != nil {
 		return err
 	}
@@ -1076,7 +1191,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	}
 	if storyIn != nil {
 		// Before the run exists, as the checks of the input itself.
-		if err := checkStoryTarget(decideCtx, repo, *storyIn); err != nil {
+		if err := checkStoryTarget(decideCtx, repo, cfg, *storyIn); err != nil {
 			return err
 		}
 	}
@@ -1126,6 +1241,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	run.Options.Isolation = cfg.Execution.IsolationMode()
+	recordResultRun(ctx, store, run)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)
@@ -1150,6 +1266,11 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
+		// The flags name the workflow, so a worktree run that could not deliver is refused
+		// before the clarity question: no call is made (specs/delivery/SPEC.md §8).
+		if err := checkStagesDeliverable(decideCtx, repo, cfg, stages, task.Source); err != nil {
+			return failRun(store, run, err)
+		}
 		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
 			reporter, prompter, interactive, stream, stderr)
 	} else {
@@ -1337,6 +1458,8 @@ type session struct {
 	// the worktree was verified (resumeInWorktree). nil and "" in place.
 	operator            *repository.Repository
 	operatorFingerprint string
+	// noCommit is why the last offerCommit committed nothing (commitStop).
+	noCommit commitStop
 }
 
 // newSession builds the Dispatcher and resolves the guarded paths. Nothing here calls a
@@ -1387,6 +1510,11 @@ type tailOptions struct {
 // final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
+	if run.ReviewTarget != nil {
+		// Nothing in a review run's worktree is a result: it goes with the run, whatever the
+		// status it ends in, unless the run is stopped and a resume continues there.
+		defer endReviewWorktree(ctx, s)
+	}
 	removeStaleVerifyDirs(os.TempDir(), time.Now())
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
 	if !cfg.Security.SecretScan.Enabled() {
@@ -1564,8 +1692,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	outcomeErr := writeOutcome(store, run)
 	if runErr != nil {
-		if s.worktree != nil {
-			// A failed or stopped run keeps its worktree: a resume continues there.
+		if s.worktree != nil && (run.ReviewTarget == nil || run.Status == domain.RunStopped) {
+			// A failed or stopped run keeps its worktree: a resume continues there. A review run
+			// removes it unless it is stopped (endReviewWorktree).
 			s.reporter.WorktreeKept(s.worktree.Path, "")
 		}
 		return runErr
@@ -1573,19 +1702,27 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if outcomeErr != nil {
 		return outcomeErr
 	}
+	if _, err := os.Stat(store.ReportPath(run.ID)); err == nil {
+		s.reporter.ReportWritten(store.ReportPath(run.ID))
+	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
-	// A worktree run commits on its own branch without the question, checks it for conflicts
-	// and removes the worktree (specs/worktree/SPEC.md §10). Only where auto_commit would not
-	// commit is an operator at the terminal asked; --mode auto asks nothing.
-	if s.worktree != nil {
-		sha := offerCommit(ctx, s, opts.mode != domain.ModeAuto && isTerminal(s.stdin))
-		finishWorktree(ctx, s, sha)
-		// summary.md was rendered before the commit: it gains the worktree line's commit,
-		// conflicts and removal.
-		saveSummary(store, run)
+	// A review run changes nothing to commit: its worktree is removed on the way out.
+	if run.ReviewTarget != nil {
 		return nil
+	}
+	// A worktree run ends with the chain commit, conflict check, push and merge request, and then
+	// removes the worktree (specs/delivery/SPEC.md §7). --mode auto asks nothing; any other mode
+	// asks before each step. A run whose branch did not become a merge request that nobody
+	// declined returns the error for exit code 6; its status stays completed.
+	if s.worktree != nil {
+		sha := offerCommit(ctx, s, mode != domain.ModeAuto && isTerminal(s.stdin))
+		deliveryErr := finishWorktree(ctx, s, sha)
+		// summary.md was rendered before the commit: it gains the worktree line's commit,
+		// conflicts and removal, and the merge request.
+		saveSummary(store, run)
+		return deliveryErr
 	}
 	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
 	// --mode auto asks nothing. auto_commit does not apply to --mode manual.
@@ -1646,7 +1783,7 @@ func preRunTest(ctx context.Context, s *session) error {
 // runOptions are the config rules a new run follows from here on; a resume reads them back from
 // run.json and never from the config (specs/quality/SPEC.md §7.3).
 func runOptions(cfg config.Config) domain.RunOptions {
-	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules()}
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules(), JiraWrite: jiraWriteOptions(cfg)}
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {
@@ -1914,13 +2051,18 @@ func writeOutcomeWith(store *persistence.Store, run *domain.Run, trace *domain.D
 	// summary.md is for a reader and never read back; a run that ended is not failed
 	// over it.
 	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	// report.md is for the reviewer and treated the same way.
+	_ = store.SaveReport(run.ID, report.RunReport(*run, trace))
 	return nil
 }
 
-// saveSummary renders summary.md again for a run whose record changed after writeOutcome,
-// such as a worktree run's commit and removal. Like writeOutcome, it never fails the run.
+// saveSummary renders summary.md and report.md again for a run whose record changed after
+// writeOutcome, such as a worktree run's commit and removal. Like writeOutcome, it never
+// fails the run.
 func saveSummary(store *persistence.Store, run *domain.Run) {
-	_ = store.SaveSummary(run.ID, report.RunSummary(*run, loadTrace(store, run.ID)))
+	trace := loadTrace(store, run.ID)
+	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	_ = store.SaveReport(run.ID, report.RunReport(*run, trace))
 }
 
 // loadTrace is the run's decision.json, or nil when there is none or the strict loader

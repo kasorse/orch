@@ -49,6 +49,24 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func TestRemoteURL(t *testing.T) {
+	repo, dir := realRepo(t)
+	ctx := context.Background()
+	if _, err := repo.RemoteURL(ctx, "origin"); err == nil {
+		t.Error("a repository without remotes has an origin")
+	}
+	gitCmd(t, dir, "remote", "add", "origin", "https://git.example.invalid/x.git")
+	got, err := repo.RemoteURL(ctx, "origin")
+	if err != nil || got != "https://git.example.invalid/x.git" {
+		t.Errorf("RemoteURL(origin) = %q, %v", got, err)
+	}
+	for _, name := range []string{"", "-v", "upstream"} {
+		if _, err := repo.RemoteURL(ctx, name); err == nil {
+			t.Errorf("RemoteURL(%q) succeeded", name)
+		}
+	}
+}
+
 func TestChangedOrIgnoredPaths(t *testing.T) {
 	repo, dir := realRepo(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "orchestrator.yaml\n*.local.json\nbuild/\n")

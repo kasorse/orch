@@ -72,13 +72,17 @@ type storyRunFixtureOpts struct {
 	tasks []story.Task
 	// simple decides every task simple: implement and test, with no review.
 	simple bool
+	// serviceYAML is appended to the config of each service (a worktree: block, for instance).
+	serviceYAML string
 }
 
 type storyRunFixture struct {
 	home, specDir, storyDir, cfg string
 	repos                        map[string]string
-	invocationsLog, responses    string
-	tasks                        []story.Task
+	// remotes are the bare repositories that are the services' origin, by service.
+	remotes                   map[string]string
+	invocationsLog, responses string
+	tasks                     []story.Task
 }
 
 func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *storyRunFixture {
@@ -105,14 +109,17 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		Choice:   choice,
 		Stages:   map[string]float64{"development": 0.1},
 	})
+	// Every task of a story is pushed and opened as a merge request: origin answers like GitLab.
 	billing := fakeexec.InitGitFixture(t)
+	remotes := map[string]string{"billing": fakeexec.AddGitLabRemote(t, billing)}
 	invocationsLog, _ := decisionEnv(t, billing)
 	gateway := fakeexec.InitGitFixture(t)
+	remotes["gateway"] = fakeexec.AddGitLabRemote(t, gateway)
 
 	t.Setenv("FAKE_CWD_DIR", t.TempDir())
 	t.Setenv("FAKE_FIX_TARGET_FILE", "fixture.go")
 	t.Setenv("FAKE_IMPLEMENT_TOUCH_FILE", "added.txt")
-	f := &storyRunFixture{repos: map[string]string{}, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR"), tasks: storyRunTasks}
+	f := &storyRunFixture{repos: map[string]string{}, remotes: remotes, invocationsLog: invocationsLog, responses: os.Getenv("FAKE_RESPONSES_DIR"), tasks: storyRunTasks}
 	if o.tasks != nil {
 		f.tasks = o.tasks
 	}
@@ -130,7 +137,9 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		if err := os.Rename(dir, dst); err != nil {
 			t.Fatal(err)
 		}
-		writeConfig(t, dst, opts)
+		svcOpts := opts
+		svcOpts.extraYAML = o.serviceYAML
+		writeConfig(t, dst, svcOpts)
 		commitAll(t, dst, "add the orchestrator config")
 		f.repos[name] = dst
 	}
@@ -485,8 +494,13 @@ func TestStoryRun_OrderStackingAsBuiltAndTheEnd(t *testing.T) {
 	}
 
 	// Stacking: billing's RF02 on RF01's commit, RF04 on RF02's; gateway's RF03 on gateway's base.
-	if in := f.input(t, "RF01"); in.BaseRef != bases["billing"] || in.BaseBranch != f.baseBranch(t, "billing") {
-		t.Errorf("RF01 input = %+v, want billing's base %s", in, bases["billing"])
+	// The merge request of a task without a parent targets the spec branch, which the child's input
+	// names as its base branch.
+	if in := f.input(t, "RF01"); in.BaseRef != bases["billing"] || in.BaseBranch != specBranch {
+		t.Errorf("RF01 input = %+v, want billing's base %s and the base branch %s", in, bases["billing"], specBranch)
+	}
+	if in := f.input(t, "RF02"); in.BaseBranch != rec.Tasks["RF01"].Branch {
+		t.Errorf("RF02 base_branch = %s, want RF01's branch %s: its merge request is stacked on it", in.BaseBranch, rec.Tasks["RF01"].Branch)
 	}
 	if in := f.input(t, "RF02"); in.BaseRef != rec.Tasks["RF01"].Commit || in.BaseRef == bases["billing"] {
 		t.Errorf("RF02 base_ref = %s, want RF01's commit %s", in.BaseRef, rec.Tasks["RF01"].Commit)

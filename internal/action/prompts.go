@@ -40,6 +40,11 @@ const implementSummaryShortRule = `"summary_short" is one line of at most 72 cha
 	`saying what the change does in the imperative mood (for example "Exclude HTTP 404 from retries"): ` +
 	`it becomes the commit message.`
 
+// implementCommitTypeRule asks for the Conventional Commit type of the commit header
+// (specs/delivery/SPEC.md §4.1); domain.CommitTypes is the same list.
+const implementCommitTypeRule = `"commit_type" is one of feat, fix, refactor, perf, test, docs, build, ci, chore: ` +
+	`the kind of the whole change.`
+
 // conventionsFiles are where a repository writes down how a change is finished. The task
 // rarely says it; implement is told to follow them and review to check them, so a missed
 // update goes back to implement instead of needing a stage of its own.
@@ -268,8 +273,9 @@ func BuildImplementPrompt(in ImplementPromptInput) string {
 	var b strings.Builder
 	b.WriteString("ACTION: implement\n\n")
 	b.WriteString("Implement the following software engineering task by modifying the code in the current repository directly. Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"summary_short\": \"...\",\n  \"commit_type\": \"...\",\n  \"changed_files\": [\"...\"],\n  \"tests_added\": [\"...\"]\n}\n\n")
 	b.WriteString(implementSummaryShortRule + "\n\n")
+	b.WriteString(implementCommitTypeRule + "\n\n")
 	b.WriteString(implementConventionsRule + "\n\n")
 	b.WriteString(implementOperatorRule + "\n\n")
 	b.WriteString(implementParallelRule + "\n\n")

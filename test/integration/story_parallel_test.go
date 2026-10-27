@@ -427,8 +427,8 @@ func TestStoryRun_ParallelDiamondRunsAtOnceAndMergesTheParents(t *testing.T) {
 	if parent := f.git(t, "billing", "rev-parse", rec.Tasks["RF03"].Commit+"^"); parent != in.BaseRef {
 		t.Errorf("RF03's commit has the parent %s, want the merge commit %s", parent, in.BaseRef)
 	}
-	if in.BaseBranch != f.baseBranch(t, "billing") {
-		t.Errorf("RF03 base_branch = %s, want the story base branch %s", in.BaseBranch, f.baseBranch(t, "billing"))
+	if in.BaseBranch != specBranch {
+		t.Errorf("RF03 base_branch = %s, want its merge request's target, the spec branch %s", in.BaseBranch, specBranch)
 	}
 
 	// RF03 was started after RF01 and RF02 were done, and the three at once were started in order.

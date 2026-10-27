@@ -20,6 +20,8 @@ import (
 type stageRun struct {
 	repoDir, cfg, invocationsLog, promptsDir string
 	jev                                      *fakeJev
+	// remote is the bare repository standing in for GitLab, set by newWorktreeRun.
+	remote string
 }
 
 func newStageRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) stageRun {

@@ -146,6 +146,9 @@ func storyStates(tasks map[string]persistence.StoryTask) map[string]story.TaskSt
 		if t.Status != story.TaskPending {
 			st.Branch = t.Branch
 		}
+		if t.MR != nil {
+			st.MRIID, st.MRURL = t.MR.IID, t.MR.URL
+		}
 		states[id] = st
 	}
 	return states

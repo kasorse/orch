@@ -55,6 +55,7 @@ func TestExecuteImplement_RecordsTheDiffFromGit(t *testing.T) {
 	want := &domain.StepDiff{
 		Step:              domain.DiffStat{Files: 3, Insertions: 5, Deletions: 0, Binary: 1},
 		Run:               &domain.DiffStat{Files: 4, Insertions: 7, Deletions: 0, Binary: 1},
+		RunFiles:          []domain.FileStat{{Path: "img.bin", Binary: true}, {Path: "lib.go", Insertions: 2}, {Path: "main.go", Insertions: 2}, {Path: "new.go", Insertions: 3}},
 		NotReported:       []string{"img.bin"},
 		ReportedUnchanged: []string{"ghost.go"},
 	}

@@ -65,6 +65,8 @@ type storyRun struct {
 func newStoryRun(t *testing.T, mutate ...func(in map[string]any)) storyRun {
 	t.Helper()
 	repoDir := fakeexec.InitGitFixture(t)
+	// A story task is a worktree run that pushes its branch: origin answers like GitLab.
+	fakeexec.AddGitLabRemote(t, repoDir)
 	base, err := gitOutput(repoDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +108,7 @@ func newStoryRun(t *testing.T, mutate ...func(in map[string]any)) storyRun {
 
 	in := map[string]any{}
 	in["story"], in["task"], in["attempt"] = "refunds", "RF02", 1
+	in["title"] = "Fix Add in fixture.go"
 	in["branch"], in["base_ref"], in["base_branch"] = "story/refunds/RF02", base, baseBranch
 	in["jira"] = "PAY-124"
 	in["acceptance"] = []string{"an amount over the payment is a 422", "the amount is optional"}
@@ -222,8 +225,9 @@ func TestStoryTask_RunsOnItsBranchAndBaseWithDevelopmentForced(t *testing.T) {
 		t.Errorf("implement wrote into the operator's tree: %v", err)
 	}
 
-	// The commit message: the Jira key as the prefix and both trailers.
-	want := "PAY-124: Fix Add to use +\n\nOrchestrator-Run: " + run.ID + "\nOrchestrator-Story: refunds/RF02"
+	// The commit message: the Jira key as the prefix and the run, decision and story trailers.
+	want := "PAY-124: Fix Add to use +\n\nOrchestrator-Run: " + run.ID +
+		"\nOrchestrator-Decision: medium/development,testing,review\nOrchestrator-Story: refunds/RF02"
 	if msg, _ := gitOutput(r.repoDir, "log", "-1", "--format=%B", run.Commit); msg != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}

@@ -181,7 +181,10 @@ orchestrator run "<task>"
 orchestrator run --jira <KEY|URL> ["notes"]
 orchestrator run --stage <name> [--stage <name> ...] "<task>"
 orchestrator run --allow-red-tests "<task>"
+orchestrator run --inplace "<task>"
+orchestrator run --output json --mode auto "<task>"
 orchestrator resume <run-id>
+orchestrator review --base <ref> [--head <ref>] [--task "<text>" | --jira <KEY|URL>]
 orchestrator story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
 orchestrator story run <spec_dir>/<slug> [--retry <ID>] [--parallel N]
 orchestrator story status <spec_dir>/<slug>
@@ -231,6 +234,30 @@ combines with `--stage` and `--jira`.
 
 `story run --parallel N` (1..8; a usage error otherwise, and with any other command) is how many
 ready tasks of a story run at once; it overrides `story.max_parallel`. Details in §48.6.
+
+`run --inplace` runs one run in the operator's working tree; `run --worktree` overrides an
+`inplace` config. A workflow with `implement` is a worktree run by default (§47.1) and ends with
+a commit, a push and a merge request (§50.5). Given together the two flags are a usage error.
+
+`--output json` (valid with `run`, `resume` and `review`) sends every human-readable line to
+stderr and prints exactly one JSON line on stdout when the process exits (§50.10). `review`
+reviews the change `base...head` of a repository without implementing anything (§50.11). The
+`run`, `resume` and `review` commands refuse to start without a terminal unless `--mode`
+names a mode that asks nothing (§50.10).
+
+### Exit codes
+
+The exit code is part of the interface, for a CI job as much as for a person (§24, §50.10):
+
+| code | meaning |
+|---|---|
+| 0 | completed, and what was asked was delivered |
+| 1 | a run that cannot be used, an unexpected error |
+| 2 | configuration, dependency, usage, credentials (`FailureAuth`), Jira fail-fast, the delivery checks of §50.7 |
+| 3 | a provider failed |
+| 4 | the workflow failed or a limit stopped it (a red test, `max_steps`, the budget, no progress, `task needs input`) |
+| 5 | cancelled by the operator |
+| 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict |
 
 Support configuration file selection, for example:
 
@@ -361,10 +388,17 @@ limits:
 
 execution:
   timeout: 15m
-  isolation: inplace           # inplace (default) | worktree: where implement runs (§47)
+  isolation: worktree          # worktree (default) | inplace: where implement runs (§47)
 
 # worktree:
 #   setup: "npm ci"            # optional; trusted, runs once before any step, with the network (§47.4)
+#   branch:                    # optional; how a worktree run's branch is named (§50.3)
+#     template: "feature/{key}-{slug}"
+#     from_instructions: {provider: claude, model: haiku, timeout: 60s}
+
+# delivery:                    # optional; where a worktree run's branch is pushed (§50.7)
+#   remote: origin
+#   target_branch: main        # the merge request target when HEAD is detached
 
 security:                      # optional (§38); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
@@ -385,6 +419,9 @@ security:                      # optional (§38); no key widens what a step may 
 #   fields:                    # extra text custom fields, in this order
 #     - id: customfield_10035
 #       label: Acceptance criteria
+#   write:                     # a comment and a transition after a merge request (§39.12)
+#     comment: true
+#     transition: "In Review"
 ```
 
 Model names must be treated as opaque provider-specific strings.
@@ -1819,6 +1856,8 @@ Suggested:
 4 workflow error / limits exceeded (also a run that stopped `task needs input`, §49.6)
 
 5 user cancellation
+
+6 completed, but needs a person (§50.6, §50.11; the table in §4)
 ```
 
 Exact values may be encapsulated centrally.
@@ -2556,8 +2595,10 @@ multi-agent parallel execution
 Web UI
 REST API
 IDE plugin
-GitHub/GitLab integration; Jira beyond reading one issue for `run --jira` (§39) and the
-child issues of an approved story (§48.7)
+GitHub integration; GitLab beyond one push of the run's branch, which opens one merge
+  request (§50.6): no API client, no token; Jira beyond reading one issue for `run --jira`
+  (§39), the child issues of an approved story (§48.7), and a comment and a transition
+  after a merge request (§39.12)
 remote repository execution
 RAG
 persistent conversational memory
@@ -3537,8 +3578,9 @@ header shows the source line (§27).
 
 ## 39.10 Not covered
 
-* Writing to Jira other than the child issues of an approved story (§39.11, §48.7): comments,
-  transitions, worklogs, links. Resume and `run --jira` write nothing.
+* Writing to Jira other than the child issues of an approved story (§39.11, §48.7) and the
+  comment and transition after a merge request (§39.12): worklogs, links, a comment on a run
+  without a merge request.
 * Comments, linked issues, sub-tasks, attachments, images; JQL, boards, sprints.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
 * Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
@@ -3562,6 +3604,36 @@ Normative; the story itself is §48.
   write to Jira, and the only one: `POST /rest/api/2/issue` to `jira.base_url`, with the same
   credential handling as the read (§39.8), no redirects, and idempotent (an intent is recorded
   before each request, a request that may have reached Jira is never repeated).
+
+## 39.12 Write-back after a merge request
+
+Normative; the run that produces the merge request is §50.
+
+```yaml
+jira:
+  write:
+    comment: true             # default false
+    transition: "In Review"   # optional; the transition's name or its target status name
+```
+
+* Only for a task with a Jira key (`run --jira`: the issue; a story task: its child issue,
+  §48.7) and only after this run's push opened a merge request (`mr.state: created`). The same
+  `jira.base_url`, credentials, redaction, no-redirect and strict-decoding rules as §39.8 and
+  §39.11 apply; the token is the one the read uses.
+* **Comment**: `POST /rest/api/2/issue/{key}/comment`, wiki markup rendered by Go:
+  `Merge request [!12|<url>]: <commit header>`, then `Review: pass · Tests: passed · Cost:
+  $0.84 · Run <run-id>`. An intent is recorded before the request, the id after the 201, and the
+  request is never repeated once it may have reached Jira.
+* **Transition**: `GET /rest/api/2/issue/{key}/transitions`, the one whose `name` or `to.name`
+  equals the configured value (case-insensitive), then `POST …/transitions
+  {"transition":{"id":…}}` (204). None matches: `Warning: PAY-12 has no transition "In Review"
+  (available: Start, Done)`. The issue already in that status: nothing is sent.
+* A failure is a warning; the run's status and exit code do not change (the merge request is the
+  result).
+* `jira.write` is copied into `options.jira_write` at run start and a resume uses that copy.
+  Resume still never *reads* Jira (§39.7): it builds a Jira client only for this write.
+* `run.json: jira_write {comment: {state, id}, transition: {name, state: done|missing|failed|
+  unchanged}}`.
 
 ---
 
@@ -3819,9 +3891,9 @@ After the engine has finished and the final answer (if any) is printed, `run` an
 Anything that stops the offer is printed as `Not offering a commit: <why>`; none of it
 changes the run's status or exit code.
 
-In a worktree run (§47) the commit is made on the run's own branch `orchestrator/<run-id>`
-without this question, under the §42.6 rules, and the question is asked only when those rules
-refuse the automatic commit and the operator is at the terminal (§47.5).
+In a worktree run (§47) the commit is made on the run's own branch (§50.3) and is the first
+step of the chain of §50.5: under `--mode auto` without this question and under the §42.6
+rules, in every other mode with the question below, which is then the first of three.
 
 ## 42.2 The question
 
@@ -3849,6 +3921,16 @@ Commit to <branch>? [y]es / [N]o / [e]dit message:
   `run --jira` task. What the cut left out goes into the body; the body ends with the
   `Orchestrator-Run: <run-id>` trailer. The commit of a story task (§48.5) also gets the trailer
   `Orchestrator-Story: <slug>/<ID>`, and its header the task's Jira key when it has one.
+* **The type.** The implement answer may carry `commit_type`, one of `feat`, `fix`, `refactor`,
+  `perf`, `test`, `docs`, `build`, `ci`, `chore`. Go reads it from the same implementation the
+  `summary_short` comes from, trims and lower-cases it and accepts it only from that closed list;
+  anything else, or no field, means no type and the artifact is never failed for it. The header
+  before the 72-rune cut is `<type>: <KEY> <summary>` with a type and a key, `<type>: <summary>`
+  with a type only, `<KEY>: <summary>` with a key only, the summary alone otherwise. `e` replaces
+  the whole header as typed.
+* **The decision trailer.** After `Orchestrator-Run` and before `Orchestrator-Story`:
+  `Orchestrator-Decision: <complexity>/<enabled stages in stage order>`, `manual/<stages>` for
+  `run --stage` and a review run. Go builds it from `run.Decision`.
 * Without a `summary_short` (the model left it out, or no implementation artifact is
   left) no message is proposed: the orchestrator says
   `The implementation proposed no commit message.` and asks for one line; an empty answer
@@ -3877,8 +3959,9 @@ resumable (§37), so the moved HEAD never meets a resume.
 
 ## 42.5 Not covered
 
-* Conventional Commit types, pushing, merge requests (TODO W1/W2). A branch per run exists in
-  worktree mode (§47); `inplace` still commits on the current branch.
+* Pushing and merge requests are §50, for a worktree run only: an `inplace` run commits on the
+  current branch (the question or `auto_commit`), pushes nothing and opens nothing.
+* A Conventional Commit scope or breaking-change marker: only the type (§42.2).
 * Committing a part of the changes: the operator commits by hand when they want that.
 
 ## 42.6 `auto_commit`
@@ -3895,8 +3978,10 @@ read the one or write the other. It is not made either when the last implement m
 files would change. It prints `Not committing automatically: policy.paths requires manual
 approval: <match> (<n> files); commit what you want yourself.` and the changes stay in the
 working tree; `outcome.approval_required` (§43.3) is true. The message is the one §42.2 proposes; the commit is
-§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed. A worktree run (§47) behaves as if
-`auto_commit` were true, on its own branch.
+§42.3's and is recorded as in §42.4. `Committed <sha> to <branch>: <header>` is printed. `auto_commit` has no effect in a worktree
+run (§47): `--mode auto` is the yes given in advance for the commit, the push and the merge
+request, and every other mode asks (§50.5). The §42.6 refusals above apply to a worktree run
+only under `--mode auto`, where nobody can read a warning.
 
 ---
 
@@ -3931,6 +4016,8 @@ status (`completed`, `failed`, `stopped`), together with `outcome`; a resume tha
 rewrites it over the whole history. It is rendered by Go from `run.json` and
 `decision.json` with no provider call, is never read back, and is not a resume input.
 Failing to write it fails nothing. Values that do not apply or are not known are `—`.
+`summary.md` is for the metrics; the reviewer-facing `report.md`, written next to it by the same
+rules, is §50.4.
 
 ### Totals
 
@@ -3961,6 +4048,7 @@ Failing to write it fails nothing. Values that do not apply or are not known are
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
 | Approval | Only when `outcome.approval_required`: `Commit needs manual approval (policy.paths)`. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
+| Merge request | Only for a worktree run that reached the end chain (§50.5): the URL (`!12: <url>`), or `pushed, no merge request`, or the skip or the error (`mr.skipped`, `mr.error`). |
 
 ### Clarification
 
@@ -4787,39 +4875,45 @@ reasoning and the owner's decisions, is `specs/worktree/SPEC.md`.
 
 ```yaml
 execution:
-  isolation: worktree   # inplace (default) | worktree
+  isolation: worktree   # worktree (default) | inplace
 worktree:
   setup: "npm ci"       # optional; trusted operator config, like test.command
+  branch: {...}         # optional; how the branch is named (§50.3)
 ```
 
 * `inplace` is the behaviour of §38.3 and §42 unchanged.
-* `worktree` applies to workflows that contain `implement`, decided on the workflow the
-  operator approved. A workflow without `implement` runs in place: `run --stage review` still
-  reviews the operator's uncommitted work (§40.4).
-* `run --inplace` and `run --worktree` make one run `inplace` or `worktree` whatever the
-  config says; given together they are a usage error. (Changed 2026-10-18: the default was
-  `worktree` with no flag the other way; the owner moved it to `inplace` so that a chain of
-  runs lands on the current branch without a merge after each.)
+* `worktree` (the default) applies to workflows that contain `implement`, decided on the
+  workflow the operator approved. A workflow without `implement` runs in place: `run --stage
+  review` still reviews the operator's uncommitted work (§40.4).
+* `run --inplace`, or `isolation: inplace` written out, opts out; `run --worktree` overrides an
+  `inplace` config. Given together the flags are a usage error. (Changed 2026-10-18: the default
+  moved to `inplace`; changed back 2026-10-23, when a worktree run came to end with a push and a
+  merge request, §50.)
 * The choice is recorded in `run.json: options.isolation`; a resume continues in that mode.
+  A run started without `--inplace` and without `isolation: inplace` records `worktree`.
 * `worktree.setup` with `isolation: inplace` written out is a config error; with the key absent
-  it runs only in a `run --worktree` run. `isolation` accepts the two values only.
+  it runs in every worktree run. `isolation` accepts the two values only.
 * A dirty operator tree gets one warning, not a refusal: `The run starts from HEAD <short>;
   <n> uncommitted changes in your tree are not part of it (commit them first, or run with
-  --inplace).` An unborn HEAD is a config error naming `isolation: inplace`.
+  --inplace).` An unborn HEAD is a config error naming `--inplace`.
 
 ## 47.2 Creation and identity
 
 After approval and before the restore point: `git worktree add --quiet -b
-orchestrator/<run-id> <path> <base_ref>`, where `base_ref` is the commit HEAD names. The path
-is `<state>/orchestrator/worktrees/<repo-id>/<run-id>`, `<state>` being `$XDG_STATE_HOME` or
-`~/.local/state` and `<repo-id>` the first 16 hex digits of the sha256 of the common git
-directory's resolved path. It is outside the repository and not configurable. The path and
-the branch come from the run ID alone; the orchestrator refuses rather than reuse either.
+<branch> <path> <base_ref>`, where `base_ref` is the commit HEAD names and `<branch>` is named
+by the repository's instructions, then the config template, then `orchestrator/<run-id>` (§50.3).
+The path is `<state>/orchestrator/worktrees/<repo-id>/<run-id>`, `<state>` being
+`$XDG_STATE_HOME` or `~/.local/state` and `<repo-id>` the first 16 hex digits of the sha256 of
+the common git directory's resolved path. It is outside the repository and not configurable.
+The path comes from the run ID alone; the branch is no longer derived from it, so a resume
+checks the recorded name against §50.3's character and format rules and against `git worktree
+list` showing the derived path on exactly that branch. The orchestrator refuses rather than
+reuse either.
 `run.json: worktree` is saved at once: `path`, `branch`, `base_ref`, `base_branch` (empty when
 detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every step, guard,
 sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its
 lock stay in the operator's repository. The restore point is `base_ref`, pinned as in §38.3.
-Console: `Worktree: <path> (orchestrator/<id> from <branch>@<short>)`.
+Console: `Worktree: <path> (<branch> from <base branch>@<short>)`.
 
 ## 47.3 The `.git` pointer
 
@@ -4843,26 +4937,28 @@ a timeout fails the run before any step (`worktree setup failed (exit <n>)`), ou
 
 ## 47.5 The end of the run
 
-A completed run commits its changes on `orchestrator/<run-id>` without the §42 question, under
-the §42.6 rules: no commit when the question would show a warning, when there is no
-`summary_short`, or when the last implement matched a `policy.paths` rule with `approval:
-manual`. An operator at the terminal then gets `Commit to orchestrator/<run-id>? [y]es / [N]o
-/ [e]dit message`; under `--mode auto` the changes stay in the worktree and its path is
-printed. Before the commit the pointer and `CheckBaseline` are checked in the worktree. Output:
-`Committed <sha> to orchestrator/<run-id>: <header>`, then `Based on <branch>@<short>. To take
-it: git merge orchestrator/<run-id>`.
+A completed run with `implement` ends with the chain of §50.5: commit on the run's branch, the
+conflict check below, push, merge request, worktree removal. Every mode but `--mode auto` asks
+(`Commit to <branch>? [y]es / [N]o / [e]dit message`, §42.2, then the push and the merge request,
+§50.5); `--mode auto` commits without the question under the §42.6 rules (no commit when the
+question would show a warning, when there is no `summary_short`, or when the last implement
+matched a `policy.paths` rule with `approval: manual`: the changes stay in the worktree and its
+path is printed, exit code 6). `auto_commit` has no effect here. Before the commit the pointer
+and `CheckBaseline` are checked in the worktree. Output: `Committed <sha> to <branch>: <header>`,
+then `Based on <base branch>@<short>. To take it: git merge <branch>`.
 
 When `base_branch` is set, `git merge-tree --write-tree --name-only --no-messages <branch>
 <commit>` reports conflicts with the operator's branch as it is now (git ≥ 2.38; older git
 skips the check with a note). The files are warned about and recorded in
 `worktree.conflicts`; nothing is resolved. After a successful commit the worktree is removed
 with `git worktree remove` (never `--force`; a worktree git refuses to remove is kept and its
-path printed). The branch stays: it is the result. Without a commit the worktree stays. The
-`summary.md` has a Worktree row (§43.2).
+path printed). The branch stays: it is the result, and the removal follows a successful commit
+whatever the push and the merge request did (§50.5). Without a commit (a failed run, a refused
+commit, a no) the worktree stays. The `summary.md` has a Worktree row (§43.2).
 
-A story task (§48.5) is the same run on a branch and from a base that the story gives it
-(`story/<slug>/<ID>` from a given commit) instead of `orchestrator/<run-id>` from HEAD; its
-commit message carries the `Orchestrator-Story` trailer (§42.2).
+A story task (§48.5) is the same run from a base that the story gives it (a given commit)
+instead of HEAD, on a branch named by its repository's rules, `story/<slug>/<ID>` only the
+fallback (§50.8); its commit message carries the `Orchestrator-Story` trailer (§42.2).
 
 ## 47.6 `orchestrator runs clean [--older-than 7d] [--dry-run]`
 
@@ -4873,7 +4969,7 @@ run directory.
 
 ## 47.7 Not covered
 
-* Parallel runs (§30), pushing and merge requests (TODO W2).
+* Parallel runs (§30); pushing and merge requests are §50 (GitHub is not covered there).
 * Copying ignored files (`.env`, `node_modules`) from the operator's tree: setup installs what
   it needs.
 * Submodules (use `inplace`), warm worktree pools, an org floor for `execution.isolation`,
@@ -5012,22 +5108,30 @@ status changes. A spec written by hand runs too.
   run, before the dispatch, requires the spec tip to descend from `bases.<repo>.sha`; if every
   parent's recorded commit is then an ancestor of the tip (the operator merged), T is dispatched
   from that tip; otherwise the merge is tried again and conflicts again. Go resolves nothing.
-* **Branch**: `story/<slug>/<ID>`, a retry adds `.<n>`. The branch a task's merge request
-  targets: with one parent, the parent's branch; with none or several, the spec branch. Rebasing
-  a stack after review is the operator's, with git. Pushing the spec branch is not done (TODO
-  W2).
+* **Branch**: named by the task's repository's rules when its worktree is created (§50.8): the
+  instructions, then `worktree.branch.template`, then the fallback `story/<slug>/<ID>`, a retry
+  adding `.<n>`. The child records the name in its `run.json: worktree.branch`, and `story run`
+  copies it into `story.json: tasks.<ID>.branch` when it reads the child's run (after the child
+  ends, or when it settles the run of a `story run` that died); before that the field is absent.
+  The branch a task's merge request targets: with one parent, the parent's recorded branch; with
+  none or several, the spec branch, which the parent `story run` pushes (§50.8). Rebasing a
+  stack after review is the operator's, with git.
 
 ## 48.5 The child run
 
 `orchestrator run --mode auto --story-task <file>` (hidden; excludes `--stage`, `--jira`,
 `--inplace` and positional text) runs a task. The file is the parent's, strictly validated:
-story, task, attempt, `branch` (`^story/[a-z0-9-]+/[A-Z]{2}[0-9]{2}(\.[0-9]+)?$`, must not
-exist), `base_ref` (a commit of this repository), `base_branch` (the repository's story base, for
+story, task, attempt, `title` (the task file's heading: one line, 1-200 runes, printable; the
+`{slug}` and the task line of the branch-naming call, §50.8), `branch` (the fallback name:
+`^story/[a-z0-9-]+/[A-Z]{2}[0-9]{2}(\.[0-9]+)?$`; it must not exist when it is the name used),
+`base_ref` (a commit of this repository), `base_branch` (the repository's story base, for
 the conflict check of §47.5), `jira`, `acceptance`, `text`. The text (at most 32 KiB) is the
 story's title and the task's place in it, the task's body, the spec's approach and contracts as
 context, and the As built line of every done task it depends on; it becomes `Task.Description`.
 
-* Always a worktree run (§47), whatever `execution.isolation` says, on the given branch and base.
+* Always a worktree run (§47), whatever `execution.isolation` says, from the given base, on a
+  branch named by its repository's rules with the given `branch` as the fallback (§50.8). It runs
+  under `--mode auto`, so it ends with the chain of §50.5 without questions.
 * **Development is always on** (reason `story task` in `decision.json`); research and
   investigation are off (reason `story task: the task file is the plan`); review is the policy's.
 * **No clarify step** (§49, D12): the task file is the plan, so the run neither records a
@@ -5174,8 +5278,9 @@ re-checked once enough new decisions exist.
 
 ## 48.10 Not covered
 
-* Pushing and merge requests (TODO W2); Jira transitions, comments and issue links (W3).
-* Resolving a merge conflict automatically; pushing the spec branch (TODO W2); more than 8
+* Merge requests of anything but a task's own branch (the spec branch gets none, §50.8); Jira
+  issue links (a comment and a transition are §39.12).
+* Resolving a merge conflict automatically; more than 8
   slots, a limit per repository, killing running siblings after a failure, isolating the test
   resources of tasks that run at once; rebasing a stack after review; re-planning; a model
   editing the spec after approval.
@@ -5493,3 +5598,374 @@ check of the new question against the real Jev.
 unclear ones through; watch the share of `task needs input` runs. A missed reference to the old
 names shows up as a strict-load refusal, not silently. Runs started before this section cannot
 be resumed by this version (§49.10).
+
+---
+
+# 50. Delivery
+
+Normative. From a finished run to a merge request, in a terminal or in CI: the commit message,
+the branch name, the reviewer's report, the push that opens the merge request, the Jira
+write-back, the machine interface and the review of a change somebody else wrote. The design
+record, with the owner's decisions D1-D22 and the author's defaults A1-A24, is
+`specs/delivery/` (`SPEC.md`, `tasks/`). (The task list called this section §49; §49 is Clarify.)
+
+## 50.1 Principles
+
+1. **Go writes everything a person reads**: the commit message, the report, the merge request
+   title and description, the Jira comment. A model proposes at most one closed-list word (the
+   commit type) and the `summary_short` it already writes.
+2. **No delivery without the commit.** The push and the merge request happen only after the run
+   committed; they never relax the §42.6 rules.
+3. **Only `--mode auto` delivers without asking.** Every other mode asks before the commit, the
+   push and the merge request, and a no stops there.
+4. **Writes outside the machine happen once, after an intent, never retried blindly**: the push
+   and every Jira write record an intent first (the §48.7 discipline).
+5. **The orchestrator holds no GitLab credentials.** The merge request is opened by the push
+   itself (GitLab push options), with the operator's own git credentials; there is no GitLab API
+   client and no token variable.
+6. **Only the run's own branch is pushed**: never with force, never the operator's branch.
+7. **The exit code and one JSON line are the machine interface**; everything else is for a
+   person and goes to stderr under `--output json`.
+8. **Review-only is a run**: same store, decision record, guard, report and resume; it has no
+   `implement` and reviews `base...head`.
+
+## 50.2 The commit message
+
+The header carries the Conventional Commit type and the `Orchestrator-Decision` trailer of §42.2.
+The prompt rule next to the `summary_short` rule asks for `"commit_type"`, one of `feat`, `fix`,
+`refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`: the kind of the whole change.
+
+| type | Jira key | header |
+|---|---|---|
+| `fix` | none | `fix: Use + in Add` |
+| `fix` | `PAY-12` | `fix: PAY-12 Use + in Add` |
+| none | `PAY-12` | `PAY-12: Use + in Add` |
+| none | none | `Use + in Add` |
+
+The key follows the type so the header stays a valid Conventional Commit and the GitLab-Jira
+integration still finds the key. The header is cut to 72 runes after this prefix.
+
+## 50.3 The branch name
+
+The branch of a worktree run is named **when the worktree is created** (§47.2: after the
+approval, before the restore point and any step) and never changes. The first of these that gives
+a valid name wins:
+
+1. **the repository's instructions**: what CLAUDE.md, AGENTS.md or CONTRIBUTING.md say about
+   branch names, read by a model;
+2. **the config template** `worktree.branch.template`;
+3. `orchestrator/<run-id>`.
+
+```yaml
+worktree:
+  branch:
+    template: "feature/{key}-{slug}"   # optional
+    from_instructions:                 # optional; absent = instructions are not read
+      provider: claude
+      model: haiku
+      timeout: 60s
+```
+
+**The instructions call** is made only when `from_instructions` is set, the run is a worktree run,
+the workflow has `implement`, and at least one of the three files at the repository root of
+`base_ref` (read with `git show <base_ref>:<file>`, not from the working tree) contains `branch`
+or `ветк` (case-insensitive); otherwise nothing is called. One cold, tool-less call: authority
+`none`, the prompt on stdin, the three files together at most 32 KiB (each cut at a line) fenced
+with `action.fence`; the input is those files, the task's first line (at most 200 runes, through
+`action.taskBlock`), the Jira key, the run ID and today's date; the answer is strictly
+`{"branch": "<name>"}`, or `{"branch": ""}` when the instructions set no rule. Any failure, an
+empty answer or a name that fails the checks prints `Warning: branch name from the instructions
+not used: <why>` and falls through to the template; `FailureAuth` stays fatal (§46.5). Recorded:
+`run.json: branch_naming {source: instructions|template|default, proposed?, rejected?, usage?,
+call?}` and `logs/branch-name.{stdout,stderr}.log`; its cost counts in `outcome.usage` and in
+`decision_overhead`.
+
+**The template** is rendered by Go:
+
+| placeholder | value |
+|---|---|
+| `{id}` | the run ID |
+| `{key}` | the Jira key of a `run --jira` task, or a story task's child issue; empty otherwise |
+| `{slug}` | the task's first line (a story task: its title): Cyrillic transliterated by a fixed table, lower case, every run of characters outside `[a-z0-9]` becomes `-`, trimmed, at most 40 bytes cut at a `-` |
+| `{date}` | `YYYYMMDD`, local time |
+
+An empty placeholder takes the separator after it (`-`, `_`, `/`) with it. An unknown placeholder
+is a config error; `{type}` is not offered (the type exists only after implement).
+
+**The checks**, for both sources: `git check-ref-format --branch`; only `[A-Za-z0-9._/-]`; at most
+100 bytes; no leading `-` or `/`, no `//`, no `..`, no `.lock` suffix; not `HEAD`, not the base
+branch, not `delivery.target_branch`, not under `story/`, and not an existing local branch. An
+existing branch with the template's name gets `-<last 6 of the run ID>` appended once and is
+checked again; a model's name that exists is rejected (to the template).
+
+**Recording and resume**: the name is in `run.json: worktree.branch`; a review run (§50.11)
+is detached and its `worktree.branch` is empty, the only case where it may be. A resume checks the
+name against these character and format rules and against `git worktree list` (§47.2).
+
+## 50.4 `report.md`
+
+Written next to `summary.md` whenever a run reaches a terminal status, by Go from `run.json` and
+`decision.json`, never read back, never a resume input; failing to write it fails nothing. It is
+the merge request description (§50.6) and the note of a review in the CI example (§50.10).
+Sections, in order, each left out when empty: the title (the commit header) and a status line
+(status, review verdict, tests, checks); **Task** (a block quote of the first 30 lines, and the
+source URL); **Why these stages** (complexity, the decider, one row per stage with its reason);
+**What changed** (files, insertions, deletions against `base@sha`, at most 50 rows); **Tests and
+checks** (the last test step, fix iterations); **Review** (verdict, criteria met, at most 30
+issues, most severe first); **Needs attention** (path rules requiring approval, secret findings:
+never a value); a footer with the run ID, branch, restore point, the merge request when there is
+one, cost, active time and version.
+
+* The file list comes from `executions[].diff.run_files` (§50.12), up to 200 entries of the
+  run's net change from the same `git diff --numstat` that gives `diff.run`; the report reads the
+  last implement's list.
+* **Untrusted text is neutralized.** Task text, ticket text and every model-written string are
+  escaped before they reach Markdown: raw HTML, link and image brackets, and the GitLab references
+  that notify or link (`@user`, `#123`, `!123`, `~label`, `%milestone`) are backslash-escaped, and
+  a line that starts with `/` is indented by one space. A model cannot put a link, an image, a
+  mention or a quick action into a merge request.
+* Bounded at 60 000 bytes: lists are cut first, then the task quote.
+* A review run has "Reviewed" (`base...head`) in place of "What changed" and no "Why these
+  stages".
+
+## 50.5 The end of a worktree run
+
+A worktree run that completes with `implement` in its workflow ends with this chain. There is no
+flag; `--inplace` is the only way out. Each step runs only after the one before it succeeded:
+
+1. **commit** on the run's branch, in the worktree (§42.2 message, §42.3 commit);
+2. the conflict check (`merge-tree`, §47.5);
+3. **push** of the branch to `delivery.remote`;
+4. **merge request** `branch → target`, opened by that same push (§50.6);
+5. the worktree removal (§47.5), after a successful commit whatever steps 3-4 did.
+
+| mode | commit | push | merge request |
+|---|---|---|---|
+| `--mode auto` | no question, under the §42.6 rules | no question | no question |
+| any other mode (`manual`, `accept-edits`, the interactive default) | `Commit to <branch>? [y]es / [N]o / [e]dit message` | `Push <branch> to <remote>? [y]es / [N]o` | `Open a merge request <branch> → <target>? [y]es / [N]o` |
+
+* The questions come in that order. The default (an empty answer, a closed stdin) is no, and a no
+  stops the chain: nothing after it is asked or done. Both the push and the merge request answers
+  are taken before the one `git push`.
+* The commit question is §42.2's: its warnings, a typed line when there is no `summary_short`.
+  The §42.6 refusals apply only under `--mode auto`.
+* `auto_commit` has no effect in a worktree run. `--mode plan` never completes a run, so it never
+  reaches the chain.
+* **No commit, no delivery.** Under `--mode auto`, when §42.6 does not commit or the commit
+  fails: `mr.skipped: <why>`, `No push and no merge request: <why>`, the changes stay in the
+  worktree, its path is printed, exit code 6. In any other mode a no records `mr.skipped:
+  declined at <commit|push|merge request>` and exits 0: the person decided.
+* A workflow without `implement` runs in place and has no chain. A resume that completes the run
+  runs the same chain (the mode is the resume's own `--mode`, the isolation `options.isolation`).
+  A completed run is not resumable, so a failed push is finished by hand with the printed command.
+
+## 50.6 The push, which opens the merge request
+
+From the operator's repository (the branch is shared with the worktree), after its git
+fingerprint matched the one taken when the worktree was created (a pre-push hook runs) and `git
+ls-remote --heads <remote> <branch>` showed nothing. A branch of that name on the remote is
+never pushed to, even as a fast-forward: `mr.error: the branch <name> already exists on
+<remote>`, exit 6.
+
+```
+git push -u --no-follow-tags <remote> refs/heads/<branch>:refs/heads/<branch> \
+    -o merge_request.create -o merge_request.target=<target> \
+    -o "merge_request.title=<title>" -o "merge_request.description=<description>"
+```
+
+Without the merge request (a no to the third question) the same command without the `-o`
+options. A story child pushes without `-u` (a sibling's guard compares that shared config).
+
+* argv, never `sh -c`; the full environment (the operator's credential helper, ssh agent); never
+  `--force`; bounded by a fixed 5 minutes. `run.json: mr {state: intent, remote, source, target}`
+  is saved before the push; the push is never repeated by this run.
+* **target**: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
+  `delivery.target_branch`.
+* **title**: the commit header, at most 255 bytes cut at a rune. **description**: `report.md`
+  rendered after the commit, every line break written as the two characters `\n` (CR dropped):
+  git refuses a push option with LF or NUL, GitLab turns a literal `\n` back into a line break.
+  The whole description option is at most 64 000 bytes after encoding; a longer report is rendered
+  again with smaller lists, then a shorter task quote, last of all cut at a line with `…(cut)`.
+  `report.md` on disk stays the 60 000-byte version.
+* **The result.** GitLab answers on the push's stderr (`remote: View merge request for
+  <branch>:` and the URL on the next line). Go takes the first line after that marker that is
+  exactly `https://<host>/<path>/-/merge_requests/<n>`, `<host>` being the remote's host. The "To
+  create a merge request" link never matches. The URL is recorded and printed, never requested.
+
+| what happened | `run.json: mr` | printed | exit |
+|---|---|---|---|
+| pushed, URL found | `state: created`, `iid`, `url` | `Merge request !12: <url>` | 0 |
+| pushed, merge request declined | `state: pushed`, `skipped: declined at merge request` | `Pushed <branch> to <remote>.` | 0 |
+| pushed, merge request asked, no URL in the answer | `state: pushed`, `error: the remote reported no merge request` | the error | 6 |
+| push failed: rejected, a hook, the network, `the receiving end does not support push options` (not GitLab) | `state: intent`, `error: <git's last line>` | `To push it yourself: git push -u <remote> <branch>` | 6 |
+
+Minimum: git 2.10 (push options), GitLab 12.2 (the `title` and `description` options); neither
+is checked in advance, the push says so. GitHub is not supported: a GitHub remote fails at the
+push.
+
+## 50.7 Configuration and the checks before the worktree
+
+```yaml
+delivery:
+  remote: origin          # default origin: pushed to
+  target_branch: main     # optional: the target when HEAD is detached
+```
+
+Strict schema, both keys optional, the section optional. No token, no URL. Checked once the
+workflow is known and approved (with `--stage`, before any call), before the worktree is created,
+for a run that will be a worktree run: `git remote get-url <remote>` succeeds; a target is known
+(the current branch, else `delivery.target_branch`); `security.secret_scan.mode` is not `off`
+(a push publishes the tree). A failure is a config error (exit 2) whose message names
+`--inplace`. Whether the remote is GitLab is not checked. `orchestrator validate` makes the first
+and third checks when the configured isolation is `worktree`.
+
+## 50.8 `story run`
+
+* Children run as `run --mode auto --story-task <file>` (§48.5), so every child runs the §50.5
+  chain without questions; `story run`'s confirmation is the operator's yes. The target is the
+  branch its base came from: the dependency's recorded branch, else the story's base branch.
+* The per-service `validate` that `story run` makes before the first dispatch (§48.6) includes
+  §50.7's checks.
+* `story.json` records each task's `mr` (`{iid, url}`) read from the child's `run.json`;
+  `story status` and the end table print it. A child that ends with exit 6 (no merge request) is
+  `completed` without one: the story stops before the next task that depends on it and continues
+  the independent ones. `story run --retry <ID>` works as before.
+* **The spec branch.** A task with no parent, or with several, targets `story/<slug>/spec`; a task
+  with one parent targets that parent's branch. The parent `story run` pushes the spec branch, once
+  after the approval at the first start and after every merge Go makes on it, before the task
+  that needs it is dispatched: `git push --no-follow-tags <remote>
+  refs/heads/story/<slug>/spec:refs/heads/story/<slug>/spec` from the repository's checkout after
+  its fingerprint matched, no `-u`, no push options, never `--force`. At the first push the
+  branch must not exist on the remote. Recorded as `story.json: bases.<repo>.spec_push {state:
+  intent|pushed, sha, error?}`; a failed push stops the story before the next dispatch with the
+  command to push it by hand.
+* **A task's branch name.** Named as any worktree run's (§50.3), by the child, when its worktree
+  is created, with the task's repository's own config and its instruction files read from the
+  task's `base_ref`: the instructions, then `worktree.branch.template`, then `story/<slug>/<ID>`
+  (a retry `story/<slug>/<ID>.<n>`) as the fallback in place of `orchestrator/<run-id>`. `{key}`
+  and the call's Jira key are the task's child issue; `{slug}` and the call's task line are the
+  task input's `title`. A name from the rules is never under `story/`. The plan before `[Y/n]`
+  prints the fallback with `or by <repo>'s rules`. A name from a template that the abandoned
+  attempt of a `--retry` holds gets the `-<6>` suffix. The naming call is the child's and counts
+  in its `outcome.usage`, so `story.max_cost_usd` counts it.
+
+## 50.9 Jira write-back
+
+A comment and a transition after a merge request: §39.12.
+
+## 50.10 Headless and CI
+
+* **No terminal.** `run`, `resume` and `review` with stdin not a terminal and no `--mode` (or
+  `--mode manual`) are a usage error at once, before the fail-fast chain's calls: `stdin is not a
+  terminal: pass --mode auto (or plan, accept-edits) to run without questions`.
+* **`--output json`** is valid with `run`, `resume` and `review`. Every human-readable line goes
+  to stderr (the plain reporter); stdout gets exactly one line when the process exits:
+
+```json
+{"v":1,"run_id":"...","status":"completed","exit_code":0,"failure_reason":"",
+ "workflow":["investigate","implement","test","review"],"commit":"<sha>","branch":"...",
+ "mr":{"iid":12,"url":"https://…/-/merge_requests/12"},"mr_skipped":"","mr_error":"",
+ "review_verdict":"pass","tests_passed_final":true,"approval_required":false,
+ "cost_usd":0.84,"cost_partial":false,"run_dir":".orchestrator/runs/<id>","report":"…/report.md"}
+```
+
+  An error before a run exists is `{"v":1,"run_id":"","status":"error","exit_code":2,"error":"…"}`
+  (the message as printed, already redacted). Fields that do not apply are empty or null, never
+  absent; `v` changes only on an incompatible change. `--output json` is not offered for
+  `story run` and `story plan`.
+* **Exit codes** are the table of §4.
+* **Docker and CI.** The `Dockerfile` at the repository root builds the orchestrator with git,
+  bubblewrap, Node.js and a pinned claude CLI (no image is published). `examples/ci/` holds a
+  `.gitlab-ci.yml` with `ai-implement` (`orchestrator run --jira "$JIRA_KEY" --mode auto
+  --output json`: a worktree run, so it pushes and opens the merge request) and `ai-review`
+  (`orchestrator review --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --mode
+  auto --output json`, then the job itself posts `report.md` as one note: job script, not
+  orchestrator code). In CI only `--claude-auth api` (§46); bwrap needs unprivileged user
+  namespaces on the runner, and the example never sets `test.sandbox: none`. Push credentials go
+  through a credential helper in the job's global git config that reads `$GITLAB_TOKEN` from the
+  environment, never a token in the remote URL.
+
+## 50.11 `orchestrator review`
+
+```bash
+orchestrator review --base main                       # main...HEAD
+orchestrator review --base v1.3.0 --head feature/x
+orchestrator review --base main --task "the new cache must not change the API"
+orchestrator review --base main --jira PAY-12         # the ticket is the task
+```
+
+* `--base` is required; `--head` defaults to `HEAD`. `--mode`, `--output json`, `--config`,
+  `--claude-auth`, `--codex-auth` as for `run`; not `--stage`, `--inplace`/`--worktree` or
+  `--allow-red-tests`. There is no `--mr`: CI reviews a merge request by its refs.
+* Refs resolve with `git rev-parse --verify --end-of-options <ref>^{commit}`; the reviewed change
+  is `merge-base(base, head)..head`, three dots like a merge request. An empty change is a usage
+  error: `nothing to review: <head> adds nothing to <base>`.
+* A run like any other: `decision.json` `source: manual`, stages `testing` and `review`, workflow
+  `test → review`, no decision provider, translator or Context Manager. It runs in a **detached
+  worktree at `head`** (the operator's tree may be dirty and is never touched; `worktree.setup`
+  runs as in §47.4), removed at the end whatever the status. `ReviewDiffOptions.Base` makes the
+  diff `merge_base` against the worktree; the bounds, deny list and redaction are unchanged. The
+  `test` step runs the checks and `test.command` on `head`, sandboxed and guarded; a red test
+  fails the run before the review.
+* The task: `--task`, else the `--jira` ticket, else Go writes one from the commits (`Review the
+  change from <base> to <head>. Its commits:` and at most 50 subjects, 8 KiB). Recorded in
+  `run.json: review_target {base, head, merge_base, base_ref_name, head_ref_name}`.
+* A verdict that fails completes the run with it and the command exits 6. `resume` works: the
+  same detached worktree, the same `review_target`. Output: `report.md` (the review form),
+  `summary.md`, the console verdict and issues, and with `--output json` the one line.
+
+## 50.12 Persistence
+
+All optional on load, strictly validated when present.
+
+| field | rule |
+|---|---|
+| `options.isolation` | a run started without `--inplace` and without `isolation: inplace` records `worktree` |
+| `branch_naming` | `{source, proposed?, rejected?, usage?, call?}`; `proposed` at most 255 printable bytes, `rejected` one line at most 500 bytes; absent for an inplace or review run |
+| `worktree.branch` | any name that passes §50.3's rules (a story task: those, or its fallback's story pattern); empty only on a run with `review_target` |
+| story task input `title` | one line, 1-200 runes, printable; required |
+| `options.jira_write` | `{comment: bool, transition: string}`, copied from `jira.write` at run start |
+| `mr` | `{state: intent\|pushed\|created, remote, source, target, iid?, url?, skipped?, error?}`; `iid` and `url` only with `created`; `url` https on the remote's host, ending `/-/merge_requests/<iid>`; `skipped` and `error` one line, at most 500 bytes, redacted; `skipped` alone (no `state`) when the chain stopped before the push |
+| `jira_write` | `{comment: {state, id?}, transition: {name, state}}` (§39.12) |
+| `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable, at most 255 |
+| `executions[].diff.run_files[]` | at most 200 `{path (clean, repository-relative), insertions, deletions, binary}`, on an implement with `diff.run` only |
+| `story.json: tasks.<ID>.mr` | `{iid, url}` |
+| `story.json: bases.<repo>.spec_push` | `{state: intent\|pushed, sha (40 hex), error?}`; only with the spec branch |
+| `story.json: tasks.<ID>.branch` | §50.3's rules too; set from the child's `worktree.branch`, absent before the child's run is read |
+
+## 50.13 Security
+
+* No GitLab credentials in the orchestrator: no token variable, no API client, no request to
+  GitLab but the push, which uses the operator's git credentials like every git call.
+* Push: only the run's own branch, an explicit refspec, no `--force`, after the operator
+  fingerprint check, and never to a branch that already exists on the remote: a model-proposed or
+  template name cannot move somebody else's branch. The `-o` values are built by Go, escaped and
+  bounded, with no LF or NUL. The merge request URL is read from the remote's answer, checked
+  against the remote's host and pattern, and only recorded and printed.
+* Only `--mode auto` publishes without a question; a story's children run under it after `story
+  run`'s confirmation.
+* The branch-name call has authority `none`; the instruction files are read from `base_ref` with
+  `git show`, bounded and fenced; whatever it answers only passes Go's checks or is dropped. A
+  secret finding never reaches a push: under `--mode auto` it blocks the commit (§42.6), in
+  another mode the commit question shows it, and the scan cannot be `off` in a worktree run.
+* Everything model- or ticket-written that reaches GitLab or Jira is escaped (§50.4).
+* A delivering run is never `inplace`, so `.git/config` (which may carry a URL with a token) is
+  outside the worktree's file tools (§47.3).
+
+## 50.14 Not covered
+
+* GitHub; `glab` and the GitLab API; draft, labels, assignees, reviewers, milestones, squash and
+  auto-merge; waiting for the merge request pipeline.
+* A flag that keeps a worktree run but skips the push (an operator says no; CI uses `--inplace`).
+* Updating an existing merge request or pushing again to it; force-push after a story rebase.
+* `review --mr`, merge request notes from the orchestrator, inline review comments; reviewing a
+  fork's merge request.
+* Jira comments on a failed run or without a merge request; links between issues.
+* Publishing a Docker image; macOS images; a non-GitLab CI example.
+* A retry command for a push or merge request that failed at the end of a completed run.
+* An org-level floor that forbids or forces delivery or `inplace`.
+* Renaming a branch after implement; a branch name for an `inplace` run; naming a story's
+  branches up front, in the plan or in the spec.
+* Parallel agents, a separate worktree for review, resolving merge conflicts, integrating
+  changes automatically, a lifecycle manager over persistent state.
+* The live check on gitlab.com (`specs/delivery/SPEC.md` §15) is the operator's gate, not a test.

@@ -88,7 +88,7 @@ func TestAsBuiltText(t *testing.T) {
 
 func goodInput() map[string]any {
 	return map[string]any{
-		"story": "refunds", "task": "RF02", "attempt": 1,
+		"story": "refunds", "task": "RF02", "attempt": 1, "title": "Expose partial refunds",
 		"branch": "story/refunds/RF02", "base_ref": goodSHA, "base_branch": "main",
 		"jira": "PAY-124", "acceptance": []any{"an amount over the payment is a 422", "the amount is optional"},
 		"text": "RF02: expose partial refunds",
@@ -101,7 +101,7 @@ func TestParseTaskInput_Valid(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := TaskInput{
-		Story: "refunds", Task: "RF02", Attempt: 1, Branch: "story/refunds/RF02", BaseRef: goodSHA, BaseBranch: "main",
+		Story: "refunds", Task: "RF02", Attempt: 1, Title: "Expose partial refunds", Branch: "story/refunds/RF02", BaseRef: goodSHA, BaseBranch: "main",
 		Jira: "PAY-124", Acceptance: []string{"an amount over the payment is a 422", "the amount is optional"},
 		Text: "RF02: expose partial refunds",
 	}
@@ -134,6 +134,11 @@ func TestParseTaskInput_Refusals(t *testing.T) {
 		{name: "bad slug", mutate: func(m map[string]any) { m["story"] = "Refunds" }, want: "story"},
 		{name: "bad task", mutate: func(m map[string]any) { m["task"] = "rf02" }, want: "task"},
 		{name: "attempt zero", mutate: func(m map[string]any) { m["attempt"] = 0 }, want: "attempt"},
+		{name: "missing title", mutate: func(m map[string]any) { delete(m, "title") }, want: "title"},
+		{name: "blank title", mutate: func(m map[string]any) { m["title"] = "  " }, want: "title"},
+		{name: "title on two lines", mutate: func(m map[string]any) { m["title"] = "a\nb" }, want: "more than one line"},
+		{name: "title with a control character", mutate: func(m map[string]any) { m["title"] = "a\x07b" }, want: "not printable"},
+		{name: "title over 200 characters", mutate: func(m map[string]any) { m["title"] = strings.Repeat("я", 201) }, want: "more than 200"},
 		{name: "branch of another story", mutate: func(m map[string]any) { m["branch"] = "story/other/RF02" }, want: "branch"},
 		{name: "branch of another task", mutate: func(m map[string]any) { m["branch"] = "story/refunds/RF03" }, want: "branch"},
 		{name: "branch outside story/", mutate: func(m map[string]any) { m["branch"] = "orchestrator/x" }, want: "branch"},

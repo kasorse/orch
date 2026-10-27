@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/exitcode"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
@@ -39,6 +40,16 @@ type worktreeRunJSON struct {
 		Conflicts  []string `json:"conflicts"`
 		Removed    bool     `json:"removed"`
 	} `json:"worktree"`
+	MR *struct {
+		State   string `json:"state"`
+		Remote  string `json:"remote"`
+		Source  string `json:"source"`
+		Target  string `json:"target"`
+		IID     int    `json:"iid"`
+		URL     string `json:"url"`
+		Skipped string `json:"skipped"`
+		Error   string `json:"error"`
+	} `json:"mr"`
 	Executions []struct {
 		Action string `json:"action"`
 		Status string `json:"status"`
@@ -58,14 +69,16 @@ func loadWorktreeRun(t *testing.T, repoDir string) worktreeRunJSON {
 	return run
 }
 
-// newWorktreeRun is a stage run under execution.isolation: worktree, with the worktrees under a
-// temporary state directory and the fake CLIs recording their argv and working directory. The
-// fake implement fixes fixture.go and writes added.txt relative to its working directory.
-// mutate changes the rest of the config.
+// newWorktreeRun is a stage run under the default execution.isolation (worktree: the config does
+// not say), with the worktrees under a temporary state directory and the fake CLIs recording
+// their argv and working directory. The fake implement fixes fixture.go and writes added.txt
+// relative to its working directory. mutate changes the rest of the config.
 func newWorktreeRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) (r stageRun, argsDir, cwdDir string) {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	r = newStageRun(t, repoDir, append([]func(*configOptions){func(o *configOptions) { o.isolation = "worktree" }}, mutate...)...)
+	r = newStageRun(t, repoDir, append([]func(*configOptions){func(o *configOptions) { o.isolation = isolationAbsent }}, mutate...)...)
+	// The run ends by pushing its branch: origin is a bare repository that answers like GitLab.
+	r.remote = fakeexec.AddGitLabRemote(t, repoDir)
 	argsDir, cwdDir = t.TempDir(), t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
 	t.Setenv("FAKE_CWD_DIR", cwdDir)
@@ -259,7 +272,7 @@ func TestWorktree_ImplementAndTestLeaveTheOperatorsTreeAlone(t *testing.T) {
 	if parent, _ := gitOutput(repoDir, "rev-parse", run.Commit+"^"); parent != head {
 		t.Errorf("the commit's parent = %s, want the base %s", parent, head)
 	}
-	if msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B", run.Commit); msg != "Fix Add to use +\n\nOrchestrator-Run: "+run.ID {
+	if msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B", run.Commit); msg != "Fix Add to use +\n\nOrchestrator-Run: "+run.ID+"\nOrchestrator-Decision: manual/development,testing" {
 		t.Errorf("commit message = %q", msg)
 	}
 	if got, _ := gitOutput(repoDir, "show", run.Commit+":fixture.go"); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
@@ -382,7 +395,8 @@ func TestWorktree_ConflictWithTheMovedBranchIsReported(t *testing.T) {
 }
 
 // A pre-commit hook that refuses the commit: the run stays completed with no commit, and the
-// worktree with its changes stays (SPEC.md §10.1, §10.4).
+// worktree with its changes stays (SPEC.md §10.1, §10.4). Under --mode auto nobody declined, so
+// nothing is pushed and the exit code is 6 (specs/delivery/SPEC.md §7.4).
 func TestWorktree_CommitRefusedByAHookKeepsTheWorktree(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	hook := filepath.Join(repoDir, ".git", "hooks", "pre-commit")
@@ -395,13 +409,22 @@ func TestWorktree_CommitRefusedByAHookKeepsTheWorktree(t *testing.T) {
 	r, _, _ := newWorktreeRun(t, repoDir)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
-	mustSucceed(t, stdout, stderr, err)
+	if exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Fatalf("exit code %d (%v), want %d: completed, but needs a person\nstdout:\n%s\nstderr:\n%s", exitcode.FromError(err), err, exitcode.NeedsPerson, stdout, stderr)
+	}
 
 	run := loadWorktreeRun(t, repoDir)
 	w := run.Worktree
 	if run.Status != "completed" || run.Commit != "" || w == nil || w.Removed {
 		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed, no commit, kept", run.Status, run.Commit, w)
 	}
+	if run.MR == nil || run.MR.State != "" || !strings.HasPrefix(run.MR.Skipped, "the commit failed: ") {
+		t.Errorf("mr = %+v, want skipped for the failed commit", run.MR)
+	}
+	if got, _ := gitOutput(r.remote, "branch", "--list"); got != "" {
+		t.Errorf("the remote has branches %q after a run that committed nothing", got)
+	}
+	assertContains(t, "stdout", stdout, "No push and no merge request: the commit failed: ")
 	if got := readTrimmed(t, filepath.Join(w.Path, "fixture.go")); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {
 		t.Errorf("worktree fixture.go = %q, want the fix", got)
 	}
@@ -518,6 +541,130 @@ func TestWorktree_ResumeContinuesInTheWorktree(t *testing.T) {
 		"Committed "+run.Commit[:12]+" to orchestrator/"+run.ID+": Fix Add to use +\n")
 	// The operator's fingerprint, taken at the resume, lets the conflict check run.
 	assertNotContains(t, "stdout", stdout, "no conflict check")
+}
+
+// --mode auto asks nothing: the run commits, pushes its branch with the merge request's options
+// to a remote that answers like GitLab, records the merge request and removes the worktree
+// (specs/delivery/SPEC.md §7). The remote receives exactly the options Go built.
+func TestWorktree_AutoPushesAndOpensTheMergeRequest(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	branch, err := gitOutput(repoDir, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	const url = "https://" + fakeexec.GitLabHost + "/group/project/-/merge_requests/1"
+	if run.Status != "completed" || run.Commit == "" || run.Worktree == nil || !run.Worktree.Removed {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed, committed, removed", run.Status, run.Commit, run.Worktree)
+	}
+	mr := run.MR
+	if mr == nil || mr.State != "created" || mr.IID != 1 || mr.URL != url || mr.Remote != "origin" || mr.Source != run.Worktree.Branch ||
+		mr.Target != branch || mr.Skipped != "" || mr.Error != "" {
+		t.Fatalf("mr = %+v, want created as !1 at %s from %s to %s", mr, url, run.Worktree.Branch, branch)
+	}
+	if tip, err := gitOutput(r.remote, "rev-parse", run.Worktree.Branch); err != nil || tip != run.Commit {
+		t.Errorf("the remote's %s = %q (%v), want the run's commit %s", run.Worktree.Branch, tip, err, run.Commit)
+	}
+
+	options := fakeexec.GitLabPushOptions(t, r.remote)
+	if len(options) != 4 || options[0] != "merge_request.create" || options[1] != "merge_request.target="+branch ||
+		options[2] != "merge_request.title=Fix Add to use +" || !strings.HasPrefix(options[3], `merge_request.description=## fix Add in fixture.go\n\n`) {
+		t.Fatalf("the remote received %q", options)
+	}
+	description := strings.ReplaceAll(strings.TrimPrefix(options[3], "merge_request.description="), `\n`, "\n")
+	assertContains(t, "the description", description, "### Task\n\n> fix Add in fixture.go\n", "### What changed", "Run `"+run.ID+"`", "commit `"+run.Commit[:7]+"`")
+	assertNotContains(t, "the description", description, "merge request [")
+
+	assertContains(t, "stdout", stdout, "Merge request !1: "+url+"\n")
+	report, _ := runFile(t, repoDir, "report.md")
+	assertContains(t, "report.md", report, "merge request [!1]("+url+")")
+	summary, _ := runFile(t, repoDir, "summary.md")
+	assertContains(t, "summary.md", summary, "| Merge request | !1 "+url+" |")
+}
+
+// Any other mode asks before the commit, the push and the merge request: yes, yes, no is a push
+// without options, a branch on the remote and no merge request, and exit 0.
+func TestWorktree_AskedYesYesNoPushesWithoutAMergeRequest(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+
+	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, r.cfg, "a\ny\ny\nn\n",
+		"--mode", "accept-edits", "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Commit == "" || run.Worktree == nil || !run.Worktree.Removed {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v", run.Status, run.Commit, run.Worktree)
+	}
+	if mr := run.MR; mr == nil || mr.State != "pushed" || mr.Skipped != "declined at merge request" || mr.Error != "" || mr.URL != "" {
+		t.Errorf("mr = %+v, want pushed, declined at merge request", mr)
+	}
+	if tip, err := gitOutput(r.remote, "rev-parse", run.Worktree.Branch); err != nil || tip != run.Commit {
+		t.Errorf("the remote's %s = %q (%v), want the run's commit %s", run.Worktree.Branch, tip, err, run.Commit)
+	}
+	if options := fakeexec.GitLabPushOptions(t, r.remote); len(options) != 0 {
+		t.Errorf("the remote received push options %q", options)
+	}
+	assertContains(t, "stdout", stdout, "Push "+run.Worktree.Branch+" to origin? [y]es / [N]o: ",
+		"Open a merge request "+run.Worktree.Branch+" → ", "Pushed "+run.Worktree.Branch+" to origin.\n")
+}
+
+// A no to the commit question: nothing is pushed, the worktree stays with its changes, exit 0.
+func TestWorktree_AskedNoToTheCommitPushesNothing(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+
+	stdout, stderr, err := runOrchestratorInteractive(t, repoDir, r.cfg, "a\nn\n",
+		"--mode", "accept-edits", "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Commit != "" || run.Worktree == nil || run.Worktree.Removed {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed, no commit, kept", run.Status, run.Commit, run.Worktree)
+	}
+	if mr := run.MR; mr == nil || mr.State != "" || mr.Skipped != "declined at commit" {
+		t.Errorf("mr = %+v, want skipped: declined at commit", mr)
+	}
+	if got, _ := gitOutput(r.remote, "branch", "--list"); got != "" {
+		t.Errorf("the remote has branches %q", got)
+	}
+	if _, err := os.Stat(run.Worktree.Path); err != nil {
+		t.Errorf("the worktree is gone: %v", err)
+	}
+	assertNotContains(t, "stdout", stdout, "Push ", "No push and no merge request")
+}
+
+// A bare repository that takes no push options refuses the push: the intent stays, the error and
+// the command to push by hand are shown, the exit code is 6, the run stays completed.
+func TestWorktree_PushOptionsRefusedNeedsAPerson(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	gitRun(t, r.remote, "config", "receive.advertisePushOptions", "false")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	if exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Fatalf("exit code %d (%v), want %d\nstdout:\n%s\nstderr:\n%s", exitcode.FromError(err), err, exitcode.NeedsPerson, stdout, stderr)
+	}
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Commit == "" || run.Worktree == nil {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed and committed", run.Status, run.Commit, run.Worktree)
+	}
+	if mr := run.MR; mr == nil || mr.State != "intent" || !strings.Contains(mr.Error, "does not support push options") || mr.URL != "" {
+		t.Errorf("mr = %+v, want the intent kept with git's error", mr)
+	}
+	assertContains(t, "stdout", stdout, "does not support push options", "To push it yourself: git push -u origin "+run.Worktree.Branch+"\n")
+	if got, _ := gitOutput(r.remote, "branch", "--list"); got != "" {
+		t.Errorf("the remote has branches %q", got)
+	}
+	if tip, err := gitOutput(repoDir, "rev-parse", run.Worktree.Branch); err != nil || tip != run.Commit {
+		t.Errorf("%s = %q (%v), want the run's commit: the branch holds the result", run.Worktree.Branch, tip, err)
+	}
 }
 
 // A worktree that may not be the run's own is never resumed (SPEC.md §11): a rewritten .git
@@ -670,6 +817,107 @@ func TestWorktree_FlagOverridesInplaceConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); !os.IsNotExist(err) {
 		t.Errorf("the change landed in the operator's tree: %v", err)
+	}
+}
+
+// run --inplace makes one run an in-place run under the default isolation: the change lands in
+// the operator's tree and no worktree is created (specs/delivery/SPEC.md §6).
+func TestWorktree_InplaceFlagOptsOutOfTheDefault(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--inplace", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Options.Isolation != "inplace" || run.Worktree != nil {
+		t.Errorf("status = %s, options.isolation = %q, worktree = %+v; want completed, inplace, none",
+			run.Status, run.Options.Isolation, run.Worktree)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); err != nil {
+		t.Errorf("the change did not land in the operator's tree: %v", err)
+	}
+}
+
+// A worktree run that could not deliver is refused before its worktree: exit 2 naming --inplace,
+// no worktree, no step, and with --stage no provider call (specs/delivery/SPEC.md §8).
+func TestWorktree_RefusedBeforeTheWorktreeWhenItCouldNotDeliver(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func(t *testing.T, repoDir string)
+		mutate func(o *configOptions)
+		want   string
+	}{
+		{"no remote", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "remote", "remove", "origin") }, nil, `remote "origin"`},
+		{"detached HEAD without a target", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "checkout", "-q", "--detach") }, nil, "delivery.target_branch"},
+		{"secret scan off", func(t *testing.T, repoDir string) {},
+			func(o *configOptions) { o.extraYAML += "\nsecurity:\n  secret_scan:\n    mode: \"off\"\n" }, "security.secret_scan.mode is off"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir := fakeexec.InitGitFixture(t)
+			var mutate []func(*configOptions)
+			if tc.mutate != nil {
+				mutate = append(mutate, tc.mutate)
+			}
+			r, _, _ := newWorktreeRun(t, repoDir, mutate...)
+			tc.setup(t, repoDir)
+
+			stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+			if err == nil {
+				t.Fatalf("a run that could not deliver succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			var cfgErr *apperr.ConfigError
+			if !errors.As(err, &cfgErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency {
+				t.Fatalf("got %T (exit %d) %v, want a config error with exit 2", err, exitcode.FromError(err), err)
+			}
+			assertContains(t, "error", err.Error(), tc.want, "--inplace")
+
+			run := loadWorktreeRun(t, repoDir)
+			if run.Worktree != nil || len(run.Executions) != 0 {
+				t.Errorf("worktree = %+v, executions = %d; want neither", run.Worktree, len(run.Executions))
+			}
+			if list, _ := gitOutput(repoDir, "worktree", "list", "--porcelain"); strings.Count(list, "worktree ") != 1 {
+				t.Errorf("a worktree was added:\n%s", list)
+			}
+			if got := invocations(t, r.invocationsLog); len(got) != 0 {
+				t.Errorf("invocations = %v, want none", got)
+			}
+			// Not even the clarity question a --stage run asks the decision provider.
+			if bodies := r.jev.Bodies(); len(bodies) != 0 {
+				t.Errorf("Jev got %d requests %v, want none", len(bodies), bodies)
+			}
+		})
+	}
+}
+
+// A detached HEAD delivers when delivery.target_branch names the target.
+func TestWorktree_DetachedHeadWithATargetBranchRuns(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.extraYAML += "delivery:\n  target_branch: main\n" })
+	gitRun(t, repoDir, "checkout", "-q", "--detach")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+	if run := loadWorktreeRun(t, repoDir); run.Status != "completed" || run.Worktree == nil {
+		t.Errorf("status = %s, worktree = %+v; want completed in a worktree", run.Status, run.Worktree)
+	}
+	// The counter the refusals above read: a run that passes the checks asks the clarity question.
+	if bodies := r.jev.Bodies(); len(bodies) != 1 || !clarityOnly(bodies[0]) {
+		t.Errorf("Jev got %v, want the clarity question alone", bodies)
+	}
+}
+
+// A workflow without implement runs in place, so a repository without a remote is fine.
+func TestWorktree_ReadOnlyWorkflowNeedsNoRemote(t *testing.T) {
+	repoDir := dirtyFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	gitRun(t, repoDir, "remote", "remove", "origin")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "review", "review my change")
+	mustSucceed(t, stdout, stderr, err)
+	if run := loadWorktreeRun(t, repoDir); run.Status != "completed" || run.Worktree != nil {
+		t.Errorf("status = %s, worktree = %+v; want completed in place", run.Status, run.Worktree)
 	}
 }
 

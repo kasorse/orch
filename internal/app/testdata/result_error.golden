@@ -1,0 +1,1 @@
+{"v":1,"run_id":"","status":"error","exit_code":2,"failure_reason":"","error":"a worktree run needs <remote> & a \"target\"","workflow":[],"commit":"","branch":"","mr":null,"mr_skipped":"","mr_error":"","review_verdict":"","tests_passed_final":null,"approval_required":false,"cost_usd":0,"cost_partial":false,"run_dir":"","report":""}

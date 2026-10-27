@@ -442,10 +442,10 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
-	// Isolation is where a workflow with implement runs: inplace (the default) or worktree
-	// (specs/worktree/SPEC.md §6); run --inplace and run --worktree override it for one run.
-	// Empty when absent, so Validate can tell a written inplace; read it through
-	// IsolationMode.
+	// Isolation is where a workflow with implement runs: worktree (the default) or inplace
+	// (specs/worktree/SPEC.md §6, specs/delivery/SPEC.md §6); run --inplace and run --worktree
+	// override it for one run. Empty when absent, so Validate can tell a written inplace; read
+	// it through IsolationMode.
 	Isolation string `yaml:"isolation"`
 	// RateLimitWait turns on waiting for a step the account's usage limit refused: the run
 	// sleeps until the reset time the CLI reported, or this long when it reported none, and
@@ -459,10 +459,10 @@ const (
 	IsolationInplace  = "inplace"
 )
 
-// IsolationMode is execution.isolation, inplace when absent.
+// IsolationMode is execution.isolation, worktree when absent.
 func (e ExecutionConfig) IsolationMode() string {
 	if e.Isolation == "" {
-		return IsolationInplace
+		return IsolationWorktree
 	}
 	return e.Isolation
 }
@@ -497,10 +497,50 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 // WorktreeConfig is the top-level worktree section (specs/worktree/SPEC.md §6).
 type WorktreeConfig struct {
 	// Setup is a trusted operator command run once in a new worktree before any model step,
-	// like test.command. It only applies to a worktree run (execution.isolation: worktree or
-	// run --worktree).
+	// like test.command. It runs in every worktree run, which is the default for a workflow
+	// with implement; a config error with execution.isolation: inplace written out.
 	Setup string `yaml:"setup"`
+	// Branch names the run's branch when the worktree is created (specs/delivery/SPEC.md §4.3).
+	Branch BranchConfig `yaml:"branch"`
 }
+
+// BranchConfig is worktree.branch: the repository's instructions are asked first, then Template
+// is rendered, then the branch is orchestrator/<run-id>.
+type BranchConfig struct {
+	// Template is rendered by Go from {id}, {key}, {slug} and {date}; empty means none.
+	Template string `yaml:"template"`
+	// FromInstructions, when set, lets a tool-less call read the repository's instruction files
+	// for a rule about branch names; nil means the instructions are not read.
+	FromInstructions *BranchInstructionsConfig `yaml:"from_instructions"`
+}
+
+// BranchInstructionsConfig is worktree.branch.from_instructions: the route of the one call.
+// Like TranslationConfig, the timeout is required and positive.
+type BranchInstructionsConfig struct {
+	ProviderModel
+	Timeout time.Duration
+}
+
+func (b *BranchInstructionsConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Provider string `yaml:"provider"`
+		Model    string `yaml:"model"`
+		Timeout  string `yaml:"timeout"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	d, err := parseDurationField("worktree.branch.from_instructions.timeout", raw.Timeout)
+	if err != nil {
+		return err
+	}
+	*b = BranchInstructionsConfig{ProviderModel: ProviderModel{Provider: raw.Provider, Model: raw.Model}, Timeout: d}
+	return nil
+}
+
+// branchFromInstructionsKey is the config key of the branch-name call, how its route is named in
+// the dependency, authority and allowed-model checks.
+const branchFromInstructionsKey = "worktree.branch.from_instructions"
 
 // WorktreeRun reports whether a run of wf happens in its own git worktree: isolation is
 // worktree and the workflow contains implement. A workflow without implement runs in place
@@ -521,6 +561,10 @@ type Config struct {
 
 	// Worktree configures the worktree isolation of a run (specs/worktree/SPEC.md §6).
 	Worktree WorktreeConfig `yaml:"worktree"`
+
+	// Delivery is where a worktree run's branch goes (specs/delivery/SPEC.md §8); the section
+	// is optional.
+	Delivery DeliveryConfig `yaml:"delivery"`
 
 	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
 	Review ReviewConfig `yaml:"review"`
@@ -561,7 +605,9 @@ type Config struct {
 	Providers ProvidersConfig `yaml:"providers"`
 
 	// AutoCommit commits a completed run's changes without asking, in every mode
-	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
+	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question. It has no
+	// effect in a worktree run, where only --mode auto commits without the question
+	// (specs/delivery/SPEC.md §7.2).
 	AutoCommit bool `yaml:"auto_commit"`
 
 	// AllowedModels and AllowedModelsFrom come from the org file (org.go) and never from the

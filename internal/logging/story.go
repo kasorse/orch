@@ -127,7 +127,11 @@ type StoryEndRow struct {
 	Commit    string
 	Jira      string
 	Conflicts string // what the conflict check found, "" for none
+	MR        string // the merge request its push opened, "!12 <url>"; "" for none
 }
+
+// StoryMRLabel is a merge request as the tables show it: "!12 <url>".
+func StoryMRLabel(iid int, url string) string { return fmt.Sprintf("!%d %s", iid, url) }
 
 func storyCount(n int, one, many string) string {
 	if n == 1 {
@@ -312,13 +316,19 @@ func (r *ConsoleReporter) StoryEnd(rows []StoryEndRow) {
 	} else {
 		fmt.Fprintf(r.Out, "\n✓ Story completed: %s\n", head)
 	}
+	withMR := 0
 	for _, row := range rows {
 		conflicts := row.Conflicts
 		if conflicts == "" {
 			conflicts = "none"
 		}
+		target := row.Target
+		if row.MR != "" {
+			target += " · " + row.MR
+			withMR++
+		}
 		line := fmt.Sprintf("%s · %s · %s → %s · %s · %s · conflicts: %s",
-			row.ID, row.Repo, row.Branch, row.Target, orDash(shortCommit(row.Commit)), orDash(row.Jira), conflicts)
+			row.ID, row.Repo, row.Branch, target, orDash(shortCommit(row.Commit)), orDash(row.Jira), conflicts)
 		if r.Pretty {
 			r.detail(line)
 			continue
@@ -326,6 +336,12 @@ func (r *ConsoleReporter) StoryEnd(rows []StoryEndRow) {
 		fmt.Fprintf(r.Out, "  %s\n", line)
 	}
 	next := "Push the branches and open the merge requests, each to its target."
+	switch {
+	case len(rows) > 0 && withMR == len(rows):
+		next = "The merge requests are open, each to its target."
+	case withMR > 0:
+		next = "Open the merge requests of the tasks without one, each to its target."
+	}
 	if r.Pretty {
 		r.detail(next)
 		return

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -17,18 +18,55 @@ const MaxInputTextBytes = 32 << 10
 // TaskInput is the file `run --story-task` reads (SPEC §11.1): everything a child run needs of
 // its story. Story and Task name the task, Attempt is 1 for the first run of it and n for the
 // retry on <ID>.<n>; Branch and BaseRef are what the worktree is created on and from; BaseBranch
-// is where the change finally goes (the conflict check's); Jira is the task's key or "";
-// Acceptance are the review criteria; Text becomes the task description.
+// is where the change finally goes (the conflict check's, and its merge request's target); Jira is
+// the task's key or ""; Acceptance are the review criteria; Text becomes the task description.
+// Title is the task's heading, one line: the child names its branch from it (specs/delivery/SPEC.md
+// §9.1) and Branch is only the fallback it uses when the repository's rules give no name.
 type TaskInput struct {
 	Story      string   `json:"story"`
 	Task       string   `json:"task"`
 	Attempt    int      `json:"attempt"`
+	Title      string   `json:"title"`
 	Branch     string   `json:"branch"`
 	BaseRef    string   `json:"base_ref"`
 	BaseBranch string   `json:"base_branch"`
 	Jira       string   `json:"jira"`
 	Acceptance []string `json:"acceptance"`
 	Text       string   `json:"text"`
+}
+
+// MaxTitleRunes bounds a task input's title.
+const MaxTitleRunes = 200
+
+// CheckTitle says why title cannot be a task input's title, or returns nil: it is required, one
+// line of printable characters, at most MaxTitleRunes of them.
+func CheckTitle(title string) error {
+	switch {
+	case strings.TrimSpace(title) == "":
+		return errors.New("is empty")
+	case strings.ContainsAny(title, "\r\n"):
+		return errors.New("is more than one line")
+	case strings.ContainsFunc(title, func(r rune) bool { return !unicode.IsPrint(r) }):
+		return errors.New("has a character that is not printable")
+	case utf8.RuneCountInString(title) > MaxTitleRunes:
+		return fmt.Errorf("is %d characters, more than %d", utf8.RuneCountInString(title), MaxTitleRunes)
+	}
+	return nil
+}
+
+// InputTitle is a task's heading as a task input's title: on one line, without what is not
+// printable, cut to MaxTitleRunes characters.
+func InputTitle(title string) string {
+	title = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.IsPrint(r) || unicode.IsSpace(r) {
+			return r
+		}
+		return -1
+	}, title)), " ")
+	if runes := []rune(title); len(runes) > MaxTitleRunes {
+		title = strings.TrimSpace(string(runes[:MaxTitleRunes]))
+	}
+	return title
 }
 
 // DepNote is a done task another task depends on, with its As built record (AsBuiltText).
@@ -253,6 +291,8 @@ func ParseTaskInput(data []byte) (TaskInput, error) {
 		return TaskInput{}, fmt.Errorf("the task input: task %q is not a task ID (two capital letters and two digits)", in.Task)
 	case in.Attempt < 1:
 		return TaskInput{}, fmt.Errorf("the task input: attempt is %d, want 1 or more", in.Attempt)
+	case CheckTitle(in.Title) != nil:
+		return TaskInput{}, fmt.Errorf("the task input: title %q %v", in.Title, CheckTitle(in.Title))
 	case !ValidBranch(in.Branch, in.Story, in.Task):
 		return TaskInput{}, fmt.Errorf("the task input: branch %q is not story/%s/%s or story/%s/%s.<n>", in.Branch, in.Story, in.Task, in.Story, in.Task)
 	case !ValidBaseRef(in.BaseRef):

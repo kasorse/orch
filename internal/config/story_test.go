@@ -216,6 +216,54 @@ func TestResolveRoots(t *testing.T) {
 	}
 }
 
+// jira.write (specs/delivery/SPEC.md §10): both keys optional, a strict schema, a transition on one
+// line.
+func TestJiraWrite(t *testing.T) {
+	base := "jira:\n  base_url: https://example.atlassian.net\n  auth: bearer\n  token_env: T\n"
+	cfg, err := loadStoryConfig(t, base+"  write:\n    comment: true\n    transition: In Review\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := cfg.Jira.Write; w == nil || !w.Comment || w.Transition != "In Review" || !w.Enabled() || !cfg.JiraWrites() {
+		t.Fatalf("write = %+v", w)
+	}
+	valid := validConfig()
+	valid.Jira = cfg.Jira
+	if err := Validate(valid); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err = loadStoryConfig(t, base)
+	if err != nil || cfg.Jira.Write != nil || cfg.JiraWrites() {
+		t.Errorf("no write: err = %v, write = %+v", err, cfg.Jira.Write)
+	}
+	if cfg, err = loadStoryConfig(t, base+"  write: {}\n"); err != nil || cfg.JiraWrites() || cfg.Jira.Write.Enabled() {
+		t.Errorf("write: {}: err = %v, writes = %v", err, cfg.JiraWrites())
+	}
+	if (Config{}).JiraWrites() {
+		t.Error("a configuration without a jira section writes to Jira")
+	}
+
+	if _, err := loadStoryConfig(t, base+"  write:\n    comments: true\n"); err == nil {
+		t.Error("an unknown key under jira.write was accepted")
+	}
+	for _, tc := range []struct{ transition, want string }{
+		{`" In Review"`, "jira.write.transition"},
+		{`"In\nReview"`, "jira.write.transition"},
+		{`"` + strings.Repeat("a", 256) + `"`, "jira.write.transition is longer"},
+	} {
+		cfg, err := loadStoryConfig(t, base+"  write:\n    transition: "+tc.transition+"\n")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := validConfig()
+		c.Jira = cfg.Jira
+		if err := Validate(c); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.transition, err, tc.want)
+		}
+	}
+}
+
 func TestJiraCreate(t *testing.T) {
 	base := "jira:\n  base_url: https://example.atlassian.net\n  auth: bearer\n  token_env: T\n  create:\n"
 	cfg, err := loadStoryConfig(t, base+"    issue_type: Story\n    labels: [orchestrator]\n    components: {billing: Billing}\n")

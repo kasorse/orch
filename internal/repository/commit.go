@@ -9,6 +9,19 @@ import (
 	"orchestrator/internal/execution"
 )
 
+// CommitSubject is the first line of the message of the commit sha, which must be a full commit
+// SHA: the header a merge request is titled with.
+func (r *Repository) CommitSubject(ctx context.Context, sha string) (string, error) {
+	if !isFullSHA(sha) {
+		return "", &apperr.RepositoryError{Msg: "not a full commit SHA: " + sha}
+	}
+	out, err := r.git(ctx, "log", "-1", "--format=%s", sha, "--")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // CommitAll stages every change in the working tree - tracked changes, deletions and
 // untracked files, minus .gitignore'd ones and the orchestrator's run directory - and
 // commits it on the current branch with message, as the user's own git identity and with

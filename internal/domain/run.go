@@ -3,9 +3,12 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type RunStatus string
@@ -250,6 +253,250 @@ type Run struct {
 	// Worktree is the git worktree the run executes in (specs/worktree/SPEC.md §8.2); nil for an
 	// inplace run and in a run written before the field.
 	Worktree *RunWorktree `json:"worktree,omitempty"`
+	// MR is where the end of a worktree run got to after its commit: the push of its branch and
+	// the merge request that push opened (specs/delivery/SPEC.md §7, §13). Nil until the chain
+	// ran; a record, never read back to decide anything.
+	MR *RunMR `json:"mr,omitempty"`
+	// BranchNaming is how the worktree's branch was named (specs/delivery/SPEC.md §4.3); nil for an
+	// inplace run, a story task and a run written before the field.
+	BranchNaming *BranchNaming `json:"branch_naming,omitempty"`
+	// ReviewTarget is the change an `orchestrator review` run reviews (specs/delivery/SPEC.md
+	// §12.2); nil for every other run. Such a run executes in a detached worktree at its head,
+	// which has no branch.
+	ReviewTarget *ReviewTarget `json:"review_target,omitempty"`
+	// JiraWrite is what the run wrote to its task's Jira issue after MR was created
+	// (specs/delivery/SPEC.md §10, §13). Nil unless options.jira_write asked for something and
+	// the task has a key; a record, never read back to decide anything.
+	JiraWrite *RunJiraWrite `json:"jira_write,omitempty"`
+}
+
+// maxReviewRefName bounds the ref names a review run records, as typed on the command line.
+const maxReviewRefName = 255
+
+// ReviewTarget is what a review run reviews: merge_base..head, with the refs as the operator
+// named them. Base, Head and MergeBase are full commit SHAs.
+type ReviewTarget struct {
+	Base        string `json:"base"`
+	Head        string `json:"head"`
+	MergeBase   string `json:"merge_base"`
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+}
+
+// Validate checks what a run.json records as its review target: three full lowercase hex
+// commit names and two printable ref names of at most 255 bytes.
+func (t ReviewTarget) Validate() error {
+	for _, c := range []struct{ name, sha string }{{"base", t.Base}, {"head", t.Head}, {"merge_base", t.MergeBase}} {
+		if (len(c.sha) != 40 && len(c.sha) != 64) || strings.Trim(c.sha, "0123456789abcdef") != "" {
+			return fmt.Errorf("%s %q is not a full commit SHA", c.name, c.sha)
+		}
+	}
+	for _, c := range []struct{ name, ref string }{{"base_ref_name", t.BaseRefName}, {"head_ref_name", t.HeadRefName}} {
+		if err := ValidReviewRefName(c.ref); err != nil {
+			return fmt.Errorf("%s: %w", c.name, err)
+		}
+	}
+	return nil
+}
+
+// ValidReviewRefName checks a ref name as typed after --base or --head: not empty, printable, at
+// most 255 bytes.
+func ValidReviewRefName(ref string) error {
+	switch {
+	case ref == "":
+		return fmt.Errorf("is empty")
+	case len(ref) > maxReviewRefName:
+		return fmt.Errorf("is %d bytes, at most %d", len(ref), maxReviewRefName)
+	case strings.ContainsFunc(ref, func(r rune) bool { return !unicode.IsPrint(r) }):
+		return fmt.Errorf("has a non-printable character")
+	}
+	return nil
+}
+
+// Values of RunJiraComment.State.
+const (
+	// JiraCommentIntent is saved before the comment is posted: the request may have reached Jira
+	// even when it reports a failure, so it is never repeated.
+	JiraCommentIntent = "intent"
+	// JiraCommentDone is a comment Jira answered with its id.
+	JiraCommentDone = "done"
+	// JiraCommentFailed is a comment Jira refused: nothing was posted.
+	JiraCommentFailed = "failed"
+)
+
+// Values of RunJiraTransition.State.
+const (
+	JiraTransitionDone = "done"
+	// JiraTransitionMissing is a configured transition the issue has none like (the warning
+	// lists the names it has).
+	JiraTransitionMissing = "missing"
+	// JiraTransitionFailed is a transition that could not be found out or made.
+	JiraTransitionFailed = "failed"
+	// JiraTransitionUnchanged is an issue that is already in the configured status.
+	JiraTransitionUnchanged = "unchanged"
+)
+
+// maxJiraWriteName bounds a recorded transition name, in bytes.
+const maxJiraWriteName = 255
+
+// JiraWriteOptions is jira.write as the run copied it when it started (specs/delivery/SPEC.md
+// §10); a resume uses this copy and never the current config.
+type JiraWriteOptions struct {
+	Comment    bool   `json:"comment,omitempty"`
+	Transition string `json:"transition,omitempty"`
+}
+
+// Validate checks the options read back from run.json: a transition is one line of at most
+// maxJiraWriteName bytes.
+func (o JiraWriteOptions) Validate() error {
+	return validJiraName("transition", o.Transition)
+}
+
+func validJiraName(what, v string) error {
+	if len(v) > maxJiraWriteName || strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+		return fmt.Errorf("%s must be one line of at most %d bytes", what, maxJiraWriteName)
+	}
+	return nil
+}
+
+// RunJiraWrite is the record of the write-back to a run's Jira issue. Either part is nil when it
+// was not asked for.
+type RunJiraWrite struct {
+	Comment    *RunJiraComment    `json:"comment,omitempty"`
+	Transition *RunJiraTransition `json:"transition,omitempty"`
+}
+
+// RunJiraComment is the record of the comment: State is JiraCommentIntent until Jira answered,
+// and ID, the id Jira gave it, goes with JiraCommentDone only.
+type RunJiraComment struct {
+	State string `json:"state"`
+	ID    string `json:"id,omitempty"`
+}
+
+// RunJiraTransition is the record of the transition: Name is the configured name, State what came
+// of it.
+type RunJiraTransition struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json,
+// against the options the run started with.
+func (j RunJiraWrite) Validate(opts JiraWriteOptions) error {
+	if j.Comment == nil && j.Transition == nil {
+		return fmt.Errorf("a record needs a comment or a transition")
+	}
+	if c := j.Comment; c != nil {
+		switch {
+		case !opts.Comment:
+			return fmt.Errorf("comment recorded, but options.jira_write.comment is off")
+		case c.State != JiraCommentIntent && c.State != JiraCommentDone && c.State != JiraCommentFailed:
+			return fmt.Errorf("comment.state %q is not intent, done or failed", c.State)
+		case (c.State == JiraCommentDone) != (c.ID != ""):
+			return fmt.Errorf("comment.id goes with state done only")
+		case len(c.ID) > 20 || strings.Trim(c.ID, "0123456789") != "":
+			return fmt.Errorf("comment.id %q is not a number", c.ID)
+		}
+	}
+	if t := j.Transition; t != nil {
+		switch {
+		case opts.Transition == "":
+			return fmt.Errorf("transition recorded, but options.jira_write.transition is empty")
+		case t.Name != opts.Transition:
+			return fmt.Errorf("transition.name is %q, but options.jira_write.transition is %q", t.Name, opts.Transition)
+		}
+		switch t.State {
+		case JiraTransitionDone, JiraTransitionMissing, JiraTransitionFailed, JiraTransitionUnchanged:
+		default:
+			return fmt.Errorf("transition.state %q is not done, missing, failed or unchanged", t.State)
+		}
+	}
+	return nil
+}
+
+// Values of RunMR.State.
+const (
+	// MRIntent is saved before the push: the push may have reached the remote even when it
+	// reports a failure, so it is never repeated.
+	MRIntent = "intent"
+	// MRPushed is a push that succeeded without a merge request: none wanted, or the remote
+	// reported none.
+	MRPushed = "pushed"
+	// MRCreated is a push whose answer named the merge request it opened.
+	MRCreated = "created"
+)
+
+// Bounds of RunMR's text, in bytes.
+const (
+	maxMRText = 500
+	maxMRURL  = 2048
+)
+
+// RunMR is the record of a worktree run's push and merge request. State is empty when the chain
+// stopped before the push: Skipped says why (nobody committed, or somebody said no), or Error
+// says what the checks before the push found.
+type RunMR struct {
+	State  string `json:"state,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+	// IID and URL are set with MRCreated only; URL is https and ends /-/merge_requests/<iid>.
+	IID     int    `json:"iid,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Skipped string `json:"skipped,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json.
+func (m RunMR) Validate() error {
+	switch m.State {
+	case "", MRIntent, MRPushed, MRCreated:
+	default:
+		return fmt.Errorf("state %q is not intent, pushed or created", m.State)
+	}
+	for name, v := range map[string]string{"skipped": m.Skipped, "error": m.Error} {
+		if len(v) > maxMRText || strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+			return fmt.Errorf("%s must be one line of at most %d bytes", name, maxMRText)
+		}
+	}
+	switch {
+	case m.State == "" && m.Skipped == "" && m.Error == "":
+		return fmt.Errorf("a record without a state needs skipped or error")
+	case m.State != "" && (m.Remote == "" || m.Source == "" || m.Target == ""):
+		return fmt.Errorf("state %s needs remote, source and target", m.State)
+	case m.State != MRCreated && (m.IID != 0 || m.URL != ""):
+		return fmt.Errorf("iid and url only go with state created")
+	case m.State == MRCreated && (m.IID <= 0 || m.URL == ""):
+		return fmt.Errorf("state created needs iid and url")
+	case m.State == MRCreated && (m.Skipped != "" || m.Error != ""):
+		return fmt.Errorf("state created has neither skipped nor error")
+	}
+	for name, v := range map[string]string{"remote": m.Remote, "source": m.Source, "target": m.Target} {
+		if strings.HasPrefix(v, "-") || strings.ContainsFunc(v, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+			return fmt.Errorf("%s %q is not a name git would take", name, v)
+		}
+	}
+	if m.State == MRCreated {
+		return validMRURL(m.URL, m.IID)
+	}
+	return nil
+}
+
+// validMRURL checks that raw is an https URL without userinfo, query or fragment that ends
+// /-/merge_requests/<iid>.
+func validMRURL(raw string, iid int) error {
+	u, err := url.Parse(raw)
+	switch {
+	case len(raw) > maxMRURL || strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r >= 0x7f }):
+		return fmt.Errorf("url is not a plain address of at most %d bytes", maxMRURL)
+	case err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf("url %q is not an https address on a host", raw)
+	}
+	prefix, ok := strings.CutSuffix(u.Path, "/-/merge_requests/"+strconv.Itoa(iid))
+	if !ok || !strings.HasPrefix(prefix, "/") || len(prefix) < 2 {
+		return fmt.Errorf("url %q does not end /-/merge_requests/%d", raw, iid)
+	}
+	return nil
 }
 
 // Values of RunOptions.Isolation.
@@ -262,12 +509,23 @@ const (
 // WorktreeBranch is the branch a run's worktree is on (specs/worktree/SPEC.md §8.2).
 func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
 
-// RunWorktreeBranch is the branch run's worktree must be on: the branch a story task was given
-// (specs/story/SPEC.md §11.1), else orchestrator/<run-id>. Loading checks that a story task's
-// branch has the story pattern and names its story and task.
+// RunWorktreeBranch is the branch run's worktree must be on: the fallback a story task was given
+// (specs/story/SPEC.md §11.1); for any other run the one worktree.branch records, which is named
+// when the worktree is created (specs/delivery/SPEC.md §4.3), and orchestrator/<run-id> until
+// there is one. Loading checks that a story task's fallback has the story pattern and names its
+// story and task, and any other run's branch passes ValidBranchName. A story task's worktree is on
+// this fallback or, when its repository's rules named one, on the name worktree.branch records
+// (specs/delivery/SPEC.md §9.1). A review run's worktree is detached: its branch is "", and only a
+// run with a review target may have none.
 func RunWorktreeBranch(run *Run) string {
+	if run.ReviewTarget != nil {
+		return ""
+	}
 	if src := run.Task.Source; src != nil && src.Kind == TaskSourceStory {
 		return src.Branch
+	}
+	if w := run.Worktree; w != nil && w.Branch != "" {
+		return w.Branch
 	}
 	return WorktreeBranch(run.ID)
 }
@@ -299,6 +557,9 @@ type RunOptions struct {
 	// PathRules is a copy of policy.paths (specs/governance/SPEC.md §4.4). Nil, never empty,
 	// when there are none, so a run without rules writes no options.
 	PathRules []PathRule `json:"path_rules,omitempty"`
+	// JiraWrite is a copy of jira.write (specs/delivery/SPEC.md §10): what the run writes to its
+	// task's Jira issue after a merge request. A resume reads it instead of the config.
+	JiraWrite JiraWriteOptions `json:"jira_write,omitzero"`
 }
 
 // IsolationMode is the run's isolation, inplace when none was recorded.

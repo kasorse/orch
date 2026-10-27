@@ -47,6 +47,9 @@ type ReviewDiffOptions struct {
 	MaxBytes int
 	// MaxUntracked caps the untracked files listed (DefaultMaxUntracked when 0).
 	MaxUntracked int
+	// Base is the commit the working tree is diffed against: a full SHA, or HEAD when empty. A
+	// review run passes the merge base of the change it reviews (specs/delivery/SPEC.md §12.2).
+	Base string
 }
 
 // FileChange is one changed file of a ReviewDiff. Added is -1 when it was not counted (an
@@ -90,7 +93,7 @@ func (d ReviewDiff) Count(t Treatment) int {
 // can be shown; anything bigger is listed with its size.
 const maxUntrackedRead = 16 << 20
 
-// ReviewDiff returns the working tree's change against HEAD for the review prompt: tracked
+// ReviewDiff returns the working tree's change against HEAD (or opts.Base) for the review prompt: tracked
 // changes from git, and untracked files that are not ignored with their content, so a file
 // implement created is reviewed by what it says, not only by its name. A file on the deny
 // list is named but never read into the text; a binary file and a new symlink are named;
@@ -105,7 +108,14 @@ func (r *Repository) ReviewDiff(ctx context.Context, opts ReviewDiffOptions) (Re
 	for _, p := range opts.Exclude {
 		pathspec = append(pathspec, ":(exclude)"+p)
 	}
-	diffArgs := []string{"diff", "HEAD", "--no-color", "--no-ext-diff", "--no-textconv"}
+	base := "HEAD"
+	if opts.Base != "" {
+		if !isFullSHA(opts.Base) {
+			return ReviewDiff{}, fmt.Errorf("the review base %q is not a full commit SHA", opts.Base)
+		}
+		base = opts.Base
+	}
+	diffArgs := []string{"diff", base, "--no-color", "--no-ext-diff", "--no-textconv"}
 
 	numstat, err := r.git(ctx, append(append(append([]string(nil), diffArgs...), "--numstat", "-z"), pathspec...)...)
 	if err != nil {

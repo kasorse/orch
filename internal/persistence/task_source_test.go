@@ -40,6 +40,21 @@ func TestValidateRun_StoryTask(t *testing.T) {
 		t.Errorf("a retry without a Jira key is refused: %v", err)
 	}
 
+	// A branch named by the repository's rules (specs/delivery/SPEC.md §9.1); the fallback stays in
+	// task.source.
+	named := storyRun()
+	named.Task.Source.Title = "Expose partial refunds"
+	named.Worktree.Branch = "feature/PAY-124-expose-partial-refunds"
+	named.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceTemplate}
+	if err := validateRun(named, "r"); err != nil {
+		t.Errorf("a story run on a templated branch is refused: %v", err)
+	}
+	fallback := storyRun()
+	fallback.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault, Rejected: "the instructions set no rule for branch names"}
+	if err := validateRun(fallback, "r"); err != nil {
+		t.Errorf("a story run on its fallback is refused: %v", err)
+	}
+
 	notStarted := storyRun()
 	notStarted.Worktree = nil
 	if err := validateRun(notStarted, "r"); err != nil {
@@ -80,7 +95,11 @@ func TestValidateRun_StoryTaskRefusals(t *testing.T) {
 		{"multi-line acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{"a\nb"} }, "more than one line"},
 		{"oversized acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{strings.Repeat("я", 2001)} }, "2001 characters"},
 		{"too many acceptance items", func(r *domain.Run) { r.Task.Acceptance = make([]string, 11) }, "11 items"},
-		{"worktree on the run's own branch", func(r *domain.Run) { r.Worktree.Branch = "orchestrator/r" }, "worktree.branch"},
+		{"worktree on a name the rules refuse", func(r *domain.Run) { r.Worktree.Branch = "feature/a b" }, "worktree.branch"},
+		{"default naming on a branch that is not the fallback", func(r *domain.Run) {
+			r.Worktree.Branch = "feature/PAY-124-x"
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault}
+		}, "branch_naming.source is default"},
 		{"worktree on another story's branch", func(r *domain.Run) { r.Worktree.Branch = "story/other/RF02" }, "worktree.branch"},
 		{"worktree from another base", func(r *domain.Run) { r.Worktree.BaseRef = strings.Repeat("b", 40) }, "worktree.base_ref"},
 		{"worktree for another base branch", func(r *domain.Run) { r.Worktree.BaseBranch = "develop" }, "worktree.base_branch"},

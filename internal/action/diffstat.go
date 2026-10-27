@@ -37,6 +37,7 @@ func (d *Dispatcher) stepDiff(ctx context.Context, run *domain.Run, before strin
 		if total, err := d.Repo.DiffNumstat(ctx, run.PreRunRef, after, exclude); err == nil {
 			stat := diffStat(total)
 			diff.Run = &stat
+			diff.RunFiles = fileStats(total)
 			net, netOK = changedPaths(total), true
 		}
 	}
@@ -81,6 +82,30 @@ func diffStat(files []repository.FileChange) domain.DiffStat {
 		s.Deletions += f.Deleted
 	}
 	return s
+}
+
+// fileStats are the per-file counts of files, in git's order, at most domain.MaxRunFiles. A
+// path that is not a clean repository-relative one is left out, as a record that would not
+// load back is worse than a shorter list.
+func fileStats(files []repository.FileChange) []domain.FileStat {
+	var out []domain.FileStat
+	for _, f := range files {
+		p := filepath.ToSlash(f.Path)
+		if len(out) >= domain.MaxRunFiles {
+			break
+		}
+		if !domain.CleanRelPath(p) {
+			continue
+		}
+		s := domain.FileStat{Path: p}
+		if f.Added < 0 {
+			s.Binary = true
+		} else {
+			s.Insertions, s.Deletions = f.Added, f.Deleted
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // reportedPaths turns the paths an artifact names into repository-relative ones, as git
