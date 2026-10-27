@@ -390,6 +390,18 @@ func (r *ConsoleReporter) Worktree(path, branch, baseBranch, baseRef string) {
 	fmt.Fprintf(r.Out, "Worktree: %s (%s from %s)\n", path, branch, base)
 }
 
+// ReviewWorktree announces the detached worktree a review run executes in, at the commit it
+// reviews (specs/delivery/SPEC.md §12.2).
+func (r *ConsoleReporter) ReviewWorktree(path, head string) {
+	at := shortRef(head)
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "worktree")), path, st.gray(fmt.Sprintf("(detached at %s)", at)))
+		return
+	}
+	fmt.Fprintf(r.Out, "Worktree: %s (detached at %s)\n", path, at)
+}
+
 // WorktreeCommitted follows the commit on a worktree run's branch with where the branch starts
 // and how to take it (specs/worktree/SPEC.md §10.2).
 func (r *ConsoleReporter) WorktreeCommitted(branch, baseBranch, baseRef string) {

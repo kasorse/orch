@@ -224,6 +224,9 @@ func worktreeLine(run domain.Run, w domain.RunWorktree) string {
 			parts = append(parts, "branch named by worktree.branch.template")
 		}
 	}
+	if w.Branch == "" { // a review run's worktree is detached at the commit it reviews
+		parts = []string{"detached at " + base}
+	}
 	if run.Commit != "" {
 		parts = append(parts, "commit "+shortCommit(run.Commit))
 	}

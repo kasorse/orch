@@ -261,10 +261,11 @@ func (e *InvalidResponseError) Error() string {
 }
 func (e *InvalidResponseError) Unwrap() error { return e.Err }
 
-// NeedsPersonError is a run that completed, but whose worktree branch did not become a merge
-// request and nobody declined that (specs/delivery/SPEC.md §7.4, §11.3): nothing was committed
-// under --mode auto, or the push or the merge request failed. The run's status is untouched; the
-// error only carries exit code 6 to the caller.
+// NeedsPersonError is a run that completed, but whose result needs a person (specs/delivery/SPEC.md
+// §7.4, §11.3): its worktree branch did not become a merge request and nobody declined that
+// (nothing was committed under --mode auto, or the push or the merge request failed), or
+// `orchestrator review` gave a failing verdict. The run's status is untouched; the error only
+// carries exit code 6 to the caller.
 type NeedsPersonError struct {
 	Msg string
 }

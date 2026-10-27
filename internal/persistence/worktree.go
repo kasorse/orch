@@ -67,8 +67,12 @@ func validateWorktree(run *domain.Run) error {
 	// A story task's branch and base are the ones its task input gave, recorded in task.source
 	// (validated with it); the worktree must be the one created on them. Any other run's branch
 	// was named when the worktree was created (specs/delivery/SPEC.md §4.3): it only has to be a
-	// name the rules accept.
-	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+	// name the rules accept. A review run's worktree is detached: it has no branch.
+	if run.ReviewTarget != nil {
+		if w.Branch != "" {
+			return fmt.Errorf("worktree.branch is %q on a review run, want none", w.Branch)
+		}
+	} else if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		if w.Branch != src.Branch {
 			return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, src.Branch)
 		}
@@ -85,6 +89,10 @@ func validateWorktree(run *domain.Run) error {
 	}
 	if !isCommitSHA(w.BaseRef) {
 		return fmt.Errorf("worktree.base_ref %q is not a full commit SHA", w.BaseRef)
+	}
+	// A review run's worktree is detached at the head it reviews (specs/delivery/SPEC.md §12.2).
+	if t := run.ReviewTarget; t != nil && (w.BaseRef != t.Head || w.BaseBranch != "") {
+		return fmt.Errorf("worktree is at %q on branch %q, but review_target.head is %q", w.BaseRef, w.BaseBranch, t.Head)
 	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		if w.BaseRef != src.BaseRef {

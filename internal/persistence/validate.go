@@ -62,6 +62,14 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if t := run.ReviewTarget; t != nil {
+		if err := t.Validate(); err != nil {
+			return fmt.Errorf("review_target: %w", err)
+		}
+		if run.Options.IsolationMode() != domain.IsolationWorktree {
+			return fmt.Errorf("review_target on a run with options.isolation %q", run.Options.IsolationMode())
+		}
+	}
 	if err := validateWorktree(run); err != nil {
 		return err
 	}

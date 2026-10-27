@@ -66,6 +66,8 @@ func TestRun_NoTerminalNeedsAMode(t *testing.T) {
 		{"--mode", "manual", "run", "fix it"},
 		{"resume", "20261023-101500-ab12cd"},
 		{"--mode=manual", "resume", "20261023-101500-ab12cd"},
+		{"review", "--base", "main"},
+		{"--mode", "manual", "review", "--base", "main"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer

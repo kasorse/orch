@@ -31,7 +31,7 @@ const (
 	WorkflowOrLimit    = 4
 	UserCancellation   = 5
 	// NeedsPerson is a run that completed, but whose change was not delivered and nobody declined
-	// that (specs/delivery/SPEC.md §11.3).
+	// that, or a review with a failing verdict (specs/delivery/SPEC.md §11.3).
 	NeedsPerson = 6
 )
 

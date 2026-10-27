@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 type RunStatus string
@@ -259,6 +260,53 @@ type Run struct {
 	// BranchNaming is how the worktree's branch was named (specs/delivery/SPEC.md §4.3); nil for an
 	// inplace run, a story task and a run written before the field.
 	BranchNaming *BranchNaming `json:"branch_naming,omitempty"`
+	// ReviewTarget is the change an `orchestrator review` run reviews (specs/delivery/SPEC.md
+	// §12.2); nil for every other run. Such a run executes in a detached worktree at its head,
+	// which has no branch.
+	ReviewTarget *ReviewTarget `json:"review_target,omitempty"`
+}
+
+// maxReviewRefName bounds the ref names a review run records, as typed on the command line.
+const maxReviewRefName = 255
+
+// ReviewTarget is what a review run reviews: merge_base..head, with the refs as the operator
+// named them. Base, Head and MergeBase are full commit SHAs.
+type ReviewTarget struct {
+	Base        string `json:"base"`
+	Head        string `json:"head"`
+	MergeBase   string `json:"merge_base"`
+	BaseRefName string `json:"base_ref_name"`
+	HeadRefName string `json:"head_ref_name"`
+}
+
+// Validate checks what a run.json records as its review target: three full lowercase hex
+// commit names and two printable ref names of at most 255 bytes.
+func (t ReviewTarget) Validate() error {
+	for _, c := range []struct{ name, sha string }{{"base", t.Base}, {"head", t.Head}, {"merge_base", t.MergeBase}} {
+		if (len(c.sha) != 40 && len(c.sha) != 64) || strings.Trim(c.sha, "0123456789abcdef") != "" {
+			return fmt.Errorf("%s %q is not a full commit SHA", c.name, c.sha)
+		}
+	}
+	for _, c := range []struct{ name, ref string }{{"base_ref_name", t.BaseRefName}, {"head_ref_name", t.HeadRefName}} {
+		if err := ValidReviewRefName(c.ref); err != nil {
+			return fmt.Errorf("%s: %w", c.name, err)
+		}
+	}
+	return nil
+}
+
+// ValidReviewRefName checks a ref name as typed after --base or --head: not empty, printable, at
+// most 255 bytes.
+func ValidReviewRefName(ref string) error {
+	switch {
+	case ref == "":
+		return fmt.Errorf("is empty")
+	case len(ref) > maxReviewRefName:
+		return fmt.Errorf("is %d bytes, at most %d", len(ref), maxReviewRefName)
+	case strings.ContainsFunc(ref, func(r rune) bool { return !unicode.IsPrint(r) }):
+		return fmt.Errorf("has a non-printable character")
+	}
+	return nil
 }
 
 // Values of RunMR.State.
@@ -360,8 +408,12 @@ func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
 // (specs/story/SPEC.md §11.1); for any other run the one worktree.branch records, which is named
 // when the worktree is created (specs/delivery/SPEC.md §4.3), and orchestrator/<run-id> until
 // there is one. Loading checks that a story task's branch has the story pattern and names its
-// story and task, and any other run's branch passes ValidBranchName.
+// story and task, and any other run's branch passes ValidBranchName. A review run's worktree is
+// detached: its branch is "", and only a run with a review target may have none.
 func RunWorktreeBranch(run *Run) string {
+	if run.ReviewTarget != nil {
+		return ""
+	}
 	if src := run.Task.Source; src != nil && src.Kind == TaskSourceStory {
 		return src.Branch
 	}
