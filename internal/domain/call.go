@@ -157,6 +157,32 @@ func (d DiffStat) Validate() error {
 // MaxDiffPaths bounds each path list of a StepDiff.
 const MaxDiffPaths = 50
 
+// MaxRunFiles bounds StepDiff.RunFiles.
+const MaxRunFiles = 200
+
+// FileStat is one file of a run's net change, from git's numstat: the counts a text file
+// gained and lost, or Binary for a file git cannot count lines of (then both counts are 0).
+type FileStat struct {
+	Path       string `json:"path"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
+	Binary     bool   `json:"binary,omitempty"`
+}
+
+// Validate checks a recorded file stat.
+func (f FileStat) Validate() error {
+	if !CleanRelPath(f.Path) {
+		return fmt.Errorf("%q is not a clean repository-relative path", f.Path)
+	}
+	if f.Insertions < 0 || f.Deletions < 0 {
+		return fmt.Errorf("%s: negative count", f.Path)
+	}
+	if f.Binary && (f.Insertions != 0 || f.Deletions != 0) {
+		return fmt.Errorf("%s: a binary file has no line counts", f.Path)
+	}
+	return nil
+}
+
 // StepDiff is what an implement step changed, from git - never from the model's own
 // account of it (MVP.md §31.4) - and how that account compares.
 type StepDiff struct {
@@ -165,6 +191,9 @@ type StepDiff struct {
 	// Run is the working tree after the step against the run's restore point
 	// (pre_run_ref): everything the run has changed so far. Nil without a restore point.
 	Run *DiffStat `json:"run,omitempty"`
+	// RunFiles are the files behind Run, from the same git output: at most MaxRunFiles, in
+	// git's order, so a run with more files lists the first ones. Only with Run.
+	RunFiles []FileStat `json:"run_files,omitempty"`
 	// NotReported are files the step changed that its artifact's changed_files and
 	// tests_added leave out; ReportedUnchanged are files those name that the step did not
 	// change. Both are repository-relative, at most MaxDiffPaths each, and both are empty
@@ -181,6 +210,17 @@ func (d StepDiff) Validate() error {
 	if d.Run != nil {
 		if err := d.Run.Validate(); err != nil {
 			return fmt.Errorf("run: %w", err)
+		}
+	}
+	if len(d.RunFiles) > 0 && d.Run == nil {
+		return fmt.Errorf("run_files without run")
+	}
+	if len(d.RunFiles) > MaxRunFiles {
+		return fmt.Errorf("run_files: %d files, at most %d", len(d.RunFiles), MaxRunFiles)
+	}
+	for i, f := range d.RunFiles {
+		if err := f.Validate(); err != nil {
+			return fmt.Errorf("run_files[%d]: %w", i, err)
 		}
 	}
 	for name, list := range map[string][]string{"not_reported": d.NotReported, "reported_unchanged": d.ReportedUnchanged} {

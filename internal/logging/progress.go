@@ -470,6 +470,17 @@ func (r *ConsoleReporter) WorktreeKept(path, why string) {
 	fmt.Fprintf(r.Out, "The worktree stays at %s%s\n", path, why)
 }
 
+// ReportWritten names the reviewer's report (report.md) of a run that ended, next to its
+// summary.md in the same directory.
+func (r *ConsoleReporter) ReportWritten(path string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "%s %s\n", st.gray("Report"), path)
+		return
+	}
+	fmt.Fprintf(r.Out, "Report: %s\n", path)
+}
+
 // worktreeBase is where a worktree run starts: the base branch at the base commit, or only the
 // commit when HEAD was detached.
 func worktreeBase(baseBranch, baseRef string) string {
