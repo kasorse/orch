@@ -21,20 +21,31 @@ const (
 	jiraToken = "test-jira-token"
 )
 
+// defaultJiraTransitions is what the fake Jira lists as the moves an issue can make.
+const defaultJiraTransitions = `{"transitions":[` +
+	`{"id":"21","name":"Start progress","to":{"name":"In Progress"}},` +
+	`{"id":"31","name":"Send to review","to":{"name":"In Review"}}]}`
+
 // jiraRequest is what the fake Jira recorded of one request.
 type jiraRequest struct {
 	Path, Query, Auth string
-	// Method and Body are set for a creation (POST /rest/api/2/issue).
+	// Method and Body are set for a write (a POST: a creation, a comment, a transition).
 	Method, Body string
 }
 
 // fakeJira serves canned REST v2 issues by key on a loopback httptest server
-// (specs/jira/SPEC.md §16). It checks Basic auth against the credentials above.
+// (specs/jira/SPEC.md §16). It checks Basic auth against the credentials above. It also takes
+// the writes of specs/delivery/SPEC.md §10: the status read, the transitions list, a comment
+// (201 with an id) and a transition (204).
 type fakeJira struct {
 	srv    *httptest.Server
 	issues map[string]string
 	// fail lists statuses to answer the first requests with, before answering normally.
 	fail []int
+	// status is the status every issue is in for the write-back's read, "To Do" unless a test sets
+	// it; transitions is the answer to GET .../transitions (defaultJiraTransitions).
+	status      string
+	transitions string
 
 	mu      sync.Mutex
 	reqs    []jiraRequest
@@ -45,7 +56,7 @@ type fakeJira struct {
 // variables to what it accepts. A key it does not know answers 404.
 func startJira(t *testing.T, issues map[string]string, fail ...int) *fakeJira {
 	t.Helper()
-	j := &fakeJira{issues: issues, fail: fail}
+	j := &fakeJira{issues: issues, fail: fail, status: "To Do", transitions: defaultJiraTransitions}
 	j.srv = httptest.NewServer(http.HandlerFunc(j.handle))
 	t.Cleanup(j.srv.Close)
 	t.Setenv("JIRA_EMAIL", jiraEmail)
@@ -72,7 +83,7 @@ func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
 	j.reqs = append(j.reqs, req)
 	n := len(j.reqs)
 	created := 0
-	if req.Method == http.MethodPost {
+	if req.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue" {
 		j.created++
 		created = j.created
 	}
@@ -99,6 +110,20 @@ func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
 		key := fmt.Sprintf("%s-%d", in.Fields.Project.Key, 100+created)
 		w.WriteHeader(http.StatusCreated)
 		_, _ = fmt.Fprintf(w, `{"id":"%d","key":%q,"self":"https://ignored"}`, 20000+created, key)
+		return
+	case req.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comment"):
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"10042"}`))
+		return
+	case req.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transitions"):
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/transitions"):
+		_, _ = w.Write([]byte(j.transitions))
+		return
+	case r.Method == http.MethodGet && r.URL.RawQuery == "fields=status":
+		key := strings.TrimPrefix(r.URL.Path, "/rest/api/2/issue/")
+		_, _ = fmt.Fprintf(w, `{"key":%q,"fields":{"status":{"name":%q}}}`, key, j.status)
 		return
 	}
 	body, ok := j.issues[strings.TrimPrefix(r.URL.Path, "/rest/api/2/issue/")]

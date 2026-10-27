@@ -203,6 +203,8 @@ type jiraOptions struct {
 	// create is the jira.create lines verbatim (two spaces of indent, starting "  create:"), or
 	// nothing.
 	create string
+	// write is the jira.write lines verbatim (two spaces of indent, starting "  write:"), or nothing.
+	write string
 }
 
 func (j *jiraOptions) yaml() string {
@@ -216,7 +218,7 @@ func (j *jiraOptions) yaml() string {
 			s += fmt.Sprintf("    - id: %s\n      label: %s\n", f[0], f[1])
 		}
 	}
-	return s + j.create
+	return s + j.create + j.write
 }
 
 func defaultConfigOptions() configOptions {
