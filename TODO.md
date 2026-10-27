@@ -664,7 +664,10 @@ worktree-run с implement заканчивается коммитом → push �
 merge_request.*` (описание — `report.md`, переводы строк как `\n`), без `internal/gitlab` и токена; `review --mr` снят. Пункты W2/W4/W5 ниже про
 `internal/gitlab`, `--mr` и draft-MR устарели — истина в спеке.
 
-### [ ] W1. Финал: коммит, ветка, отчёт для человека — P0 · M
+### [x] W1. Финал: коммит, ветка, отчёт для человека — P0 · M
+**Сделано (2026-10-27, DL01–DL04, DL13; нормативно MVP.md §50, §42.2, §47):** тип Conventional Commit и
+trailer `Orchestrator-Decision`, имя ветки по инструкциям репозитория / шаблону, `report.md`, затем
+push и MR. Спека и задачи: [`specs/delivery/`](specs/delivery/README.md). Текст ниже — исходный план.
 **Зачем:** 0.4. Результат run'а должен быть готов к ревью человеком.
 **Сделано Q4/WT (MVP.md §47):** ветка `orchestrator/<id>` и коммит в неё без вопроса в режиме
 worktree; остальное ниже (Conventional Commits, trailer решения, `report.md`) — по-прежнему здесь.
@@ -687,7 +690,10 @@ worktree; остальное ниже (Conventional Commits, trailer решен�
 **Готово, когда:** после успешного run'а есть коммит с trailers и `report.md`, который не
 стыдно вставить в MR.
 
-### [ ] W2. Merge Request в GitLab (потом GitHub) — P1 · M
+### [x] W2. Merge Request в GitLab (потом GitHub) — P1 · M
+**Сделано (2026-10-27, DL04, DL05; MVP.md §50.5–§50.8):** без `internal/gitlab` и токена: MR открывает
+`git push -o merge_request.*`; стори — MR на каждую таску и push spec-ветки. GitHub не делался. Живая
+проверка на gitlab.com (`specs/delivery/SPEC.md` §15) — за оператором. Спека: [`specs/delivery/`](specs/delivery/README.md).
 **Зачем:** ценность на рынке — «тикет → готовый MR». Российский enterprise в основном на
 self-hosted GitLab.
 **Как сделать:**
@@ -705,7 +711,9 @@ self-hosted GitLab.
 прогон на тестовом проекте создаёт draft MR.
 **⚠ спека:** §30 (GitHub/GitLab integration), новый `specs/gitlab/`.
 
-### [ ] W3. Обратная запись в Jira (opt-in) — P2 · S
+### [x] W3. Обратная запись в Jira (opt-in) — P2 · S
+**Сделано (2026-10-27, DL06; MVP.md §39.12):** `jira.write.comment` и `jira.write.transition` после MR,
+тот же токен, что и на чтение. Спека: [`specs/delivery/`](specs/delivery/README.md).
 **Уже сделано в W6:** `story run` создаёт дочерние задачи (`jira.create`, MVP.md §39.11, §48.7) —
 первая запись в Jira, после одобрения и идемпотентно, с `jira.base_url` и теми же правилами
 учётных данных. Остаются комментарии, переходы статусов и ссылки между задачами.
@@ -716,7 +724,10 @@ self-hosted GitLab.
 **⚠ спека:** §39 фиксирует чтение и (§39.11) создание дочерних задач story — остальная запись
 требует отдельной спеки.
 
-### [ ] W4. Headless-режим и CI — P1 · M
+### [x] W4. Headless-режим и CI — P1 · M
+**Сделано (2026-10-27, DL07, DL10; MVP.md §4, §50.10):** `--output json`, коды выхода (новый 6), отказ без
+терминала без `--mode`, `Dockerfile` и `examples/ci/`. Прогон CI-примера на тестовом проекте и `docker
+build` — за оператором. Спека: [`specs/delivery/`](specs/delivery/README.md).
 **Как сделать:**
 1. `--non-interactive` (или автоматически, если нет TTY): нет вопросов, `on_failure: ask`
    → `fail`, ручные гейты → отказ, если не `--mode auto`.
@@ -728,7 +739,10 @@ self-hosted GitLab.
    `JIRA_KEY` → `orchestrator run --jira $JIRA_KEY --mr --non-interactive`.
 **Готово, когда:** пример CI-пайплайна в `examples/ci/` прогнан на тестовом проекте.
 
-### [ ] W5. Режим «только ревью» для существующего MR — P1 · M
+### [x] W5. Режим «только ревью» для существующего MR — P1 · M
+**Сделано (2026-10-27, DL08; MVP.md §50.11):** `orchestrator review --base <ref> [--head <ref>]` без
+`--mr`: в CI MR ревьюится по `CI_MERGE_REQUEST_DIFF_BASE_SHA`/`CI_COMMIT_SHA`. Спека:
+[`specs/delivery/`](specs/delivery/README.md).
 **Зачем:** самый дешёвый и безопасный способ зайти в команду: ничего не пишет, сразу
 полезен, легко продаётся. Плюс к нему детерминированные проверки (Q5).
 **Как сделать:** `orchestrator review --base <ref> [--head <ref>]` (локально) и
@@ -758,7 +772,7 @@ shadow-вопрос `scope.story` в классификации, ничего н
 `story.max_parallel` (`--parallel N`, 1..8, по умолчанию 1) готовых задач одновременно, каждая —
 свой run в своём worktree, вывод в `logs/task-<ID>.<attempt>.log`; несколько родителей одной
 задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
-`conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`), не сделано.
+`conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`, MVP.md §50.8).
 
 ---
 

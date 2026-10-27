@@ -35,7 +35,11 @@ design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
 `FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
 the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
-Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`.
+Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`;
+delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
+merge request, the Jira comment and transition, `--output json` and the exit codes, `orchestrator
+review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its design record in
+`specs/delivery/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -43,7 +47,8 @@ This file is a summary to keep future work aligned with them, not a replacement.
 Responsibilities are strictly separated:
 
 - **LLM** — task reasoning: clarifying an unclear task (no tools), research, investigation,
-  implementation, review.
+  implementation, review. `orchestrator review --base <ref>` is a run of just `test` and
+  `review` over `base...head` in a detached worktree (MVP.md §50.11).
 - **Decision provider** — bounded probabilities only: does the task need project context,
   is it clear enough, its complexity distribution, each stage's probability. It never decides
   anything.
@@ -191,11 +196,14 @@ and review), without it, as the last read-only step, it writes the answer.
   anything else — a silent downgrade is the one unacceptable failure. Never pass
   `bypassPermissions` or any equivalent.
 - **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
-  `implement` under `execution.isolation: worktree` (or `run --worktree`; the default is `inplace`) runs every step, guard,
+  `implement` runs in a worktree by default (`execution.isolation: worktree`; `run --inplace` or
+  `isolation: inplace` opts out, `run --worktree` overrides an `inplace` config) and runs every step, guard,
   scan, review diff and commit in `<state>/orchestrator/worktrees/<repo-id>/<run-id>`; the
-  orchestrator writes git objects, `orchestrator/<run-id>`, the worktree and
+  orchestrator writes git objects, the run's branch, the worktree and
   `refs/orchestrator/` there and nothing in the operator's working tree, index or branch. The
-  worktree's path is derived from the run ID, never read from `run.json`; the mode comes from
+  worktree's path is derived from the run ID, never read from `run.json`; the branch is not (it
+  is named by the repository's instructions, a template or `orchestrator/<run-id>`, MVP.md
+  §50.3), so a resume checks the recorded name's format and `git worktree list`; the mode comes from
   `options.isolation`, not the current config. The `.git` pointer is checked in Go before
   every fingerprint, `worktree.setup` runs only before any step, and a new test or scenario
   that reads the result in the working tree pins `isolation: inplace`. New run artifacts:
@@ -350,17 +358,31 @@ and review), without it, as the last read-only step, it writes the answer.
   hooks. The message is the implementation's `summary_short` (without one, the operator
   types it) plus the `Orchestrator-Run` trailer, assembled by Go with no model call.
   `Repository.CommitAll` is the one call that writes the user's index and a branch. Nothing in the offer changes the run's status or exit code.
-  A worktree run (`specs/worktree/` §10) commits in its worktree on `orchestrator/<run-id>`
-  as under `auto_commit: true`, whatever the config and `--mode` say; only where §42.6 would
-  not commit is an operator at the terminal asked (default no). `finishWorktree` then runs
+  A worktree run commits in its worktree on its own branch as the first step of the delivery
+  chain below; `auto_commit` has no effect there. `finishWorktree` then runs
   `merge-tree` against `base_branch` in the operator's repository (`session.operator`, after
-  its fingerprint matched the one taken at creation) and `git worktree remove` without
+  its fingerprint matched the one taken at creation), the push and `git worktree remove` without
   `--force`; without a commit the worktree stays.
+- **Delivery: ask unless `--mode auto`, the push opens the merge request, no GitLab credentials**
+  (MVP.md §50, `specs/delivery/`). A worktree run that completes with `implement` ends with commit
+  → push → merge request → worktree removal, with no flag; `--inplace` is the only way out. Only
+  `--mode auto` takes the three yeses in advance (and then the §42.6 refusals apply); every other
+  mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
+  merge request is opened by the one `git push -u … -o merge_request.create -o
+  merge_request.target=… -o merge_request.title=… -o merge_request.description=…` of the run's own
+  branch (explicit refspec, never `--force`, never to a branch that exists on the remote, an intent
+  in `run.json: mr` before it, never repeated): the orchestrator holds no GitLab token and has no
+  GitLab client, the operator's git credentials do the push, and the MR URL is only read from the
+  push's answer. Go writes everything a person reads (commit message, `report.md`, title,
+  description, Jira comment) and escapes model- and ticket-written text; `commit_type` is the one
+  model word, taken from a closed list. `--output json` prints one line on stdout and exit code 6
+  is "completed, needs a person".
 - **A model proposes, Go orders, the operator approves** (MVP.md §48, `specs/story/`). `story
   plan` writes a spec of tasks as files and runs nothing; `story run` is the approval. Go finds
   the services the task names under `story.roots` (no model call), validates the model's
   answer strictly, orders the tasks from `depends_on` (Kahn, smallest ID first) and computes
-  each task's base and branch (`story/<slug>/<ID>`: stacked on the same-repository task it
+  each task's base and fallback branch (named by its repository's rules, `story/<slug>/<ID>` only the
+fallback: stacked on the same-repository task it
   needs, or, with several such parents, on the tip of the story's spec branch
   `story/<slug>/spec` where Go merged them with `merge-tree` and `commit-tree`, never in a tree;
   a merge that conflicts makes the task `conflict` and stops the story for a manual merge); no
@@ -376,12 +398,15 @@ and review), without it, as the last read-only step, it writes the answer.
   them), and nothing new starts after a task that did not end done. A
   dispatched task's file is frozen up to `## As built`, which only Go appends. The scope
   question is shadow data: nothing reads `scope.story` to decide.
-- **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11). The one write is
+- **Jira writes only after approval, never twice** (MVP.md §48.7, §39.11, §39.12). The writes are
   `story run` creating the child issues (`jira.create`, a story planned from a Jira issue): after
   the confirmation, before the first dispatch, an intent in `story.json` before each POST, the
   key recorded after the 201, no retry once a request may have reached Jira (only 429/503 with
-  `Retry-After`), and an intent without a key stops the next start. `run`, `resume` and `story
-  plan` write nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
+  `Retry-After`), and an intent without a key stops the next start; and, with `jira.write`, a
+  comment and a transition on the task's own issue after a push opened its merge request
+  (`mr.state: created`; the same intent-first, never-repeated rules; a failure is a warning;
+  `options.jira_write` is the copy a resume uses, and a resume still reads nothing from Jira).
+  `story plan` writes nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
 - Stages always get the user's original request (through `action.taskBlock`); the translation
   is only for the decision provider and relevant-file search. After a clarify step the stages
   that take the task (research, investigate, implement, review) get, after it, the rendered
@@ -394,8 +419,9 @@ decision API and reading one Jira issue for `run --jira`), no model benchmarking
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
-API/IDE plugin, no GitHub/GitLab integration, no Jira beyond reading one issue and creating
-the child issues of an approved story (no comments, transitions or JQL), no remote repository execution, no RAG or persistent
+API/IDE plugin, no GitHub integration and for GitLab only the push that opens a merge request (no
+API client, no token), no Jira beyond reading one issue, creating the child issues of an approved
+story and the comment and transition after a merge request (no JQL, links or worklogs), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
@@ -464,17 +490,22 @@ before the decision, absent when the first check was clear, with `clarify.enable
 a story task and after a failed pre-check; a run stopped `task needs input` has it and no
 decision or workflow), the `decision`,
 `pre_run_ref`, `head_ref`, `resume_baseline` (the guard's run-start state), `provider_cli`,
+`branch_naming` (`{source, proposed?, rejected?, usage?, call?}`), `mr` (`{state: intent|pushed|created,
+remote, source, target, iid?, url?, skipped?, error?}`: the intent is saved before the push),
+`jira_write` (`{comment, transition}`), `review_target` (`{base, head, merge_base, …}`, an
+`orchestrator review` run, which has no `worktree.branch`),
 `org_config` (`{path, sha256}` of the org file the run started under; each `resumes[]` entry
 has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
 holds variable names only; each
 `resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
-`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, both recorded at run start and
-read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
+`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, and `jira_write`, a copy of
+`jira.write`, all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `provider.model_source` (`base`, `by_complexity.<level>` or `escalated.<level>`), `attempt`,
 `usage` (with `partial` for a call cut off before its final report), `call` (`api_key_source`
 as the CLI reported it, prompt size and cuts, models, API time, tool calls, an extra reviewer's `extra_calls`) and, for an implement the
-guard passed, `diff` from git and `path_rules` (the `policy.paths` rules the run's net diff matched,
+guard passed, `diff` from git (with `run_files`, up to 200 `{path, insertions, deletions, binary}`
+for `report.md`) and `path_rules` (the `policy.paths` rules the run's net diff matched,
 with the stages the workflow lacks in `missing`; recorded also when they failed the step), and for any
 implement `tree_after` and `verify_calls`; a test
 result's `checks`, `failed_check`, `failed_tests` and `report_format`; a review result's `diff`
@@ -485,7 +516,8 @@ resume, derived and never read back for a decision: `status`, `failure_reason`,
 `usage` summed over the steps and the decision calls with `calls` and `partial_calls`,
 `decision_overhead` {`cost_usd`, `ms`, `calls`}, the net `diff`), `summary.md` (rendered
 from run.json and decision.json when
-the run ends, never read back; field reference MVP.md §43), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
+the run ends, never read back; field reference MVP.md §43), `report.md` (the reviewer's report and
+the merge request description, written next to it by Go, never read back; MVP.md §50.4), `decision.json` (`source: manual` for `run --stage`, with no provider, complexity or latency; `models`: the
 provider, model, effort and source each action gets; `policy_hash`: the sha256 of the
 `DecisionPolicy` the decision used, absent for `manual`; `questions_hash`: the sha256 of the
 shared questions, which `decisions calibrate` groups sizes by; `complexity.sources.<src>.size`
@@ -506,7 +538,7 @@ prompt as sent, the excerpts' paths and headings, the parsed points), `logs/<NNN
 `checks:` adds `logs/<NNN>-test.<check>.*`, an implement with verify calls adds
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
 `logs/decide-{context,classify}.*`, `logs/clarify-<N>.*`, `logs/decide-clarity-<N>.*` (one per
-re-check), `logs/pre-run-test.*` and `logs/pre-run-test.<check>.*`.
+re-check), `logs/pre-run-test.*`, `logs/pre-run-test.<check>.*` and `logs/branch-name.*` (the branch-naming call).
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`
