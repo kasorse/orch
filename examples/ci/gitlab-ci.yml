@@ -1,0 +1,65 @@
+# GitLab CI example for the orchestrator (specs/delivery/SPEC.md §11.4). Copy it to the
+# repository's .gitlab-ci.yml and read examples/ci/README.md for the variables and the runner.
+#
+# The repository's orchestrator.yaml must set, for the detached checkout GitLab makes:
+#   delivery:
+#     target_branch: main
+# The example never sets test.sandbox: none; the runner has to allow bubblewrap.
+
+stages: [implement, review]
+
+default:
+  image: registry.example.com/team/orchestrator:latest   # built from the Dockerfile, see the README
+  before_script:
+    # Push credentials: a helper in the global git config reading $GITLAB_TOKEN from the
+    # environment. No token goes into the remote URL (.git/config is readable by file tools).
+    - git config --global user.name "orchestrator"
+    - git config --global user.email "orchestrator@${CI_SERVER_HOST}"
+    - git config --global credential.helper '!f() { echo username=oauth2; echo "password=${GITLAB_TOKEN}"; }; f'
+    - git remote set-url origin "${CI_SERVER_PROTOCOL}://${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - grep -q 'target_branch:' orchestrator.yaml || { echo "orchestrator.yaml must set delivery.target_branch" >&2; exit 2; }
+
+variables:
+  GIT_DEPTH: "0"
+
+ai-implement:
+  stage: implement
+  rules:
+    - if: '$JIRA_KEY'
+    - when: manual
+      allow_failure: true
+  script:
+    - orchestrator run --jira "$JIRA_KEY" --mode auto --claude-auth api --output json > result.json
+  artifacts:
+    when: always
+    paths:
+      - result.json
+      - .orchestrator/runs/
+    expire_in: 1 week
+
+ai-review:
+  stage: review
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+  script:
+    - |
+      set +e
+      orchestrator review --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" \
+        --mode auto --claude-auth api --output json > result.json
+      code=$?
+      set -e
+      report=$(sed -n 's/.*"report":"\([^"]*\)".*/\1/p' result.json)
+      if [ -n "$report" ] && [ -f "$report" ]; then
+        curl --fail --silent --show-error --request POST \
+          --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+          --data-urlencode "body@${report}" \
+          "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
+      fi
+      # Exit 6: the review ran and its verdict fails; the job fails so the merge request shows it.
+      exit "$code"
+  artifacts:
+    when: always
+    paths:
+      - result.json
+      - .orchestrator/runs/
+    expire_in: 1 week
