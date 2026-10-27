@@ -315,6 +315,10 @@ security:
 #     # field: customfield_10014   # with link: field (Epic Link on Server/Data Center)
 #     labels: [orchestrator]
 #     components: {billing: Billing}   # optional, service name -> Jira component
+#   write:                         # after a worktree run's push opened a merge request, on the task's own issue (specs/delivery/SPEC.md §10); absent: nothing
+#     comment: true                # comment with the merge request link and what the run found
+#     transition: In Review        # move the issue by the transition of this name, or leading to this status; case does not matter
+#                                  # the run needs the credential variables when this is set; a failure here is a warning, never the run's result
 
 # Optional: a task split into a specification and ordered subtasks across services
 # (specs/story/SPEC.md §5). The task names the services it touches; they are the checkouts
