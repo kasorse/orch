@@ -37,17 +37,27 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 		exclude = append(exclude, d.RunsDir)
 	}
 	limits := d.Config.Limits.Prompt
+	// A review run reviews merge_base..head, and its worktree is at head: the diff is taken
+	// against the merge base, not against HEAD (specs/delivery/SPEC.md §12.2).
+	base := ""
+	if t := run.ReviewTarget; t != nil {
+		base = t.MergeBase
+	}
 	diff, err := d.Repo.ReviewDiff(ctx, repository.ReviewDiffOptions{
 		Exclude:   exclude,
 		Denied:    projectctx.DenyMatcher(d.Config.Context.ExtraDeny),
 		Summarize: append(slices.Clone(DefaultDiffSummarize), limits.DiffSummarize...),
 		MaxBytes:  limits.DiffBytes(),
+		Base:      base,
 	})
 	if err != nil {
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "failed to collect the diff to review", Err: err}
 	}
 
 	if diff.Empty() {
+		if run.ReviewTarget != nil {
+			return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "nothing to review: the worktree has no changes against the merge base " + run.ReviewTarget.MergeBase}
+		}
 		return workflow.StepOutcome{}, &apperr.WorkflowError{Msg: "nothing to review: the working tree has no changes against HEAD"}
 	}
 	// What looks like a secret is not sent to the review model: a finding recorded under

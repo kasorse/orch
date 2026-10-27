@@ -41,6 +41,57 @@ func TestAskCommit(t *testing.T) {
 	}
 }
 
+// The push and the merge request questions default to no: an empty answer is a no, a typo asks
+// again, and a closed stdin is an error the caller reads as no.
+func TestAskPushAndMergeRequest(t *testing.T) {
+	asks := map[string]func(p Prompter, out *bytes.Buffer) (bool, error){
+		"push": func(p Prompter, out *bytes.Buffer) (bool, error) { return AskPush(p, out, "orchestrator/r1", "origin") },
+		"merge request": func(p Prompter, out *bytes.Buffer) (bool, error) {
+			return AskMergeRequest(p, out, "orchestrator/r1", "main")
+		},
+	}
+	cases := []struct {
+		answers []string
+		want    bool
+	}{
+		{[]string{"y"}, true}, {[]string{"YES"}, true}, {[]string{"n"}, false}, {[]string{"no"}, false},
+		{[]string{""}, false}, {[]string{"maybe", "y"}, true}, {[]string{"maybe", ""}, false},
+	}
+	for name, ask := range asks {
+		for _, c := range cases {
+			p := &fakePrompter{answers: c.answers}
+			var out bytes.Buffer
+			got, err := ask(p, &out)
+			if err != nil || got != c.want || p.idx != len(c.answers) {
+				t.Errorf("%s %q: got %v, %v after %d answers; want %v after %d", name, c.answers, got, err, p.idx, c.want, len(c.answers))
+			}
+		}
+		if got, err := ask(&fakePrompter{}, new(bytes.Buffer)); err == nil || got {
+			t.Errorf("%s with no answer = %v, %v; want false and an error", name, got, err)
+		}
+	}
+}
+
+func TestAskPushAndMergeRequest_Prompts(t *testing.T) {
+	var prompts []string
+	record := promptFunc(func(prompt string) (string, error) { prompts = append(prompts, prompt); return "", nil })
+	var out bytes.Buffer
+	if _, err := AskPush(record, &out, "orchestrator/r1", "origin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AskMergeRequest(record, &out, "orchestrator/r1", "main"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"Push orchestrator/r1 to origin? [y]es / [N]o: ", "Open a merge request orchestrator/r1 → main? [y]es / [N]o: "}
+	if strings.Join(prompts, "|") != strings.Join(want, "|") {
+		t.Errorf("prompts = %q, want %q", prompts, want)
+	}
+}
+
+type promptFunc func(string) (string, error)
+
+func (f promptFunc) Ask(prompt string) (string, error) { return f(prompt) }
+
 func TestAskCommit_ShowsChangesWarningsAndMessage(t *testing.T) {
 	p := &fakePrompter{answers: []string{"n"}}
 	var out bytes.Buffer

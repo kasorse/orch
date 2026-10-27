@@ -1,5 +1,5 @@
 // Package persistence stores run state on the local filesystem under
-// <baseDir>/<run-id>/{run.json,decision.json,project_context.json,workflow.json,ticket.json,summary.md,artifacts/,logs/} so a
+// <baseDir>/<run-id>/{run.json,decision.json,project_context.json,workflow.json,ticket.json,summary.md,report.md,artifacts/,logs/} so a
 // completed or failed run can later be inspected. No database is required (MVP.md §21).
 package persistence
 
@@ -127,6 +127,24 @@ func (s *Store) SaveSummary(runID, markdown string) error {
 	}
 	if err := writeFileAtomic(filepath.Join(s.runDir(runID), "summary.md"), []byte(markdown), 0o644); err != nil {
 		return fmt.Errorf("save summary: %w", err)
+	}
+	return nil
+}
+
+// ReportPath is where SaveReport writes report.md, beside summary.md.
+func (s *Store) ReportPath(runID string) string {
+	return filepath.Join(s.runDir(runID), "report.md")
+}
+
+// SaveReport writes report.md: the run's report for a reviewer (specs/delivery/SPEC.md §5),
+// rendered from run.json and decision.json. Like summary.md it is never read back, so it is
+// not a resume input and is not in action.RunDirPatterns.
+func (s *Store) SaveReport(runID, markdown string) error {
+	if !isRunID(runID) {
+		return fmt.Errorf("save report: %q is not a run ID", runID)
+	}
+	if err := writeFileAtomic(s.ReportPath(runID), []byte(markdown), 0o644); err != nil {
+		return fmt.Errorf("save report: %w", err)
 	}
 	return nil
 }

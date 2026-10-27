@@ -21,21 +21,23 @@ const commitHeaderMax = 72
 // auto_commit the same checks run and the commit is made without the question, unless
 // there is something the question would have warned about or no message to use.
 //
-// A worktree run commits on its own branch, never the operator's, so it takes the auto_commit
-// path whatever the config and the mode say (specs/worktree/SPEC.md §10.1); where that path
-// would not commit, an operator at the terminal (canAsk) gets the question instead. In place
-// canAsk is not read: the caller asked only when someone is there. It returns the commit, or
-// "" when nothing was committed.
+// A worktree run commits on its own branch, never the operator's, and without the question only
+// under --mode auto, by the same checks (specs/delivery/SPEC.md §7.2): auto_commit has no
+// effect there. Any other mode asks, with the warnings, and needs somebody to ask (canAsk); a
+// no is a person's decision. In place canAsk is not read: the caller asked only when someone
+// is there. It returns the commit, or "" when nothing was committed, and s.noCommit says why.
 func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 	run := s.run
+	s.noCommit = commitStop{}
 	if run.Status != domain.RunCompleted || run.Workflow == nil || !run.Workflow.Contains(domain.ActionImplement) {
 		return ""
 	}
 	out := s.reporter.PausingWriter()
 	inWorktree := s.worktree != nil
 	// A manual run is confirmed by a person step by step: it ends with the question too.
-	auto := inWorktree || (s.cfg.AutoCommit && run.Mode != domain.ModeManual)
+	auto := (inWorktree && run.Mode == domain.ModeAuto) || (!inWorktree && s.cfg.AutoCommit && run.Mode != domain.ModeManual)
 	skip := func(why string) {
+		s.noCommit = commitStop{why: why}
 		if auto {
 			fmt.Fprintf(out, "\nNot committing automatically: %s\n", why)
 		} else {
@@ -66,6 +68,7 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 		return ""
 	}
 	if changes == "" {
+		s.noCommit = commitStop{why: "the run changed nothing, so there is nothing to commit"}
 		fmt.Fprintln(out, "\nNo changes to commit.")
 		return ""
 	}
@@ -95,24 +98,26 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 		case header == "":
 			why = "the implementation proposed no commit message; commit what you want yourself."
 		}
-		switch {
-		case why == "":
-		case inWorktree && canAsk:
-			// The §42.2 question decides instead, with its default no.
-			ask = true
-		default:
+		if why != "" {
 			skip(why)
 			return ""
 		}
 	}
 	if ask {
+		if inWorktree && !canAsk {
+			skip("there is no terminal to ask on; run with --mode auto to commit and deliver without questions.")
+			return ""
+		}
 		var ok bool
 		header, ok, err = interaction.AskCommit(s.prompter, out, offer)
 		if err != nil {
+			// A closed stdin is the default answer: no.
+			s.noCommit = commitStop{why: "no answer to the commit question", declined: true}
 			fmt.Fprintf(out, "\nNo answer (%v); nothing committed.\n", err)
 			return ""
 		}
 		if !ok {
+			s.noCommit = commitStop{why: "declined at commit", declined: true}
 			if inWorktree {
 				fmt.Fprintln(out, "Not committed; the changes stay in the worktree.")
 			} else {
@@ -123,6 +128,7 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 	}
 	sha, err := s.repo.CommitAll(ctx, offer.Message(header))
 	if err != nil {
+		s.noCommit = commitStop{why: "the commit failed: " + firstNonEmpty(strings.SplitN(err.Error(), "\n", 2)[0])}
 		fmt.Fprintf(out, "Commit failed: %v\n", err)
 		return ""
 	}
@@ -137,17 +143,24 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 
 // commitOffer proposes the message and the warnings for run. The header is the last
 // implementation's summary_short, cut to one line of commitHeaderMax runes and prefixed
-// with the Jira key for a run --jira task or a story task that has one; whatever the cut left
-// out goes into the body, followed by the Orchestrator-Run trailer and, for a story task, the
-// Orchestrator-Story one. Without a summary_short the header is "" and
+// with its commit_type ("fix: ") and the Jira key for a run --jira task or a story task that
+// has one ("fix: PAY-12 summary", "PAY-12: summary" without a type); whatever the cut left
+// out goes into the body, followed by the Orchestrator-Run trailer, the Orchestrator-Decision
+// one (when the run has a decision) and, for a story task, the Orchestrator-Story one. Without a summary_short the header is "" and
 // the operator is asked to write it.
 func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interaction.CommitOffer {
 	var body strings.Builder
 	var header string
 	if impl != nil {
 		if source := strings.TrimSpace(impl.SummaryShort); source != "" {
+			key := ticketKey(run.Task.Source)
 			prefix := ""
-			if key := ticketKey(run.Task.Source); key != "" {
+			switch commitType, ok := domain.ValidCommitType(impl.CommitType); {
+			case ok && key != "":
+				prefix = commitType + ": " + key + " "
+			case ok:
+				prefix = commitType + ": "
+			case key != "":
 				prefix = key + ": "
 			}
 			first, _, _ := strings.Cut(source, "\n")
@@ -158,6 +171,18 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 		}
 	}
 	body.WriteString("Orchestrator-Run: " + run.ID + "\n")
+	if d := run.Decision; d != nil {
+		label := string(d.Complexity.Selected)
+		if d.Source == domain.DecisionSourceManual || label == "" {
+			label = "manual"
+		}
+		stages := d.Stages.EnabledStages()
+		names := make([]string, len(stages))
+		for i, st := range stages {
+			names[i] = string(st)
+		}
+		body.WriteString("Orchestrator-Decision: " + label + "/" + strings.Join(names, ",") + "\n")
+	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		body.WriteString("Orchestrator-Story: " + src.StoryRef() + "\n")
 	}
@@ -175,15 +200,7 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 
 // ticketKey is the Jira key a commit header starts with: the issue a run --jira task was
 // rendered from, or the key of a story task; "" when there is none.
-func ticketKey(src *domain.TaskSource) string {
-	switch {
-	case src == nil:
-		return ""
-	case src.Kind == domain.TaskSourceStory:
-		return src.Jira
-	}
-	return src.Key
-}
+func ticketKey(src *domain.TaskSource) string { return src.JiraKey() }
 
 // approvalReason is why auto_commit does not commit a change that matched approval: manual
 // rules.

@@ -188,6 +188,54 @@ type StoryBase struct {
 	// by the first story run (a record from before it has none, and gets it when it continues).
 	// The tasks with several parents are merged on it.
 	SpecBranch string `json:"spec_branch,omitempty"`
+	// SpecPush is the state of the spec branch on the repository's remote, which the story run
+	// pushes (specs/delivery/SPEC.md §9); nil until the first push is attempted.
+	SpecPush *StorySpecPush `json:"spec_push,omitempty"`
+}
+
+// Values of StorySpecPush.State.
+const (
+	// SpecPushIntent is saved before the push: it may have reached the remote even when it reports
+	// a failure, so it is never repeated without asking the remote first.
+	SpecPushIntent = "intent"
+	// SpecPushPushed is a push that succeeded: SHA is the commit the remote's branch is at.
+	SpecPushPushed = "pushed"
+)
+
+// maxSpecPushError bounds the text of a failed push that story.json keeps.
+const maxSpecPushError = 500
+
+// StorySpecPush is the record of the spec branch's push: the state, the commit the push was for,
+// and, for a push that failed, git's last line.
+type StorySpecPush struct {
+	State string `json:"state"`
+	SHA   string `json:"sha"`
+	Error string `json:"error,omitempty"`
+}
+
+func (p StorySpecPush) validate() error {
+	switch {
+	case p.State != SpecPushIntent && p.State != SpecPushPushed:
+		return fmt.Errorf("state %q is not intent or pushed", p.State)
+	case !story.ValidBaseRef(p.SHA):
+		return fmt.Errorf("sha %q is not a full commit SHA", p.SHA)
+	case len(p.Error) > maxSpecPushError || strings.ContainsFunc(p.Error, func(r rune) bool { return r < ' ' || r == 0x7f }):
+		return fmt.Errorf("error must be one line of at most %d bytes", maxSpecPushError)
+	case p.State == SpecPushPushed && p.Error != "":
+		return fmt.Errorf("a pushed spec branch has no error")
+	}
+	return nil
+}
+
+// StoryMR is the merge request a task's child opened, read from the child's run.json.
+type StoryMR struct {
+	IID int    `json:"iid"`
+	URL string `json:"url"`
+}
+
+func (m StoryMR) validate() error {
+	// The same rules as run.json: mr, which this is copied from.
+	return domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: "x", Target: "x", IID: m.IID, URL: m.URL}.Validate()
 }
 
 // StorySpecBranch is the story's own branch, where the parents of a task are merged:
@@ -242,11 +290,17 @@ type StoryTask struct {
 	// found for the dispatch.
 	RunID string `json:"run_id,omitempty"`
 	Repo  string `json:"repo,omitempty"`
-	// Branch and BaseRef are what the child was asked to run on and from; Commit is the commit
-	// the task ended with, and what a dependent in the same repository is stacked on.
+	// Branch is the branch the child's worktree was on: its run's worktree.branch, copied when the
+	// run is read - after the child, or when the run of a story run that died is settled - so it is
+	// absent before (specs/delivery/SPEC.md §9.1). It is the repository's rule name or
+	// StoryTaskBranch. BaseRef is what the child was asked to run from; Commit is the commit the
+	// task ended with, and what a dependent in the same repository is stacked on.
 	Branch  string `json:"branch,omitempty"`
 	BaseRef string `json:"base_ref,omitempty"`
 	Commit  string `json:"commit,omitempty"`
+	// MR is the merge request the child's push opened, read from its run.json; nil for a task
+	// whose child opened none, which holds back every task that depends on it.
+	MR *StoryMR `json:"mr,omitempty"`
 	// Jira is the task's issue key; JiraIntent marks a child issue whose creation may have
 	// reached Jira without its key being recorded (SPEC §12.2).
 	Jira       string `json:"jira,omitempty"`
@@ -349,8 +403,18 @@ func (t StoryTask) validate(slug, id string, services map[string]string) error {
 		}
 	}
 	if t.Branch != "" {
-		if t.Attempt < 1 || t.Branch != StoryTaskBranch(slug, id, t.Attempt) || !story.ValidBranch(t.Branch, slug, id) {
-			return fmt.Errorf("branch %q is not %s", t.Branch, StoryTaskBranch(slug, id, max(t.Attempt, 1)))
+		// A name the repository's rules gave (specs/delivery/SPEC.md §4.3), or the story's own.
+		fallback := t.Attempt >= 1 && t.Branch == StoryTaskBranch(slug, id, t.Attempt) && story.ValidBranch(t.Branch, slug, id)
+		if err := domain.CheckBranchName(t.Branch); !fallback && (t.Attempt < 1 || err != nil) {
+			return fmt.Errorf("branch %q is neither %s nor a branch name the rules accept", t.Branch, StoryTaskBranch(slug, id, max(t.Attempt, 1)))
+		}
+	}
+	if t.MR != nil {
+		if t.Status != story.TaskDone {
+			return fmt.Errorf("a %s task has a merge request", orPendingStatus(t.Status))
+		}
+		if err := t.MR.validate(); err != nil {
+			return fmt.Errorf("mr: %w", err)
 		}
 	}
 	if t.BaseRef != "" && !story.ValidBaseRef(t.BaseRef) {
@@ -378,12 +442,15 @@ func (t StoryTask) validate(slug, id string, services map[string]string) error {
 		switch {
 		case t.Attempt < 1:
 			return fmt.Errorf("a %s task has no attempt", t.Status)
-		case t.FileSHA256 == "" || t.Repo == "" || t.Branch == "" || t.BaseRef == "":
-			return fmt.Errorf("a %s task is missing file_sha256, repo, branch or base_ref", t.Status)
+		case t.FileSHA256 == "" || t.Repo == "" || t.BaseRef == "":
+			return fmt.Errorf("a %s task is missing file_sha256, repo or base_ref", t.Status)
 		}
 	}
 	if t.Status == story.TaskDone && t.Commit == "" {
 		return fmt.Errorf("a done task has no commit")
+	}
+	if t.Status == story.TaskDone && t.Branch == "" {
+		return fmt.Errorf("a done task has no branch")
 	}
 	return nil
 }
@@ -441,6 +508,14 @@ func (r StoryRecord) Validate() error {
 		}
 		if b.SpecBranch != "" && b.SpecBranch != StorySpecBranch(r.Slug) {
 			return fmt.Errorf("bases.%s: spec_branch %q is not %s", name, b.SpecBranch, StorySpecBranch(r.Slug))
+		}
+		if b.SpecPush != nil {
+			if b.SpecBranch == "" {
+				return fmt.Errorf("bases.%s: spec_push without a spec_branch", name)
+			}
+			if err := b.SpecPush.validate(); err != nil {
+				return fmt.Errorf("bases.%s: spec_push: %w", name, err)
+			}
 		}
 	}
 	dispatched := false

@@ -390,6 +390,18 @@ func (r *ConsoleReporter) Worktree(path, branch, baseBranch, baseRef string) {
 	fmt.Fprintf(r.Out, "Worktree: %s (%s from %s)\n", path, branch, base)
 }
 
+// ReviewWorktree announces the detached worktree a review run executes in, at the commit it
+// reviews (specs/delivery/SPEC.md §12.2).
+func (r *ConsoleReporter) ReviewWorktree(path, head string) {
+	at := shortRef(head)
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s %s\n", st.gray(fmt.Sprintf("%-12s", "worktree")), path, st.gray(fmt.Sprintf("(detached at %s)", at)))
+		return
+	}
+	fmt.Fprintf(r.Out, "Worktree: %s (detached at %s)\n", path, at)
+}
+
 // WorktreeCommitted follows the commit on a worktree run's branch with where the branch starts
 // and how to take it (specs/worktree/SPEC.md §10.2).
 func (r *ConsoleReporter) WorktreeCommitted(branch, baseBranch, baseRef string) {
@@ -468,6 +480,17 @@ func (r *ConsoleReporter) WorktreeKept(path, why string) {
 		return
 	}
 	fmt.Fprintf(r.Out, "The worktree stays at %s%s\n", path, why)
+}
+
+// ReportWritten names the reviewer's report (report.md) of a run that ended, next to its
+// summary.md in the same directory.
+func (r *ConsoleReporter) ReportWritten(path string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "%s %s\n", st.gray("Report"), path)
+		return
+	}
+	fmt.Fprintf(r.Out, "Report: %s\n", path)
 }
 
 // worktreeBase is where a worktree run starts: the base branch at the base commit, or only the

@@ -20,11 +20,12 @@ import (
 
 // worktreeRun reports whether a run that has not executed a step runs in its own git
 // worktree: its recorded isolation is worktree and the approved workflow contains implement
-// (specs/worktree/SPEC.md §6). It is the rule config.WorktreeRun applies before approval, read
+// (specs/worktree/SPEC.md §6), or it is a review run, which always has one
+// (specs/delivery/SPEC.md §12.2). It is the rule config.WorktreeRun applies before approval, read
 // from run.json: options.isolation already folds in run --inplace.
 func worktreeRun(run *domain.Run) bool {
 	return run.Options.IsolationMode() == domain.IsolationWorktree && run.Workflow != nil &&
-		run.Workflow.Contains(domain.ActionImplement)
+		(run.ReviewTarget != nil || run.Workflow.Contains(domain.ActionImplement))
 }
 
 // enterWorktree applies the isolation rule to a run that has not executed a step, once the
@@ -45,19 +46,27 @@ func enterWorktree(ctx context.Context, s *session) error {
 		}
 		return nil
 	}
+	if err := checkDeliverable(ctx, s.repo, *s.cfg, run.Task.Source); err != nil {
+		return err
+	}
 	wt, err := openWorktree(ctx, s)
 	if err != nil {
 		return err
 	}
 	switchToWorktree(s, wt)
 	w := s.worktree
+	if run.ReviewTarget != nil {
+		s.reporter.ReviewWorktree(w.Path, w.BaseRef)
+		return nil
+	}
 	s.reporter.Worktree(w.Path, w.Branch, w.BaseBranch, w.BaseRef)
 	return nil
 }
 
 // openWorktree creates the run's worktree from the operator's repository s.repo
-// (specs/worktree/SPEC.md §7, §8): on the branch orchestrator/<run-id>, at the derived path,
-// from the commit HEAD names. A story task (specs/story/SPEC.md §11) is created on the branch
+// (specs/worktree/SPEC.md §7, §8): on the branch nameBranch chose (the repository's instructions,
+// worktree.branch.template, else orchestrator/<run-id>), at the derived path, from the commit HEAD
+// names. A story task (specs/story/SPEC.md §11) is created on the branch
 // and from the commit its task input gave, which run.json records in task.source, with the
 // input's base branch for the conflict check; the operator's HEAD and branch play no part.
 // run.json: worktree is saved as soon as git created it, so a failure after that never leaves a
@@ -65,6 +74,9 @@ func enterWorktree(ctx context.Context, s *session) error {
 // it yet.
 func openWorktree(ctx context.Context, s *session) (*repository.Repository, error) {
 	repo, run := s.repo, s.run
+	if run.ReviewTarget != nil {
+		return openReviewWorktree(ctx, s)
+	}
 	var base, baseBranch string
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		// The commit may have gone since the task input was checked, or the run be resumed
@@ -79,7 +91,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		var err error
 		if base, err = repo.HeadRef(ctx); err != nil {
 			return nil, &apperr.ConfigError{Msg: "a worktree run starts from the commit HEAD names, and HEAD names none (a repository without commits?)\n\n" +
-				"Make a first commit, or run in place: set execution.isolation: inplace, or run with --inplace.", Err: err}
+				"Make a first commit, or " + inplaceHint, Err: err}
 		}
 		if baseBranch, err = repo.Branch(ctx); err != nil {
 			return nil, err
@@ -94,7 +106,27 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return nil, &apperr.ConfigError{Msg: "cannot place the run's worktree", Err: err}
 	}
 	path := persistence.WorktreePath(state, common, run.ID)
-	branch := domain.RunWorktreeBranch(run)
+	// The branch is named now, once, and never changes (specs/delivery/SPEC.md §4.3); the record is
+	// saved with the worktree's. A story task is named as any run is, with this repository's rules,
+	// from its Jira child issue and its title, and its task input's branch is the fallback (§9.1).
+	in := branchInput{
+		Key: runJiraKey(run), Task: action.BranchTaskLine(run.Task.Description), Fallback: domain.WorktreeBranch(run.ID),
+		BaseRef: base, BaseBranch: baseBranch,
+	}
+	if t := s.cfg.Delivery.TargetBranch; t != "" {
+		in.Reserved = []string{t}
+	}
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		in.Key, in.Fallback = src.Jira, src.Branch
+		if src.Title != "" {
+			in.Task = src.Title
+		}
+	}
+	branch, naming, err := nameBranch(ctx, s, in)
+	if err != nil {
+		return nil, err
+	}
+	run.BranchNaming = naming
 
 	// Neither is ever reused: an existing one belongs to something else.
 	if exists, err := repo.BranchExists(ctx, branch); err != nil {
@@ -154,6 +186,93 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	return &repository.Repository{Dir: path, Executor: repo.Executor}, nil
 }
 
+// openReviewWorktree creates the worktree of a review run (specs/delivery/SPEC.md §12.2): at the
+// derived path, detached at review_target.head, with no branch. It is checked and recorded like
+// openWorktree's, and the operator's tree, index and branches play no part.
+func openReviewWorktree(ctx context.Context, s *session) (*repository.Repository, error) {
+	repo, run := s.repo, s.run
+	head := run.ReviewTarget.Head
+	// The commit may have gone since the refs were resolved, or the run be resumed before it
+	// had a worktree. CommitExists refuses anything but a full SHA.
+	if ok, err := repo.CommitExists(ctx, head); err != nil {
+		return nil, err
+	} else if !ok {
+		return nil, &apperr.ConfigError{Msg: fmt.Sprintf("the commit to review, %s, is not in this repository", head)}
+	}
+	common, err := repo.CommonDir(ctx)
+	if err != nil {
+		return nil, err
+	}
+	state, err := persistence.StateDir()
+	if err != nil {
+		return nil, &apperr.ConfigError{Msg: "cannot place the run's worktree", Err: err}
+	}
+	path := persistence.WorktreePath(state, common, run.ID)
+	if _, err := os.Lstat(path); err == nil {
+		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("the run's worktree path %s already exists; it is not reused. Remove it, or start a new run.", path)}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, &apperr.WorkflowError{Msg: "cannot check the run's worktree path", Err: err}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, &apperr.WorkflowError{Msg: "cannot create the worktrees directory", Err: err}
+	}
+
+	before, err := repo.GitFingerprint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	admin, err := repo.AddDetachedWorktree(ctx, path, head)
+	if err != nil {
+		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("failed to create the run's worktree %s at %s", path, head), Err: err}
+	}
+	pointer, pointerErr := repository.ReadGitPointer(path)
+	if pointerErr == nil && pointer != admin && sameResolvedPath(pointer, admin) {
+		admin = pointer
+	}
+	run.Worktree = &domain.RunWorktree{Path: path, BaseRef: head, AdminDir: admin}
+	if err := s.store.SaveRun(run); err != nil {
+		return nil, err
+	}
+	if pointerErr != nil || pointer != admin {
+		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("the new worktree's .git file does not name its admin directory %s "+
+			"(worktree.useRelativePaths?); the run stops before any step. The worktree is at %s", admin, path), Err: pointerErr}
+	}
+	after, err := repo.GitFingerprint(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if after != before {
+		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("creating the run's worktree changed %s in your repository "+
+			"(a post-checkout hook or a filter?); the run stops before any step. The worktree is at %s", guard.GitViolation, path)}
+	}
+	s.operatorFingerprint = after
+	return &repository.Repository{Dir: path, Executor: repo.Executor}, nil
+}
+
+// endReviewWorktree removes the worktree of a review run that ended, completed or failed: nothing
+// in it is a result (specs/delivery/SPEC.md §12.2). A stopped run keeps it, for resume to
+// continue in. A removal git refuses keeps the worktree and prints its path.
+func endReviewWorktree(ctx context.Context, s *session) {
+	run, w := s.run, s.worktree
+	if run.ReviewTarget == nil || w == nil || w.Removed || s.operator == nil {
+		return
+	}
+	if run.Status != domain.RunCompleted && run.Status != domain.RunFailed {
+		return
+	}
+	// A cancelled context must not keep git from removing what the run made.
+	if err := s.operator.RemoveWorktree(context.WithoutCancel(ctx), w.Path); err != nil {
+		s.reporter.WorktreeKept(w.Path, err.Error())
+		return
+	}
+	w.Removed = true
+	if err := s.store.SaveRun(run); err != nil {
+		fmt.Fprintf(s.reporter.PausingWriter(), "Removed the worktree %s, but run.json could not record it: %v\n", w.Path, err)
+		return
+	}
+	saveSummary(s.store, run)
+}
+
 func branchExistsError(branch string) error {
 	return &apperr.WorkflowError{Msg: fmt.Sprintf("the branch %s already exists; it is not reused. Delete it (git branch -D %s), or start a new run.", branch, branch)}
 }
@@ -209,6 +328,9 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		return &apperr.RunStateError{Kind: kind, RunID: run.ID, Msg: msg, Err: err}
 	}
 	if w.Removed {
+		if run.ReviewTarget != nil {
+			return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s was removed; start a new run", w.Path), nil)
+		}
 		return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s was removed; its branch %s stays; start a new run", w.Path, w.Branch), nil)
 	}
 
@@ -225,8 +347,18 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.path is %s, but this repository's worktree for the run is %s "+
 			"(resumed from another repository, or with another $XDG_STATE_HOME?)", w.Path, want), nil)
 	}
-	if branch := domain.RunWorktreeBranch(run); w.Branch != branch {
-		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q, want %q", w.Branch, branch), nil)
+	// The branch was named when the worktree was created, so it is checked against the rules (a
+	// story task's may also be the fallback its task input gave), and below against what git lists
+	// on the derived path: a branch edited to another worktree's is not the one on that path. A
+	// review run's worktree is detached: it has no branch.
+	if run.ReviewTarget != nil {
+		if w.Branch != "" {
+			return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q on a review run, want none", w.Branch), nil)
+		}
+	} else if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory && w.Branch == src.Branch {
+		// The story task's fallback.
+	} else if err := domain.CheckBranchName(w.Branch); err != nil {
+		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch %q: %v", w.Branch, err), nil)
 	}
 
 	info, err := os.Lstat(w.Path)
@@ -261,6 +393,16 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		if entry.Path != w.Path && !sameResolvedPath(entry.Path, w.Path) {
 			continue
 		}
+		if t := run.ReviewTarget; t != nil {
+			// A review run's worktree is detached at the commit it reviews.
+			if entry.Branch != "" {
+				return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s is on %s, not a detached HEAD at %s", w.Path, entry.Branch, t.Head), nil)
+			}
+			if entry.Head != t.Head {
+				return nil, refuse(apperr.RunNotResumable, fmt.Sprintf("the run's worktree %s is at %s, not at %s", w.Path, entry.Head, t.Head), nil)
+			}
+			return &repository.Repository{Dir: w.Path, Executor: repo.Executor}, nil
+		}
 		if ref := "refs/heads/" + w.Branch; entry.Branch != ref {
 			on := entry.Branch
 			if on == "" {
@@ -274,30 +416,35 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 }
 
 // finishWorktree ends a completed worktree run after the commit (specs/worktree/SPEC.md
-// §10): with sha, the commit on the run's branch, it says how to take the branch, checks it
-// for conflicts with the operator's branch and removes the worktree; without one the worktree
-// stays and its path is printed. Nothing here fails a run that already completed: what goes
-// wrong is reported and the worktree is kept. The branch is never deleted: it is the result.
-func finishWorktree(ctx context.Context, s *session, sha string) {
+// §10, specs/delivery/SPEC.md §7): with sha, the commit on the run's branch, it says how to
+// take the branch, checks it for conflicts with the operator's branch, delivers it (deliver:
+// the push and the merge request) and removes the worktree, whatever the delivery did; without
+// one the worktree stays, its path is printed and the chain ends there (skipDelivery). Nothing
+// here fails a run that already completed: what goes wrong is reported and the worktree is
+// kept. The branch is never deleted: it is the result. The error is the delivery's: a
+// NeedsPersonError when the branch did not become a merge request and nobody declined that.
+func finishWorktree(ctx context.Context, s *session, sha string) error {
 	w := s.worktree
 	if sha == "" || s.operator == nil {
 		s.reporter.WorktreeKept(w.Path, "")
-		return
+		return skipDelivery(s)
 	}
 	s.reporter.WorktreeCommitted(w.Branch, w.BaseBranch, w.BaseRef)
 	// A detached HEAD has no branch to merge into.
 	if w.BaseBranch != "" {
 		checkConflicts(ctx, s, sha)
 	}
+	deliveryErr := deliver(ctx, s, sha)
 	// Without --force: git refuses when anything is left in the worktree, which then stays.
 	if err := s.operator.RemoveWorktree(ctx, w.Path); err != nil {
 		s.reporter.WorktreeKept(w.Path, err.Error())
-		return
+		return deliveryErr
 	}
 	w.Removed = true
 	if err := s.store.SaveRun(s.run); err != nil {
 		fmt.Fprintf(s.reporter.PausingWriter(), "Removed the worktree %s, but run.json could not record it: %v\n", w.Path, err)
 	}
+	return deliveryErr
 }
 
 // checkConflicts asks git, in the operator's repository, whether merging the run's commit

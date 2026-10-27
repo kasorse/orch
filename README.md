@@ -693,6 +693,8 @@ orchestrator [--config path] [--claude-auth m] [--codex-auth m] validate
 orchestrator [--config path] [--claude-auth m] [--codex-auth m] run [--verbose|-v] "<task description>"
 orchestrator [--config path] run --jira <KEY|URL> ["notes"]
 orchestrator [--config path] run --stage <name> [--stage <name> ...] "<task>"
+orchestrator [--config path] run [--inplace|--worktree] [--output json] "<task>"
+orchestrator [--config path] [--mode m] [--output json] review --base <ref> [--head <ref>] [--task "<text>" | --jira <KEY|URL>]
 orchestrator [--config path] story plan "<request>" [--jira <KEY|URL>] [--repo <name>]...
 orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID>] [--parallel <N>]
 orchestrator [--config path] story status <spec_dir>/<slug>
@@ -719,6 +721,12 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
 - `run --stage <name> [--stage <name> ...] "<task>"` — runs exactly the stages you name and
   skips the decision layer (no translation, Jev or LLM call, project context). See
   [Choosing the stages yourself](#choosing-the-stages-yourself).
+- `run --inplace` / `--worktree` — where a workflow with `implement` runs. A worktree is the
+  default; see [Taking the result from its branch](#taking-the-result-from-its-branch-worktree-runs).
+- `review --base <ref> [--head <ref>]` — reviews a change somebody else wrote. See
+  [Reviewing a change](#reviewing-a-change-orchestrator-review).
+- `--output json` (`run`, `resume`, `review`) — one JSON line on stdout when the process exits,
+  everything else on stderr. See [Exit codes and CI](#exit-codes-and-ci).
 - `story plan`, `story run`, `story status` — split a task that spans services into a spec and
   ordered tasks, and run them. See [Planning and running a story](#planning-and-running-a-story).
 - `resume <run-id>` — continues a run that failed, was stopped, was only planned
@@ -734,7 +742,7 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
 - `runs clean [--older-than <N>d] [--dry-run]` — removes the git worktrees of runs older than
   the limit (default 7 days, by the run's `created_at`) whose worktree is still there. A run in
   use is skipped; a worktree git refuses to remove (uncommitted files) is kept and listed with
-  git's reason. Never `--force`, and no branch is deleted: `orchestrator/<run-id>` stays.
+  git's reason. Never `--force`, and no branch is deleted: the run's branch stays.
   `--dry-run` lists what would be removed and changes nothing.
 - `decisions report` — the older name of the last part of `runs report`, kept as an alias:
   compares the two complexity questions (`choice` and `score`) over
@@ -865,28 +873,96 @@ the working tree. Interactively, the question lists those rules and their files 
 
 ### Taking the result from its branch (worktree runs)
 
-With `execution.isolation: worktree` (or `run --worktree` for one run; the default is
-`inplace`) a workflow with `implement` runs in its own git
-worktree under `$XDG_STATE_HOME/orchestrator/worktrees/` (`~/.local/state/...`), on a branch
-`orchestrator/<run-id>` that starts at your current HEAD. Your working tree, index and branch
-are never touched, so you can keep working (uncommitted changes are not part of the run; the
-run warns when there are some). When the run completes, its changes are committed on that
-branch without the question above (same rules as `auto_commit`: not with a warning, a missing
-`summary_short` or a `policy.paths` rule with `approval: manual`), the worktree is removed,
-and you take the result with git:
+A workflow with `implement` runs by default in its own git worktree under
+`$XDG_STATE_HOME/orchestrator/worktrees/` (`~/.local/state/...`), on a branch that starts at
+your current HEAD. `orchestrator run --inplace` (or `execution.isolation: inplace`) runs in your
+working tree instead, with the commit question above and no push; `run --worktree` overrides an
+`inplace` config. Your working tree, index and branch are never touched by a worktree run, so
+you can keep working (uncommitted changes are not part of the run; the run warns when there are
+some).
+
+The branch is named when the worktree is created: by what your CLAUDE.md, AGENTS.md or
+CONTRIBUTING.md say about branch names when `worktree.branch.from_instructions` is set, else by
+`worktree.branch.template` (`{id}`, `{key}`, `{slug}`, `{date}`), else `orchestrator/<run-id>`.
+
+When the run completes it ends with a chain: **commit** on that branch, **push** of the branch to
+`delivery.remote` (default `origin`), a **merge request** to the branch the run started from
+(`delivery.target_branch` when HEAD is detached), and the worktree is removed. The push itself
+opens the merge request, with GitLab's push options (title: the commit header, description:
+`report.md`): the orchestrator holds no GitLab token and has no API client, and your own git
+credentials do the push. With `--mode auto` nothing is asked (the commit still follows the
+`auto_commit` rules: not with a warning, a missing `summary_short` or a `policy.paths` rule with
+`approval: manual`); in every other mode you are asked before each step, the default is no and a
+no stops the chain:
 
 ```
-Committed 3f2a9c1 to orchestrator/<run-id>: Fix Add to use +
-Based on master@8d0e4b2. To take it:
-  git merge orchestrator/<run-id>
+Commit to feature/PAY-12-use-plus-in-add? [y]es / [N]o / [e]dit message: y
+Push feature/PAY-12-use-plus-in-add to origin? [y]es / [N]o: y
+Open a merge request feature/PAY-12-use-plus-in-add → master? [y]es / [N]o: y
+Committed 3f2a9c1 to feature/PAY-12-use-plus-in-add: fix: PAY-12 Use + in Add
+Merge request !12: https://gitlab.example.com/group/app/-/merge_requests/12
 ```
+
+The commit message is written by Go: a Conventional Commit type the model proposed from a closed
+list, the Jira key, the `summary_short`, and the `Orchestrator-Run` and `Orchestrator-Decision`
+trailers. `report.md` in the run directory (task, why these stages, what changed, tests, review,
+what needs attention) is the merge request description; it escapes everything a model or a
+ticket wrote. The push is not repeated and never forced, and a branch that already exists on the
+remote is never pushed to. If the push or the merge request fails, or `--mode auto` did not
+commit, the run says why, keeps the branch (and the worktree when there is no commit), prints
+the command to finish by hand and exits 6. A remote that is not GitLab fails at the push (push
+options). Before the worktree is created the run checks that the remote exists, a target is known
+and `security.secret_scan.mode` is not `off` (a push publishes the tree); the message names
+`--inplace` as the way out.
 
 If your branch moved on and the merge would conflict, the run says so and lists the files
 (`git merge-tree`, git ≥ 2.38); you resolve it with git. A failed or stopped run keeps its
 worktree for `resume`, which continues there. `worktree.setup` (for example `npm ci`) runs once
-in a fresh worktree before any step, in the test sandbox but with the network.
-`orchestrator run --inplace` runs one run in your working tree under a worktree config. Old worktrees are removed with
-`orchestrator runs clean` (branches are never deleted). See `MVP.md` §47.
+in a fresh worktree before any step, in the test sandbox but with the network. Old worktrees are removed with
+`orchestrator runs clean` (branches are never deleted). With `jira.write` (`comment`,
+`transition`) a run of a Jira task comments on the issue and moves it after the merge request
+was opened; a failure there is a warning. See `MVP.md` §47 and §50.
+
+### Reviewing a change (`orchestrator review`)
+
+```
+orchestrator review --base main                       # main...HEAD
+orchestrator review --base v1.3.0 --head feature/x --mode auto
+orchestrator review --base main --task "the new cache must not change the API"
+orchestrator review --base main --jira PAY-12         # the ticket is the task
+```
+
+Reviews the change `merge-base(base, head)..head`, like a merge request, without implementing
+anything: a run of `test` (your checks and `test.command`, sandboxed) and `review` in a detached
+worktree at `head`, so your working tree may be dirty and is never touched. The verdict and
+issues are printed and `report.md` is written; a failing verdict exits 6. Without `--task` or
+`--jira`, the task is written from the commits' subjects.
+
+### Exit codes and CI
+
+| code | meaning |
+|---|---|
+| 0 | completed, and what was asked was delivered |
+| 1 | a run that cannot be used, an unexpected error |
+| 2 | configuration, dependency, usage, credentials, the delivery checks |
+| 3 | a provider failed |
+| 4 | the workflow failed or a limit stopped it (a red test, budget, no progress, `task needs input`) |
+| 5 | cancelled |
+| 6 | completed, but needs a person: no merge request was opened (and nobody said no), or `review` failed |
+
+`run`, `resume` and `review` without a terminal need `--mode auto` (or `plan`, `accept-edits`)
+and refuse at once otherwise. With `--output json` stdout carries exactly one line
+(`run_id`, `status`, `exit_code`, `branch`, `commit`, `mr`, `review_verdict`, `cost_usd`,
+`report`, …) and everything else goes to stderr:
+
+```
+orchestrator run --jira "$JIRA_KEY" --mode auto --output json > result.json
+orchestrator review --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --mode auto --output json
+```
+
+The `Dockerfile` in the repository root builds an image with git, bubblewrap and a pinned claude
+CLI (no image is published), and [`examples/ci/`](examples/ci/) has a `.gitlab-ci.yml` with an
+implement job and a review job; in CI use `--claude-auth api`. See `MVP.md` §4 and §50.10.
 
 ### Resuming a run
 
@@ -1070,8 +1146,11 @@ story:
    is `conflict`: Go lists the files and the story blocks until you merge the parents' branches
    on `story/<slug>/spec` yourself (in a worktree of it) and run `story run` again.
    `story status specs/<slug>` prints the table.
-4. **Merge.** Each branch is the result; merge them in order, rebasing the stack yourself after
-   a review. Pushing and merge requests are not done by the orchestrator.
+4. **Merge.** Each task's branch is pushed and opens one merge request (the children run under
+   `--mode auto`, so `story run`'s confirmation is your yes), targeting the branch of the task it
+   needs, or `story/<slug>/spec`, which `story run` pushes. A branch is named by its repository's
+   rules (`worktree.branch`), `story/<slug>/<ID>` only the fallback. Merge in order, rebasing the
+   stack yourself after a review; `story status` shows each merge request.
 
 With `jira.create` (`issue_type`, `link: parent|field`, `labels`, `components`) and a story
 planned from a Jira issue, `story run` creates one child issue per task after you approve,
@@ -1098,7 +1177,11 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
                         # cuts, models, API time, tool calls), an implement's diff;
                         # outcome (status, fix iterations, last test and review result,
                         # wall and active time, cost, decision overhead, net change)
+                        # branch_naming, mr (the push and the merge request), jira_write,
+                        # review_target (an `orchestrator review` run), options.jira_write;
+                        # per implement: diff.run_files
   summary.md            # the run's report for a reader, written when the run ends
+  report.md             # the reviewer's report and the merge request description
   decision.json         # the full decision trace (see below)
   project_context.json  # exactly the context sent to the decision provider, if any
   workflow.json         # the workflow built from the decision
@@ -1109,6 +1192,7 @@ Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target
   logs/translate.{stdout,stderr}.log       # the translation call, if one was made
   logs/decide-{context,classify}.{stdout,stderr}.log  # LLM decision provider calls
   logs/setup.{stdout,stderr}.log           # worktree.setup, worktree runs only
+  logs/branch-name.{stdout,stderr}.log     # the branch-naming call (worktree.branch.from_instructions)
   logs/pre-run-test.{stdout,stderr}.log    # the tests before any change, when red
   logs/<NNN>-test.<check>.{stdout,stderr}.log  # each `checks:` command (pre-run-test.<check>.* before the run)
   logs/<NNN>-implement.verify-<K>.{stdout,stderr}.log  # each verify call of an implement step
@@ -1245,9 +1329,10 @@ This is an MVP, deliberately scoped down (see `MVP.md` for the full rationale). 
   exception is a story, which can run its ready tasks at once (`story.max_parallel`,
   `story run --parallel N`), each as its own run.
 - No web UI, REST API, or IDE plugin — CLI only.
-- No GitHub/GitLab integration or remote repository execution — operates on the local working
-  directory only. Jira is read-only and limited to one issue, plus the child issues of an
-  approved story: no comments, transitions, linked issues, attachments or JQL.
+- No GitHub integration, no GitLab API client or token (a GitLab merge request is opened by the
+  push of the run's branch) and no remote repository execution — operates on the local working
+  directory only. Jira is limited to one issue, the child issues of an approved story and the
+  comment and transition after a merge request: no linked issues, attachments or JQL.
 - No RAG, persistent conversational memory, or database — state is per-run JSON on disk.
 - No custom/dynamically-defined action types or user-defined workflow language — the stage
   set, their order and the policy rules are fixed in Go code; only thresholds are configured.

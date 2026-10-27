@@ -48,6 +48,15 @@ func validateWorktree(run *domain.Run) error {
 	default:
 		return fmt.Errorf("options.isolation %q is not inplace or worktree", run.Options.Isolation)
 	}
+	// The record outlives a worktree that git then failed to add.
+	if bn := run.BranchNaming; bn != nil {
+		if err := bn.Validate(); err != nil {
+			return fmt.Errorf("branch_naming: %w", err)
+		}
+		if run.Options.IsolationMode() != domain.IsolationWorktree {
+			return fmt.Errorf("branch_naming recorded on a run with options.isolation %q", run.Options.IsolationMode())
+		}
+	}
 	w := run.Worktree
 	if w == nil {
 		return nil
@@ -55,13 +64,37 @@ func validateWorktree(run *domain.Run) error {
 	if run.Options.IsolationMode() != domain.IsolationWorktree {
 		return fmt.Errorf("worktree recorded on a run with options.isolation %q", run.Options.IsolationMode())
 	}
-	// A story task's branch and base are the ones its task input gave, recorded in task.source
-	// (validated with it); the worktree must be the one created on them.
-	if want := domain.RunWorktreeBranch(run); w.Branch != want {
-		return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, want)
+	// The branch was named when the worktree was created (specs/delivery/SPEC.md §4.3): it only has
+	// to be a name the rules accept. A story task's may also be the fallback its task input gave,
+	// recorded in task.source (validated with it) (§9.1). A review run's worktree is detached: it
+	// has no branch.
+	defaultBranch := domain.WorktreeBranch(run.ID)
+	if run.ReviewTarget != nil {
+		if w.Branch != "" {
+			return fmt.Errorf("worktree.branch is %q on a review run, want none", w.Branch)
+		}
+	} else if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		defaultBranch = src.Branch
+		if err := domain.CheckBranchName(w.Branch); err != nil && w.Branch != src.Branch {
+			return fmt.Errorf("worktree.branch %q is not the story task's fallback %q: %w", w.Branch, src.Branch, err)
+		}
+	} else if err := domain.CheckBranchName(w.Branch); err != nil {
+		return fmt.Errorf("worktree.branch %q: %w", w.Branch, err)
+	}
+	if bn := run.BranchNaming; bn != nil {
+		if bn.Source == domain.BranchSourceDefault && w.Branch != defaultBranch {
+			return fmt.Errorf("branch_naming.source is default, but worktree.branch is %q, not %q", w.Branch, defaultBranch)
+		}
+		if bn.Source == domain.BranchSourceInstructions && w.Branch != bn.Proposed {
+			return fmt.Errorf("branch_naming.source is instructions, but worktree.branch is %q, not the proposed %q", w.Branch, bn.Proposed)
+		}
 	}
 	if !isCommitSHA(w.BaseRef) {
 		return fmt.Errorf("worktree.base_ref %q is not a full commit SHA", w.BaseRef)
+	}
+	// A review run's worktree is detached at the head it reviews (specs/delivery/SPEC.md §12.2).
+	if t := run.ReviewTarget; t != nil && (w.BaseRef != t.Head || w.BaseBranch != "") {
+		return fmt.Errorf("worktree is at %q on branch %q, but review_target.head is %q", w.BaseRef, w.BaseBranch, t.Head)
 	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		if w.BaseRef != src.BaseRef {
@@ -79,6 +112,49 @@ func validateWorktree(run *domain.Run) error {
 	}
 	if w.Removed && run.Status == domain.RunRunning {
 		return fmt.Errorf("worktree.removed on a running run")
+	}
+	return nil
+}
+
+// validateMR checks run.mr (specs/delivery/SPEC.md §13): its own rules, and that it belongs to a
+// completed worktree run, with a commit once anything was pushed or about to be.
+func validateMR(run *domain.Run) error {
+	m := run.MR
+	if m == nil {
+		return nil
+	}
+	if err := m.Validate(); err != nil {
+		return fmt.Errorf("mr: %w", err)
+	}
+	switch {
+	case run.Status != domain.RunCompleted:
+		return fmt.Errorf("mr recorded on a %s run; only a completed run has one", run.Status)
+	case run.Worktree == nil:
+		return fmt.Errorf("mr recorded on a run without a worktree")
+	case m.State != "" && run.Commit == "":
+		return fmt.Errorf("mr.state %s on a run without a commit", m.State)
+	case m.Source != "" && m.Source != run.Worktree.Branch:
+		return fmt.Errorf("mr.source is %q, but worktree.branch is %q", m.Source, run.Worktree.Branch)
+	}
+	return nil
+}
+
+// validateJiraWrite checks run.jira_write (specs/delivery/SPEC.md §13): its own rules against the
+// options the run started with, and that it follows a merge request this run's push created, for
+// a task that has a Jira key.
+func validateJiraWrite(run *domain.Run) error {
+	j := run.JiraWrite
+	if j == nil {
+		return nil
+	}
+	if err := j.Validate(run.Options.JiraWrite); err != nil {
+		return fmt.Errorf("jira_write: %w", err)
+	}
+	if run.MR == nil || run.MR.State != domain.MRCreated {
+		return fmt.Errorf("jira_write recorded on a run whose push did not create a merge request")
+	}
+	if run.Task.Source.JiraKey() == "" {
+		return fmt.Errorf("jira_write recorded on a task without a Jira key")
 	}
 	return nil
 }

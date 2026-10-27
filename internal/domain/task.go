@@ -51,11 +51,29 @@ type TaskSource struct {
 	Task    string `json:"task,omitempty"`
 	Attempt int    `json:"attempt,omitempty"`
 	Jira    string `json:"jira,omitempty"`
-	// Branch, BaseRef and BaseBranch are what the story task's worktree is created on and
-	// from, and the branch its change finally goes to (the conflict check's).
+	// Title is the story task's heading, one line: what {slug} of its branch name and the naming
+	// call's task line are made of (specs/delivery/SPEC.md §9.1). Empty in a run recorded before it.
+	Title string `json:"title,omitempty"`
+	// Branch is the fallback name of a story task's branch, story/<slug>/<ID>[.<n>], used when its
+	// repository's rules give none; the branch the worktree is on is worktree.branch. BaseRef and
+	// BaseBranch are what the worktree is created from, and the branch the change finally goes to
+	// (the conflict check's, and the merge request's target).
 	Branch     string `json:"branch,omitempty"`
 	BaseRef    string `json:"base_ref,omitempty"`
 	BaseBranch string `json:"base_branch,omitempty"`
+}
+
+// JiraKey is the key of the Jira issue the task stands for: the issue a run --jira task was
+// rendered from, or a story task's child issue. It is empty for a typed task, for a story task
+// without an issue and for a nil source.
+func (s *TaskSource) JiraKey() string {
+	switch {
+	case s == nil:
+		return ""
+	case s.Kind == TaskSourceStory:
+		return s.Jira
+	}
+	return s.Key
 }
 
 // StoryRef is <story>/<task>, how a story task is named in a commit trailer and on screen.

@@ -707,12 +707,16 @@ func jevKeyProblems(d DecisionConfig) []string {
 }
 
 // decisionProviderModels lists the CLIs the decision flow calls: translation always
-// (fail-fast must not depend on the request's language), the clarify step when it is on, and the
-// decision provider when it is an LLM.
+// (fail-fast must not depend on the request's language), the clarify step when it is on, the
+// branch-name call when worktree.branch.from_instructions is set, and the decision provider when
+// it is an LLM.
 func decisionProviderModels(cfg Config) []namedProviderModel {
 	pms := []namedProviderModel{{Action: "translation", ProviderModel: cfg.Translation.ProviderModel}}
 	if cfg.Clarify.Active() {
 		pms = append(pms, namedProviderModel{Action: "clarify", ProviderModel: cfg.Clarify.ProviderModel})
+	}
+	if fi := cfg.Worktree.Branch.FromInstructions; fi != nil {
+		pms = append(pms, namedProviderModel{Action: branchFromInstructionsKey, ProviderModel: fi.ProviderModel})
 	}
 	if !cfg.Decision.UsesJev() {
 		pms = append(pms, namedProviderModel{Action: "decision", ProviderModel: ProviderModel{Provider: cfg.Decision.Provider, Model: cfg.Decision.Model}})

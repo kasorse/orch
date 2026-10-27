@@ -18,6 +18,7 @@ import (
 	"orchestrator/internal/config"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/execution"
+	"orchestrator/internal/exitcode"
 	"orchestrator/internal/guard"
 	"orchestrator/internal/interaction"
 	"orchestrator/internal/logging"
@@ -25,6 +26,7 @@ import (
 	"orchestrator/internal/provider"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/testexec"
+	"orchestrator/internal/testutil/fakeexec"
 )
 
 // worktreeSession is a fresh worktree run with an approved workflow over a real repository
@@ -37,6 +39,9 @@ func worktreeSession(t *testing.T, commit bool, wf domain.Workflow) (*session, s
 	gitIn(t, dir, "init", "-q", "-b", "main")
 	gitIn(t, dir, "config", "user.email", "t@example.com")
 	gitIn(t, dir, "config", "user.name", "T")
+	gitIn(t, dir, "remote", "add", "origin", "https://git.example.invalid/repo.git")
+	// The end of a run pushes its branch: origin answers like GitLab, without a network.
+	fakeexec.AddGitLabRemote(t, dir)
 	if commit {
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -539,10 +544,11 @@ func finishedWorktreeRun(t *testing.T, mode domain.RunMode, review *domain.Revie
 var failingReview = &domain.ReviewResult{Status: domain.ReviewFail, SummaryShort: "still broken",
 	Issues: []domain.ReviewIssue{{Severity: domain.SeverityHigh, File: "main.go", Description: "wrong"}}}
 
-// A completed worktree run commits on its own branch even under --mode manual and without
-// auto_commit, leaves the operator's HEAD and branch alone, and removes the worktree.
+// A completed worktree run under --mode auto commits on its own branch without auto_commit,
+// pushes it, opens the merge request, leaves the operator's HEAD and branch alone, and removes the
+// worktree.
 func TestFinishWorktree_CommitsOnTheRunBranchAndRemoves(t *testing.T) {
-	s, dir, out := finishedWorktreeRun(t, domain.ModeManual, nil, nil)
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAuto, nil, nil)
 	ctx := context.Background()
 	w := s.worktree
 	head := gitIn(t, dir, "rev-parse", "HEAD")
@@ -551,7 +557,9 @@ func TestFinishWorktree_CommitsOnTheRunBranchAndRemoves(t *testing.T) {
 	if sha == "" || s.run.Commit != sha {
 		t.Fatalf("commit = %q (run.Commit %q), want one\n%s", sha, s.run.Commit, out)
 	}
-	finishWorktree(ctx, s, sha)
+	if err := finishWorktree(ctx, s, sha); err != nil {
+		t.Fatalf("finishWorktree = %v\n%s", err, out)
+	}
 
 	if got := gitIn(t, dir, "rev-parse", w.Branch); got != sha {
 		t.Errorf("%s = %s, want the commit %s", w.Branch, got, sha)
@@ -575,13 +583,19 @@ func TestFinishWorktree_CommitsOnTheRunBranchAndRemoves(t *testing.T) {
 		t.Errorf("git still lists the worktree:\n%s", list)
 	}
 	want := "\nCommitted " + shortSHA(sha) + " to " + w.Branch + ": Add main\n" +
-		"Based on main@" + head[:7] + ". To take it:\n  git merge " + w.Branch + "\n"
+		"Based on main@" + head[:7] + ". To take it:\n  git merge " + w.Branch + "\n" +
+		"Merge request !1: https://gitlab.test/group/project/-/merge_requests/1\n"
 	if out.String() != want {
 		t.Errorf("output = %q, want %q", out.String(), want)
 	}
 	saved, err := s.store.LoadRun(s.run.ID)
 	if err != nil || saved.Commit != sha || saved.Worktree == nil || !saved.Worktree.Removed || len(saved.Worktree.Conflicts) != 0 {
 		t.Errorf("saved run = %+v, %v; want the commit and removed", saved, err)
+	}
+	wantMR := domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: w.Branch, Target: "main", IID: 1,
+		URL: "https://gitlab.test/group/project/-/merge_requests/1"}
+	if err != nil || saved.MR == nil || *saved.MR != wantMR {
+		t.Errorf("saved mr = %+v, want %+v", saved.MR, wantMR)
 	}
 }
 
@@ -593,15 +607,27 @@ func TestFinishWorktree_WarningWithoutAnOperatorKeepsTheWorktree(t *testing.T) {
 	w := s.worktree
 
 	sha := offerCommit(ctx, s, false)
-	finishWorktree(ctx, s, sha)
+	err := finishWorktree(ctx, s, sha)
 
 	if sha != "" || s.run.Commit != "" {
 		t.Errorf("committed %q", sha)
 	}
-	want := "\nNot committing automatically: the review did not pass: still broken; commit what you want yourself.\n" +
-		"The worktree stays at " + w.Path + "\n"
+	const why = "the review did not pass: still broken; commit what you want yourself."
+	want := "\nNot committing automatically: " + why + "\n" +
+		"The worktree stays at " + w.Path + "\n" +
+		"No push and no merge request: " + why + "\n"
 	if out.String() != want {
 		t.Errorf("output = %q, want %q", out.String(), want)
+	}
+	var person *apperr.NeedsPersonError
+	if !errors.As(err, &person) || exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Errorf("finishWorktree = %v, want a NeedsPersonError (exit 6)", err)
+	}
+	if saved, err := s.store.LoadRun(s.run.ID); err != nil || saved.MR == nil || *saved.MR != (domain.RunMR{Skipped: why}) || saved.Status != domain.RunCompleted {
+		t.Errorf("saved run = %+v, %v; want status completed and mr.skipped %q", saved, err, why)
+	}
+	if got := gitIn(t, dir, "ls-remote", "origin"); got != "" {
+		t.Errorf("the remote has refs after a run that committed nothing:\n%s", got)
 	}
 	if _, err := os.Stat(w.Path); err != nil {
 		t.Errorf("the worktree is gone: %v", err)

@@ -1,0 +1,47 @@
+---
+id: DL07
+repo: orche
+depends_on: [DL04]
+jira: none
+---
+# DL07 — Headless: no terminal, `--output json`, exit codes
+
+**Size** S–M
+
+## Goal
+
+A CI caller gets an immediate error instead of an EOF prompt, one JSON line on stdout, and a
+documented exit code table (`SPEC.md` §11.1–§11.3).
+
+## Files
+
+- `internal/app/app.go`: for `run`, `resume`, `review`: no `--mode` (or `--mode manual`) and a
+  non-terminal stdin → usage error before anything is called (`isTerminal`).
+- `--output json`: parsed for the three commands; the reporter forced to the plain one on stderr;
+  `internal/app/result.go` builds the result line from the run (or from the error when there is
+  none) and writes it to stdout last, once, on every exit path after argument parsing.
+- `internal/exitcode`: the table as a doc comment, code 6 (DL04) included.
+
+## Acceptance
+
+- A pipe stdin without `--mode` → exit 2 and the message, no provider call.
+- `--output json`: stdout is exactly one valid JSON line for a completed run, a failed run, a
+  config error before the run, an MR skip (exit 6), an MR error (exit 6); nothing else on stdout (the test reads both
+  streams).
+- The field set is stable: a golden of the line with the run ID and sha masked.
+
+## Gates
+
+`scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `d0dd6977-8fdb-4d02-94fd-b7f0acebbb28` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/delivery/DL07` on `story/delivery/DL04` @ 1c43c51, commit 58378cd.
+Cost $3.46. Implementation summary: Test --output json end to end on both streams.
+Conflicts with spec/delivery: none.

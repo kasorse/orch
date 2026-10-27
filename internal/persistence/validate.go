@@ -62,6 +62,14 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 
+	if t := run.ReviewTarget; t != nil {
+		if err := t.Validate(); err != nil {
+			return fmt.Errorf("review_target: %w", err)
+		}
+		if run.Options.IsolationMode() != domain.IsolationWorktree {
+			return fmt.Errorf("review_target on a run with options.isolation %q", run.Options.IsolationMode())
+		}
+	}
 	if err := validateWorktree(run); err != nil {
 		return err
 	}
@@ -69,6 +77,9 @@ func validateRun(run *domain.Run, runID string) error {
 		if err := r.Validate(); err != nil {
 			return fmt.Errorf("options.path_rules[%d]: %w", i, err)
 		}
+	}
+	if err := run.Options.JiraWrite.Validate(); err != nil {
+		return fmt.Errorf("options.jira_write: %w", err)
 	}
 
 	for i, exec := range run.Executions {
@@ -121,6 +132,12 @@ func validateRun(run *domain.Run, runID string) error {
 		if run.Status != domain.RunCompleted {
 			return fmt.Errorf("commit recorded on a %s run; only a completed run is committed", run.Status)
 		}
+	}
+	if err := validateMR(run); err != nil {
+		return err
+	}
+	if err := validateJiraWrite(run); err != nil {
+		return err
 	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
@@ -357,6 +374,8 @@ func validateStorySource(src domain.TaskSource) error {
 		return fmt.Errorf("attempt is %d, want 1 or more", src.Attempt)
 	case src.Jira != "" && !story.ValidJiraKey(src.Jira):
 		return fmt.Errorf("jira %q is not a Jira key", src.Jira)
+	case src.Title != "" && story.CheckTitle(src.Title) != nil:
+		return fmt.Errorf("title %q %v", src.Title, story.CheckTitle(src.Title))
 	case !story.ValidBranch(src.Branch, src.Story, src.Task):
 		return fmt.Errorf("branch %q is not story/%s/%s or story/%s/%s.<n>", src.Branch, src.Story, src.Task, src.Story, src.Task)
 	case !isCommitSHA(src.BaseRef):
@@ -370,7 +389,7 @@ func validateStorySource(src domain.TaskSource) error {
 }
 
 func validateJiraSource(src domain.TaskSource) error {
-	if src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" ||
+	if src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" || src.Title != "" ||
 		src.Branch != "" || src.BaseRef != "" || src.BaseBranch != "" {
 		return fmt.Errorf("a Jira task has no story fields")
 	}

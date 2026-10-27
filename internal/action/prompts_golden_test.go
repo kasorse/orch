@@ -194,6 +194,15 @@ func TestPrompts_Golden(t *testing.T) {
 				Clarification: goldenClarification,
 			})
 		}},
+		{"branch_name", func() string {
+			return BuildBranchNamePrompt(BranchNameInput{
+				Task: "Fix the nil map panic in Store.Put", Key: "PAY-12", RunID: "20261027-101500-ab12cd", Date: "2026-10-27",
+				Files: []BranchFile{
+					{Path: "CLAUDE.md", Text: "## Git\n\nBranch names look like feature/<jira-key>-<short-description>.\n"},
+					{Path: "CONTRIBUTING.md", Text: "Open a merge request from your branch into main.\n"},
+				},
+			})
+		}},
 		{"survey", func() string { return BuildSurveyPrompt(goldenStoryRequest, "billing") }},
 		{"specify", func() string {
 			return BuildSpecifyPrompt(goldenStoryRequest, goldenSurveys(), []string{"gateway", "billing"}, 12)

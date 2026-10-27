@@ -245,6 +245,7 @@ func parseImplementation(output string) domain.ImplementationArtifact {
 	}
 	artifact = domain.ImplementationArtifact{Summary: output}
 	recoverField(output, "summary_short", &artifact.SummaryShort)
+	recoverField(output, "commit_type", &artifact.CommitType)
 	recoverField(output, "changed_files", &artifact.ChangedFiles)
 	recoverField(output, "tests_added", &artifact.TestsAdded)
 	return artifact

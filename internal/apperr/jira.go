@@ -23,8 +23,16 @@ const (
 	JiraRejected        JiraFailureKind = "rejected"         // HTTP 400 to a creation: Jira says what is wrong with it
 )
 
-// JiraOpCreate is JiraError.Op of a failed creation of a child issue.
-const JiraOpCreate = "create"
+// JiraError.Op of a failed creation of a child issue and of the write-back after a merge request
+// (specs/delivery/SPEC.md §10): reading the issue's status or its transitions, posting a comment,
+// making a transition.
+const (
+	JiraOpCreate      = "create"
+	JiraOpStatus      = "status"
+	JiraOpTransitions = "transitions"
+	JiraOpComment     = "comment"
+	JiraOpTransition  = "transition"
+)
 
 var transientJiraFailures = map[JiraFailureKind]bool{
 	JiraTimeout:     true,
@@ -87,8 +95,13 @@ func (e *JiraError) headline() string {
 	if key == "" {
 		key = "the issue"
 	}
-	if e.Op == JiraOpCreate {
+	switch e.Op {
+	case JiraOpCreate:
 		if h, ok := e.createHeadline(key); ok {
+			return h
+		}
+	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition:
+		if h, ok := e.writeHeadline(key); ok {
 			return h
 		}
 	}
@@ -128,6 +141,49 @@ func (e *JiraError) headline() string {
 		return fmt.Sprintf("fetching %s from Jira was cancelled", key)
 	}
 	return fmt.Sprintf("fetching %s from Jira failed: %s", key, e.Kind)
+}
+
+// writeHeadline words the failures of the write-back to an issue (reading its status or
+// transitions, a comment, a transition); the others read the same as for a fetch.
+func (e *JiraError) writeHeadline(key string) (string, bool) {
+	what := map[string]string{
+		JiraOpStatus:      "reading the status of " + key,
+		JiraOpTransitions: "reading the transitions of " + key,
+		JiraOpComment:     "commenting on " + key,
+		JiraOpTransition:  "moving " + key,
+	}[e.Op]
+	switch e.Kind {
+	case JiraNotFound:
+		who := "this account"
+		if e.Detail != "" {
+			who = "the account behind " + e.Detail
+		}
+		return fmt.Sprintf("%s does not exist, or %s may not %s it", key, who, e.opVerb()), true
+	case JiraRejected:
+		if e.Detail != "" {
+			return fmt.Sprintf("Jira rejected %s: %s", what, e.Detail), true
+		}
+		return "Jira rejected " + what, true
+	case JiraInvalidResponse:
+		if e.Detail != "" {
+			return fmt.Sprintf("Jira answered %s with an unexpected response: %s", what, e.Detail), true
+		}
+		return fmt.Sprintf("Jira answered %s with an unexpected response", what), true
+	case JiraCancelled:
+		return what + " was cancelled", true
+	}
+	return "", false
+}
+
+// opVerb is what a write-back operation does to the issue, for "may not <verb> it".
+func (e *JiraError) opVerb() string {
+	switch e.Op {
+	case JiraOpComment:
+		return "comment on"
+	case JiraOpTransition:
+		return "move"
+	}
+	return "read"
 }
 
 // createHeadline words the failures that mean something else for a creation than for a fetch;

@@ -154,6 +154,30 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	if w := run.Worktree; w != nil {
 		row("Worktree", worktreeLine(run, *w))
 	}
+	if mr := run.MR; mr != nil {
+		row("Merge request", mergeRequestLine(*mr))
+	}
+}
+
+// mergeRequestLine is how a worktree run's push and merge request came out
+// (specs/delivery/SPEC.md §7.5): the merge request's URL, or what was skipped or went wrong.
+func mergeRequestLine(mr domain.RunMR) string {
+	var parts []string
+	switch mr.State {
+	case domain.MRCreated:
+		parts = append(parts, fmt.Sprintf("!%d %s", mr.IID, mr.URL))
+	case domain.MRPushed:
+		parts = append(parts, "pushed "+mr.Source+" to "+mr.Remote+", no merge request")
+	case domain.MRIntent:
+		parts = append(parts, "pushing "+mr.Source+" to "+mr.Remote+" failed")
+	}
+	if mr.Skipped != "" {
+		parts = append(parts, "skipped: "+mr.Skipped)
+	}
+	if mr.Error != "" {
+		parts = append(parts, "error: "+mr.Error)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // writeClarification lists what the clarify step agreed about an unclear task (specs/clarify):
@@ -190,6 +214,19 @@ func worktreeLine(run domain.Run, w domain.RunWorktree) string {
 		base = w.BaseBranch + "@" + base
 	}
 	parts := []string{w.Branch + " from " + base}
+	// orchestrator/<run-id> needs no explanation; any other name says where it came from
+	// (specs/delivery/SPEC.md §4.3).
+	if bn := run.BranchNaming; bn != nil {
+		switch bn.Source {
+		case domain.BranchSourceInstructions:
+			parts = append(parts, "branch named by the repository's instructions")
+		case domain.BranchSourceTemplate:
+			parts = append(parts, "branch named by worktree.branch.template")
+		}
+	}
+	if w.Branch == "" { // a review run's worktree is detached at the commit it reviews
+		parts = []string{"detached at " + base}
+	}
 	if run.Commit != "" {
 		parts = append(parts, "commit "+shortCommit(run.Commit))
 	}

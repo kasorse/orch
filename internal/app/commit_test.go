@@ -9,6 +9,21 @@ import (
 
 func TestCommitOffer(t *testing.T) {
 	long := strings.Repeat("слово ", 20) // 120 runes, multi-byte
+	manual, err := domain.ManualDecision([]domain.Stage{domain.StageReview, domain.StageTesting})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var medium domain.Decision
+	medium.Source = domain.DecisionSourceLLM
+	medium.Complexity.Selected = domain.ComplexityMedium
+	medium.Stages.Stages = []domain.StageOutcome{
+		{Stage: domain.StageResearch},
+		{Stage: domain.StageDevelopment, Enabled: true},
+		{Stage: domain.StageTesting, Enabled: true},
+	}
+	typedLong := "refactor: " + long
+	jira := &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "PAY-12"}
+	storyTask := &domain.TaskSource{Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1}
 	cases := []struct {
 		name   string
 		run    domain.Run
@@ -67,6 +82,54 @@ func TestCommitOffer(t *testing.T) {
 			impl:   &domain.ImplementationArtifact{SummaryShort: long},
 			header: strings.TrimSpace(string([]rune(long)[:69])) + "...",
 			body:   strings.TrimSpace(long) + "\n\nOrchestrator-Run: r1\n",
+		},
+		{
+			name:   "type without a key",
+			run:    domain.Run{ID: "r1"},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Use + in Add", CommitType: "fix"},
+			header: "fix: Use + in Add",
+			body:   "Orchestrator-Run: r1\n",
+		},
+		{
+			name:   "type and key: the key follows the type",
+			run:    domain.Run{ID: "r1", Task: domain.Task{Source: jira}},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Use + in Add", CommitType: "fix"},
+			header: "fix: PAY-12 Use + in Add",
+			body:   "Orchestrator-Run: r1\n",
+		},
+		{
+			name:   "type with spaces and capitals",
+			run:    domain.Run{ID: "r1"},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Add refunds", CommitType: "  Feat "},
+			header: "feat: Add refunds",
+			body:   "Orchestrator-Run: r1\n",
+		},
+		{
+			name:   "unknown type is ignored",
+			run:    domain.Run{ID: "r1"},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Add refunds", CommitType: "feature"},
+			header: "Add refunds",
+			body:   "Orchestrator-Run: r1\n",
+		},
+		{
+			name:   "the cut counts the type",
+			run:    domain.Run{ID: "r1"},
+			impl:   &domain.ImplementationArtifact{SummaryShort: long, CommitType: "refactor"},
+			header: strings.TrimSpace(string([]rune(typedLong)[:69])) + "...",
+			body:   strings.TrimSpace(long) + "\n\nOrchestrator-Run: r1\n",
+		},
+		{
+			name:   "manual decision trailer",
+			run:    domain.Run{ID: "r1", Decision: &manual},
+			header: "",
+			body:   "Orchestrator-Run: r1\nOrchestrator-Decision: manual/testing,review\n",
+		},
+		{
+			name:   "decision trailer sits between the run and the story trailer",
+			run:    domain.Run{ID: "r1", Decision: &medium, Task: domain.Task{Source: storyTask}},
+			impl:   &domain.ImplementationArtifact{SummaryShort: "Add partial refunds"},
+			header: "Add partial refunds",
+			body:   "Orchestrator-Run: r1\nOrchestrator-Decision: medium/development,testing\nOrchestrator-Story: refunds/RF02\n",
 		},
 	}
 	for _, c := range cases {
