@@ -105,10 +105,14 @@ type configOptions struct {
 	// maxCostUSD is limits.max_cost_usd; 0 renders none.
 	maxCostUSD float64
 	// isolation is execution.isolation; "" pins inplace, which every scenario that checks the
-	// result in the working directory needs (specs/worktree/SPEC.md §14). The worktree
-	// scenarios set "worktree" and point XDG_STATE_HOME at a temporary directory.
+	// result in the working directory needs (specs/worktree/SPEC.md §14, specs/delivery/SPEC.md
+	// §6). The worktree scenarios set "worktree" and point XDG_STATE_HOME at a temporary
+	// directory; isolationAbsent leaves the key out, which is the worktree default.
 	isolation string
 }
+
+// isolationAbsent is configOptions.isolation for a config without the execution.isolation key.
+const isolationAbsent = "absent"
 
 // pathRulesYAML is the policy.paths and policy.explore keys that follow policy.stages, or
 // nothing.
@@ -253,9 +257,12 @@ func writeConfig(t *testing.T, dir string, opts configOptions) string {
 	if sandbox == "" {
 		sandbox = "none"
 	}
-	isolation := opts.isolation
-	if isolation == "" {
-		isolation = "inplace"
+	isolation := "  isolation: " + opts.isolation + "\n"
+	switch opts.isolation {
+	case "":
+		isolation = "  isolation: inplace\n"
+	case isolationAbsent:
+		isolation = ""
 	}
 	clarifyYAML := "clarify: {enabled: false}\n"
 	if p.Clarify != "" {
@@ -313,8 +320,7 @@ limits:
 %s
 execution:
   timeout: %s
-  isolation: %s
-%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation, clarifyYAML,
+%s%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation, clarifyYAML,
 		opts.pathRulesYAML(), opts.actionsYAML(),
 		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, isolation, opts.extraYAML)
 	content += opts.tailYAML()

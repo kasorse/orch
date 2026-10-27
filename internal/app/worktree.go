@@ -45,6 +45,9 @@ func enterWorktree(ctx context.Context, s *session) error {
 		}
 		return nil
 	}
+	if err := checkDeliverable(ctx, s.repo, *s.cfg, run.Task.Source); err != nil {
+		return err
+	}
 	wt, err := openWorktree(ctx, s)
 	if err != nil {
 		return err
@@ -79,7 +82,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		var err error
 		if base, err = repo.HeadRef(ctx); err != nil {
 			return nil, &apperr.ConfigError{Msg: "a worktree run starts from the commit HEAD names, and HEAD names none (a repository without commits?)\n\n" +
-				"Make a first commit, or run in place: set execution.isolation: inplace, or run with --inplace.", Err: err}
+				"Make a first commit, or " + inplaceHint, Err: err}
 		}
 		if baseBranch, err = repo.Branch(ctx); err != nil {
 			return nil, err

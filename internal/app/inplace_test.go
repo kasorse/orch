@@ -63,7 +63,7 @@ func TestCheckWorktree_PerMode(t *testing.T) {
 		{"worktree, implement, dirty: warning", worktreeCfg, implement, true, false, "not part of it (commit them first, or run with --inplace)."},
 		{"worktree, implement, clean", worktreeCfg, implement, false, false, ""},
 		{"inplace config, implement, dirty: refusal", inplaceCfg, implement, true, true, ""},
-		{"default is inplace, implement, dirty: refusal", defaultCfg, implement, true, true, ""},
+		{"default is worktree, implement, dirty: warning", defaultCfg, implement, true, false, "not part of it (commit them first, or run with --inplace)."},
 		{"read-only, dirty: never a refusal", worktreeCfg, readOnly, true, false, "uncommitted changes"},
 		{"read-only, inplace config, dirty: never a refusal", inplaceCfg, readOnly, true, false, "uncommitted changes"},
 	}

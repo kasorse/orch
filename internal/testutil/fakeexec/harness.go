@@ -390,6 +390,9 @@ func InitGitFixture(t *testing.T) string {
 	runGit(t, dir, "config", "user.name", "Fixture")
 	runGit(t, dir, "add", "-A")
 	runGit(t, dir, "commit", "-m", "initial fixture commit")
+	// A worktree run delivers to a remote and is refused without one (specs/delivery/SPEC.md §8);
+	// nothing connects to this URL.
+	runGit(t, dir, "remote", "add", "origin", "https://git.example.invalid/fixture.git")
 
 	return dir
 }

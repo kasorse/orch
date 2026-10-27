@@ -178,6 +178,20 @@ func (r *Repository) HeadRef(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// RemoteURL returns the URL of the named remote (git remote get-url). It is an error, whose
+// message is git's, when the repository has no such remote. The URL may carry credentials: it
+// is for checking and for the host of a result, never for printing as it is.
+func (r *Repository) RemoteURL(ctx context.Context, remote string) (string, error) {
+	if remote == "" || strings.HasPrefix(remote, "-") {
+		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a valid remote name", remote)}
+	}
+	out, err := r.git(ctx, "remote", "get-url", "--", remote)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // CommitExists reports whether ref is a full commit SHA naming a commit in the repository.
 // Anything else - an abbreviation, a branch name, an option - is false without running git.
 func (r *Repository) CommitExists(ctx context.Context, ref string) (bool, error) {

@@ -37,6 +37,7 @@ func worktreeSession(t *testing.T, commit bool, wf domain.Workflow) (*session, s
 	gitIn(t, dir, "init", "-q", "-b", "main")
 	gitIn(t, dir, "config", "user.email", "t@example.com")
 	gitIn(t, dir, "config", "user.name", "T")
+	gitIn(t, dir, "remote", "add", "origin", "https://git.example.invalid/repo.git")
 	if commit {
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
 			t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/exitcode"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
@@ -58,14 +59,14 @@ func loadWorktreeRun(t *testing.T, repoDir string) worktreeRunJSON {
 	return run
 }
 
-// newWorktreeRun is a stage run under execution.isolation: worktree, with the worktrees under a
-// temporary state directory and the fake CLIs recording their argv and working directory. The
-// fake implement fixes fixture.go and writes added.txt relative to its working directory.
-// mutate changes the rest of the config.
+// newWorktreeRun is a stage run under the default execution.isolation (worktree: the config does
+// not say), with the worktrees under a temporary state directory and the fake CLIs recording
+// their argv and working directory. The fake implement fixes fixture.go and writes added.txt
+// relative to its working directory. mutate changes the rest of the config.
 func newWorktreeRun(t *testing.T, repoDir string, mutate ...func(*configOptions)) (r stageRun, argsDir, cwdDir string) {
 	t.Helper()
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	r = newStageRun(t, repoDir, append([]func(*configOptions){func(o *configOptions) { o.isolation = "worktree" }}, mutate...)...)
+	r = newStageRun(t, repoDir, append([]func(*configOptions){func(o *configOptions) { o.isolation = isolationAbsent }}, mutate...)...)
 	argsDir, cwdDir = t.TempDir(), t.TempDir()
 	t.Setenv("FAKE_ARGS_DIR", argsDir)
 	t.Setenv("FAKE_CWD_DIR", cwdDir)
@@ -670,6 +671,107 @@ func TestWorktree_FlagOverridesInplaceConfig(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); !os.IsNotExist(err) {
 		t.Errorf("the change landed in the operator's tree: %v", err)
+	}
+}
+
+// run --inplace makes one run an in-place run under the default isolation: the change lands in
+// the operator's tree and no worktree is created (specs/delivery/SPEC.md §6).
+func TestWorktree_InplaceFlagOptsOutOfTheDefault(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--inplace", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadWorktreeRun(t, repoDir)
+	if run.Status != "completed" || run.Options.Isolation != "inplace" || run.Worktree != nil {
+		t.Errorf("status = %s, options.isolation = %q, worktree = %+v; want completed, inplace, none",
+			run.Status, run.Options.Isolation, run.Worktree)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "added.txt")); err != nil {
+		t.Errorf("the change did not land in the operator's tree: %v", err)
+	}
+}
+
+// A worktree run that could not deliver is refused before its worktree: exit 2 naming --inplace,
+// no worktree, no step, and with --stage no provider call (specs/delivery/SPEC.md §8).
+func TestWorktree_RefusedBeforeTheWorktreeWhenItCouldNotDeliver(t *testing.T) {
+	cases := []struct {
+		name   string
+		setup  func(t *testing.T, repoDir string)
+		mutate func(o *configOptions)
+		want   string
+	}{
+		{"no remote", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "remote", "remove", "origin") }, nil, `remote "origin"`},
+		{"detached HEAD without a target", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "checkout", "-q", "--detach") }, nil, "delivery.target_branch"},
+		{"secret scan off", func(t *testing.T, repoDir string) {},
+			func(o *configOptions) { o.extraYAML += "\nsecurity:\n  secret_scan:\n    mode: \"off\"\n" }, "security.secret_scan.mode is off"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir := fakeexec.InitGitFixture(t)
+			var mutate []func(*configOptions)
+			if tc.mutate != nil {
+				mutate = append(mutate, tc.mutate)
+			}
+			r, _, _ := newWorktreeRun(t, repoDir, mutate...)
+			tc.setup(t, repoDir)
+
+			stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+			if err == nil {
+				t.Fatalf("a run that could not deliver succeeded\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+			}
+			var cfgErr *apperr.ConfigError
+			if !errors.As(err, &cfgErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency {
+				t.Fatalf("got %T (exit %d) %v, want a config error with exit 2", err, exitcode.FromError(err), err)
+			}
+			assertContains(t, "error", err.Error(), tc.want, "--inplace")
+
+			run := loadWorktreeRun(t, repoDir)
+			if run.Worktree != nil || len(run.Executions) != 0 {
+				t.Errorf("worktree = %+v, executions = %d; want neither", run.Worktree, len(run.Executions))
+			}
+			if list, _ := gitOutput(repoDir, "worktree", "list", "--porcelain"); strings.Count(list, "worktree ") != 1 {
+				t.Errorf("a worktree was added:\n%s", list)
+			}
+			if got := invocations(t, r.invocationsLog); len(got) != 0 {
+				t.Errorf("invocations = %v, want none", got)
+			}
+			// Not even the clarity question a --stage run asks the decision provider.
+			if bodies := r.jev.Bodies(); len(bodies) != 0 {
+				t.Errorf("Jev got %d requests %v, want none", len(bodies), bodies)
+			}
+		})
+	}
+}
+
+// A detached HEAD delivers when delivery.target_branch names the target.
+func TestWorktree_DetachedHeadWithATargetBranchRuns(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.extraYAML += "delivery:\n  target_branch: main\n" })
+	gitRun(t, repoDir, "checkout", "-q", "--detach")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+	if run := loadWorktreeRun(t, repoDir); run.Status != "completed" || run.Worktree == nil {
+		t.Errorf("status = %s, worktree = %+v; want completed in a worktree", run.Status, run.Worktree)
+	}
+	// The counter the refusals above read: a run that passes the checks asks the clarity question.
+	if bodies := r.jev.Bodies(); len(bodies) != 1 || !clarityOnly(bodies[0]) {
+		t.Errorf("Jev got %v, want the clarity question alone", bodies)
+	}
+}
+
+// A workflow without implement runs in place, so a repository without a remote is fine.
+func TestWorktree_ReadOnlyWorkflowNeedsNoRemote(t *testing.T) {
+	repoDir := dirtyFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir)
+	gitRun(t, repoDir, "remote", "remove", "origin")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "run", "--stage", "review", "review my change")
+	mustSucceed(t, stdout, stderr, err)
+	if run := loadWorktreeRun(t, repoDir); run.Status != "completed" || run.Worktree != nil {
+		t.Errorf("status = %s, worktree = %+v; want completed in place", run.Status, run.Worktree)
 	}
 }
 
