@@ -15,13 +15,13 @@ func workflowOf(actions ...domain.ActionType) domain.Workflow {
 	return wf
 }
 
-func TestLoad_IsolationDefaultsToInplace(t *testing.T) {
+func TestLoad_IsolationDefaultsToWorktree(t *testing.T) {
 	cfg, err := Load(writeTempConfig(t, validV2("")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Execution.IsolationMode(); got != IsolationInplace {
-		t.Errorf("IsolationMode() = %q, want inplace", got)
+	if got := cfg.Execution.IsolationMode(); got != IsolationWorktree {
+		t.Errorf("IsolationMode() = %q, want worktree", got)
 	}
 	if err := Validate(cfg); err != nil && strings.Contains(err.Error(), "isolation") {
 		t.Errorf("the default isolation is refused: %v", err)
@@ -62,6 +62,38 @@ func TestValidate_Isolation(t *testing.T) {
 	if err := Validate(cfg); err != nil {
 		t.Errorf("worktree.setup with worktree: %v", err)
 	}
+
+	// With the key absent the run is a worktree run, so setup runs.
+	cfg.Execution.Isolation = ""
+	if err := Validate(cfg); err != nil {
+		t.Errorf("worktree.setup with isolation absent: %v", err)
+	}
+}
+
+func TestLoad_DeliveryDefaultsAndIsStrict(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, validV2("")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Delivery.RemoteName(); got != "origin" {
+		t.Errorf("RemoteName() = %q, want origin", got)
+	}
+	if cfg.Delivery.TargetBranch != "" {
+		t.Errorf("TargetBranch = %q, want none", cfg.Delivery.TargetBranch)
+	}
+
+	cfg, err = Load(writeTempConfig(t, validV2("delivery: {remote: upstream, target_branch: main}\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Delivery.RemoteName() != "upstream" || cfg.Delivery.TargetBranch != "main" {
+		t.Errorf("Delivery = %+v, want upstream and main", cfg.Delivery)
+	}
+
+	_, err = Load(writeTempConfig(t, validV2("delivery: {remtoe: origin}\n")))
+	if err == nil || !strings.Contains(err.Error(), "remtoe") {
+		t.Errorf("unknown key under delivery: got %v, want an unknown-key error", err)
+	}
 }
 
 func TestLoad_WorktreeSectionIsStrict(t *testing.T) {
@@ -82,8 +114,8 @@ func TestConfig_WorktreeRun(t *testing.T) {
 	cfg := validConfig()
 	impl := workflowOf(domain.ActionImplement, domain.ActionTest)
 	readOnly := workflowOf(domain.ActionReview)
-	if cfg.WorktreeRun(impl) {
-		t.Error("default isolation with implement is a worktree run")
+	if !cfg.WorktreeRun(impl) {
+		t.Error("default isolation with implement is not a worktree run")
 	}
 	cfg.Execution.Isolation = IsolationWorktree
 	if !cfg.WorktreeRun(impl) {

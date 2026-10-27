@@ -442,10 +442,10 @@ func (p PromptLimitsConfig) TestOutputBytes() int {
 // UnmarshalYAML, since YAML has no native duration type.
 type ExecutionConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
-	// Isolation is where a workflow with implement runs: inplace (the default) or worktree
-	// (specs/worktree/SPEC.md §6); run --inplace and run --worktree override it for one run.
-	// Empty when absent, so Validate can tell a written inplace; read it through
-	// IsolationMode.
+	// Isolation is where a workflow with implement runs: worktree (the default) or inplace
+	// (specs/worktree/SPEC.md §6, specs/delivery/SPEC.md §6); run --inplace and run --worktree
+	// override it for one run. Empty when absent, so Validate can tell a written inplace; read
+	// it through IsolationMode.
 	Isolation string `yaml:"isolation"`
 	// RateLimitWait turns on waiting for a step the account's usage limit refused: the run
 	// sleeps until the reset time the CLI reported, or this long when it reported none, and
@@ -459,10 +459,10 @@ const (
 	IsolationInplace  = "inplace"
 )
 
-// IsolationMode is execution.isolation, inplace when absent.
+// IsolationMode is execution.isolation, worktree when absent.
 func (e ExecutionConfig) IsolationMode() string {
 	if e.Isolation == "" {
-		return IsolationInplace
+		return IsolationWorktree
 	}
 	return e.Isolation
 }
@@ -497,8 +497,8 @@ func (e *ExecutionConfig) UnmarshalYAML(unmarshal func(interface{}) error) error
 // WorktreeConfig is the top-level worktree section (specs/worktree/SPEC.md §6).
 type WorktreeConfig struct {
 	// Setup is a trusted operator command run once in a new worktree before any model step,
-	// like test.command. It only applies to a worktree run (execution.isolation: worktree or
-	// run --worktree).
+	// like test.command. It runs in every worktree run, which is the default for a workflow
+	// with implement; a config error with execution.isolation: inplace written out.
 	Setup string `yaml:"setup"`
 }
 
@@ -521,6 +521,10 @@ type Config struct {
 
 	// Worktree configures the worktree isolation of a run (specs/worktree/SPEC.md §6).
 	Worktree WorktreeConfig `yaml:"worktree"`
+
+	// Delivery is where a worktree run's branch goes (specs/delivery/SPEC.md §8); the section
+	// is optional.
+	Delivery DeliveryConfig `yaml:"delivery"`
 
 	// Review holds what the review step's result changes in the run (specs/quality/SPEC.md §7.3).
 	Review ReviewConfig `yaml:"review"`

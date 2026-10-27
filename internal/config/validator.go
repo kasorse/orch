@@ -89,7 +89,7 @@ func Validate(cfg Config) error {
 	switch cfg.Execution.Isolation {
 	case "", IsolationWorktree, IsolationInplace:
 	default:
-		problems = append(problems, fmt.Sprintf("execution.isolation must be inplace (the default) or worktree, got %q", cfg.Execution.Isolation))
+		problems = append(problems, fmt.Sprintf("execution.isolation must be worktree (the default) or inplace, got %q", cfg.Execution.Isolation))
 	}
 	if cfg.Execution.Isolation == IsolationInplace && strings.TrimSpace(cfg.Worktree.Setup) != "" {
 		problems = append(problems, "worktree.setup needs execution.isolation: worktree; with inplace it would never run")

@@ -786,6 +786,9 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
 		}
 	}
+	if err := checkValidateDelivery(ctx, cfg, executor); err != nil {
+		return err
+	}
 	checked, err := checkJevModel(ctx, cfg, stderr)
 	if checked {
 		reporter.JevModelServed(cfg.Decision.Model)
@@ -1150,6 +1153,11 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 
 	var out decisionOutcome
 	if len(stages) > 0 {
+		// The flags name the workflow, so a worktree run that could not deliver is refused
+		// before the clarity question: no call is made (specs/delivery/SPEC.md §8).
+		if err := checkStagesDeliverable(decideCtx, repo, cfg, stages, task.Source); err != nil {
+			return failRun(store, run, err)
+		}
 		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
 			reporter, prompter, interactive, stream, stderr)
 	} else {
