@@ -48,6 +48,15 @@ func validateWorktree(run *domain.Run) error {
 	default:
 		return fmt.Errorf("options.isolation %q is not inplace or worktree", run.Options.Isolation)
 	}
+	// The record outlives a worktree that git then failed to add.
+	if bn := run.BranchNaming; bn != nil {
+		if err := bn.Validate(); err != nil {
+			return fmt.Errorf("branch_naming: %w", err)
+		}
+		if run.Options.IsolationMode() != domain.IsolationWorktree {
+			return fmt.Errorf("branch_naming recorded on a run with options.isolation %q", run.Options.IsolationMode())
+		}
+	}
 	w := run.Worktree
 	if w == nil {
 		return nil
@@ -56,9 +65,23 @@ func validateWorktree(run *domain.Run) error {
 		return fmt.Errorf("worktree recorded on a run with options.isolation %q", run.Options.IsolationMode())
 	}
 	// A story task's branch and base are the ones its task input gave, recorded in task.source
-	// (validated with it); the worktree must be the one created on them.
-	if want := domain.RunWorktreeBranch(run); w.Branch != want {
-		return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, want)
+	// (validated with it); the worktree must be the one created on them. Any other run's branch
+	// was named when the worktree was created (specs/delivery/SPEC.md §4.3): it only has to be a
+	// name the rules accept.
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		if w.Branch != src.Branch {
+			return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, src.Branch)
+		}
+	} else if err := domain.CheckBranchName(w.Branch); err != nil {
+		return fmt.Errorf("worktree.branch %q: %w", w.Branch, err)
+	}
+	if bn := run.BranchNaming; bn != nil {
+		if bn.Source == domain.BranchSourceDefault && w.Branch != domain.WorktreeBranch(run.ID) {
+			return fmt.Errorf("branch_naming.source is default, but worktree.branch is %q, not %q", w.Branch, domain.WorktreeBranch(run.ID))
+		}
+		if bn.Source == domain.BranchSourceInstructions && w.Branch != bn.Proposed {
+			return fmt.Errorf("branch_naming.source is instructions, but worktree.branch is %q, not the proposed %q", w.Branch, bn.Proposed)
+		}
 	}
 	if !isCommitSHA(w.BaseRef) {
 		return fmt.Errorf("worktree.base_ref %q is not a full commit SHA", w.BaseRef)

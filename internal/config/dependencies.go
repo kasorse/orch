@@ -104,6 +104,10 @@ func budgetProblems(cfg Config, checker CostChecker) []string {
 	if clarify := cfg.Clarify; clarify.Active() && clarify.Provider != "" && (checker == nil || !checker.ReportsCost(clarify.Provider)) {
 		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (clarify) reports no cost", clarify.Provider))
 	}
+	// So is the branch-name call (specs/delivery/SPEC.md §4.3).
+	if fi := cfg.Worktree.Branch.FromInstructions; fi != nil && fi.Provider != "" && (checker == nil || !checker.ReportsCost(fi.Provider)) {
+		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (%s) reports no cost", fi.Provider, branchFromInstructionsKey))
+	}
 	return problems
 }
 

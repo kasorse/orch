@@ -95,6 +95,7 @@ func Validate(cfg Config) error {
 		problems = append(problems, "worktree.setup needs execution.isolation: worktree; with inplace it would never run")
 	}
 
+	problems = append(problems, branchProblems(cfg.Worktree.Branch)...)
 	problems = append(problems, decisionProblems(cfg)...)
 	problems = append(problems, pathRuleProblems(cfg)...)
 	problems = append(problems, providersProblems(cfg)...)
@@ -145,6 +146,25 @@ func Validate(cfg Config) error {
 		fmt.Sprintf("configuration validation failed:\n\n%s", strings.Join(problems, "\n")),
 		nil,
 	)
+}
+
+// branchProblems validates worktree.branch (specs/delivery/SPEC.md §4.3): a template with only the
+// placeholders {id}, {key}, {slug} and {date}, and a route with a provider, a model and a positive
+// timeout for the call that reads the instructions.
+func branchProblems(b BranchConfig) []string {
+	var problems []string
+	if b.Template != "" {
+		if err := domain.CheckBranchTemplate(b.Template); err != nil {
+			problems = append(problems, fmt.Sprintf("worktree.branch.template %q: %v", b.Template, err))
+		}
+	}
+	if fi := b.FromInstructions; fi != nil {
+		problems = append(problems, validateProviderModel(branchFromInstructionsKey, fi.ProviderModel)...)
+		if fi.Timeout <= 0 {
+			problems = append(problems, branchFromInstructionsKey+".timeout must be a positive duration")
+		}
+	}
+	return problems
 }
 
 // verifyProblems validates actions.implement.verify and limits.verify (specs/quality/SPEC.md
@@ -384,6 +404,9 @@ func allowedModelProblems(cfg Config) []string {
 	check("translation", cfg.Translation.Model)
 	if cfg.Clarify.Active() {
 		check("clarify", cfg.Clarify.Model)
+	}
+	if fi := cfg.Worktree.Branch.FromInstructions; fi != nil {
+		check(branchFromInstructionsKey, fi.Model)
 	}
 	if !cfg.Decision.UsesJev() {
 		check("decision", cfg.Decision.Model)
