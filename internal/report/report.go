@@ -53,6 +53,31 @@ func RunReport(run domain.Run, trace *domain.DecisionTrace) string {
 	return cutAtLine(text, maxReportBytes)
 }
 
+// RunReportFit is RunReport for a text that must also satisfy fits, such as a merge request
+// description that has to fit one push option once its line breaks are encoded (specs/delivery/
+// SPEC.md §7.3). The report is rendered again with the next smaller lists, then a shorter task
+// quote (the same cut order as RunReport), until the text fits; when even the smallest does not,
+// it is cut at a line with a closing mark. report.md on disk stays RunReport's version.
+func RunReportFit(run domain.Run, trace *domain.DecisionTrace, fits func(string) bool) string {
+	out := domain.ComputeOutcome(run, trace)
+	if run.Outcome != nil {
+		out = *run.Outcome
+	}
+	var text string
+	for _, lim := range reportCuts {
+		if text = renderReport(run, trace, out, lim); len(text) <= maxReportBytes && fits(text) {
+			return text
+		}
+	}
+	const mark = "\n…(cut)\n"
+	for max := min(len(text), maxReportBytes); max > len(mark); max -= max/10 + 1 {
+		if cut := cutAtLine(text, max); fits(cut) {
+			return cut
+		}
+	}
+	return strings.TrimSpace(mark)
+}
+
 // cutAtLine is s cut at a line boundary to fit max bytes with a closing mark.
 func cutAtLine(s string, max int) string {
 	const mark = "\n…(cut)\n"
@@ -522,6 +547,13 @@ func writeFooter(b *strings.Builder, run domain.Run, out domain.Outcome) {
 	}
 	if run.Commit != "" {
 		parts = append(parts, "commit "+mdCode(shortCommit(run.Commit)))
+	}
+	if mr := run.MR; mr != nil && mr.State == domain.MRCreated {
+		link := mdCode(mr.URL)
+		if linkable(mr.URL) {
+			link = fmt.Sprintf("[!%d](%s)", mr.IID, mr.URL)
+		}
+		parts = append(parts, "merge request "+link)
 	}
 	if run.PreRunRef != "" {
 		parts = append(parts, "restore point "+mdCode(shortCommit(run.PreRunRef)))

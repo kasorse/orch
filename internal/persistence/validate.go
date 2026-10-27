@@ -122,6 +122,9 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("commit recorded on a %s run; only a completed run is committed", run.Status)
 		}
 	}
+	if err := validateMR(run); err != nil {
+		return err
+	}
 	for i, r := range run.Resumes {
 		if err := validateProviderCLI(r.ProviderCLI); err != nil {
 			return fmt.Errorf("resumes[%d].provider_cli: %w", i, err)

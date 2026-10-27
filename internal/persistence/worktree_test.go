@@ -69,6 +69,70 @@ func TestValidateWorktree(t *testing.T) {
 	}
 }
 
+// run.mr (specs/delivery/SPEC.md §13): its own rules, and that it belongs to a completed worktree
+// run that has the commit it pushed.
+func TestValidateMR(t *testing.T) {
+	sha := strings.Repeat("cd", 20)
+	created := func(r *domain.Run) {
+		r.Commit = sha
+		r.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: r.Worktree.Branch, Target: "master", IID: 7,
+			URL: "https://gitlab.example.com/g/p/-/merge_requests/7"}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*domain.Run)
+		want   string // "" = valid
+	}{
+		{"no mr", nil, ""},
+		{"created", created, ""},
+		{"skipped without a commit", func(r *domain.Run) { r.MR = &domain.RunMR{Skipped: "the review did not pass"} }, ""},
+		{"intent", func(r *domain.Run) {
+			created(r)
+			r.MR = &domain.RunMR{State: domain.MRIntent, Remote: "origin", Source: r.Worktree.Branch, Target: "master", Error: "fatal: nope"}
+		}, ""},
+		{"invalid record", func(r *domain.Run) { created(r); r.MR.URL = "http://x/-/merge_requests/7" }, "mr:"},
+		{"on a running run", func(r *domain.Run) { created(r); r.Status = domain.RunRunning }, "only a completed run"},
+		{"on a failed run", func(r *domain.Run) { created(r); r.Status = domain.RunFailed }, "only a completed run"},
+		{"without a worktree", func(r *domain.Run) { created(r); r.Worktree = nil; r.Options.Isolation = "" }, "without a worktree"},
+		{"pushed without a commit", func(r *domain.Run) { created(r); r.Commit = "" }, "without a commit"},
+		{"another branch", func(r *domain.Run) { created(r); r.MR.Source = "orchestrator/other" }, "mr.source"},
+	}
+	for _, c := range cases {
+		err := validateRun(wtRun(c.mutate), wtRunID)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: validateRun() = %v, want nil", c.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: validateRun() = %v, want an error naming %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestDecodeRun_MRRoundTrip(t *testing.T) {
+	run := wtRun(func(r *domain.Run) {
+		r.Commit = strings.Repeat("cd", 20)
+		r.MR = &domain.RunMR{State: domain.MRPushed, Remote: "origin", Source: r.Worktree.Branch, Target: "master", Skipped: "declined at merge request"}
+	})
+	data, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeRun(data, wtRunID)
+	if err != nil || !reflect.DeepEqual(got.MR, run.MR) {
+		t.Fatalf("round trip: %+v, %v; want %+v", got.MR, err, run.MR)
+	}
+	bad := strings.Replace(string(data), `"declined at merge request"`, `"declined at merge request","extra":1`, 1)
+	if _, err := decodeRun([]byte(bad), wtRunID); err == nil {
+		t.Error("unknown mr field accepted")
+	}
+	if old, _ := json.Marshal(wtRun(nil)); strings.Contains(string(old), `"mr"`) {
+		t.Errorf("a run without a merge request writes %s", old)
+	}
+}
+
 func TestDecodeRun_WorktreeRoundTrip(t *testing.T) {
 	run := wtRun(func(r *domain.Run) { r.Worktree.Conflicts = []string{"internal/app/app.go"} })
 	data, err := json.Marshal(run)

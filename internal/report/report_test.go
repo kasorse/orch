@@ -224,6 +224,51 @@ func TestRunReport_ByteBound(t *testing.T) {
 	}
 }
 
+// RunReportFit renders again, smaller, until the text satisfies fits: the lists shrink, then the
+// task quote, and a text that still does not fit is cut at a line.
+func TestRunReportFit(t *testing.T) {
+	run := reportRun()
+	var task []string
+	for i := 0; i < 30; i++ {
+		task = append(task, fmt.Sprintf("line %d %s", i, strings.Repeat("x", 900)))
+	}
+	run.Task.Description = strings.Join(task, "\n")
+	files := make([]domain.FileStat, domain.MaxRunFiles)
+	for i := range files {
+		files[i] = domain.FileStat{Path: fmt.Sprintf("dir/%03d/%s.go", i, strings.Repeat("p", 100)), Insertions: i, Deletions: 1}
+	}
+	run.Executions[2].Diff.RunFiles = files
+	run.Executions[2].Diff.Run.Files = len(files)
+
+	full := RunReport(run, nil)
+	if got := RunReportFit(run, nil, func(string) bool { return true }); got != full {
+		t.Errorf("a text that always fits differs from report.md\n%s", got)
+	}
+
+	limit := len(full) - 1
+	got := RunReportFit(run, nil, func(s string) bool { return len(s) <= limit })
+	if len(got) > limit || strings.Count(got, "dir/") >= len(files) || !strings.Contains(got, "---\nRun `20261023-101500-ab12cd`") {
+		t.Errorf("a report that must fit %d bytes is %d bytes, %d files, footer kept: %v", limit, len(got), strings.Count(got, "dir/"),
+			strings.Contains(got, "---\nRun `"))
+	}
+
+	// Not even the smallest rendering fits 600 bytes: it is cut at a line.
+	got = RunReportFit(run, nil, func(s string) bool { return len(s) <= 600 })
+	if len(got) > 600 || !strings.HasSuffix(got, "\n…(cut)\n") || !strings.HasPrefix(got, "## PAY-12") {
+		t.Errorf("a report that must fit 600 bytes is %d bytes, ends %q", len(got), got[max(0, len(got)-20):])
+	}
+}
+
+// The footer names the merge request a push opened, and only that one.
+func TestRunReport_FooterNamesTheMergeRequest(t *testing.T) {
+	run := reportRun()
+	run.MR = &domain.RunMR{State: domain.MRIntent, Remote: "origin", Source: run.Worktree.Branch, Target: "main", Error: "boom"}
+	mustNotContain(t, RunReport(run, nil), "merge request")
+	run.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: run.Worktree.Branch, Target: "main", IID: 12,
+		URL: "https://gitlab.example.com/g/p/-/merge_requests/12"}
+	mustContain(t, RunReport(run, nil), " · merge request [!12](https://gitlab.example.com/g/p/-/merge_requests/12) · restore point")
+}
+
 func TestRunReport_Escapes(t *testing.T) {
 	run := reportRun()
 	run.Task.Description = "<img src=x> [link](http://x)\n/merge\n```\n@all #1 !2 ~bug %m1"

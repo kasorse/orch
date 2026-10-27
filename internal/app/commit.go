@@ -21,21 +21,23 @@ const commitHeaderMax = 72
 // auto_commit the same checks run and the commit is made without the question, unless
 // there is something the question would have warned about or no message to use.
 //
-// A worktree run commits on its own branch, never the operator's, so it takes the auto_commit
-// path whatever the config and the mode say (specs/worktree/SPEC.md §10.1); where that path
-// would not commit, an operator at the terminal (canAsk) gets the question instead. In place
-// canAsk is not read: the caller asked only when someone is there. It returns the commit, or
-// "" when nothing was committed.
+// A worktree run commits on its own branch, never the operator's, and without the question only
+// under --mode auto, by the same checks (specs/delivery/SPEC.md §7.2): auto_commit has no
+// effect there. Any other mode asks, with the warnings, and needs somebody to ask (canAsk); a
+// no is a person's decision. In place canAsk is not read: the caller asked only when someone
+// is there. It returns the commit, or "" when nothing was committed, and s.noCommit says why.
 func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 	run := s.run
+	s.noCommit = commitStop{}
 	if run.Status != domain.RunCompleted || run.Workflow == nil || !run.Workflow.Contains(domain.ActionImplement) {
 		return ""
 	}
 	out := s.reporter.PausingWriter()
 	inWorktree := s.worktree != nil
 	// A manual run is confirmed by a person step by step: it ends with the question too.
-	auto := inWorktree || (s.cfg.AutoCommit && run.Mode != domain.ModeManual)
+	auto := (inWorktree && run.Mode == domain.ModeAuto) || (!inWorktree && s.cfg.AutoCommit && run.Mode != domain.ModeManual)
 	skip := func(why string) {
+		s.noCommit = commitStop{why: why}
 		if auto {
 			fmt.Fprintf(out, "\nNot committing automatically: %s\n", why)
 		} else {
@@ -66,6 +68,7 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 		return ""
 	}
 	if changes == "" {
+		s.noCommit = commitStop{why: "the run changed nothing, so there is nothing to commit"}
 		fmt.Fprintln(out, "\nNo changes to commit.")
 		return ""
 	}
@@ -95,24 +98,26 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 		case header == "":
 			why = "the implementation proposed no commit message; commit what you want yourself."
 		}
-		switch {
-		case why == "":
-		case inWorktree && canAsk:
-			// The §42.2 question decides instead, with its default no.
-			ask = true
-		default:
+		if why != "" {
 			skip(why)
 			return ""
 		}
 	}
 	if ask {
+		if inWorktree && !canAsk {
+			skip("there is no terminal to ask on; run with --mode auto to commit and deliver without questions.")
+			return ""
+		}
 		var ok bool
 		header, ok, err = interaction.AskCommit(s.prompter, out, offer)
 		if err != nil {
+			// A closed stdin is the default answer: no.
+			s.noCommit = commitStop{why: "no answer to the commit question", declined: true}
 			fmt.Fprintf(out, "\nNo answer (%v); nothing committed.\n", err)
 			return ""
 		}
 		if !ok {
+			s.noCommit = commitStop{why: "declined at commit", declined: true}
 			if inWorktree {
 				fmt.Fprintln(out, "Not committed; the changes stay in the worktree.")
 			} else {
@@ -123,6 +128,7 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 	}
 	sha, err := s.repo.CommitAll(ctx, offer.Message(header))
 	if err != nil {
+		s.noCommit = commitStop{why: "the commit failed: " + firstNonEmpty(strings.SplitN(err.Error(), "\n", 2)[0])}
 		fmt.Fprintf(out, "Commit failed: %v\n", err)
 		return ""
 	}

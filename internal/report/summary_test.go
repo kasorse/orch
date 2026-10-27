@@ -255,3 +255,30 @@ func TestRunSummary_Worktree(t *testing.T) {
 		t.Errorf("summary lacks %q\n%s", want, got)
 	}
 }
+
+// A "Merge request" row says what the end of a worktree run came to: the URL, or what was skipped
+// or went wrong; a run that never got there has none.
+func TestRunSummary_MergeRequest(t *testing.T) {
+	run := summaryRun()
+	if got := RunSummary(run, nil); strings.Contains(got, "| Merge request |") {
+		t.Errorf("a run without mr has a merge request row\n%s", got)
+	}
+	for _, c := range []struct {
+		mr   domain.RunMR
+		want string
+	}{
+		{domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: "b", Target: "main", IID: 12, URL: "https://gitlab.example.com/g/p/-/merge_requests/12"},
+			"| Merge request | !12 https://gitlab.example.com/g/p/-/merge_requests/12 |\n"},
+		{domain.RunMR{State: domain.MRPushed, Remote: "origin", Source: "b", Target: "main", Skipped: "declined at merge request"},
+			"| Merge request | pushed b to origin, no merge request; skipped: declined at merge request |\n"},
+		{domain.RunMR{State: domain.MRIntent, Remote: "origin", Source: "b", Target: "main", Error: "fatal: nope"},
+			"| Merge request | pushing b to origin failed; error: fatal: nope |\n"},
+		{domain.RunMR{Skipped: "the review did not pass"}, "| Merge request | skipped: the review did not pass |\n"},
+	} {
+		mr := c.mr
+		run.MR = &mr
+		if got := RunSummary(run, nil); !strings.Contains(got, c.want) {
+			t.Errorf("summary lacks %q\n%s", c.want, got)
+		}
+	}
+}

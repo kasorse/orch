@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -395,6 +396,67 @@ func InitGitFixture(t *testing.T) string {
 	runGit(t, dir, "remote", "add", "origin", "https://git.example.invalid/fixture.git")
 
 	return dir
+}
+
+// GitLabHost is the host of the remote AddGitLabRemote sets up, and of the merge request URLs its
+// hook prints.
+const GitLabHost = "gitlab.test"
+
+// gitLabHook is the post-receive hook of the bare repository AddGitLabRemote makes. It records
+// the push options it received, one per line, in push-options.log, and plays GitLab: a push with
+// merge_request.create is answered with the merge request's URL, the next number each time.
+const gitLabHook = `#!/bin/sh
+i=0
+create=
+while [ "$i" -lt "${GIT_PUSH_OPTION_COUNT:-0}" ]; do
+  eval "opt=\$GIT_PUSH_OPTION_$i"
+  printf '%s\n' "$opt" >> push-options.log
+  [ "$opt" = "merge_request.create" ] && create=1
+  i=$((i + 1))
+done
+[ -n "$create" ] || exit 0
+n=$(cat merge-requests.count 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > merge-requests.count
+while read -r old new ref; do
+  branch=${ref#refs/heads/}
+  echo "" >&2
+  echo "View merge request for $branch:" >&2
+  echo "  https://` + GitLabHost + `/group/project/-/merge_requests/$n" >&2
+  echo "" >&2
+done
+`
+
+// AddGitLabRemote makes origin of the repository at dir a bare repository that takes push
+// options (receive.advertisePushOptions) and answers like GitLab (gitLabHook), so a worktree run
+// can push its branch and open a merge request without a network. The URL is a file:// URL with
+// the host GitLabHost, which git ignores and the orchestrator reads as the remote's host. It
+// returns the bare repository's directory.
+func AddGitLabRemote(t *testing.T, dir string) string {
+	t.Helper()
+	bare := filepath.Join(t.TempDir(), "gitlab.git")
+	runGit(t, dir, "init", "--bare", "-q", bare)
+	runGit(t, bare, "config", "receive.advertisePushOptions", "true")
+	hook := filepath.Join(bare, "hooks", "post-receive")
+	if err := os.WriteFile(hook, []byte(gitLabHook), 0o755); err != nil {
+		t.Fatalf("fakeexec: write %s: %v", hook, err)
+	}
+	runGit(t, dir, "remote", "set-url", "origin", "file://"+GitLabHost+bare)
+	return bare
+}
+
+// GitLabPushOptions are the push options the bare repository made by AddGitLabRemote received,
+// in order; none when it received none.
+func GitLabPushOptions(t *testing.T, bare string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(bare, "push-options.log"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("fakeexec: %v", err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
 }
 
 const buggyFixtureSource = `package fixture

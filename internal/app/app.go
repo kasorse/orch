@@ -1345,6 +1345,8 @@ type session struct {
 	// the worktree was verified (resumeInWorktree). nil and "" in place.
 	operator            *repository.Repository
 	operatorFingerprint string
+	// noCommit is why the last offerCommit committed nothing (commitStop).
+	noCommit commitStop
 }
 
 // newSession builds the Dispatcher and resolves the guarded paths. Nothing here calls a
@@ -1587,16 +1589,17 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
-	// A worktree run commits on its own branch without the question, checks it for conflicts
-	// and removes the worktree (specs/worktree/SPEC.md §10). Only where auto_commit would not
-	// commit is an operator at the terminal asked; --mode auto asks nothing.
+	// A worktree run ends with the chain commit, conflict check, push and merge request, and then
+	// removes the worktree (specs/delivery/SPEC.md §7). --mode auto asks nothing; any other mode
+	// asks before each step. A run whose branch did not become a merge request that nobody
+	// declined returns the error for exit code 6; its status stays completed.
 	if s.worktree != nil {
-		sha := offerCommit(ctx, s, opts.mode != domain.ModeAuto && isTerminal(s.stdin))
-		finishWorktree(ctx, s, sha)
+		sha := offerCommit(ctx, s, mode != domain.ModeAuto && isTerminal(s.stdin))
+		deliveryErr := finishWorktree(ctx, s, sha)
 		// summary.md was rendered before the commit: it gains the worktree line's commit,
-		// conflicts and removal.
+		// conflicts and removal, and the merge request.
 		saveSummary(store, run)
-		return nil
+		return deliveryErr
 	}
 	// auto_commit needs nobody at the terminal; otherwise only when the operator is there:
 	// --mode auto asks nothing. auto_commit does not apply to --mode manual.

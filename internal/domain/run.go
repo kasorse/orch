@@ -3,7 +3,9 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -250,6 +252,95 @@ type Run struct {
 	// Worktree is the git worktree the run executes in (specs/worktree/SPEC.md §8.2); nil for an
 	// inplace run and in a run written before the field.
 	Worktree *RunWorktree `json:"worktree,omitempty"`
+	// MR is where the end of a worktree run got to after its commit: the push of its branch and
+	// the merge request that push opened (specs/delivery/SPEC.md §7, §13). Nil until the chain
+	// ran; a record, never read back to decide anything.
+	MR *RunMR `json:"mr,omitempty"`
+}
+
+// Values of RunMR.State.
+const (
+	// MRIntent is saved before the push: the push may have reached the remote even when it
+	// reports a failure, so it is never repeated.
+	MRIntent = "intent"
+	// MRPushed is a push that succeeded without a merge request: none wanted, or the remote
+	// reported none.
+	MRPushed = "pushed"
+	// MRCreated is a push whose answer named the merge request it opened.
+	MRCreated = "created"
+)
+
+// Bounds of RunMR's text, in bytes.
+const (
+	maxMRText = 500
+	maxMRURL  = 2048
+)
+
+// RunMR is the record of a worktree run's push and merge request. State is empty when the chain
+// stopped before the push: Skipped says why (nobody committed, or somebody said no), or Error
+// says what the checks before the push found.
+type RunMR struct {
+	State  string `json:"state,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+	// IID and URL are set with MRCreated only; URL is https and ends /-/merge_requests/<iid>.
+	IID     int    `json:"iid,omitempty"`
+	URL     string `json:"url,omitempty"`
+	Skipped string `json:"skipped,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json.
+func (m RunMR) Validate() error {
+	switch m.State {
+	case "", MRIntent, MRPushed, MRCreated:
+	default:
+		return fmt.Errorf("state %q is not intent, pushed or created", m.State)
+	}
+	for name, v := range map[string]string{"skipped": m.Skipped, "error": m.Error} {
+		if len(v) > maxMRText || strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+			return fmt.Errorf("%s must be one line of at most %d bytes", name, maxMRText)
+		}
+	}
+	switch {
+	case m.State == "" && m.Skipped == "" && m.Error == "":
+		return fmt.Errorf("a record without a state needs skipped or error")
+	case m.State != "" && (m.Remote == "" || m.Source == "" || m.Target == ""):
+		return fmt.Errorf("state %s needs remote, source and target", m.State)
+	case m.State != MRCreated && (m.IID != 0 || m.URL != ""):
+		return fmt.Errorf("iid and url only go with state created")
+	case m.State == MRCreated && (m.IID <= 0 || m.URL == ""):
+		return fmt.Errorf("state created needs iid and url")
+	case m.State == MRCreated && (m.Skipped != "" || m.Error != ""):
+		return fmt.Errorf("state created has neither skipped nor error")
+	}
+	for name, v := range map[string]string{"remote": m.Remote, "source": m.Source, "target": m.Target} {
+		if strings.HasPrefix(v, "-") || strings.ContainsFunc(v, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
+			return fmt.Errorf("%s %q is not a name git would take", name, v)
+		}
+	}
+	if m.State == MRCreated {
+		return validMRURL(m.URL, m.IID)
+	}
+	return nil
+}
+
+// validMRURL checks that raw is an https URL without userinfo, query or fragment that ends
+// /-/merge_requests/<iid>.
+func validMRURL(raw string, iid int) error {
+	u, err := url.Parse(raw)
+	switch {
+	case len(raw) > maxMRURL || strings.ContainsFunc(raw, func(r rune) bool { return r <= ' ' || r >= 0x7f }):
+		return fmt.Errorf("url is not a plain address of at most %d bytes", maxMRURL)
+	case err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "":
+		return fmt.Errorf("url %q is not an https address on a host", raw)
+	}
+	prefix, ok := strings.CutSuffix(u.Path, "/-/merge_requests/"+strconv.Itoa(iid))
+	if !ok || !strings.HasPrefix(prefix, "/") || len(prefix) < 2 {
+		return fmt.Errorf("url %q does not end /-/merge_requests/%d", raw, iid)
+	}
+	return nil
 }
 
 // Values of RunOptions.Isolation.

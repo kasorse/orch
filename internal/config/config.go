@@ -565,7 +565,9 @@ type Config struct {
 	Providers ProvidersConfig `yaml:"providers"`
 
 	// AutoCommit commits a completed run's changes without asking, in every mode
-	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question.
+	// (MVP.md §42.6): the operator's yes, given in advance. False keeps the question. It has no
+	// effect in a worktree run, where only --mode auto commits without the question
+	// (specs/delivery/SPEC.md §7.2).
 	AutoCommit bool `yaml:"auto_commit"`
 
 	// AllowedModels and AllowedModelsFrom come from the org file (org.go) and never from the

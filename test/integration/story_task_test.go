@@ -65,6 +65,8 @@ type storyRun struct {
 func newStoryRun(t *testing.T, mutate ...func(in map[string]any)) storyRun {
 	t.Helper()
 	repoDir := fakeexec.InitGitFixture(t)
+	// A story task is a worktree run that pushes its branch: origin answers like GitLab.
+	fakeexec.AddGitLabRemote(t, repoDir)
 	base, err := gitOutput(repoDir, "rev-list", "--max-parents=0", "HEAD")
 	if err != nil {
 		t.Fatal(err)

@@ -261,6 +261,16 @@ func (e *InvalidResponseError) Error() string {
 }
 func (e *InvalidResponseError) Unwrap() error { return e.Err }
 
+// NeedsPersonError is a run that completed, but whose worktree branch did not become a merge
+// request and nobody declined that (specs/delivery/SPEC.md §7.4, §11.3): nothing was committed
+// under --mode auto, or the push or the merge request failed. The run's status is untouched; the
+// error only carries exit code 6 to the caller.
+type NeedsPersonError struct {
+	Msg string
+}
+
+func (e *NeedsPersonError) Error() string { return e.Msg }
+
 // LimitExceededError signals that a workflow limit (max steps / max fix iterations) was
 // reached. Reason is pre-formatted for direct CLI display.
 type LimitExceededError struct {

@@ -93,6 +93,35 @@ func AskCommit(p Prompter, out io.Writer, o CommitOffer) (header string, ok bool
 	}
 }
 
+// AskPush asks whether to push branch to remote (specs/delivery/SPEC.md §7.2). The default is
+// no: an empty answer is a no, and so is an error, which the caller sees and may report.
+func AskPush(p Prompter, out io.Writer, branch, remote string) (bool, error) {
+	return askYesNo(p, out, fmt.Sprintf("Push %s to %s? [y]es / [N]o: ", branch, remote))
+}
+
+// AskMergeRequest asks whether the push opens a merge request from branch into target. Like
+// AskPush, the default is no.
+func AskMergeRequest(p Prompter, out io.Writer, branch, target string) (bool, error) {
+	return askYesNo(p, out, fmt.Sprintf("Open a merge request %s → %s? [y]es / [N]o: ", branch, target))
+}
+
+// askYesNo asks prompt until it gets a yes or a no; an empty answer is no.
+func askYesNo(p Prompter, out io.Writer, prompt string) (bool, error) {
+	for {
+		ans, err := p.Ask(prompt)
+		if err != nil {
+			return false, err
+		}
+		switch strings.ToLower(ans) {
+		case "y", "yes":
+			return true, nil
+		case "n", "no", "":
+			return false, nil
+		}
+		fmt.Fprintln(out, "unrecognized option")
+	}
+}
+
 // indent indents every non-empty line of s by two spaces.
 func indent(s string) string {
 	lines := strings.Split(s, "\n")

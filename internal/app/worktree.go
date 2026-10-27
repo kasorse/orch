@@ -277,30 +277,35 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 }
 
 // finishWorktree ends a completed worktree run after the commit (specs/worktree/SPEC.md
-// §10): with sha, the commit on the run's branch, it says how to take the branch, checks it
-// for conflicts with the operator's branch and removes the worktree; without one the worktree
-// stays and its path is printed. Nothing here fails a run that already completed: what goes
-// wrong is reported and the worktree is kept. The branch is never deleted: it is the result.
-func finishWorktree(ctx context.Context, s *session, sha string) {
+// §10, specs/delivery/SPEC.md §7): with sha, the commit on the run's branch, it says how to
+// take the branch, checks it for conflicts with the operator's branch, delivers it (deliver:
+// the push and the merge request) and removes the worktree, whatever the delivery did; without
+// one the worktree stays, its path is printed and the chain ends there (skipDelivery). Nothing
+// here fails a run that already completed: what goes wrong is reported and the worktree is
+// kept. The branch is never deleted: it is the result. The error is the delivery's: a
+// NeedsPersonError when the branch did not become a merge request and nobody declined that.
+func finishWorktree(ctx context.Context, s *session, sha string) error {
 	w := s.worktree
 	if sha == "" || s.operator == nil {
 		s.reporter.WorktreeKept(w.Path, "")
-		return
+		return skipDelivery(s)
 	}
 	s.reporter.WorktreeCommitted(w.Branch, w.BaseBranch, w.BaseRef)
 	// A detached HEAD has no branch to merge into.
 	if w.BaseBranch != "" {
 		checkConflicts(ctx, s, sha)
 	}
+	deliveryErr := deliver(ctx, s, sha)
 	// Without --force: git refuses when anything is left in the worktree, which then stays.
 	if err := s.operator.RemoveWorktree(ctx, w.Path); err != nil {
 		s.reporter.WorktreeKept(w.Path, err.Error())
-		return
+		return deliveryErr
 	}
 	w.Removed = true
 	if err := s.store.SaveRun(s.run); err != nil {
 		fmt.Fprintf(s.reporter.PausingWriter(), "Removed the worktree %s, but run.json could not record it: %v\n", w.Path, err)
 	}
+	return deliveryErr
 }
 
 // checkConflicts asks git, in the operator's repository, whether merging the run's commit

@@ -292,6 +292,8 @@ security:
 
 # Optional: commit a completed run's changes without asking, also under --mode auto
 # (MVP.md §42.6). The same checks as the question; a warning or no summary_short skips it.
+# It applies to a run in place only: a worktree run (the default) commits without the question
+# only under --mode auto, and asks before the commit, the push and the merge request otherwise.
 # auto_commit: true
 
 # Optional: where `run --jira <KEY|URL>` reads the task from (MVP.md §39). Only run --jira

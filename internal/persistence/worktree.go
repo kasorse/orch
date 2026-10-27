@@ -83,6 +83,29 @@ func validateWorktree(run *domain.Run) error {
 	return nil
 }
 
+// validateMR checks run.mr (specs/delivery/SPEC.md §13): its own rules, and that it belongs to a
+// completed worktree run, with a commit once anything was pushed or about to be.
+func validateMR(run *domain.Run) error {
+	m := run.MR
+	if m == nil {
+		return nil
+	}
+	if err := m.Validate(); err != nil {
+		return fmt.Errorf("mr: %w", err)
+	}
+	switch {
+	case run.Status != domain.RunCompleted:
+		return fmt.Errorf("mr recorded on a %s run; only a completed run has one", run.Status)
+	case run.Worktree == nil:
+		return fmt.Errorf("mr recorded on a run without a worktree")
+	case m.State != "" && run.Commit == "":
+		return fmt.Errorf("mr.state %s on a run without a commit", m.State)
+	case m.Source != "" && m.Source != run.Worktree.Branch:
+		return fmt.Errorf("mr.source is %q, but worktree.branch is %q", m.Source, run.Worktree.Branch)
+	}
+	return nil
+}
+
 // validBranchName refuses what git would not accept as a branch name, and what could be read as
 // an option or a revision expression.
 func validBranchName(name string) bool {
