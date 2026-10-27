@@ -39,6 +39,9 @@ const (
 type TaskState struct {
 	Status TaskStatus
 	Branch string
+	// MRIID and MRURL are the task's merge request, 0 and "" for none.
+	MRIID int
+	MRURL string
 }
 
 // cell makes s fit in one cell of a Markdown table.
@@ -89,6 +92,9 @@ func RenderREADME(title string, status Status, tasks []Task, states map[string]T
 		branch := "—"
 		if st.Branch != "" {
 			branch = "`" + st.Branch + "`"
+			if st.MRIID > 0 && st.MRURL != "" {
+				branch += fmt.Sprintf(" · [!%d](%s)", st.MRIID, st.MRURL)
+			}
 		}
 		fmt.Fprintf(&rows, "| %s | %s | %s | %s | %s | %s | %s | %s |\n",
 			mark, id, cell(t.Title), cell(t.Repo), cell(deps), cell(jira), cell(string(st.Status)), cell(branch))

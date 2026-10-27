@@ -165,6 +165,8 @@ type storyRunner struct {
 	// services whose fingerprint was compared again before their first merge in this run.
 	fingerprints map[string]string
 	merged       map[string]bool
+	// remotes are the git remotes the services deliver to (their delivery.remote), by service.
+	remotes map[string]string
 }
 
 func (r *storyRunner) run() error {
@@ -189,6 +191,10 @@ func (r *storyRunner) run() error {
 	}
 	// The spec branch exists before the Jira children and any dispatch (§1).
 	if err := r.createSpecBranches(continued); err != nil {
+		return err
+	}
+	// and is on the remote before any merge request targets it (§9).
+	if err := r.pushSpecBranches(); err != nil {
 		return err
 	}
 	// Nothing is written to Jira before the operator's answer (§6), and nothing is dispatched
@@ -416,6 +422,9 @@ func (r *storyRunner) checkRepository(name, path string) error {
 	if code := r.child(path, "validate"); code != 0 {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("orchestrator validate failed in service %s (%s, exit code %d): no task was started", name, path, code)}
 	}
+	if err := r.checkDeliverable(name, path, repo); err != nil {
+		return err
+	}
 
 	// What makes git run code in this repository (config, hooks), kept until the first merge-tree:
 	// a configured merge driver would run there.
@@ -430,11 +439,41 @@ func (r *storyRunner) checkRepository(name, path string) error {
 	return nil
 }
 
-// knownBranches are the branches the record accounts for: every attempt's branch of every task
-// it has a state for, the ones --retry left behind included.
+// checkDeliverable is the part of §8 (specs/delivery/SPEC.md) that `orchestrator validate` leaves
+// to the isolation the service's config names, for a story task always runs in a worktree and
+// delivers: the service has the remote it pushes to, and its secret scan is on. A service without
+// them stops the story before anything is dispatched.
+func (r *storyRunner) checkDeliverable(name, path string, repo *repository.Repository) error {
+	svc, err := config.Load(filepath.Join(path, defaultConfigPath))
+	if err != nil {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s): cannot read its config: %v", name, path, err)}
+	}
+	remote := svc.Delivery.RemoteName()
+	if _, err := repo.RemoteURL(r.ctx, remote); err != nil {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s) has no git remote %q (delivery.remote), and every task of a story is pushed and "+
+			"opened as a merge request there: add the remote; no task was started", name, path, remote), Err: err}
+	}
+	if !svc.Security.SecretScan.Enabled() {
+		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s): security.secret_scan.mode is off, and every task of a story pushes its branch, "+
+			"so nothing would look for a secret first: turn the scan on; no task was started", name, path)}
+	}
+	if r.remotes == nil {
+		r.remotes = map[string]string{}
+	}
+	r.remotes[name] = remote
+	return nil
+}
+
+// knownBranches are the branches the record accounts for: the name each task's child recorded
+// (a repository's rules may have named it), and the story's own fallback of every attempt of every
+// task it has a state for - the ones --retry left behind included, and the one a child that has not
+// been read yet may have created.
 func (r *storyRunner) knownBranches() map[string]bool {
 	known := map[string]bool{}
 	for id, rt := range r.rec.Tasks {
+		if rt.Branch != "" {
+			known[rt.Branch] = true
+		}
 		for attempt := 1; attempt <= rt.Attempt; attempt++ {
 			known[persistence.StoryTaskBranch(r.loc.slug, id, attempt)] = true
 		}
@@ -485,7 +524,10 @@ func (r *storyRunner) approve() error {
 				base = label
 			}
 			plan = append(plan, logging.StoryPlanTask{
-				ID: id, Repo: t.Repo, Base: base, Branch: persistence.StoryTaskBranch(r.loc.slug, id, 1), Jira: jiraKey(t, persistence.StoryTask{}),
+				// The fallback only: the name is fixed when the child creates its worktree, by its
+				// repository's rules (specs/delivery/SPEC.md §9.1, A23).
+				ID: id, Repo: t.Repo, Base: base, Branch: persistence.StoryTaskBranch(r.loc.slug, id, 1) + " or by " + t.Repo + "'s rules",
+				Jira: jiraKey(t, persistence.StoryTask{}),
 			})
 		}
 		r.reporter.StoryRunPlan(plan, len(repos))
@@ -504,12 +546,15 @@ func (r *storyRunner) approve() error {
 	return r.persist()
 }
 
-// parentBranch is the branch of a parent task: the one its record has, else its first attempt's.
+// parentBranch is the branch of a parent task: the one its record has - the name its child's run
+// recorded, which a repository's rules may have chosen - else, for a parent that has not run, the
+// fallback its child will use unless they do.
 func (r *storyRunner) parentBranch(id string) string {
-	if b := r.rec.Tasks[id].Branch; b != "" {
-		return b
+	rt := r.rec.Tasks[id]
+	if rt.Branch != "" {
+		return rt.Branch
 	}
-	return persistence.StoryTaskBranch(r.loc.slug, id, 1)
+	return persistence.StoryTaskBranch(r.loc.slug, id, max(rt.Attempt, 1))
 }
 
 // startLabel names what a task with parents starts from, for the plan and As built: its only
@@ -654,9 +699,9 @@ func (r *storyRunner) applyRetry() error {
 	rt.AbandonedCostUSD += rt.CostUSD
 	rt.CostUSD = 0
 	rt.Attempt++
-	rt.Branch = persistence.StoryTaskBranch(r.loc.slug, id, rt.Attempt)
 	rt.Status = story.TaskPending
-	rt.RunID, rt.Commit, rt.FileSHA256, rt.BaseRef = "", "", "", ""
+	// The branch is the new attempt's, and the child's run names it (§9.1): absent until it is read.
+	rt.RunID, rt.Commit, rt.FileSHA256, rt.BaseRef, rt.Branch, rt.MR = "", "", "", "", "", nil
 	r.rec.Tasks[id] = rt
 	return r.persist()
 }
@@ -698,8 +743,15 @@ type dispatchLoop struct {
 	slots   int
 	running map[string]*childJob
 	ends    chan childEnd
-	// notDone are the tasks that ended without a commit, in the order they ended.
+	// notDone are the tasks that ended without a commit, in the order they ended; looked are the
+	// tasks that ended in this loop in any way but done, which nothing looks at again in it.
 	notDone []string
+	looked  map[string]bool
+	// stopping is whether one of them ended in a way that stops anything new from starting. A task
+	// that is blocked - its child completed without a commit, exit code 6 - leaves a person to
+	// commit or retry it and holds only the tasks that depend on it (specs/delivery/SPEC.md §9):
+	// independent tasks go on.
+	stopping bool
 	// err is the first error that is not a task's status; budgetErr the budget refusal;
 	// stoppedBefore the task that was ready when the operator pressed Ctrl-C.
 	err           error
@@ -707,10 +759,10 @@ type dispatchLoop struct {
 	stoppedBefore string
 }
 
-// draining is whether nothing new is started: something ended without a commit, the budget is
-// reached, the operator cancelled, or the loop failed.
+// draining is whether nothing new is started: something failed or stopped, the budget is reached,
+// the operator cancelled, or the loop failed.
 func (lp *dispatchLoop) draining() bool {
-	return lp.err != nil || len(lp.notDone) > 0 || lp.budgetErr != nil || lp.stoppedBefore != ""
+	return lp.err != nil || lp.stopping || lp.budgetErr != nil || lp.stoppedBefore != ""
 }
 
 // ended records how a task came out of a settle or of looking at it again.
@@ -722,6 +774,13 @@ func (lp *dispatchLoop) ended(id string, status story.TaskStatus, err error) {
 		}
 	case status != story.TaskDone:
 		lp.notDone = append(lp.notDone, id)
+		if lp.looked == nil {
+			lp.looked = map[string]bool{}
+		}
+		lp.looked[id] = true
+		if status != story.TaskBlocked {
+			lp.stopping = true
+		}
 	}
 }
 
@@ -743,16 +802,76 @@ func (r *storyRunner) dispatchAll() error {
 	return r.conclude(lp)
 }
 
-// nextReady is the first task story.Ready names, "" for none.
-func (r *storyRunner) nextReady() string {
+// nextReady is the first task story.Ready names that was not looked at in this loop and does not
+// wait for a task without a merge request, "" for none.
+func (r *storyRunner) nextReady(looked map[string]bool) string {
 	states := make(map[string]story.TaskStatus, len(r.rec.Tasks))
 	for id, rt := range r.rec.Tasks {
 		states[id] = rt.Status
 	}
-	if ready := story.Ready(r.spec.tasks, states); len(ready) > 0 {
-		return ready[0]
+	for _, id := range story.Ready(r.spec.tasks, states) {
+		if !looked[id] && len(r.withoutMR(id)) == 0 {
+			return id
+		}
 	}
 	return ""
+}
+
+// withoutMR are the tasks id depends on that are done and have no merge request: their branch may
+// not be on the remote, so a merge request stacked on it cannot be opened (specs/delivery/SPEC.md
+// §9). A task counts when its run completed with a commit and its push reported no merge request;
+// one the operator marked done by committing in the kept worktree has not been pushed by anyone,
+// and is the operator's to open.
+func (r *storyRunner) withoutMR(id string) []string {
+	var held []string
+	for _, dep := range r.byID[id].DependsOn {
+		rt := r.rec.Tasks[dep]
+		if rt.Status != story.TaskDone || rt.MR != nil {
+			continue
+		}
+		if run, err := r.loadRun(rt); err == nil && run.Commit != "" && (run.MR == nil || run.MR.State != domain.MRCreated) {
+			held = append(held, dep)
+		}
+	}
+	return held
+}
+
+// missingMR are the done tasks, in the story's order, that have no merge request and that a task
+// not done yet depends on.
+func (r *storyRunner) missingMR() []string {
+	var missing []string
+	for _, id := range r.order {
+		if r.rec.Tasks[id].Status == story.TaskDone {
+			continue
+		}
+		for _, dep := range r.withoutMR(id) {
+			if !slices.Contains(missing, dep) {
+				missing = append(missing, dep)
+			}
+		}
+	}
+	slices.SortFunc(missing, func(a, b string) int { return slices.Index(r.order, a) - slices.Index(r.order, b) })
+	return missing
+}
+
+// hintMissingMR says which done tasks hold back the tasks that depend on them for want of a merge
+// request, and how to go on.
+func (r *storyRunner) hintMissingMR(missing []string) {
+	for _, id := range missing {
+		rt := r.rec.Tasks[id]
+		var waiting []string
+		for _, other := range r.order {
+			if r.rec.Tasks[other].Status != story.TaskDone && slices.Contains(r.withoutMR(other), id) {
+				waiting = append(waiting, other)
+			}
+		}
+		r.reporter.StoryHint(
+			fmt.Sprintf("blocked: %s has no merge request, so %s was not started.", id, strings.Join(waiting, ", ")),
+			fmt.Sprintf("Why: its child ended with exit code 6 - the branch %s (commit %s) is committed, but its push did not open a merge request; "+
+				"see mr in run %s.", rt.Branch, shortSHA(rt.Commit), rt.RunID),
+			fmt.Sprintf("Fix: push %s and open its merge request to its target by hand, then record it in %s: tasks.%s.mr {\"iid\": <n>, \"url\": \"<url>\"}, and run the story again.",
+				rt.Branch, filepath.Join(r.loc.storyDir, persistence.StoryRecordFile), id))
+	}
 }
 
 // fill starts ready tasks while a slot is free and nothing asks the loop to drain. A blocked task
@@ -761,7 +880,7 @@ func (r *storyRunner) nextReady() string {
 // operator may have merged by hand, and it goes from the tip if they are all in it.
 func (r *storyRunner) fill(lp *dispatchLoop) {
 	for !lp.draining() && len(lp.running) < lp.slots {
-		id := r.nextReady()
+		id := r.nextReady(lp.looked)
 		if id == "" {
 			return
 		}
@@ -844,13 +963,20 @@ func (r *storyRunner) conclude(lp *dispatchLoop) error {
 		return lp.err
 	case len(lp.notDone) > 0:
 		slices.SortFunc(lp.notDone, func(a, b string) int { return slices.Index(r.order, a) - slices.Index(r.order, b) })
-		return r.stopAll(lp.notDone)
+		err := r.stopAll(lp.notDone)
+		r.hintMissingMR(r.missingMR())
+		return err
 	case lp.budgetErr != nil:
 		r.halt(story.StatusStopped)
 		return lp.budgetErr
 	case lp.stoppedBefore != "":
 		r.halt(story.StatusStopped)
 		return fmt.Errorf("story %s stopped before %s: %w", r.loc.slug, lp.stoppedBefore, r.ctx.Err())
+	}
+	if missing := r.missingMR(); len(missing) > 0 {
+		r.halt(story.StatusBlocked)
+		r.hintMissingMR(missing)
+		return &apperr.WorkflowError{Msg: fmt.Sprintf("story %s is blocked: %s has no merge request", r.loc.slug, strings.Join(missing, ", "))}
 	}
 	for _, id := range r.order {
 		if r.rec.Tasks[id].Status != story.TaskDone {
@@ -970,12 +1096,13 @@ func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJo
 	t := r.byID[id]
 	rt := r.rec.Tasks[id]
 	attempt := max(rt.Attempt, 1)
-	branch := persistence.StoryTaskBranch(r.loc.slug, id, attempt)
+	// The fallback: the child names its branch by its repository's rules, and uses this only when
+	// they give none (specs/delivery/SPEC.md §9.1).
+	fallback := persistence.StoryTaskBranch(r.loc.slug, id, attempt)
 
 	// No parent: the repository's story base. One: that task's commit as it was recorded - not
 	// its branch's tip now, which an operator's commit may have moved. Several: the spec branch's
 	// tip after their commits are merged on it.
-	base := r.rec.Bases[t.Repo]
 	baseRef, conflict, err := r.startRef(id)
 	if err != nil {
 		if r.ctx.Err() != nil {
@@ -989,6 +1116,14 @@ func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJo
 		rt.Status, rt.Repo, rt.Conflict = story.TaskConflict, t.Repo, conflict
 		r.rec.Tasks[id] = rt
 		return nil, story.TaskConflict, r.persist()
+	}
+
+	// The merge request of a task with several parents targets the spec branch, which holds their
+	// merge: it is on the remote before the child that needs it is dispatched (§9).
+	if parents, _ := story.Parents(r.spec.tasks, id); len(parents) > 1 {
+		if err := r.pushSpecBranch(t.Repo); err != nil {
+			return nil, "", err
+		}
 	}
 
 	var notes []story.DepNote
@@ -1005,8 +1140,9 @@ func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJo
 	}
 	jira := jiraKey(t, rt)
 	file, err := persistence.WriteStoryTaskInput(r.loc.storyDir, story.TaskInput{
-		Story: r.loc.slug, Task: id, Attempt: attempt, Branch: branch, BaseRef: baseRef, BaseBranch: base.Branch,
-		Jira: jira, Acceptance: acceptance, Text: text,
+		Story: r.loc.slug, Task: id, Attempt: attempt, Title: story.InputTitle(t.Title), Branch: fallback, BaseRef: baseRef,
+		// The merge request's target, and the branch the child's conflict check merges against.
+		BaseBranch: r.targetBranch(id), Jira: jira, Acceptance: acceptance, Text: text,
 	})
 	if err != nil {
 		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: %v", id, err)}
@@ -1022,9 +1158,10 @@ func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJo
 	}
 
 	// Recorded before the child starts, so a story run that dies meanwhile finds the task running.
+	// Its branch is not known yet: the child's run records it (§9.1).
 	r.rec.Tasks[id] = persistence.StoryTask{
 		Status: story.TaskRunning, FileSHA256: story.FrozenHash(r.spec.data[id]), Attempt: attempt, Repo: t.Repo,
-		Branch: branch, BaseRef: baseRef, Jira: jira, JiraIntent: rt.JiraIntent, AbandonedCostUSD: rt.AbandonedCostUSD,
+		BaseRef: baseRef, Jira: jira, JiraIntent: rt.JiraIntent, AbandonedCostUSD: rt.AbandonedCostUSD,
 	}
 	r.rec.Status = story.StatusRunning
 	if err := r.persist(); err != nil {
@@ -1075,6 +1212,9 @@ func (r *storyRunner) prepareResume(pos int, id string, logged bool) (*childJob,
 // operator committed in the kept worktree.
 func (r *storyRunner) settleBlocked(id string) (story.TaskStatus, error) {
 	rt := r.rec.Tasks[id]
+	if rt.Branch == "" {
+		return story.TaskBlocked, nil
+	}
 	repo, err := repository.Open(r.bg, r.rec.Services[rt.Repo], r.osExec)
 	if err != nil {
 		return "", err
@@ -1188,6 +1328,7 @@ func (r *storyRunner) settle(id string, exit int) (story.TaskStatus, error) {
 	}
 
 	rt.RunID = run.ID
+	readBranch(&rt, run)
 	cost, known := runCostUSD(run)
 	if known {
 		// A resumed run's outcome holds the cost of its earlier attempts: replaced, not added.
@@ -1216,6 +1357,24 @@ func (r *storyRunner) settle(id string, exit int) (story.TaskStatus, error) {
 	return status, nil
 }
 
+// readBranch copies into the task the branch its run's worktree was on, which the child's
+// repository may have named by its rules (specs/delivery/SPEC.md §9.1): the one place the name
+// becomes known to the story. A run that has no worktree yet leaves the task as it is.
+func readBranch(rt *persistence.StoryTask, run *domain.Run) {
+	if w := run.Worktree; w != nil && w.Branch != "" {
+		rt.Branch = w.Branch
+	}
+}
+
+// readMR copies into the task the merge request its run's push opened; none when the push opened
+// none (the task is then held back from the tasks that depend on it, withoutMR).
+func readMR(rt *persistence.StoryTask, run *domain.Run) {
+	rt.MR = nil
+	if m := run.MR; m != nil && m.State == domain.MRCreated {
+		rt.MR = &persistence.StoryMR{IID: m.IID, URL: m.URL}
+	}
+}
+
 // runDetail is the one-line reason shown for a run that did not end in a commit.
 func runDetail(run *domain.Run) string {
 	if run.Status == domain.RunCompleted {
@@ -1236,6 +1395,13 @@ func runDetail(run *domain.Run) string {
 // running with a completed run and settles it again without writing As built twice.
 func (r *storyRunner) complete(id string, rt persistence.StoryTask, run *domain.Run, commit string) (story.TaskStatus, error) {
 	rt.Status, rt.Commit, rt.RunID = story.TaskDone, commit, run.ID
+	readBranch(&rt, run)
+	readMR(&rt, run)
+	// The child's merge request targets its run's base_branch, which the input took from the
+	// story's target: what the end table prints.
+	if w := run.Worktree; w != nil && w.BaseBranch != r.targetBranch(id) {
+		fmt.Fprintf(r.stderr, "Warning: %s: its run targeted %s, but the story's target for it is %s\n", id, w.BaseBranch, r.targetBranch(id))
+	}
 	if err := r.writeAsBuilt(id, rt, run); err != nil {
 		return "", err
 	}
@@ -1243,7 +1409,11 @@ func (r *storyRunner) complete(id string, rt persistence.StoryTask, run *domain.
 	if err := r.persist(); err != nil {
 		return "", err
 	}
-	r.reporter.StoryTaskResult(id, string(story.TaskDone), "commit "+shortSHA(commit))
+	detail := "commit " + shortSHA(commit)
+	if rt.MR != nil {
+		detail += ", " + logging.StoryMRLabel(rt.MR.IID, rt.MR.URL)
+	}
+	r.reporter.StoryTaskResult(id, string(story.TaskDone), detail)
 	return story.TaskDone, nil
 }
 
@@ -1484,6 +1654,9 @@ func (r *storyRunner) finish() error {
 	for _, id := range r.order {
 		rt := r.rec.Tasks[id]
 		row := logging.StoryEndRow{ID: id, Repo: rt.Repo, Branch: rt.Branch, Target: r.targetBranch(id), Commit: rt.Commit, Jira: rt.Jira}
+		if rt.MR != nil {
+			row.MR = logging.StoryMRLabel(rt.MR.IID, rt.MR.URL)
+		}
 		if run, err := r.loadRun(rt); err == nil && run.Worktree != nil {
 			row.Conflicts = strings.Join(run.Worktree.Conflicts, ", ")
 		}

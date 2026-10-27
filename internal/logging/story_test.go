@@ -125,6 +125,23 @@ func TestStoryEnd(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", buf.String(), want)
 	}
 
+	// The merge request is printed next to the target branch.
+	buf.Reset()
+	mr := StoryMRLabel(12, "https://gitlab.example/g/p/-/merge_requests/12")
+	r.StoryEnd([]StoryEndRow{
+		{ID: "RF01", Repo: "billing", Branch: "feature/PAY-2-a", Target: "story/refunds/spec", Commit: "8d0e4b2a1c9f2e7d", Jira: "PAY-2", MR: mr},
+		{ID: "RF02", Repo: "billing", Branch: "feature/PAY-3-b", Target: "feature/PAY-2-a", Commit: "1c9f2e7d3f2a"},
+	})
+	for _, w := range []string{
+		"RF01 · billing · feature/PAY-2-a → story/refunds/spec · !12 https://gitlab.example/g/p/-/merge_requests/12 · 8d0e4b2 · PAY-2",
+		"RF02 · billing · feature/PAY-3-b → feature/PAY-2-a · 1c9f2e7",
+		"Open the merge requests of the tasks without one, each to its target.",
+	} {
+		if !strings.Contains(buf.String(), w) {
+			t.Errorf("the end table lacks %q:\n%s", w, buf.String())
+		}
+	}
+
 	buf.Reset()
 	r.StoryStatusTable("# T\n\ntable\n")
 	if buf.String() != "# T\n\ntable\n" {

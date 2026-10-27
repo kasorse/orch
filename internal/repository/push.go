@@ -19,22 +19,28 @@ const remoteTimeout = 5 * time.Minute
 // ends in the same words is not a match. A remote that cannot be asked is an error, not an
 // answer.
 func (r *Repository) LsRemoteHead(ctx context.Context, remote, branch string) (bool, error) {
+	_, present, err := r.LsRemoteHeadSHA(ctx, remote, branch)
+	return present, err
+}
+
+// LsRemoteHeadSHA is LsRemoteHead with the commit the remote's branch is at.
+func (r *Repository) LsRemoteHeadSHA(ctx context.Context, remote, branch string) (sha string, present bool, err error) {
 	if err := checkPushNames(remote, branch); err != nil {
-		return false, err
+		return "", false, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, remoteTimeout)
 	defer cancel()
 	ref := "refs/heads/" + branch
 	out, err := r.git(ctx, "ls-remote", "--heads", remote, ref)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	for _, line := range strings.Split(out, "\n") {
-		if _, name, ok := strings.Cut(line, "\t"); ok && strings.TrimSpace(name) == ref {
-			return true, nil
+		if sha, name, ok := strings.Cut(line, "\t"); ok && strings.TrimSpace(name) == ref {
+			return strings.TrimSpace(sha), true, nil
 		}
 	}
-	return false, nil
+	return "", false, nil
 }
 
 // Push pushes the branch to the remote, once, as the operator (specs/delivery/SPEC.md §7.3):
@@ -49,6 +55,19 @@ func (r *Repository) LsRemoteHead(ctx context.Context, remote, branch string) (b
 // message ends with git's last line; the push may still have reached the remote when it timed
 // out, so a caller never repeats it.
 func (r *Repository) Push(ctx context.Context, remote, branch string, options []string) (stderr string, err error) {
+	return r.push(ctx, true, remote, branch, options)
+}
+
+// PushWithoutUpstream is Push without -u, which a story's push uses (specs/delivery/SPEC.md §7.3,
+// D22): the upstream is written to the git config that sibling tasks of the same repository, and
+// the story run itself, compare while they work.
+//
+//	git push --no-follow-tags <remote> refs/heads/B:refs/heads/B [-o option]...
+func (r *Repository) PushWithoutUpstream(ctx context.Context, remote, branch string, options []string) (stderr string, err error) {
+	return r.push(ctx, false, remote, branch, options)
+}
+
+func (r *Repository) push(ctx context.Context, upstream bool, remote, branch string, options []string) (stderr string, err error) {
 	if err := checkPushNames(remote, branch); err != nil {
 		return "", err
 	}
@@ -59,7 +78,11 @@ func (r *Repository) Push(ctx context.Context, remote, branch string, options []
 	}
 	ctx, cancel := context.WithTimeout(ctx, remoteTimeout)
 	defer cancel()
-	args := []string{"push", "-u", "--no-follow-tags", remote, "refs/heads/" + branch + ":refs/heads/" + branch}
+	args := []string{"push"}
+	if upstream {
+		args = append(args, "-u")
+	}
+	args = append(args, "--no-follow-tags", remote, "refs/heads/"+branch+":refs/heads/"+branch)
 	for _, o := range options {
 		args = append(args, "-o", o)
 	}

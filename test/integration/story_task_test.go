@@ -108,6 +108,7 @@ func newStoryRun(t *testing.T, mutate ...func(in map[string]any)) storyRun {
 
 	in := map[string]any{}
 	in["story"], in["task"], in["attempt"] = "refunds", "RF02", 1
+	in["title"] = "Fix Add in fixture.go"
 	in["branch"], in["base_ref"], in["base_branch"] = "story/refunds/RF02", base, baseBranch
 	in["jira"] = "PAY-124"
 	in["acceptance"] = []string{"an amount over the payment is a 422", "the amount is optional"}

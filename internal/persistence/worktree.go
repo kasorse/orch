@@ -64,24 +64,26 @@ func validateWorktree(run *domain.Run) error {
 	if run.Options.IsolationMode() != domain.IsolationWorktree {
 		return fmt.Errorf("worktree recorded on a run with options.isolation %q", run.Options.IsolationMode())
 	}
-	// A story task's branch and base are the ones its task input gave, recorded in task.source
-	// (validated with it); the worktree must be the one created on them. Any other run's branch
-	// was named when the worktree was created (specs/delivery/SPEC.md §4.3): it only has to be a
-	// name the rules accept. A review run's worktree is detached: it has no branch.
+	// The branch was named when the worktree was created (specs/delivery/SPEC.md §4.3): it only has
+	// to be a name the rules accept. A story task's may also be the fallback its task input gave,
+	// recorded in task.source (validated with it) (§9.1). A review run's worktree is detached: it
+	// has no branch.
+	defaultBranch := domain.WorktreeBranch(run.ID)
 	if run.ReviewTarget != nil {
 		if w.Branch != "" {
 			return fmt.Errorf("worktree.branch is %q on a review run, want none", w.Branch)
 		}
 	} else if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
-		if w.Branch != src.Branch {
-			return fmt.Errorf("worktree.branch is %q, want %q", w.Branch, src.Branch)
+		defaultBranch = src.Branch
+		if err := domain.CheckBranchName(w.Branch); err != nil && w.Branch != src.Branch {
+			return fmt.Errorf("worktree.branch %q is not the story task's fallback %q: %w", w.Branch, src.Branch, err)
 		}
 	} else if err := domain.CheckBranchName(w.Branch); err != nil {
 		return fmt.Errorf("worktree.branch %q: %w", w.Branch, err)
 	}
 	if bn := run.BranchNaming; bn != nil {
-		if bn.Source == domain.BranchSourceDefault && w.Branch != domain.WorktreeBranch(run.ID) {
-			return fmt.Errorf("branch_naming.source is default, but worktree.branch is %q, not %q", w.Branch, domain.WorktreeBranch(run.ID))
+		if bn.Source == domain.BranchSourceDefault && w.Branch != defaultBranch {
+			return fmt.Errorf("branch_naming.source is default, but worktree.branch is %q, not %q", w.Branch, defaultBranch)
 		}
 		if bn.Source == domain.BranchSourceInstructions && w.Branch != bn.Proposed {
 			return fmt.Errorf("branch_naming.source is instructions, but worktree.branch is %q, not the proposed %q", w.Branch, bn.Proposed)

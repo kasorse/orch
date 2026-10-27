@@ -404,12 +404,14 @@ const (
 // WorktreeBranch is the branch a run's worktree is on (specs/worktree/SPEC.md §8.2).
 func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
 
-// RunWorktreeBranch is the branch run's worktree must be on: the branch a story task was given
+// RunWorktreeBranch is the branch run's worktree must be on: the fallback a story task was given
 // (specs/story/SPEC.md §11.1); for any other run the one worktree.branch records, which is named
 // when the worktree is created (specs/delivery/SPEC.md §4.3), and orchestrator/<run-id> until
-// there is one. Loading checks that a story task's branch has the story pattern and names its
-// story and task, and any other run's branch passes ValidBranchName. A review run's worktree is
-// detached: its branch is "", and only a run with a review target may have none.
+// there is one. Loading checks that a story task's fallback has the story pattern and names its
+// story and task, and any other run's branch passes ValidBranchName. A story task's worktree is on
+// this fallback or, when its repository's rules named one, on the name worktree.branch records
+// (specs/delivery/SPEC.md §9.1). A review run's worktree is detached: its branch is "", and only a
+// run with a review target may have none.
 func RunWorktreeBranch(run *Run) string {
 	if run.ReviewTarget != nil {
 		return ""

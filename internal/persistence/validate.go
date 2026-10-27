@@ -368,6 +368,8 @@ func validateStorySource(src domain.TaskSource) error {
 		return fmt.Errorf("attempt is %d, want 1 or more", src.Attempt)
 	case src.Jira != "" && !story.ValidJiraKey(src.Jira):
 		return fmt.Errorf("jira %q is not a Jira key", src.Jira)
+	case src.Title != "" && story.CheckTitle(src.Title) != nil:
+		return fmt.Errorf("title %q %v", src.Title, story.CheckTitle(src.Title))
 	case !story.ValidBranch(src.Branch, src.Story, src.Task):
 		return fmt.Errorf("branch %q is not story/%s/%s or story/%s/%s.<n>", src.Branch, src.Story, src.Task, src.Story, src.Task)
 	case !isCommitSHA(src.BaseRef):
@@ -381,7 +383,7 @@ func validateStorySource(src domain.TaskSource) error {
 }
 
 func validateJiraSource(src domain.TaskSource) error {
-	if src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" ||
+	if src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" || src.Title != "" ||
 		src.Branch != "" || src.BaseRef != "" || src.BaseBranch != "" {
 		return fmt.Errorf("a Jira task has no story fields")
 	}

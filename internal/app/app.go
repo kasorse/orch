@@ -304,22 +304,29 @@ func readStoryTask(path string) (story.TaskInput, error) {
 	return in, nil
 }
 
-// storyTaskSource is the task.source a story task records: who it is, and the branch and base
-// it was asked to run on, so that a resume needs no story file.
+// storyTaskSource is the task.source a story task records: who it is, its title, the fallback
+// branch and the base it was asked to run from, so that a resume needs no story file. The branch
+// the worktree is on is named when it is created (specs/delivery/SPEC.md §9.1) and recorded in
+// worktree.branch.
 func storyTaskSource(in story.TaskInput) *domain.TaskSource {
 	return &domain.TaskSource{
-		Kind: domain.TaskSourceStory, Story: in.Story, Task: in.Task, Attempt: in.Attempt, Jira: in.Jira,
+		Kind: domain.TaskSourceStory, Story: in.Story, Task: in.Task, Attempt: in.Attempt, Jira: in.Jira, Title: in.Title,
 		Branch: in.Branch, BaseRef: in.BaseRef, BaseBranch: in.BaseBranch,
 	}
 }
 
-// checkStoryTarget refuses a story task whose base_ref is not a commit of repo or whose branch
-// exists already, before a run is created (specs/story/SPEC.md §11.1).
-func checkStoryTarget(ctx context.Context, repo *repository.Repository, in story.TaskInput) error {
+// checkStoryTarget refuses a story task whose base_ref is not a commit of repo or whose fallback
+// branch exists already and will be the name used, before a run is created (specs/story/SPEC.md
+// §11.1). With rules in the child's config (worktree.branch) the name is chosen when the worktree
+// is created and may be another one, so a fallback that exists is refused there, only if it is used.
+func checkStoryTarget(ctx context.Context, repo *repository.Repository, cfg config.Config, in story.TaskInput) error {
 	if ok, err := repo.CommitExists(ctx, in.BaseRef); err != nil {
 		return err
 	} else if !ok {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("the story task's base_ref %s is not a commit in this repository", in.BaseRef)}
+	}
+	if b := cfg.Worktree.Branch; b.Template != "" || b.FromInstructions != nil {
+		return nil
 	}
 	if exists, err := repo.BranchExists(ctx, in.Branch); err != nil {
 		return err
@@ -1182,7 +1189,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	}
 	if storyIn != nil {
 		// Before the run exists, as the checks of the input itself.
-		if err := checkStoryTarget(decideCtx, repo, *storyIn); err != nil {
+		if err := checkStoryTarget(decideCtx, repo, cfg, *storyIn); err != nil {
 			return err
 		}
 	}

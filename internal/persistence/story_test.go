@@ -357,6 +357,101 @@ func TestStoryRecord_Refuses(t *testing.T) {
 	}
 }
 
+// A task's branch is the name its repository's rules gave or the story's own; its merge request and
+// its repository's spec push are recorded and checked (specs/delivery/SPEC.md §9, §9.1, §13).
+func TestStoryRecord_RuleBranchMergeRequestAndSpecPush(t *testing.T) {
+	r := runningRecord()
+	rf01 := r.Tasks["RF01"]
+	rf01.Branch = "feature/PAY-2-store-the-amount"
+	rf01.MR = &StoryMR{IID: 12, URL: "https://gitlab.example/g/p/-/merge_requests/12"}
+	r.Tasks["RF01"] = rf01
+	rf02 := r.Tasks["RF02"]
+	rf02.Branch = "" // a running or failed task's branch is absent until its run is read
+	r.Tasks["RF02"] = rf02
+	b := r.Bases["billing"]
+	b.SpecBranch = StorySpecBranch(r.Slug)
+	b.SpecPush = &StorySpecPush{State: SpecPushPushed, SHA: testSHA2}
+	r.Bases["billing"] = b
+
+	dir := t.TempDir()
+	if err := SaveStoryRecord(dir, r); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadStoryRecord(filepath.Join(dir, "story.json"))
+	if err != nil || !reflect.DeepEqual(got, r) {
+		t.Fatalf("loaded\n%+v, %v\nwant\n%+v", got, err, r)
+	}
+
+	cases := []struct {
+		name   string
+		change func(r *StoryRecord)
+		want   string
+	}{
+		{"branch that git refuses", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Branch = "feature/a b"
+			r.Tasks["RF01"] = t
+		}, "branch"},
+		{"done without a branch", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.Branch = ""
+			r.Tasks["RF01"] = t
+		}, "no branch"},
+		{"merge request with a URL on no merge request", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.MR = &StoryMR{IID: 12, URL: "https://gitlab.example/g/p/-/merge_requests/13"}
+			r.Tasks["RF01"] = t
+		}, "mr"},
+		{"merge request without an iid", func(r *StoryRecord) {
+			t := r.Tasks["RF01"]
+			t.MR = &StoryMR{URL: "https://gitlab.example/g/p/-/merge_requests/12"}
+			r.Tasks["RF01"] = t
+		}, "mr"},
+		{"merge request on a task that is not done", func(r *StoryRecord) {
+			t := r.Tasks["RF02"]
+			t.MR = &StoryMR{IID: 3, URL: "https://gitlab.example/g/p/-/merge_requests/3"}
+			r.Tasks["RF02"] = t
+		}, "merge request"},
+		{"spec push with a bad state", func(r *StoryRecord) {
+			b := r.Bases["billing"]
+			b.SpecPush = &StorySpecPush{State: "done", SHA: testSHA}
+			r.Bases["billing"] = b
+		}, "spec_push"},
+		{"spec push with a short sha", func(r *StoryRecord) {
+			b := r.Bases["billing"]
+			b.SpecPush = &StorySpecPush{State: SpecPushIntent, SHA: "HEAD"}
+			r.Bases["billing"] = b
+		}, "spec_push"},
+		{"spec push with an error on two lines", func(r *StoryRecord) {
+			b := r.Bases["billing"]
+			b.SpecPush = &StorySpecPush{State: SpecPushIntent, SHA: testSHA, Error: "a\nb"}
+			r.Bases["billing"] = b
+		}, "spec_push"},
+		{"spec push without a spec branch", func(r *StoryRecord) {
+			b := r.Bases["billing"]
+			b.SpecBranch = ""
+			r.Bases["billing"] = b
+		}, "spec_push"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := r
+			bad.Tasks = map[string]StoryTask{}
+			for k, v := range r.Tasks {
+				bad.Tasks[k] = v
+			}
+			bad.Bases = map[string]StoryBase{}
+			for k, v := range r.Bases {
+				bad.Bases[k] = v
+			}
+			tc.change(&bad)
+			if err := bad.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("Validate() = %v, want an error about %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestStoryTaskBranch(t *testing.T) {
 	for attempt, want := range map[int]string{0: "story/refunds/RF02", 1: "story/refunds/RF02", 2: "story/refunds/RF02.2", 11: "story/refunds/RF02.11"} {
 		if got := StoryTaskBranch("refunds", "RF02", attempt); got != want {
@@ -408,7 +503,7 @@ func TestLockStory(t *testing.T) {
 func TestWriteStoryTaskInput(t *testing.T) {
 	dir := t.TempDir()
 	in := story.TaskInput{
-		Story: "refunds", Task: "RF02", Attempt: 1, Branch: "story/refunds/RF02", BaseRef: testSHA,
+		Story: "refunds", Task: "RF02", Attempt: 1, Title: "Expose partial refunds", Branch: "story/refunds/RF02", BaseRef: testSHA,
 		BaseBranch: "main", Acceptance: []string{"a"}, Text: "do it",
 	}
 	file, err := WriteStoryTaskInput(dir, in)

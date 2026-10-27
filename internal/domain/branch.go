@@ -30,7 +30,8 @@ const (
 )
 
 // BranchNaming records how a worktree run's branch was named: run.json: branch_naming. Absent for
-// an inplace run and for a story task, whose branch is the one its task input gave.
+// an inplace run. A story task's is recorded as any run's, its default being the fallback its task
+// input gave (specs/delivery/SPEC.md §9.1).
 type BranchNaming struct {
 	// Source is where the name in worktree.branch came from.
 	Source string `json:"source"`

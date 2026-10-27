@@ -114,11 +114,18 @@ func deliver(ctx context.Context, s *session, sha string) error {
 		return stopBeforePush(s, "error", "run.json could not record the push intent, so nothing was pushed: "+err.Error())
 	}
 
-	stderr, err := s.operator.Push(ctx, remote, w.Branch, options)
+	// A story child pushes without -u (specs/delivery/SPEC.md §7.3, D22): a sibling task of the same
+	// repository may be running, and its guard compares the git config the upstream is written to.
+	storyTask := run.Task.Source != nil && run.Task.Source.Kind == domain.TaskSourceStory
+	push, byHand := s.operator.Push, "git push -u "
+	if storyTask {
+		push, byHand = s.operator.PushWithoutUpstream, "git push "
+	}
+	stderr, err := push(ctx, remote, w.Branch, options)
 	if err != nil {
 		mr.Error = pushFailure(stderr, err)
 		recordMR(s, mr)
-		s.reporter.DeliveryFailed(mr.Error, "git push -u "+shellWord(remote)+" "+shellWord(w.Branch), "")
+		s.reporter.DeliveryFailed(mr.Error, byHand+shellWord(remote)+" "+shellWord(w.Branch), "")
 		return needsPerson("its branch was not pushed: " + mr.Error)
 	}
 	mr.State = domain.MRPushed

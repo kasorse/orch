@@ -53,6 +53,44 @@ func TestPush_WithOptions(t *testing.T) {
 	}
 }
 
+// A story's push writes nothing to the shared git config (specs/delivery/SPEC.md §7.3, D22).
+func TestPushWithoutUpstream_LeavesTheGitConfigAlone(t *testing.T) {
+	repo, dir, bare := pushFixture(t, true)
+	before, err := os.ReadFile(filepath.Join(dir, ".git", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := []string{"merge_request.create", "merge_request.target=main"}
+
+	if _, err := repo.PushWithoutUpstream(context.Background(), "origin", "feature/x", options); err != nil {
+		t.Fatalf("PushWithoutUpstream: %v", err)
+	}
+	if got, want := gitOut(t, bare, "rev-parse", "feature/x"), gitOut(t, dir, "rev-parse", "HEAD"); got != want {
+		t.Errorf("the remote's feature/x = %s, want %s", got, want)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, ".git", "config"))
+	if err != nil || string(after) != string(before) {
+		t.Errorf("the git config changed (%v):\n%s\nwas\n%s", err, after, before)
+	}
+	data, err := os.ReadFile(filepath.Join(bare, "push-options.log"))
+	if err != nil || string(data) != strings.Join(options, "\n")+"\n" {
+		t.Errorf("the remote received %q (%v), want %q", data, err, options)
+	}
+}
+
+func TestLsRemoteHeadSHA(t *testing.T) {
+	repo, dir, _ := pushFixture(t, true)
+	ctx := context.Background()
+	if sha, present, err := repo.LsRemoteHeadSHA(ctx, "origin", "feature/x"); err != nil || present || sha != "" {
+		t.Fatalf("LsRemoteHeadSHA before the push = %q, %v, %v; want nothing", sha, present, err)
+	}
+	gitCmd(t, dir, "push", "-q", "origin", "HEAD:refs/heads/feature/x")
+	want := gitOut(t, dir, "rev-parse", "HEAD")
+	if sha, present, err := repo.LsRemoteHeadSHA(ctx, "origin", "feature/x"); err != nil || !present || sha != want {
+		t.Errorf("LsRemoteHeadSHA after the push = %q, %v, %v; want %s", sha, present, err, want)
+	}
+}
+
 func TestPush_WithoutOptions(t *testing.T) {
 	repo, _, bare := pushFixture(t, false)
 	if _, err := repo.Push(context.Background(), "origin", "feature/x", nil); err != nil {

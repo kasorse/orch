@@ -352,20 +352,59 @@ func TestOpenWorktree_TemplateNameNotUsed(t *testing.T) {
 	}
 }
 
-// A story task keeps the branch its task input gave: nothing is named, nothing is called.
-func TestOpenWorktree_StoryTaskIsNotNamed(t *testing.T) {
+// A story task is named as any run is (specs/delivery/SPEC.md §9.1): with its repository's template,
+// from its Jira key and its title; the branch its task input gave stays in task.source.
+func TestOpenWorktree_StoryTaskIsNamedByTheTemplate(t *testing.T) {
+	// No instruction file mentions branches, so no call is made.
 	client := &branchClient{output: `{"branch": "feature/fix-it"}`}
-	s, dir, _ := namingSession(t, map[string]string{"CLAUDE.md": branchRule}, client)
-	s.cfg.Worktree.Branch.Template = "work/{slug}"
+	s, dir, _ := namingSession(t, nil, client)
+	s.cfg.Worktree.Branch.Template = "work/{key}-{slug}"
 	s.run.Task.Source = &domain.TaskSource{
-		Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1,
+		Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1, Jira: "PAY-102", Title: "Partial refunds",
 		Branch: "story/refunds/RF02", BaseRef: gitIn(t, dir, "rev-parse", "HEAD"), BaseBranch: "main",
 	}
 	if _, err := openWorktree(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	if client.calls != 0 || s.run.Worktree.Branch != "story/refunds/RF02" || s.run.BranchNaming != nil {
-		t.Errorf("calls = %d, branch = %q, naming = %+v", client.calls, s.run.Worktree.Branch, s.run.BranchNaming)
+	naming := s.run.BranchNaming
+	if client.calls != 0 || s.run.Worktree.Branch != "work/PAY-102-partial-refunds" || naming == nil || naming.Source != domain.BranchSourceTemplate {
+		t.Errorf("calls = %d, branch = %q, naming = %+v", client.calls, s.run.Worktree.Branch, naming)
+	}
+	if got := s.run.Task.Source.Branch; got != "story/refunds/RF02" {
+		t.Errorf("task.source.branch = %q, want the fallback it was given", got)
+	}
+	if _, err := verifyRunWorktree(context.Background(), s.repo, s.run); err != nil {
+		t.Errorf("the worktree it created does not verify: %v", err)
+	}
+}
+
+// Without a rule the fallback is the name, and a retry whose templated name exists gets the
+// run's -<6> suffix.
+func TestOpenWorktree_StoryTaskFallbackAndRetrySuffix(t *testing.T) {
+	s, dir, _ := namingSession(t, nil, &branchClient{})
+	s.run.Task.Source = &domain.TaskSource{
+		Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 1, Title: "Partial refunds",
+		Branch: "story/refunds/RF02", BaseRef: gitIn(t, dir, "rev-parse", "HEAD"), BaseBranch: "main",
+	}
+	if _, err := openWorktree(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	if bn := s.run.BranchNaming; s.run.Worktree.Branch != "story/refunds/RF02" || bn == nil || bn.Source != domain.BranchSourceDefault {
+		t.Errorf("branch = %q, naming = %+v, want the fallback", s.run.Worktree.Branch, bn)
+	}
+
+	retry, dir2, _ := namingSession(t, nil, &branchClient{})
+	retry.cfg.Worktree.Branch.Template = "work/{slug}"
+	gitIn(t, dir2, "branch", "work/partial-refunds")
+	retry.run.Task.Source = &domain.TaskSource{
+		Kind: domain.TaskSourceStory, Story: "refunds", Task: "RF02", Attempt: 2, Title: "Partial refunds",
+		Branch: "story/refunds/RF02.2", BaseRef: gitIn(t, dir2, "rev-parse", "HEAD"), BaseBranch: "main",
+	}
+	if _, err := openWorktree(context.Background(), retry); err != nil {
+		t.Fatal(err)
+	}
+	if want := "work/partial-refunds-" + idTail(retry.run.ID); retry.run.Worktree.Branch != want {
+		t.Errorf("branch = %q, want %q", retry.run.Worktree.Branch, want)
 	}
 }
 
