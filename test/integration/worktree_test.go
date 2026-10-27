@@ -259,7 +259,7 @@ func TestWorktree_ImplementAndTestLeaveTheOperatorsTreeAlone(t *testing.T) {
 	if parent, _ := gitOutput(repoDir, "rev-parse", run.Commit+"^"); parent != head {
 		t.Errorf("the commit's parent = %s, want the base %s", parent, head)
 	}
-	if msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B", run.Commit); msg != "Fix Add to use +\n\nOrchestrator-Run: "+run.ID {
+	if msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B", run.Commit); msg != "Fix Add to use +\n\nOrchestrator-Run: "+run.ID+"\nOrchestrator-Decision: manual/development,testing" {
 		t.Errorf("commit message = %q", msg)
 	}
 	if got, _ := gitOutput(repoDir, "show", run.Commit+":fixture.go"); got != strings.TrimSpace(fakeexec.FixedFixtureSource) {

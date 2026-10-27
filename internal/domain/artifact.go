@@ -303,7 +303,25 @@ type ImplementationArtifact struct {
 	// SummaryShort is the model's one-line version of Summary, for a reader skimming the
 	// run (every stage's artifact and the review result carry one); implement's becomes
 	// the commit message (MVP.md §42.2). Empty when the model left it out.
-	SummaryShort string   `json:"summary_short,omitempty"`
+	SummaryShort string `json:"summary_short,omitempty"`
+	// CommitType is the model's Conventional Commit type for the whole change; read it with
+	// ValidCommitType, since an unknown value is ignored, never an error.
+	CommitType   string   `json:"commit_type,omitempty"`
 	ChangedFiles []string `json:"changed_files"`
 	TestsAdded   []string `json:"tests_added"`
+}
+
+// CommitTypes are the Conventional Commit types implement may name, the closed list of
+// specs/delivery/SPEC.md §4.1.
+var CommitTypes = []string{"feat", "fix", "refactor", "perf", "test", "docs", "build", "ci", "chore"}
+
+// ValidCommitType trims and lower-cases s and reports whether it is one of CommitTypes.
+func ValidCommitType(s string) (string, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	for _, t := range CommitTypes {
+		if s == t {
+			return s, true
+		}
+	}
+	return "", false
 }

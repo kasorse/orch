@@ -68,7 +68,8 @@ func TestScenario31_CommitApproved(t *testing.T) {
 		t.Errorf("run.json commit = %v, HEAD = %s", run["commit"], head)
 	}
 	msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B")
-	want := "Fix Add to use +\n\nOrchestrator-Run: " + run["id"].(string)
+	want := "Fix Add to use +\n\nOrchestrator-Run: " + run["id"].(string) +
+		"\nOrchestrator-Decision: simple/development,testing"
 	if strings.TrimSpace(msg) != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}
@@ -94,7 +95,8 @@ func TestScenario31_CommitMessageAsked(t *testing.T) {
 		t.Errorf("no request for a message in stdout:\n%s", stdout)
 	}
 	msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B")
-	want := "Add instead of subtract\n\nOrchestrator-Run: " + readRunJSON(t, repoDir)["id"].(string)
+	want := "Add instead of subtract\n\nOrchestrator-Run: " + readRunJSON(t, repoDir)["id"].(string) +
+		"\nOrchestrator-Decision: simple/development,testing"
 	if strings.TrimSpace(msg) != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}
@@ -147,7 +149,8 @@ func TestScenario31_AutoCommit(t *testing.T) {
 		t.Errorf("run.json commit = %v, HEAD = %s", run["commit"], head)
 	}
 	msg, _ := gitOutput(repoDir, "log", "-1", "--format=%B")
-	if want := "Fix Add to use +\n\nOrchestrator-Run: " + run["id"].(string); strings.TrimSpace(msg) != want {
+	if want := "Fix Add to use +\n\nOrchestrator-Run: " + run["id"].(string) +
+		"\nOrchestrator-Decision: simple/development,testing"; strings.TrimSpace(msg) != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}
 }

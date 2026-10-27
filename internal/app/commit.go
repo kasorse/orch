@@ -137,17 +137,24 @@ func offerCommit(ctx context.Context, s *session, canAsk bool) string {
 
 // commitOffer proposes the message and the warnings for run. The header is the last
 // implementation's summary_short, cut to one line of commitHeaderMax runes and prefixed
-// with the Jira key for a run --jira task or a story task that has one; whatever the cut left
-// out goes into the body, followed by the Orchestrator-Run trailer and, for a story task, the
-// Orchestrator-Story one. Without a summary_short the header is "" and
+// with its commit_type ("fix: ") and the Jira key for a run --jira task or a story task that
+// has one ("fix: PAY-12 summary", "PAY-12: summary" without a type); whatever the cut left
+// out goes into the body, followed by the Orchestrator-Run trailer, the Orchestrator-Decision
+// one (when the run has a decision) and, for a story task, the Orchestrator-Story one. Without a summary_short the header is "" and
 // the operator is asked to write it.
 func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interaction.CommitOffer {
 	var body strings.Builder
 	var header string
 	if impl != nil {
 		if source := strings.TrimSpace(impl.SummaryShort); source != "" {
+			key := ticketKey(run.Task.Source)
 			prefix := ""
-			if key := ticketKey(run.Task.Source); key != "" {
+			switch commitType, ok := domain.ValidCommitType(impl.CommitType); {
+			case ok && key != "":
+				prefix = commitType + ": " + key + " "
+			case ok:
+				prefix = commitType + ": "
+			case key != "":
 				prefix = key + ": "
 			}
 			first, _, _ := strings.Cut(source, "\n")
@@ -158,6 +165,18 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 		}
 	}
 	body.WriteString("Orchestrator-Run: " + run.ID + "\n")
+	if d := run.Decision; d != nil {
+		label := string(d.Complexity.Selected)
+		if d.Source == domain.DecisionSourceManual || label == "" {
+			label = "manual"
+		}
+		stages := d.Stages.EnabledStages()
+		names := make([]string, len(stages))
+		for i, st := range stages {
+			names[i] = string(st)
+		}
+		body.WriteString("Orchestrator-Decision: " + label + "/" + strings.Join(names, ",") + "\n")
+	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		body.WriteString("Orchestrator-Story: " + src.StoryRef() + "\n")
 	}

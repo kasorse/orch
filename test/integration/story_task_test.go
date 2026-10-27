@@ -222,8 +222,9 @@ func TestStoryTask_RunsOnItsBranchAndBaseWithDevelopmentForced(t *testing.T) {
 		t.Errorf("implement wrote into the operator's tree: %v", err)
 	}
 
-	// The commit message: the Jira key as the prefix and both trailers.
-	want := "PAY-124: Fix Add to use +\n\nOrchestrator-Run: " + run.ID + "\nOrchestrator-Story: refunds/RF02"
+	// The commit message: the Jira key as the prefix and the run, decision and story trailers.
+	want := "PAY-124: Fix Add to use +\n\nOrchestrator-Run: " + run.ID +
+		"\nOrchestrator-Decision: medium/development,testing,review\nOrchestrator-Story: refunds/RF02"
 	if msg, _ := gitOutput(r.repoDir, "log", "-1", "--format=%B", run.Commit); msg != want {
 		t.Errorf("commit message = %q, want %q", msg, want)
 	}
