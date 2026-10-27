@@ -1,6 +1,12 @@
+---
+id: DL03
+repo: orche
+depends_on: []
+jira: none
+---
 # DL03 — Worktree by default, the `delivery` config, the checks before the worktree
 
-**Size** S–M (1.5 d) · **Depends on** — · **Blocks** DL04
+**Size** S–M
 
 ## Goal
 
@@ -35,3 +41,8 @@ worktree run is refused before the worktree when it could not deliver (`SPEC.md`
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

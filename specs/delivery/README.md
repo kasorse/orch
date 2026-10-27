@@ -78,7 +78,10 @@ DL07 → DL08 → DL05 → DL06 → DL10 → DL11 → DL12. With DL02, DL03, DL0
 - Tests need no network, no real CLI, no GitLab or Jira: a bare repository with a push-options
   hook as the remote, a fake Jira server in `test/integration`.
 - Each task ends green on `scripts/check.sh` (root and `bench/`).
-- When a task is done: tick it here and in TODO.md, update the `Status:` line above, and add an
-  `## As built` section to the task file with the date and anything built differently, and why.
-  A gate the test step cannot run (the live check, `docker build`) is left to the operator and
-  named in the As built.
+- These are story tasks: `story run` ticks them here, updates the `Status:` line and writes each
+  task's `## As built`; a task does not edit anything under `specs/delivery/`. Only DL12 edits the
+  shared documents (MVP.md, CLAUDE.md, TODO.md, README.md, the example config); it ticks W1–W5
+  in TODO.md. A gate the test step cannot run (the live check, `docker build`) is left to the
+  operator and named in the As built.
+- Run the story with `orchestrator story run` (see `SPEC.md`, "Ground rules for the tasks of this
+  story").

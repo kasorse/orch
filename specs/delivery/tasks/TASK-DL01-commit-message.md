@@ -1,6 +1,12 @@
+---
+id: DL01
+repo: orche
+depends_on: []
+jira: none
+---
 # DL01 — Commit message: Conventional Commit type and the decision trailer
 
-**Size** S (1 d) · **Depends on** — · **Blocks** DL11
+**Size** S
 
 ## Goal
 
@@ -31,3 +37,8 @@ The commit header gets the model's `commit_type` from a closed list, and the bod
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

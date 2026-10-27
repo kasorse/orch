@@ -1,6 +1,12 @@
+---
+id: DL08
+repo: orche
+depends_on: [DL02]
+jira: none
+---
 # DL08 — `orchestrator review --base/--head`
 
-**Size** M (3 d) · **Depends on** DL02 · **Blocks** DL10, DL11
+**Size** M
 
 ## Goal
 
@@ -35,3 +41,8 @@ worktree, as an ordinary run (`SPEC.md` §12.1–§12.3).
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

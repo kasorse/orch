@@ -1,6 +1,12 @@
+---
+id: DL11
+repo: orche
+depends_on: [DL01, DL02, DL03, DL04, DL05, DL06, DL07, DL08, DL13]
+jira: none
+---
 # DL11 — Integration scenarios 64–77
 
-**Size** M (2.5 d) · **Depends on** DL01–DL08, DL13 · **Blocks** DL12
+**Size** M
 
 ## Goal
 
@@ -31,3 +37,8 @@ endpoints.
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

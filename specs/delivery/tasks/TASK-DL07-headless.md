@@ -1,6 +1,12 @@
+---
+id: DL07
+repo: orche
+depends_on: [DL04]
+jira: none
+---
 # DL07 — Headless: no terminal, `--output json`, exit codes
 
-**Size** S–M (1.5 d) · **Depends on** DL04 · **Blocks** DL10, DL11
+**Size** S–M
 
 ## Goal
 
@@ -27,3 +33,8 @@ documented exit code table (`SPEC.md` §11.1–§11.3).
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

@@ -1,6 +1,12 @@
+---
+id: DL12
+repo: orche
+depends_on: [DL10, DL11]
+jira: none
+---
 # DL12 — Documentation
 
-**Size** S (1 d) · **Depends on** DL11 · **Blocks** —
+**Size** S
 
 ## Goal
 
@@ -24,8 +30,14 @@ MVP.md becomes the normative home; CLAUDE.md, README, the example config and TOD
   the path still is), the spec pointer.
 - README.md: the worktree default and the chain, `orchestrator review`, `--output json`, exit codes, CI.
 - `orchestrator.example.yaml`: `delivery:`, `jira.write` and `worktree.branch` commented out.
-- TODO.md: W1–W5 ticked with a pointer here; this README's `Status:`.
+- TODO.md: W1–W5 ticked with a pointer to `specs/delivery/`.
 
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README, the `Status:` line and
+As built, the README's ticks); the TODO.md ticking above is this task's own. This is the one task of the story that
+edits the shared documents.

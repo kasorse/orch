@@ -1,6 +1,12 @@
+---
+id: DL10
+repo: orche
+depends_on: [DL07, DL08]
+jira: none
+---
 # DL10 — Dockerfile and the CI example
 
-**Size** S (1 d) · **Depends on** DL07, DL08 · **Blocks** DL12
+**Size** S
 
 ## Goal
 
@@ -26,3 +32,10 @@ A team can build an image and copy a working GitLab CI job (`SPEC.md` §11.4).
 ## Gates
 
 `scripts/check.sh`; `docker build` and the CI job on the gitlab.com test project (operator).
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12. `docker build` and the CI job are the
+operator's gate: say in the summary that they were left to the operator, and do not claim they
+were done.

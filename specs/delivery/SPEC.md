@@ -84,6 +84,19 @@ changes in the current tree (§40.4), so it cannot review a merge request.
 8. **Review-only is a run**: same store, decision record, guard, report and resume; it just has no
    `implement` and reviews `base...head`.
 
+### Ground rules for the tasks of this story
+
+- These are story tasks (`story run`). `story run` writes `specs/delivery/README.md` and each
+  task's `## As built`: **do not edit anything under `specs/delivery/`**. CLAUDE.md's bookkeeping
+  for `specs/*/tasks` (ticking, the `Status:` line, As built) is done by `story run` for these
+  tasks.
+- Only DL12 edits the shared documents (MVP.md, CLAUDE.md, TODO.md, README.md,
+  orchestrator.example.yaml), so the task branches do not conflict on them.
+- A gate the test step cannot run (the live check on gitlab.com, `docker build`) is left to the
+  operator: the task says so in its summary and does not claim it was done.
+- CLAUDE.md's invariants hold: Go orders and decides, no model picks what runs; git is argv only.
+- The gate is `scripts/check.sh` (root and `bench/`).
+
 ---
 
 ## 4. The commit message and the branch name (W1)

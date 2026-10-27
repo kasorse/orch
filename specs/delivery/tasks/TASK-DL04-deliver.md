@@ -1,6 +1,12 @@
+---
+id: DL04
+repo: orche
+depends_on: [DL01, DL02, DL03]
+jira: none
+---
 # DL04 — The end of a worktree run: commit, push, merge request
 
-**Size** M (3 d) · **Depends on** DL03, DL02 (DL01 for the typed title) · **Blocks** DL05, DL06, DL07, DL11
+**Size** M
 
 ## Goal
 
@@ -50,3 +56,9 @@ push; `--mode auto` without questions, every other mode with a question before e
 ## Gates
 
 `scripts/check.sh`; the live check (operator).
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12. The live check is the operator's gate: say in
+the summary that it was left to the operator, and do not claim it was done.

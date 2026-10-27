@@ -1,6 +1,12 @@
+---
+id: DL13
+repo: orche
+depends_on: []
+jira: none
+---
 # DL13 — The branch name: instructions, template, fallback
 
-**Size** M (2.5 d) · **Depends on** — · **Blocks** DL05, DL11
+**Size** M
 
 ## Goal
 
@@ -48,3 +54,8 @@ instructions (a tool-less call), else from `worktree.branch.template`, else
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

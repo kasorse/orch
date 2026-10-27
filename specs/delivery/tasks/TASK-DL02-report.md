@@ -1,6 +1,12 @@
+---
+id: DL02
+repo: orche
+depends_on: []
+jira: none
+---
 # DL02 — `report.md`
 
-**Size** M (2.5 d) · **Depends on** — · **Blocks** DL04, DL08
+**Size** M
 
 ## Goal
 
@@ -36,3 +42,8 @@ A reviewer-facing `report.md` next to `summary.md` at every terminal status, ren
 ## Gates
 
 `scripts/check.sh`
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12.

@@ -1,6 +1,12 @@
+---
+id: DL05
+repo: orche
+depends_on: [DL04, DL13]
+jira: none
+---
 # DL05 — `story run`: one MR per task, the task's branch by its repository's rules
 
-**Size** M (2 d) · **Depends on** DL04, DL13 · **Blocks** DL11
+**Size** M
 
 ## Goal
 
@@ -58,3 +64,9 @@ dependency's branch (`SPEC.md` §9, §9.1).
 ## Gates
 
 `scripts/check.sh`; live check step 4 (operator).
+
+## Notes
+
+Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
+MVP.md, CLAUDE.md, TODO.md and README.md to DL12. The live check is the operator's gate: say in
+the summary that it was left to the operator, and do not claim it was done.
