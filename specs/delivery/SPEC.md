@@ -1,6 +1,11 @@
 # Spec: Delivery — from a finished run to a merge request, in a terminal or in CI
 
-Status: **specified** (2026-10-23), nothing built. The owner's decisions are in §16 (taken
+Status: **built** (2026-10-27): DL01–DL13 by `story run`, merged into `spec/delivery` as
+97e3748; the normative text is MVP.md §50. `scripts/check.sh` and `bench/` (`go test -count=1
+./...`, outside the sandbox, `bin/orchestrator` rebuilt from 97e3748, none of the four bwrap
+skips skipped) passed on 2026-10-27 over all of them. Left to the operator: the live check (§15),
+the CI example run, `docker build`, and `go test -tags security ./test/security/...`.
+Specified 2026-10-23. The owner's decisions are in §16 (taken
 2026-10-23 while scoping; D12–D15 the same day, on the branch name; D16–D20 the same day, on the
 worktree default and the end of a run, which replace D2, D3 and D5; D21 the same day, on a story
 task's branch name, which replaces D15; D22 the same day, on `specs/parallel-story`'s spec
