@@ -51,17 +51,39 @@ const defaultConfigPath = "orchestrator.yaml"
 
 const runsBaseDir = ".orchestrator/runs"
 
-const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
+const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--output json] [--verbose] ` +
 	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
 // exitcode.FromError.
+//
+// With --output json (run, resume, review) stdout gets exactly one line when Run returns, the
+// result of specs/delivery/SPEC.md §11.2; everything else goes to stderr.
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cli, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
 	}
+	if cli.output == "" {
+		return dispatch(ctx, cli, stdin, stdout, stderr)
+	}
+	if len(cli.rest) == 0 || !headlessCommand(cli.rest[0]) {
+		return &apperr.ConfigError{Msg: "--output is only valid with run, resume and review"}
+	}
+	ctx, rec := withResultRecorder(ctx)
+	// The reporter writes to what it is given as stdout: a writer that is no terminal makes it the
+	// plain one, and it is stderr, so stdout stays the result line's alone.
+	err = dispatch(ctx, cli, stdin, plainWriter{stderr}, stderr)
+	writeResult(stdout, rec, err)
+	return err
+}
+
+// plainWriter hides the file behind a writer, so that nothing takes it for a terminal.
+type plainWriter struct{ io.Writer }
+
+// dispatch runs the command parseArgs found.
+func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr io.Writer) error {
 	rest := cli.rest
 	if len(rest) == 0 {
 		return &apperr.ConfigError{Msg: usage}
@@ -119,10 +141,16 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err := checkNotAStory(rest[1:]); err != nil {
 			return err
 		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
+		}
 		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
+		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
 		}
 		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "story":
@@ -322,12 +350,15 @@ type cliArgs struct {
 	// parallel is --parallel's value, 1..8: how many ready tasks story run runs at once, in place
 	// of story.max_parallel; 0 if not given (specs/parallel-story/SPEC.md §2).
 	parallel int
+	// output is --output's value, "json" or empty: the one result line on stdout (specs/delivery/SPEC.md
+	// §11.2).
+	output string
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
-// --codex-auth/--codex-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
+// --codex-auth/--codex-auth=X, --output/--output=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -452,6 +483,18 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--parallel requires a number from %d to %d, got %q", config.MinStoryMaxParallel, config.MaxStoryMaxParallel, v)
 			}
 			cli.parallel = n
+		case arg == "--output" || strings.HasPrefix(arg, "--output="):
+			if cli.output != "" {
+				return cliArgs{}, fmt.Errorf("--output given twice")
+			}
+			v, err := value(&i, "--output")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if v != outputJSON {
+				return cliArgs{}, fmt.Errorf("--output must be %s, got %q", outputJSON, v)
+			}
+			cli.output = v
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":
@@ -1129,6 +1172,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	run.Options.Isolation = cfg.Execution.IsolationMode()
+	recordResultRun(ctx, store, run)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).
 	unlock, err := store.Lock(run.ID)

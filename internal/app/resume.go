@@ -67,6 +67,7 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if err := verifyWorkflow(run); err != nil {
 		return err
 	}
+	recordResultRun(ctx, store, run)
 
 	var stream io.Writer
 	if verbose {

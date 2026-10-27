@@ -1,5 +1,19 @@
 // Package exitcode centralizes the mapping from returned errors to process exit codes.
 // main.go is the only call site for os.Exit in the codebase.
+//
+// The codes are an interface for scripts and CI (specs/delivery/SPEC.md §11.3):
+//
+//	0  completed, and what was asked was delivered
+//	1  a run that cannot be used, an unexpected error
+//	2  config, dependency, usage, credentials (FailureAuth), Jira fail-fast, the delivery checks
+//	3  a provider failed
+//	4  the workflow failed or a limit stopped it (a red test, max_steps, budget, no progress)
+//	5  cancelled by the operator
+//	6  completed, but needs a person: a worktree run with implement ended without a merge request
+//	   that nobody declined (--mode auto did not commit, or the push or the merge request failed in
+//	   any mode), or a review gave a failing verdict
+//
+// With --output json the same code is the "exit_code" of the one line on stdout.
 package exitcode
 
 import (
