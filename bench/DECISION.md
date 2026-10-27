@@ -109,3 +109,67 @@ bare Claude Code without a shell, and it does not win either.
    code is done; this round measured its `complex` route only on the one task above.
 7. G5 and P3 (presets) wait for round 3: there is nothing to calibrate while complexity is
    `simple` almost everywhere.
+
+## The E run (2026-10-26 … 27)
+
+E ran alone into `round2` as planned: 30 tasks × 3 reps, 90 cells, 0 `infra_error`, one container
+from 2026-10-26 22:01Z to 2026-10-27 01:35Z (orchestrator at 319fc92, claude 2.1.287). The
+summary with all five configs is
+[`results/2026-10-27-round2-e/summary.md`](results/2026-10-27-round2-e/summary.md).
+
+| config | pass rate | cost/task | time/task | vs A, pp [95% CI] |
+|---|---|---|---|---|
+| A | 88% | $0.20 | 1m17s | — |
+| B | 90% | $0.33 | 2m15s | +2 [−2, +8] |
+| **E** | **86%** | **$0.31** | **2m43s** | **−2 [−10, +6]** |
+
+**E does not beat A, and it does not beat round 2's B.** By the §12 rule it stays in the
+second branch: the bundle (clarify, verify, graphify, the fix loop of 3) does not buy pass
+rate on this set, and it costs about as much as B.
+
+What the numbers are made of:
+
+- **5 of E's 13 failures are `regression`, all on the Go tasks of this repository, and all of
+  them are the `test/integration` flake**, not a change the model made: `context deadline
+  exceeded` in a scenario's 30 s run timeout, fake CLIs that could not be spawned, `WaitDelay
+  expired`, a timing assertion (scenario 13). In each of the five the run's own `test` step had
+  passed on the same tree (status `completed`, 0 fix iterations). In two more cells the flake
+  hit the run's `test` step: implement rightly changed nothing, the run stopped `no progress`,
+  and the final check passed. A–D had one `regression` in 360 cells.
+- **The Go suites ran 1.5–2.6 times slower under E** than under A and B on the same tasks
+  (`test/integration`: 7740c60 120 s against 56 s, 52e2eec 119 s against 46 s); Python and Node
+  suites ran at the same speed. The code graph in the tree is not the cause: the suite of
+  7740c60 takes 51 s with and without `graphify-out` in the same container. graphify-mcp exits
+  when its stdin closes, so no server outlives a session. The cause is not found; the run was on
+  the owner's laptop at night, next to other work, and the flake is timing-bound.
+- **Without the flake E would be at 91%** (82 of 90) and +3 pp over A paired, inside the noise
+  either way. The real failures are the two tasks every config fails (`52e2eec`,
+  `graphql-js-4c9d754`) and `sqlglot-5b7b413` (E 1 of 3, A 2 of 3).
+- **Cost: E $0.31 against B $0.33.** Without `52e2eec`, E costs $0.22 per task, B $0.21 and A
+  $0.18. The `complex` route on that task cost $2.97 per cell (B $3.86, A $0.74) and failed
+  again. The decision cost $0.026 per cell (2.0 calls), as in B.
+- **Clarify never ran:** the first clarity check was clear in all 90 cells, so its cost and its
+  effect are both zero on this set. Every task here is a well-formed commit message; a set
+  without unclear tasks cannot measure clarify.
+- **graphify was used in every step after the hint change:** one `query_graph` per implement
+  (plus 0.1 `get_node`), 1.0–2.0 graph calls per investigate and review. It did not replace the
+  search: implement still made 3.1 Grep and 4.6 Read calls. No `mcp_failed` in any cell.
+- **verify: 1.2 `run_tests` calls per implement, 0.1 `replace`.** Fix iterations fell from 0.2
+  (B) to 0.1, with the fix loop raised to 3; the gain does not reach the pass rate.
+- **Stage choice:** the three questions went to `investigation` alone (9 of 9, all passed);
+  `52e2eec` was `complex` again (investigation + development + testing + review); everything else
+  development + testing.
+
+Consequences, on top of the ones above:
+
+8. **Q2 (verify) is measured and shows no gain** on this set, inside the bundle. It stays
+   because it costs little (0.1 fix iterations fewer, no extra failure), not because the
+   benchmark proved it.
+9. **The flake must go before round 3.** It hides the difference the round is meant to show:
+   five E cells lost to it. Either the `test/integration` timeouts of the task snapshots stop
+   depending on the machine's load (a task setup that raises them, as the run timeout of the
+   snapshot cannot be changed in the past), or the round runs on a quiet machine and records its
+   load.
+10. **Round 3 needs unclear tasks** for clarify, besides the en/ru pairs and harder tasks.
+11. **Q8 is not blocked by E:** the decision costs the same in E as in B, and nothing in the run
+    argues against the simpler default.
