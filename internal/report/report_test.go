@@ -187,6 +187,37 @@ func TestRunReport_StageRun(t *testing.T) {
 	mustNotContain(t, got, "complexity", "decided by", "### What changed", "Source:", "branch `", "Fix iterations")
 }
 
+// A review run has "Reviewed" in place of "What changed" and no "Why these stages", no branch
+// and no restore point (specs/delivery/SPEC.md §5).
+func TestRunReport_ReviewRun(t *testing.T) {
+	run := reportRun()
+	d, err := domain.ManualDecision([]domain.Stage{domain.StageTesting, domain.StageReview})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("b", 40)
+	run.Decision = &d
+	run.Task = domain.Task{Description: "Review the change from main to feature. Its commits:\n- Add the feature"}
+	run.Commit = ""
+	run.PreRunRef = head
+	run.Worktree = &domain.RunWorktree{BaseRef: head, Removed: true}
+	run.ReviewTarget = &domain.ReviewTarget{Base: strings.Repeat("a", 40), Head: head, MergeBase: strings.Repeat("c", 40),
+		BaseRefName: "main", HeadRefName: "feature"}
+	run.Executions = run.Executions[3:]
+	run.Executions[0].Index, run.Executions[1].Index = 0, 1
+	run.FixIterations = 0
+
+	got := RunReport(run, &domain.DecisionTrace{Source: domain.DecisionSourceManual})
+	mustContain(t, got,
+		"### Reviewed",
+		"`main...feature` · merge base `ccccccc` · head `bbbbbbb`",
+		"### Review",
+		"verdict **pass**",
+		"Run `20261023-101500-ab12cd` · cost",
+	)
+	mustNotContain(t, got, "### Why these stages", "### What changed", "branch `", "restore point", "commit `")
+}
+
 func TestRunReport_ByteBound(t *testing.T) {
 	run := reportRun()
 	var task []string

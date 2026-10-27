@@ -49,6 +49,8 @@ func TestFromError(t *testing.T) {
 		{"limit", &apperr.LimitExceededError{Reason: "too many steps"}, WorkflowOrLimit},
 		{"workflow", &apperr.WorkflowError{Msg: "bad transition"}, WorkflowOrLimit},
 		{"cancel", context.Canceled, UserCancellation},
+		{"needs a person", &apperr.NeedsPersonError{Msg: "verdict fail"}, NeedsPerson},
+		{"needs a person wrapped", fmt.Errorf("review: %w", &apperr.NeedsPersonError{Msg: "verdict fail"}), NeedsPerson},
 		{"run not found", &apperr.RunStateError{Kind: apperr.RunNotFound}, GenericError},
 		{"run ambiguous", &apperr.RunStateError{Kind: apperr.RunAmbiguous}, GenericError},
 		{"run in use", &apperr.RunStateError{Kind: apperr.RunInUse}, GenericError},

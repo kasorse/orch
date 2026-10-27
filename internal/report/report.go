@@ -68,8 +68,14 @@ func renderReport(run domain.Run, trace *domain.DecisionTrace, out domain.Outcom
 	fmt.Fprintf(&b, "## %s\n\n", mdText(reportTitle(run)))
 	b.WriteString(statusLine(run, out) + "\n")
 	writeTaskSection(&b, run, lim)
-	writeStagesSection(&b, run, trace)
-	writeChangedSection(&b, run, lim)
+	if run.ReviewTarget != nil {
+		// A review run's stages are fixed, and what it reviewed is the refs, not a change it made
+		// (specs/delivery/SPEC.md §5).
+		writeReviewedSection(&b, run)
+	} else {
+		writeStagesSection(&b, run, trace)
+		writeChangedSection(&b, run, lim)
+	}
 	writeTestsSection(&b, run, lim)
 	writeReviewSection(&b, run, lim)
 	writeAttentionSection(&b, run, lim)
@@ -314,6 +320,13 @@ func writeChangedSection(b *strings.Builder, run domain.Run, lim reportLimits) {
 	}
 }
 
+// writeReviewedSection says what a review run reviewed: base...head, and the commits they name.
+func writeReviewedSection(b *strings.Builder, run domain.Run) {
+	t := run.ReviewTarget
+	b.WriteString("\n### Reviewed\n\n")
+	fmt.Fprintf(b, "%s · merge base %s · head %s\n", mdCode(t.BaseRefName+"..."+t.HeadRefName), mdCode(shortCommit(t.MergeBase)), mdCode(shortCommit(t.Head)))
+}
+
 // changeBase is what the run's change is counted against: the base of its worktree, else its
 // restore point.
 func changeBase(run domain.Run) string {
@@ -523,7 +536,8 @@ func writeFooter(b *strings.Builder, run domain.Run, out domain.Outcome) {
 	if run.Commit != "" {
 		parts = append(parts, "commit "+mdCode(shortCommit(run.Commit)))
 	}
-	if run.PreRunRef != "" {
+	// A review run changes nothing, so it has nothing to restore.
+	if run.PreRunRef != "" && run.ReviewTarget == nil {
 		parts = append(parts, "restore point "+mdCode(shortCommit(run.PreRunRef)))
 	}
 	c := money(out.Usage.CostUSD, true)

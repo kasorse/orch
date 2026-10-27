@@ -208,6 +208,15 @@ func (e *WorkflowError) Error() string {
 }
 func (e *WorkflowError) Unwrap() error { return e.Err }
 
+// NeedsPersonError ends a run that completed but whose result needs a person
+// (specs/delivery/SPEC.md §11.3): so far only `orchestrator review` with a failing verdict. It maps
+// to exit code 6.
+type NeedsPersonError struct {
+	Msg string
+}
+
+func (e *NeedsPersonError) Error() string { return e.Msg }
+
 type RepositoryError struct {
 	Msg string
 	Err error

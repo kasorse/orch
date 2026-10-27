@@ -63,6 +63,10 @@ func validateWorktree(run *domain.Run) error {
 	if !isCommitSHA(w.BaseRef) {
 		return fmt.Errorf("worktree.base_ref %q is not a full commit SHA", w.BaseRef)
 	}
+	// A review run's worktree is detached at the head it reviews (specs/delivery/SPEC.md §12.2).
+	if t := run.ReviewTarget; t != nil && (w.BaseRef != t.Head || w.BaseBranch != "") {
+		return fmt.Errorf("worktree is at %q on branch %q, but review_target.head is %q", w.BaseRef, w.BaseBranch, t.Head)
+	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		if w.BaseRef != src.BaseRef {
 			return fmt.Errorf("worktree.base_ref is %q, but task.source.base_ref is %q", w.BaseRef, src.BaseRef)

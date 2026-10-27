@@ -190,6 +190,9 @@ func worktreeLine(run domain.Run, w domain.RunWorktree) string {
 		base = w.BaseBranch + "@" + base
 	}
 	parts := []string{w.Branch + " from " + base}
+	if w.Branch == "" { // a review run's worktree is detached at the commit it reviews
+		parts = []string{"detached at " + base}
+	}
 	if run.Commit != "" {
 		parts = append(parts, "commit "+shortCommit(run.Commit))
 	}

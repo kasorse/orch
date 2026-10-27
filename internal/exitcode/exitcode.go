@@ -16,6 +16,9 @@ const (
 	ProviderExecution  = 3
 	WorkflowOrLimit    = 4
 	UserCancellation   = 5
+	// NeedsPerson: the run completed, but its result needs a person (a review with a failing
+	// verdict; specs/delivery/SPEC.md §11.3).
+	NeedsPerson = 6
 )
 
 // FromError maps a returned error to a process exit code. nil maps to OK.
@@ -26,6 +29,11 @@ func FromError(err error) int {
 
 	if errors.Is(err, context.Canceled) {
 		return UserCancellation
+	}
+
+	var personErr *apperr.NeedsPersonError
+	if errors.As(err, &personErr) {
+		return NeedsPerson
 	}
 
 	// Checked before the other categories: a run that cannot be used is exit 1 whatever

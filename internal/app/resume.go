@@ -119,7 +119,10 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	if len(run.Executions) == 0 {
 		// No step was recorded: this is the tail of a fresh run (plan mode, cancelled at
 		// approval, refused for a dirty tree, or crashed before the first step).
-		if s.worktree == nil {
+		if s.worktree == nil && run.ReviewTarget != nil {
+			// A review run gets its detached worktree after approval (enterWorktree); the
+			// operator's tree, dirty or not, plays no part.
+		} else if s.worktree == nil {
 			dirty, err := repo.IsDirty(ctx)
 			if err != nil {
 				return err
@@ -180,7 +183,11 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	reporter.ResumeHeader(run, store.RunDir(run.ID))
 	reporter.History(run)
 	if w := s.worktree; w != nil {
-		reporter.Worktree(w.Path, w.Branch, w.BaseBranch, w.BaseRef)
+		if run.ReviewTarget != nil {
+			reporter.ReviewWorktree(w.Path, w.BaseRef)
+		} else {
+			reporter.Worktree(w.Path, w.Branch, w.BaseBranch, w.BaseRef)
+		}
 	}
 	reporter.WorkingTree(treeSummary, treeErr)
 	remaining := remainingSteps(*run.Workflow, opts.resume.Entry)

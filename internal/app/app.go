@@ -1,7 +1,7 @@
 // Package app wires config, provider, translation, the decision provider, context
 // collection, classification, repository, testexec, action, persistence, and workflow
 // together into the orchestrator's CLI commands
-// (version, validate, run, resume, story plan|run|status, decisions report|calibrate, runs report). This is the composition root - no other package
+// (version, validate, run, review, resume, story plan|run|status, decisions report|calibrate, runs report). This is the composition root - no other package
 // constructs the full dependency graph.
 package app
 
@@ -52,7 +52,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -72,8 +72,18 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	storyPlanCmd := storySub == "plan"
 	storyRunCmd := storySub == "run"
-	if cli.jiraRef != "" && rest[0] != "run" && !storyPlanCmd {
+	if cli.jiraRef != "" && rest[0] != "run" && rest[0] != "review" && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--jira is only valid with run and story plan"}
+	}
+	if rest[0] != "review" {
+		switch {
+		case cli.base != "":
+			return &apperr.ConfigError{Msg: "--base is only valid with review"}
+		case cli.head != "":
+			return &apperr.ConfigError{Msg: "--head is only valid with review"}
+		case cli.reviewTask != "":
+			return &apperr.ConfigError{Msg: "--task is only valid with review"}
+		}
 	}
 	if len(cli.repos) > 0 && !storyPlanCmd {
 		return &apperr.ConfigError{Msg: "--repo is only valid with story plan"}
@@ -93,10 +103,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	if cli.isolation != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--" + cli.isolation + " is only valid with run"}
 	}
-	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, validate and story run"}
 	}
-	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "validate" && !storyRunCmd {
+	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, validate and story run"}
 	}
 	if cli.storyTaskFile != "" {
@@ -120,6 +130,14 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return err
 		}
 		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+	case "review":
+		if len(rest) != 1 {
+			return &apperr.ConfigError{Msg: reviewUsage}
+		}
+		return reviewChange(ctx, reviewOptions{
+			configPath: cli.configPath, base: cli.base, head: cli.head, task: cli.reviewTask, jiraRef: cli.jiraRef,
+			mode: cli.mode, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth, verbose: cli.verbose,
+		}, stdin, stdout, stderr)
 	case "resume":
 		if len(rest) != 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator resume <run-id>   (the full ID, or a unique prefix of at least 8 characters)`}
@@ -322,12 +340,18 @@ type cliArgs struct {
 	// parallel is --parallel's value, 1..8: how many ready tasks story run runs at once, in place
 	// of story.max_parallel; 0 if not given (specs/parallel-story/SPEC.md §2).
 	parallel int
+	// base and head are --base and --head: the refs of `review`, which reviews
+	// merge-base(base, head)..head (specs/delivery/SPEC.md §12.1); empty if not given.
+	base, head string
+	// reviewTask is --task's value: the task text of `review`; empty if not given.
+	reviewTask string
 	// rest are the positional arguments.
 	rest []string
 }
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
-// --codex-auth/--codex-auth=X, --jira/--jira=X, --retry/--retry=X, the hidden --story-task/--story-task=X, the repeatable
+// --codex-auth/--codex-auth=X, --jira/--jira=X, --retry/--retry=X, --base/--base=X, --head/--head=X,
+// --task/--task=X, the hidden --story-task/--story-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -452,6 +476,39 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--parallel requires a number from %d to %d, got %q", config.MinStoryMaxParallel, config.MaxStoryMaxParallel, v)
 			}
 			cli.parallel = n
+		case arg == "--base" || strings.HasPrefix(arg, "--base="):
+			if cli.base != "" {
+				return cliArgs{}, fmt.Errorf("--base given twice")
+			}
+			v, err := value(&i, "--base")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.base = v; cli.base == "" {
+				return cliArgs{}, fmt.Errorf("--base requires a ref")
+			}
+		case arg == "--head" || strings.HasPrefix(arg, "--head="):
+			if cli.head != "" {
+				return cliArgs{}, fmt.Errorf("--head given twice")
+			}
+			v, err := value(&i, "--head")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.head = v; cli.head == "" {
+				return cliArgs{}, fmt.Errorf("--head requires a ref")
+			}
+		case arg == "--task" || strings.HasPrefix(arg, "--task="):
+			if cli.reviewTask != "" {
+				return cliArgs{}, fmt.Errorf("--task given twice")
+			}
+			v, err := value(&i, "--task")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.reviewTask = v; strings.TrimSpace(cli.reviewTask) == "" {
+				return cliArgs{}, fmt.Errorf("--task requires the text of the task")
+			}
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
 		case arg == "--inplace" || arg == "--worktree":
@@ -1387,6 +1444,11 @@ type tailOptions struct {
 // final answer and the commit offer.
 func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	run, store, cfg := s.run, s.store, s.cfg
+	if run.ReviewTarget != nil {
+		// Nothing in a review run's worktree is a result: it goes with the run, whatever the
+		// status it ends in, unless the run is stopped and a resume continues there.
+		defer endReviewWorktree(ctx, s)
+	}
 	removeStaleVerifyDirs(os.TempDir(), time.Now())
 	s.reporter.Authority(*run.Workflow, cfg.Test.Command, cfg.Test.Sandboxed())
 	if !cfg.Security.SecretScan.Enabled() {
@@ -1564,8 +1626,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	outcomeErr := writeOutcome(store, run)
 	if runErr != nil {
-		if s.worktree != nil {
-			// A failed or stopped run keeps its worktree: a resume continues there.
+		if s.worktree != nil && (run.ReviewTarget == nil || run.Status == domain.RunStopped) {
+			// A failed or stopped run keeps its worktree: a resume continues there. A review run
+			// removes it unless it is stopped (endReviewWorktree).
 			s.reporter.WorktreeKept(s.worktree.Path, "")
 		}
 		return runErr
@@ -1578,6 +1641,10 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
+	}
+	// A review run changes nothing to commit: its worktree is removed on the way out.
+	if run.ReviewTarget != nil {
+		return nil
 	}
 	// A worktree run commits on its own branch without the question, checks it for conflicts
 	// and removes the worktree (specs/worktree/SPEC.md §10). Only where auto_commit would not
