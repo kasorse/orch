@@ -200,15 +200,7 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 
 // ticketKey is the Jira key a commit header starts with: the issue a run --jira task was
 // rendered from, or the key of a story task; "" when there is none.
-func ticketKey(src *domain.TaskSource) string {
-	switch {
-	case src == nil:
-		return ""
-	case src.Kind == domain.TaskSourceStory:
-		return src.Jira
-	}
-	return src.Key
-}
+func ticketKey(src *domain.TaskSource) string { return src.JiraKey() }
 
 // approvalReason is why auto_commit does not commit a change that matched approval: manual
 // rules.

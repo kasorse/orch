@@ -256,6 +256,111 @@ type Run struct {
 	// the merge request that push opened (specs/delivery/SPEC.md §7, §13). Nil until the chain
 	// ran; a record, never read back to decide anything.
 	MR *RunMR `json:"mr,omitempty"`
+	// JiraWrite is what the run wrote to its task's Jira issue after MR was created
+	// (specs/delivery/SPEC.md §10, §13). Nil unless options.jira_write asked for something and
+	// the task has a key; a record, never read back to decide anything.
+	JiraWrite *RunJiraWrite `json:"jira_write,omitempty"`
+}
+
+// Values of RunJiraComment.State.
+const (
+	// JiraCommentIntent is saved before the comment is posted: the request may have reached Jira
+	// even when it reports a failure, so it is never repeated.
+	JiraCommentIntent = "intent"
+	// JiraCommentDone is a comment Jira answered with its id.
+	JiraCommentDone = "done"
+	// JiraCommentFailed is a comment Jira refused: nothing was posted.
+	JiraCommentFailed = "failed"
+)
+
+// Values of RunJiraTransition.State.
+const (
+	JiraTransitionDone = "done"
+	// JiraTransitionMissing is a configured transition the issue has none like (the warning
+	// lists the names it has).
+	JiraTransitionMissing = "missing"
+	// JiraTransitionFailed is a transition that could not be found out or made.
+	JiraTransitionFailed = "failed"
+	// JiraTransitionUnchanged is an issue that is already in the configured status.
+	JiraTransitionUnchanged = "unchanged"
+)
+
+// maxJiraWriteName bounds a recorded transition name, in bytes.
+const maxJiraWriteName = 255
+
+// JiraWriteOptions is jira.write as the run copied it when it started (specs/delivery/SPEC.md
+// §10); a resume uses this copy and never the current config.
+type JiraWriteOptions struct {
+	Comment    bool   `json:"comment,omitempty"`
+	Transition string `json:"transition,omitempty"`
+}
+
+// Validate checks the options read back from run.json: a transition is one line of at most
+// maxJiraWriteName bytes.
+func (o JiraWriteOptions) Validate() error {
+	return validJiraName("transition", o.Transition)
+}
+
+func validJiraName(what, v string) error {
+	if len(v) > maxJiraWriteName || strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r == 0x7f }) {
+		return fmt.Errorf("%s must be one line of at most %d bytes", what, maxJiraWriteName)
+	}
+	return nil
+}
+
+// RunJiraWrite is the record of the write-back to a run's Jira issue. Either part is nil when it
+// was not asked for.
+type RunJiraWrite struct {
+	Comment    *RunJiraComment    `json:"comment,omitempty"`
+	Transition *RunJiraTransition `json:"transition,omitempty"`
+}
+
+// RunJiraComment is the record of the comment: State is JiraCommentIntent until Jira answered,
+// and ID, the id Jira gave it, goes with JiraCommentDone only.
+type RunJiraComment struct {
+	State string `json:"state"`
+	ID    string `json:"id,omitempty"`
+}
+
+// RunJiraTransition is the record of the transition: Name is the configured name, State what came
+// of it.
+type RunJiraTransition struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json,
+// against the options the run started with.
+func (j RunJiraWrite) Validate(opts JiraWriteOptions) error {
+	if j.Comment == nil && j.Transition == nil {
+		return fmt.Errorf("a record needs a comment or a transition")
+	}
+	if c := j.Comment; c != nil {
+		switch {
+		case !opts.Comment:
+			return fmt.Errorf("comment recorded, but options.jira_write.comment is off")
+		case c.State != JiraCommentIntent && c.State != JiraCommentDone && c.State != JiraCommentFailed:
+			return fmt.Errorf("comment.state %q is not intent, done or failed", c.State)
+		case (c.State == JiraCommentDone) != (c.ID != ""):
+			return fmt.Errorf("comment.id goes with state done only")
+		case len(c.ID) > 20 || strings.Trim(c.ID, "0123456789") != "":
+			return fmt.Errorf("comment.id %q is not a number", c.ID)
+		}
+	}
+	if t := j.Transition; t != nil {
+		switch {
+		case opts.Transition == "":
+			return fmt.Errorf("transition recorded, but options.jira_write.transition is empty")
+		case t.Name != opts.Transition:
+			return fmt.Errorf("transition.name is %q, but options.jira_write.transition is %q", t.Name, opts.Transition)
+		}
+		switch t.State {
+		case JiraTransitionDone, JiraTransitionMissing, JiraTransitionFailed, JiraTransitionUnchanged:
+		default:
+			return fmt.Errorf("transition.state %q is not done, missing, failed or unchanged", t.State)
+		}
+	}
+	return nil
 }
 
 // Values of RunMR.State.
@@ -390,6 +495,9 @@ type RunOptions struct {
 	// PathRules is a copy of policy.paths (specs/governance/SPEC.md §4.4). Nil, never empty,
 	// when there are none, so a run without rules writes no options.
 	PathRules []PathRule `json:"path_rules,omitempty"`
+	// JiraWrite is a copy of jira.write (specs/delivery/SPEC.md §10): what the run writes to its
+	// task's Jira issue after a merge request. A resume reads it instead of the config.
+	JiraWrite JiraWriteOptions `json:"jira_write,omitzero"`
 }
 
 // IsolationMode is the run's isolation, inplace when none was recorded.

@@ -70,6 +70,9 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("options.path_rules[%d]: %w", i, err)
 		}
 	}
+	if err := run.Options.JiraWrite.Validate(); err != nil {
+		return fmt.Errorf("options.jira_write: %w", err)
+	}
 
 	for i, exec := range run.Executions {
 		if err := validateExecution(exec, i); err != nil {
@@ -123,6 +126,9 @@ func validateRun(run *domain.Run, runID string) error {
 		}
 	}
 	if err := validateMR(run); err != nil {
+		return err
+	}
+	if err := validateJiraWrite(run); err != nil {
 		return err
 	}
 	for i, r := range run.Resumes {

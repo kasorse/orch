@@ -55,9 +55,10 @@ func skipDelivery(s *session) error {
 // no stops there. It is called from the operator's repository, the branch being shared with the
 // worktree: only after that repository's git fingerprint matched the one taken when the
 // worktree was created, and the remote showed no branch of that name. The push is never
-// repeated: run.json: mr says intent before it. Nothing here changes the run's status; what did
-// not happen is recorded in run.mr and returned as a NeedsPersonError (exit code 6), unless a
-// person said no.
+// repeated: run.json: mr says intent before it. Once the merge request is created the task's
+// Jira issue gets a comment and a transition (writeJira, specs/delivery/SPEC.md §10), and only
+// then. Nothing here changes the run's status; what did not happen is recorded in run.mr and
+// returned as a NeedsPersonError (exit code 6), unless a person said no.
 func deliver(ctx context.Context, s *session, sha string) error {
 	run, w := s.run, s.worktree
 	remote := s.cfg.Delivery.RemoteName()
@@ -132,6 +133,7 @@ func deliver(ctx context.Context, s *session, sha string) error {
 		mr.State, mr.IID, mr.URL = domain.MRCreated, iid, found
 		recordMR(s, mr)
 		s.reporter.MergeRequest(iid, found)
+		writeJira(ctx, s, sha)
 		return nil
 	}
 	mr.Error = "the remote reported no merge request"

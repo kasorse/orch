@@ -93,6 +93,29 @@ func (c *JiraCreateConfig) UnmarshalYAML(unmarshal func(interface{}) error) erro
 	return nil
 }
 
+// maxJiraTransition bounds jira.write.transition, the length of a Jira status or transition name.
+const maxJiraTransition = 255
+
+// JiraWriteConfig is jira.write (specs/delivery/SPEC.md §10): what a run writes to the task's
+// Jira issue once its push opened a merge request.
+type JiraWriteConfig struct {
+	// Comment posts the merge request as a comment on the issue.
+	Comment bool `yaml:"comment"`
+	// Transition is the name of a transition, or of the status it leads to, to move the issue
+	// by; empty moves nothing.
+	Transition string `yaml:"transition"`
+}
+
+// Enabled reports whether anything is to be written.
+func (w *JiraWriteConfig) Enabled() bool {
+	return w != nil && (w.Comment || strings.TrimSpace(w.Transition) != "")
+}
+
+// JiraWrites reports whether the configuration writes to Jira after a merge request.
+func (c Config) JiraWrites() bool {
+	return c.Jira != nil && c.Jira.Write.Enabled()
+}
+
 // JiraConfig describes the Jira instance run --jira reads one issue from. The credentials
 // themselves are never part of it: EmailEnv and TokenEnv only name environment variables.
 type JiraConfig struct {
@@ -111,6 +134,9 @@ type JiraConfig struct {
 	// Create is how story run creates the child issues of a story (specs/story/SPEC.md §12);
 	// nil means it creates nothing in Jira.
 	Create *JiraCreateConfig
+	// Write is what a run writes to its task's issue after a merge request (specs/delivery/SPEC.md
+	// §10); nil means it writes nothing.
+	Write *JiraWriteConfig
 
 	// literalSecrets lists the jiraSecretKeys the YAML set, without their values, which
 	// validateJira rejects (as JevConfig.apiKeyLiteralSet does for decision.jev.api_key).
@@ -132,6 +158,7 @@ func (j *JiraConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Fields     []JiraField `yaml:"fields"`
 
 		Create *JiraCreateConfig `yaml:"create"`
+		Write  *JiraWriteConfig  `yaml:"write"`
 
 		// The jiraSecretKeys, declared only so a strict decode (Load) accepts them and
 		// validateJira can reject them with its own message; their values are discarded.
@@ -182,6 +209,7 @@ func (j *JiraConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		Timeout:  timeout, MaxRetries: maxRetries, MaxBytes: maxBytes,
 		Fields:         raw.Fields,
 		Create:         raw.Create,
+		Write:          raw.Write,
 		literalSecrets: literal,
 	}
 	return nil
@@ -236,7 +264,25 @@ func validateJira(j JiraConfig) []string {
 	if j.Create != nil {
 		problems = append(problems, jiraCreateProblems(*j.Create)...)
 	}
+	if j.Write != nil {
+		problems = append(problems, jiraWriteProblems(*j.Write)...)
+	}
 	return problems
+}
+
+// jiraWriteProblems checks jira.write (specs/delivery/SPEC.md §10): a transition is a name on one
+// line, as Jira writes it.
+func jiraWriteProblems(w JiraWriteConfig) []string {
+	t := w.Transition
+	switch {
+	case t != strings.TrimSpace(t):
+		return []string{fmt.Sprintf("jira.write.transition %q must not start or end with whitespace", t)}
+	case len(t) > maxJiraTransition:
+		return []string{fmt.Sprintf("jira.write.transition is longer than %d bytes", maxJiraTransition)}
+	case strings.ContainsFunc(t, func(r rune) bool { return r < ' ' || r == 0x7f }):
+		return []string{"jira.write.transition must be a single line without control characters"}
+	}
+	return nil
 }
 
 // jiraCreateProblems checks jira.create (specs/story/SPEC.md §5). The block lives inside jira,
@@ -329,6 +375,13 @@ func jiraFieldProblems(fields []JiraField) []string {
 		labels[label] = true
 	}
 	return problems
+}
+
+// CredentialProblems reports which of the variables the credentials come from are unset or
+// blank, naming the variables and never their values. A resume of a run with options.jira_write
+// asks it before the write-back, which it does not check in the fail-fast chain.
+func (j *JiraConfig) CredentialProblems() []string {
+	return jiraCredentialProblems(j, nil)
 }
 
 // jiraCredentialProblems reports what would stop run --jira from authenticating: a missing

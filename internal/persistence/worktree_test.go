@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"orchestrator/internal/domain"
 )
@@ -108,6 +109,79 @@ func TestValidateMR(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: validateRun() = %v, want an error naming %q", c.name, err, c.want)
 		}
+	}
+}
+
+// run.jira_write and options.jira_write (specs/delivery/SPEC.md §13): the record is checked
+// against the options, and it needs a merge request this run created for a task with a key.
+func TestValidateJiraWrite(t *testing.T) {
+	created := func(r *domain.Run) {
+		r.Commit = strings.Repeat("cd", 20)
+		r.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: r.Worktree.Branch, Target: "master", IID: 7,
+			URL: "https://gitlab.example.com/g/p/-/merge_requests/7"}
+		r.Task.Source = &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "PAY-12", URL: "https://jira.example.com/browse/PAY-12",
+			FetchedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
+		r.Options.JiraWrite = domain.JiraWriteOptions{Comment: true, Transition: "In Review"}
+	}
+	written := func(r *domain.Run) {
+		created(r)
+		r.JiraWrite = &domain.RunJiraWrite{
+			Comment:    &domain.RunJiraComment{State: domain.JiraCommentDone, ID: "10042"},
+			Transition: &domain.RunJiraTransition{Name: "In Review", State: domain.JiraTransitionDone},
+		}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*domain.Run)
+		want   string // "" = valid
+	}{
+		{"nothing written", created, ""},
+		{"written", written, ""},
+		{"options only", func(r *domain.Run) { r.Options.JiraWrite = domain.JiraWriteOptions{Comment: true} }, ""},
+		{"a transition with a line feed", func(r *domain.Run) { r.Options.JiraWrite.Transition = "a\nb" }, "options.jira_write"},
+		{"a record for another transition", func(r *domain.Run) { written(r); r.JiraWrite.Transition.Name = "Done" }, "jira_write: transition.name"},
+		{"without a merge request", func(r *domain.Run) { written(r); r.MR.State = domain.MRPushed; r.MR.IID, r.MR.URL = 0, "" }, "did not create a merge request"},
+		{"without an mr record", func(r *domain.Run) { written(r); r.MR = nil }, "did not create a merge request"},
+		{"without a key", func(r *domain.Run) { written(r); r.Task.Source = nil }, "without a Jira key"},
+	}
+	for _, c := range cases {
+		err := validateRun(wtRun(c.mutate), wtRunID)
+		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: validateRun() = %v, want nil", c.name, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: validateRun() = %v, want an error naming %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestDecodeRun_JiraWriteRoundTrip(t *testing.T) {
+	run := wtRun(func(r *domain.Run) {
+		r.Commit = strings.Repeat("cd", 20)
+		r.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: r.Worktree.Branch, Target: "master", IID: 7,
+			URL: "https://gitlab.example.com/g/p/-/merge_requests/7"}
+		r.Task.Source = &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "PAY-12", URL: "https://jira.example.com/browse/PAY-12",
+			FetchedAt: time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)}
+		r.Options.JiraWrite = domain.JiraWriteOptions{Comment: true}
+		r.JiraWrite = &domain.RunJiraWrite{Comment: &domain.RunJiraComment{State: domain.JiraCommentIntent}}
+	})
+	data, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := decodeRun(data, wtRunID)
+	if err != nil || !reflect.DeepEqual(got.JiraWrite, run.JiraWrite) || got.Options.JiraWrite != run.Options.JiraWrite {
+		t.Fatalf("round trip: %+v / %+v, %v; want %+v / %+v", got.JiraWrite, got.Options.JiraWrite, err, run.JiraWrite, run.Options.JiraWrite)
+	}
+	bad := strings.Replace(string(data), `"state":"intent"`, `"state":"intent","extra":1`, 1)
+	if _, err := decodeRun([]byte(bad), wtRunID); err == nil {
+		t.Error("an unknown jira_write field was accepted")
+	}
+	if old, _ := json.Marshal(wtRun(nil)); strings.Contains(string(old), "jira_write") {
+		t.Errorf("a run that wrote nothing writes %s", old)
 	}
 }
 

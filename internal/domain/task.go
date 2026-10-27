@@ -58,6 +58,19 @@ type TaskSource struct {
 	BaseBranch string `json:"base_branch,omitempty"`
 }
 
+// JiraKey is the key of the Jira issue the task stands for: the issue a run --jira task was
+// rendered from, or a story task's child issue. It is empty for a typed task, for a story task
+// without an issue and for a nil source.
+func (s *TaskSource) JiraKey() string {
+	switch {
+	case s == nil:
+		return ""
+	case s.Kind == TaskSourceStory:
+		return s.Jira
+	}
+	return s.Key
+}
+
 // StoryRef is <story>/<task>, how a story task is named in a commit trailer and on screen.
 func (s TaskSource) StoryRef() string { return s.Story + "/" + s.Task }
 

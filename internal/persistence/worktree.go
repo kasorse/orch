@@ -106,6 +106,26 @@ func validateMR(run *domain.Run) error {
 	return nil
 }
 
+// validateJiraWrite checks run.jira_write (specs/delivery/SPEC.md §13): its own rules against the
+// options the run started with, and that it follows a merge request this run's push created, for
+// a task that has a Jira key.
+func validateJiraWrite(run *domain.Run) error {
+	j := run.JiraWrite
+	if j == nil {
+		return nil
+	}
+	if err := j.Validate(run.Options.JiraWrite); err != nil {
+		return fmt.Errorf("jira_write: %w", err)
+	}
+	if run.MR == nil || run.MR.State != domain.MRCreated {
+		return fmt.Errorf("jira_write recorded on a run whose push did not create a merge request")
+	}
+	if run.Task.Source.JiraKey() == "" {
+		return fmt.Errorf("jira_write recorded on a task without a Jira key")
+	}
+	return nil
+}
+
 // validBranchName refuses what git would not accept as a branch name, and what could be read as
 // an option or a revision expression.
 func validBranchName(name string) bool {
