@@ -256,6 +256,9 @@ type Run struct {
 	// the merge request that push opened (specs/delivery/SPEC.md §7, §13). Nil until the chain
 	// ran; a record, never read back to decide anything.
 	MR *RunMR `json:"mr,omitempty"`
+	// BranchNaming is how the worktree's branch was named (specs/delivery/SPEC.md §4.3); nil for an
+	// inplace run, a story task and a run written before the field.
+	BranchNaming *BranchNaming `json:"branch_naming,omitempty"`
 }
 
 // Values of RunMR.State.
@@ -354,11 +357,16 @@ const (
 func WorktreeBranch(runID string) string { return worktreeBranchBase + runID }
 
 // RunWorktreeBranch is the branch run's worktree must be on: the branch a story task was given
-// (specs/story/SPEC.md §11.1), else orchestrator/<run-id>. Loading checks that a story task's
-// branch has the story pattern and names its story and task.
+// (specs/story/SPEC.md §11.1); for any other run the one worktree.branch records, which is named
+// when the worktree is created (specs/delivery/SPEC.md §4.3), and orchestrator/<run-id> until
+// there is one. Loading checks that a story task's branch has the story pattern and names its
+// story and task, and any other run's branch passes ValidBranchName.
 func RunWorktreeBranch(run *Run) string {
 	if src := run.Task.Source; src != nil && src.Kind == TaskSourceStory {
 		return src.Branch
+	}
+	if w := run.Worktree; w != nil && w.Branch != "" {
+		return w.Branch
 	}
 	return WorktreeBranch(run.ID)
 }

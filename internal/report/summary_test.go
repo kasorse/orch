@@ -282,3 +282,23 @@ func TestRunSummary_MergeRequest(t *testing.T) {
 		}
 	}
 }
+
+// The Worktree row says where a branch name that is not the default came from.
+func TestRunSummary_WorktreeBranchSource(t *testing.T) {
+	for _, tc := range []struct {
+		source, want string
+	}{
+		{domain.BranchSourceDefault, "| Worktree | feature/x from 8d0e4b2 |\n"},
+		{domain.BranchSourceTemplate, "| Worktree | feature/x from 8d0e4b2; branch named by worktree.branch.template |\n"},
+		{domain.BranchSourceInstructions, "| Worktree | feature/x from 8d0e4b2; branch named by the repository's instructions |\n"},
+	} {
+		run := summaryRun()
+		run.Commit = ""
+		run.Worktree = &domain.RunWorktree{Path: "/state/wt/r1", Branch: "feature/x",
+			BaseRef: "8d0e4b2a1b2c3d4e5f60718293a4b5c6d7e8f901", Removed: true}
+		run.BranchNaming = &domain.BranchNaming{Source: tc.source, Proposed: "feature/x"}
+		if got := RunSummary(run, nil); !strings.Contains(got, tc.want) {
+			t.Errorf("source %s: summary lacks %q\n%s", tc.source, tc.want, got)
+		}
+	}
+}

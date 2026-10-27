@@ -214,6 +214,16 @@ func worktreeLine(run domain.Run, w domain.RunWorktree) string {
 		base = w.BaseBranch + "@" + base
 	}
 	parts := []string{w.Branch + " from " + base}
+	// orchestrator/<run-id> needs no explanation; any other name says where it came from
+	// (specs/delivery/SPEC.md §4.3).
+	if bn := run.BranchNaming; bn != nil {
+		switch bn.Source {
+		case domain.BranchSourceInstructions:
+			parts = append(parts, "branch named by the repository's instructions")
+		case domain.BranchSourceTemplate:
+			parts = append(parts, "branch named by worktree.branch.template")
+		}
+	}
 	if run.Commit != "" {
 		parts = append(parts, "commit "+shortCommit(run.Commit))
 	}

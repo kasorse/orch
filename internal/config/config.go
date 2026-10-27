@@ -500,7 +500,47 @@ type WorktreeConfig struct {
 	// like test.command. It runs in every worktree run, which is the default for a workflow
 	// with implement; a config error with execution.isolation: inplace written out.
 	Setup string `yaml:"setup"`
+	// Branch names the run's branch when the worktree is created (specs/delivery/SPEC.md §4.3).
+	Branch BranchConfig `yaml:"branch"`
 }
+
+// BranchConfig is worktree.branch: the repository's instructions are asked first, then Template
+// is rendered, then the branch is orchestrator/<run-id>.
+type BranchConfig struct {
+	// Template is rendered by Go from {id}, {key}, {slug} and {date}; empty means none.
+	Template string `yaml:"template"`
+	// FromInstructions, when set, lets a tool-less call read the repository's instruction files
+	// for a rule about branch names; nil means the instructions are not read.
+	FromInstructions *BranchInstructionsConfig `yaml:"from_instructions"`
+}
+
+// BranchInstructionsConfig is worktree.branch.from_instructions: the route of the one call.
+// Like TranslationConfig, the timeout is required and positive.
+type BranchInstructionsConfig struct {
+	ProviderModel
+	Timeout time.Duration
+}
+
+func (b *BranchInstructionsConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		Provider string `yaml:"provider"`
+		Model    string `yaml:"model"`
+		Timeout  string `yaml:"timeout"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	d, err := parseDurationField("worktree.branch.from_instructions.timeout", raw.Timeout)
+	if err != nil {
+		return err
+	}
+	*b = BranchInstructionsConfig{ProviderModel: ProviderModel{Provider: raw.Provider, Model: raw.Model}, Timeout: d}
+	return nil
+}
+
+// branchFromInstructionsKey is the config key of the branch-name call, how its route is named in
+// the dependency, authority and allowed-model checks.
+const branchFromInstructionsKey = "worktree.branch.from_instructions"
 
 // WorktreeRun reports whether a run of wf happens in its own git worktree: isolation is
 // worktree and the workflow contains implement. A workflow without implement runs in place

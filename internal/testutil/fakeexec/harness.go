@@ -149,6 +149,7 @@ for arg in "$prompt" "$@"; do
     "ACTION: decide-classify"*) action="decide-classify" ;;
     "ACTION: decide-clarity"*)  action="decide-clarity" ;;
     "ACTION: clarify"*)         action="clarify" ;;
+    "ACTION: branch-name"*)     action="branch-name" ;;
     "ACTION: research"*)        action="research" ;;
     "ACTION: investigate"*)     action="investigate" ;;
     "ACTION: implement"*)       action="implement" ;;

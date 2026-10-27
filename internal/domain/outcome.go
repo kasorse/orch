@@ -108,6 +108,17 @@ func ComputeOutcome(run Run, trace *DecisionTrace) Outcome {
 		out.ActiveMS += ExecutionMS(exec)
 		out.VerifyCalls += len(exec.VerifyCalls)
 	}
+	// The branch-name call is spent before the workflow runs, like a decision call
+	// (specs/delivery/SPEC.md §4.3).
+	if bn := run.BranchNaming; bn != nil && bn.Usage != nil {
+		out.Usage.Usage.Add(*bn.Usage)
+		out.Usage.Calls++
+		if bn.Usage.Partial {
+			out.Usage.PartialCalls++
+		}
+		out.DecisionOverhead.CostUSD += bn.Usage.CostUSD
+		out.DecisionOverhead.Calls++
+	}
 	out.DurationMS = executionsDurationMS(run.Executions)
 	out.ApprovalRequired = len(ManualApprovalMatches(LastImplementPathRules(run))) > 0
 

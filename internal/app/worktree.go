@@ -59,8 +59,9 @@ func enterWorktree(ctx context.Context, s *session) error {
 }
 
 // openWorktree creates the run's worktree from the operator's repository s.repo
-// (specs/worktree/SPEC.md §7, §8): on the branch orchestrator/<run-id>, at the derived path,
-// from the commit HEAD names. A story task (specs/story/SPEC.md §11) is created on the branch
+// (specs/worktree/SPEC.md §7, §8): on the branch nameBranch chose (the repository's instructions,
+// worktree.branch.template, else orchestrator/<run-id>), at the derived path, from the commit HEAD
+// names. A story task (specs/story/SPEC.md §11) is created on the branch
 // and from the commit its task input gave, which run.json records in task.source, with the
 // input's base branch for the conflict check; the operator's HEAD and branch play no part.
 // run.json: worktree is saved as soon as git created it, so a failure after that never leaves a
@@ -97,7 +98,22 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return nil, &apperr.ConfigError{Msg: "cannot place the run's worktree", Err: err}
 	}
 	path := persistence.WorktreePath(state, common, run.ID)
-	branch := domain.RunWorktreeBranch(run)
+	// A story task's branch is the one its task input gave. Any other run's is named now, once,
+	// and never changes (specs/delivery/SPEC.md §4.3); the record is saved with the worktree's.
+	var branch string
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		branch = src.Branch
+	} else {
+		var naming *domain.BranchNaming
+		branch, naming, err = nameBranch(ctx, s, branchInput{
+			Key: runJiraKey(run), Task: action.BranchTaskLine(run.Task.Description), Fallback: domain.WorktreeBranch(run.ID),
+			BaseRef: base, BaseBranch: baseBranch,
+		})
+		if err != nil {
+			return nil, err
+		}
+		run.BranchNaming = naming
+	}
 
 	// Neither is ever reused: an existing one belongs to something else.
 	if exists, err := repo.BranchExists(ctx, branch); err != nil {
@@ -228,8 +244,15 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.path is %s, but this repository's worktree for the run is %s "+
 			"(resumed from another repository, or with another $XDG_STATE_HOME?)", w.Path, want), nil)
 	}
-	if branch := domain.RunWorktreeBranch(run); w.Branch != branch {
-		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q, want %q", w.Branch, branch), nil)
+	// A story task's branch is the one its task input gave; any other run's was named when the
+	// worktree was created, so it is checked against the rules, and below against what git lists
+	// on the derived path: a branch edited to another worktree's is not the one on that path.
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		if w.Branch != src.Branch {
+			return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch is %q, want %q", w.Branch, src.Branch), nil)
+		}
+	} else if err := domain.CheckBranchName(w.Branch); err != nil {
+		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.branch %q: %v", w.Branch, err), nil)
 	}
 
 	info, err := os.Lstat(w.Path)

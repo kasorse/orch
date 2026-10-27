@@ -4,8 +4,9 @@
 // objects, through a throwaway index; the tree and the index are untouched. The one ref it
 // writes is a run's own refs/orchestrator/runs/<id>, by PinRestorePoint. CommitAll, the
 // one exception, stages and commits a finished run's changes on the operator's explicit
-// approval.) The orchestrator also writes a run's own linked worktree and its branch
-// orchestrator/<run-id> (AddWorktree, RemoveWorktree); never the operator's tree, index or branch.
+// approval.) The orchestrator also writes a run's own linked worktree and its branch, named when
+// the worktree is created, orchestrator/<run-id> by default (AddWorktree, RemoveWorktree); never
+// the operator's tree, index or branch.
 package repository
 
 import (

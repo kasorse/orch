@@ -47,7 +47,38 @@ func TestValidateWorktree(t *testing.T) {
 		{"unknown isolation", func(r *domain.Run) { r.Options.Isolation = "chroot" }, "options.isolation"},
 		{"inplace run with worktree", func(r *domain.Run) { r.Options.Isolation = domain.IsolationInplace }, "worktree"},
 		{"legacy run with worktree", func(r *domain.Run) { r.Options.Isolation = "" }, "worktree"},
-		{"foreign branch", func(r *domain.Run) { r.Worktree.Branch = "orchestrator/other" }, "worktree.branch"},
+		{"another run's default branch is a valid name", func(r *domain.Run) { r.Worktree.Branch = "orchestrator/other" }, ""},
+		{"a templated branch", func(r *domain.Run) {
+			r.Worktree.Branch = "feature/PAY-12-use-plus-in-add"
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceTemplate}
+		}, ""},
+		{"a branch from the instructions", func(r *domain.Run) {
+			r.Worktree.Branch = "feat/PAY-12"
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceInstructions, Proposed: "feat/PAY-12"}
+		}, ""},
+		{"branch under story/", func(r *domain.Run) { r.Worktree.Branch = "story/refunds/RF02" }, "worktree.branch"},
+		{"branch that is an option", func(r *domain.Run) { r.Worktree.Branch = "-x" }, "worktree.branch"},
+		{"branch with a space", func(r *domain.Run) { r.Worktree.Branch = "feature/a b" }, "worktree.branch"},
+		{"empty branch", func(r *domain.Run) { r.Worktree.Branch = "" }, "worktree.branch"},
+		{"default naming on another branch", func(r *domain.Run) {
+			r.Worktree.Branch = "feature/x"
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault}
+		}, "branch_naming.source is default"},
+		{"instructions naming on another branch", func(r *domain.Run) {
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceInstructions, Proposed: "feat/x"}
+		}, "branch_naming.source is instructions"},
+		{"unknown naming source", func(r *domain.Run) { r.BranchNaming = &domain.BranchNaming{Source: "model"} }, "branch_naming"},
+		{"naming without a worktree", func(r *domain.Run) {
+			r.Worktree = nil
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault, Rejected: "the name is empty"}
+		}, ""},
+		{"naming on an inplace run", func(r *domain.Run) {
+			r.Worktree, r.Options.Isolation = nil, domain.IsolationInplace
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault}
+		}, "branch_naming"},
+		{"multi-line rejection", func(r *domain.Run) {
+			r.BranchNaming = &domain.BranchNaming{Source: domain.BranchSourceDefault, Rejected: "a\nb"}
+		}, "branch_naming"},
 		{"short base_ref", func(r *domain.Run) { r.Worktree.BaseRef = "abc123" }, "worktree.base_ref"},
 		{"base_ref upper case", func(r *domain.Run) { r.Worktree.BaseRef = strings.Repeat("AB", 20) }, "worktree.base_ref"},
 		{"bad base_branch", func(r *domain.Run) { r.Worktree.BaseBranch = "-x" }, "worktree.base_branch"},
