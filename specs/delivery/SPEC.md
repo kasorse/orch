@@ -592,7 +592,7 @@ never the pretty one); stdout gets exactly one line when the process exits:
   with a clear message; `examples/ci/README.md` names the runner settings that allow it. The
   example never sets `test.sandbox: none`.
 - In CI only `--claude-auth api` (`ANTHROPIC_API_KEY`, §46; TODO P6).
-- `examples/ci/.gitlab-ci.yml`:
+- `examples/ci/gitlab-ci.yml` (no leading dot: `.gitlab-ci.yml` is a protected path at any depth, and an example is copied to the root as `.gitlab-ci.yml` anyway):
   - `ai-implement`: manual, or a pipeline variable `JIRA_KEY` →
     `orchestrator run --jira "$JIRA_KEY" --mode auto --output json > result.json` (a worktree
     run by default: it pushes and opens the MR, §7); `result.json` and the run directory as
@@ -701,8 +701,9 @@ repository whose `origin` is that project, pushable with the operator's credenti
    an MR with the commit header as title and `report.md` as a multi-line description (the
    `\n` decoded, not shown literally), `run.json: mr.state: created`, exit 0, the worktree
    removed.
-2. The same task with a test that cannot pass → no commit, no push, `mr.skipped`, exit 6, the
-   worktree kept.
+2. The same task with a test that cannot pass → the fix loop runs out and the run fails (exit
+   4): no commit, no push, the worktree kept. (A failed run never reaches the chain of §7, so it
+   has no `mr` record; exit 6 is a completed run that §42.6 does not commit, scenario 65.)
 3. Without `--mode auto`: `y` to the commit, `y` to the push, `n` to the MR → the branch on the
    remote, no MR, `mr.state: pushed`, exit 0.
 4. A two-task story in that repository, with `worktree.branch.template` set → two MRs on

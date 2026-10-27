@@ -46,3 +46,10 @@ worktree, as an ordinary run (`SPEC.md` §12.1–§12.3).
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `2a31b662-c25e-4c80-add6-e6572cc2cc2a` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/delivery/DL08` on `story/delivery/DL02` @ 4cccd0e, commit 0bb512c.
+Cost $6.29. Implementation summary: Add orchestrator review --base/--head over a detached worktree.
+Conflicts with spec/delivery: none.

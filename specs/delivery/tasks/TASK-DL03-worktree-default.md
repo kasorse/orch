@@ -46,3 +46,10 @@ worktree run is refused before the worktree when it could not deliver (`SPEC.md`
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `848d8366-2a58-4ff1-aeca-9b18f01e873c` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/delivery/DL03` on `spec/delivery` @ 6d3f006, commit 51c64b4.
+Cost $3.17. Implementation summary: Default to worktree runs and refuse undeliverable ones before any call.
+Conflicts with spec/delivery: none.

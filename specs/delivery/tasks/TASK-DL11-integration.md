@@ -42,3 +42,20 @@ endpoints.
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `d5d4c334-c788-488b-b775-e0ad307555a1` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/delivery/DL11` on `story/delivery/spec (DL05 + DL06 + DL07 + DL08)` @ 304f1d6, commit 5af7646.
+Cost $3.80. Implementation summary: Add delivery integration scenarios 64-77 with fake GitLab and Jira.
+Conflicts with spec/delivery: none.
+
+Built differently from the plan: scenario 65 ("auto, review fails: no commit, no push,
+`mr.skipped`, exit 6, worktree kept") cannot happen as written. With `implement` in the workflow
+a failing review goes back to implement, so a review that keeps failing ends the run stopped or
+failed, never completed, and only a completed run reaches the delivery chain (SPEC §7.4).
+`TestDelivery65_AutoDeliversNothingWithoutACommit` covers it in two parts: a review that keeps
+failing (the run is not completed, nothing committed or pushed, the worktree kept, no `mr`
+state) and a completed run that §42.6 does not commit, here with no `summary_short` (`mr.skipped`,
+`No push and no merge request:`, exit 6, the worktree kept). The table row above is frozen and
+left as dispatched; SPEC §15's live scenario 2 had the same mistake and is corrected there.

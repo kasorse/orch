@@ -41,3 +41,10 @@ MVP.md becomes the normative home; CLAUDE.md, README, the example config and TOD
 Do not edit anything under `specs/delivery/` (story run writes its README, the `Status:` line and
 As built, the README's ticks); the TODO.md ticking above is this task's own. This is the one task of the story that
 edits the shared documents.
+
+## As built (2026-10-27)
+
+Run `95071ad2-db7a-4bdc-bb85-7bac290bb9b6` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/delivery/DL12` on `story/delivery/spec (DL10 + DL11)` @ ee8486d, commit 9a91bab.
+Cost $1.36. Implementation summary: Document delivery: MVP.md §50, CLAUDE.md, README, example config, TODO.
+Conflicts with spec/delivery: none.

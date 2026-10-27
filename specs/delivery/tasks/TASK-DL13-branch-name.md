@@ -59,3 +59,10 @@ instructions (a tool-less call), else from `worktree.branch.template`, else
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `e3d68117-8feb-4255-b280-a6ef345a688c` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/delivery/DL13` on `spec/delivery` @ 6d3f006, commit 91c7bf8.
+Cost $5.28. Implementation summary: Name the worktree branch from instructions, template or default.
+Conflicts with spec/delivery: none.

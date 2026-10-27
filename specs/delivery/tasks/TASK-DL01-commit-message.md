@@ -42,3 +42,10 @@ The commit header gets the model's `commit_type` from a closed list, and the bod
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `8ccfefc3-a789-4ca7-bd0d-dd1d4efc23d1` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/delivery/DL01` on `spec/delivery` @ 6d3f006, commit 8d1ffc9.
+Cost $0.72. Implementation summary: Add commit_type to commit header and Orchestrator-Decision trailer.
+Conflicts with spec/delivery: none.

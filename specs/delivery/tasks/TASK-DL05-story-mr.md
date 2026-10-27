@@ -70,3 +70,10 @@ dependency's branch (`SPEC.md` §9, §9.1).
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12. The live check is the operator's gate: say in
 the summary that it was left to the operator, and do not claim it was done.
+
+## As built (2026-10-27)
+
+Run `da6fbee6-6384-4f80-89a2-e89f4788755f` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/delivery/DL05` on `story/delivery/spec (DL04 + DL13)` @ edaebab, commit 43c0edc.
+Cost $6.76. Implementation summary: Open one MR per story task on rule-named, stacked branches.
+Conflicts with spec/delivery: none.

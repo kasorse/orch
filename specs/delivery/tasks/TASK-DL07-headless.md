@@ -38,3 +38,10 @@ documented exit code table (`SPEC.md` §11.1–§11.3).
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `d0dd6977-8fdb-4d02-94fd-b7f0acebbb28` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/delivery/DL07` on `story/delivery/DL04` @ 1c43c51, commit 58378cd.
+Cost $3.46. Implementation summary: Test --output json end to end on both streams.
+Conflicts with spec/delivery: none.

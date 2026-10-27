@@ -41,3 +41,10 @@ After an MR, comment on the task's Jira issue and move it by a configured transi
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `e1019df3-352a-4d9b-8846-3881155de981` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/delivery/DL06` on `story/delivery/DL04` @ 1c43c51, commit 0ecc6b6.
+Cost $4.78. Implementation summary: Comment on and transition the Jira issue after a merge request.
+Conflicts with spec/delivery: none.

@@ -62,3 +62,10 @@ push; `--mode auto` without questions, every other mode with a question before e
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12. The live check is the operator's gate: say in
 the summary that it was left to the operator, and do not claim it was done.
+
+## As built (2026-10-27)
+
+Run `139f06cf-d12d-4fcf-9bde-6048e26682d1` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/delivery/DL04` on `story/delivery/spec (DL01 + DL02 + DL03)` @ c4e9802, commit 1c43c51.
+Cost $2.15. Implementation summary: Commit, push and open a merge request at the end of a worktree run.
+Conflicts with spec/delivery: none.

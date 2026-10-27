@@ -47,3 +47,10 @@ A reviewer-facing `report.md` next to `summary.md` at every terminal status, ren
 
 Do not edit anything under `specs/delivery/` (story run writes its README and As built). Leave
 MVP.md, CLAUDE.md, TODO.md and README.md to DL12.
+
+## As built (2026-10-27)
+
+Run `f1af5a00-311e-480b-9a66-af3737fea0d7` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/delivery/DL02` on `spec/delivery` @ 6d3f006, commit 4cccd0e.
+Cost $2.51. Implementation summary: Add reviewer-facing report.md with escaped text and run_files.
+Conflicts with spec/delivery: none.
