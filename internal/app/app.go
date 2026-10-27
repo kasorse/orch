@@ -1573,6 +1573,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if outcomeErr != nil {
 		return outcomeErr
 	}
+	if _, err := os.Stat(store.ReportPath(run.ID)); err == nil {
+		s.reporter.ReportWritten(store.ReportPath(run.ID))
+	}
 	if answer := s.dispatcher.FinalAnswer(run); answer != "" {
 		s.reporter.Answer(answer)
 	}
@@ -1914,13 +1917,18 @@ func writeOutcomeWith(store *persistence.Store, run *domain.Run, trace *domain.D
 	// summary.md is for a reader and never read back; a run that ended is not failed
 	// over it.
 	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	// report.md is for the reviewer and treated the same way.
+	_ = store.SaveReport(run.ID, report.RunReport(*run, trace))
 	return nil
 }
 
-// saveSummary renders summary.md again for a run whose record changed after writeOutcome,
-// such as a worktree run's commit and removal. Like writeOutcome, it never fails the run.
+// saveSummary renders summary.md and report.md again for a run whose record changed after
+// writeOutcome, such as a worktree run's commit and removal. Like writeOutcome, it never
+// fails the run.
 func saveSummary(store *persistence.Store, run *domain.Run) {
-	_ = store.SaveSummary(run.ID, report.RunSummary(*run, loadTrace(store, run.ID)))
+	trace := loadTrace(store, run.ID)
+	_ = store.SaveSummary(run.ID, report.RunSummary(*run, trace))
+	_ = store.SaveReport(run.ID, report.RunReport(*run, trace))
 }
 
 // loadTrace is the run's decision.json, or nil when there is none or the strict loader
