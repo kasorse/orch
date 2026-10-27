@@ -126,15 +126,17 @@ func addMCPServers(servers map[string]json.RawMessage, cfg string) error {
 
 // withExtensionsHint tells the model which extra tools this step has, so it reaches for them
 // instead of defaulting to grep. It goes right after the "ACTION: <name>" first line: at the
-// end of a long prompt (a review diff) models ignored it. prompt is unchanged without tools.
+// end of a long prompt (a review diff) models ignored it, and a "start with them" in the
+// middle of it was ignored too (bench pilot E, 2026-10-26: no call in three sessions), so it
+// names the first tool call. prompt is unchanged without tools.
 func withExtensionsHint(prompt string, ext provider.Extensions) string {
 	if len(ext.MCPTools) == 0 {
 		return prompt
 	}
 	hint := "Extra tools are available in this step: " + strings.Join(ext.MCPTools, ", ") + ". " +
-		"Start with them: before searching with Grep or Glob, ask them about the code this step concerns " +
-		"(for example a knowledge graph for structure, callers and relationships), then read the files they point to. " +
-		"Use Grep and Glob for what they do not answer."
+		"Your first tool call must be one of them: ask about the functions, types and files the task names " +
+		"(for example a knowledge graph for structure, callers and relationships), then read the files the answer points to. " +
+		"Do not start with Grep or Glob; use them only for what these tools do not answer."
 	first, rest, _ := strings.Cut(prompt, "\n")
 	return first + "\n\n" + hint + "\n" + rest
 }

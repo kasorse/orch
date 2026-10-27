@@ -31,6 +31,22 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}" \
  && claude --version | grep -E '^2\.1\.(28[3-9]|29[0-9]|[3-9][0-9]{2}|[0-9]{4,})([^0-9.]|$)'
 ENV DISABLE_AUTOUPDATER=1
 
+# graphify for config E, pinned: its setup builds the code graph (`graphify update .`, AST only,
+# no network) and its implement, investigate and review read it through graphify-mcp, which needs
+# the mcp extra. graphifyy leaves mcp unpinned, and mcp 2.x drops what graphify 0.9.26 imports
+# (mcp.types.AnyUrl), so mcp is pinned too; the handshake below fails the build when the server
+# cannot start, instead of every E cell running without its tools.
+ARG GRAPHIFY_VERSION=0.9.26
+ARG MCP_VERSION=1.30.0
+RUN python3 -m venv /opt/graphify \
+ && /opt/graphify/bin/pip install --no-cache-dir "graphifyy[mcp]==${GRAPHIFY_VERSION}" "mcp==${MCP_VERSION}" \
+ && ln -s /opt/graphify/bin/graphify /opt/graphify/bin/graphify-mcp /usr/local/bin/ \
+ && mkdir /tmp/g && cd /tmp/g && git init -q && printf 'package g\nfunc F() {}\n' > g.go \
+ && graphify update . > /dev/null \
+ && echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"build","version":"1"}}}' \
+    | timeout 30 graphify-mcp --graph /tmp/g/graphify-out/graph.json | grep -q '"serverInfo"' \
+ && cd / && rm -rf /tmp/g
+
 COPY --from=build /out/orchestrator /out/orchbench /usr/local/bin/
 
 # The commit the binaries were built from: `orchestrator version` does not name one yet (TODO P9).

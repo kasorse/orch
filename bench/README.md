@@ -187,7 +187,7 @@ paid for, and is exit 2: a draft or invalid task, a task not validated with its 
 a config that cannot be rendered for a task, a manifest that names another build.
 
 One cell: a fresh workspace without any commit after `base_commit` and without the oracle,
-`setup_command`, the config under the task's `timeout`, then the final check (the existing
+`setup_command`, the config's `setup` if it has one, the config under the task's `timeout`, then the final check (the existing
 tests are reset, test files the model added are removed, the oracle files are written, `oracle.command` and `test_command` run
 sandboxed; SPEC.md §7.5). A task is solved only when both exit 0; the result comes from exit
 codes, never from model text. Question tasks are checked by their `answer_checks` and by the
@@ -253,15 +253,19 @@ A config is a file named after it in `bench/configs/`; `common.yaml` is shared b
 | `B` | the orchestrator as the owner runs it (`~/orchestrator_v2.yaml`): `--mode auto`, decision and translation on opus, `by_complexity` routes for investigate, implement and review, implement `escalate` to opus. Left out: jira, providers, the graphify extension, `auto_commit`, secret-scan allow paths (see the file's comment) | `B.yaml` |
 | `C` | the orchestrator with its defaults: `--mode auto`, everything from `orchestrator.example.yaml` except `clarify` (below) | `C.yaml` |
 | `D` | the orchestrator, `development` and `testing` only (`--stage`), C's template otherwise | `D.yaml` |
+| `E` | the orchestrator as the owner runs it now: B plus the clarify step, `verify` in implement, the graphify MCP server (the graph built by the config's `setup`), `max_fix_iterations: 3` and `test.baseline: off`. The replace tool and the parallel-calls rule come with the build, in every orchestrator config | `E.yaml` |
 
 Every orchestrator config sets `execution.rate_limit_wait: 0s`: the orchestrator stops at once on
 a usage limit and orchbench waits for the reset (a test holds it). B against A asks whether the
 pipeline as it is used beats bare Claude Code; C against A the same for the defaults; B against C
-what the owner's choices change; D against C what the decision and the read-only stages add.
+what the owner's choices change; D against C what the decision and the read-only stages add; E
+against B what came after round 2 (`DECISION.md`), as one bundle.
 Another setting is measured by editing B and running into a new `--out`, not by a new config;
-the config's hash is in every result line, so the two B files stay apart.
+the config's hash is in every result line, so the two B files stay apart. E (2026-10-26) is the
+owner's exception: a config of its own, run alone into `round2` (`--allow-mixed`), so that round 2's
+A and B are its reference (`DECISION.md`).
 
-**Why every orchestrator config sets `clarify: {enabled: false}`.** The `clarify:` section is
+**Why every orchestrator config but E sets `clarify: {enabled: false}`.** The `clarify:` section is
 required in an orchestrator config (MVP.md §49, `specs/clarify/`): a route, or the step switched
 off. A benchmark task is a problem statement a human wrote for a hidden oracle, and it runs
 unattended in `--mode auto`. With the step on, a task rated under `policy.clarify.threshold` would
@@ -271,7 +275,9 @@ the pipeline failing the task, not as a property of the task. Off, the pipeline 
 task as given, in every cell alike. The clarity question is still asked and recorded in
 `decision.json` (`clarity.status: disabled`), so the P(clear) of the tasks can be read from the
 results and `decisions calibrate` shows its distribution. `policy.clarify.threshold` stays in the
-configs because the policy requires it and its value is part of `policy_hash`.
+configs because the policy requires it and its value is part of `policy_hash`. E turns the step
+on because it measures the pipeline as it is used: its `task needs input` stops count as a fail
+of the config, not as an infra error.
 
 ```yaml
 # bench/configs/common.yaml
@@ -287,7 +293,10 @@ prompt_suffix: "Run the tests with: {{.TestCommand}}"
 
 An orchestrator config has `kind: orchestrator`, optional `stages` (each becomes a `--stage`
 flag; omitted means the decision chooses) and a `config:` text that is an orchestrator config
-template. Placeholders filled per task: `{{.Model}}`, `{{.TestCommand}}`, `{{.RoBinds}}`,
+template, and an optional `setup`: a shell command run in the workspace's sandbox, without
+network, after `setup_command` and before the config (E builds its code graph with it; what it
+writes must be ignored by git, or it counts as the model's change). A failed `setup` is an
+infra error. Placeholders filled per task: `{{.Model}}`, `{{.TestCommand}}`, `{{.RoBinds}}`,
 `{{.RwBinds}}` and `{{.Timeout}}`; nothing else, and never the oracle. A file is read strictly
 (an unknown key is an error) and its templates are run once at load time, so a typo fails
 before a benchmark starts. The config generated for a task is saved as

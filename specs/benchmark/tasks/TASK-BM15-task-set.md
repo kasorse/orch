@@ -37,3 +37,11 @@ B1's "done when": 30 tasks, each reviewed by hand and green on `orchbench valida
 ## Gates
 
 None beyond `validate` (no code in this task).
+
+## As built (2026-10-20)
+
+31 tasks, all green on `orchbench validate` in the container: 14 Go from this repository (private
+directory `bench/results/go/tasks/`, never committed) and copies of the 17 public Python and
+TypeScript tasks of `bench/tasks/`. Two targets were missed: 3 questions instead of 6, and no
+en/ru pair. Both move to round 3 (`bench/DECISION.md`). There is no `refactor` task; the
+categories are bugfix 18, feature 10, question 3.

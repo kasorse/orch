@@ -382,6 +382,40 @@ func TestExecTreatsAFailedSetupAsInfrastructure(t *testing.T) {
 	}
 }
 
+func TestExecRunsTheConfigSetupBeforeTheConfig(t *testing.T) {
+	testutil.RequireBwrap(t)
+	p := testutil.NewSHProject(t)
+	var calls atomic.Int32
+	fix := fixer(t, &calls, 0.5, "", true)
+	env := newEnv(t, func(ctx context.Context, cfg config.Config, tk task.Task, ws runner.Workspace) (runner.Outcome, error) {
+		if !exists(filepath.Join(ws.Dir, "graph-out", "graph.json")) {
+			t.Error("the config ran before its setup")
+		}
+		return fix(ctx, cfg, tk, ws)
+	})
+	c := cellOf(p.Task("code"))
+	// What a setup generates and ignores is not the model's change.
+	c.Config.Setup = "mkdir graph-out && echo {} > graph-out/graph.json && echo '*' > graph-out/.gitignore"
+
+	fin, err := env.Exec(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fin.Record.Result != results.Pass || fin.Record.Diff != (results.Diff{Files: 1, Added: 1, Deleted: 1}) {
+		t.Errorf("record %+v", fin.Record)
+	}
+
+	c.Config.Setup = "exit 3"
+	calls.Store(0)
+	fin, err = env.Exec(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fin.Record.Result != results.InfraError || fin.Record.FailureReason != "config setup: exit 3" || calls.Load() != 0 {
+		t.Errorf("record %+v after %d model calls; want an infra error before the config", fin.Record, calls.Load())
+	}
+}
+
 func TestExecWritesNothingWhenInterrupted(t *testing.T) {
 	testutil.RequireBwrap(t)
 	p := testutil.NewSHProject(t)

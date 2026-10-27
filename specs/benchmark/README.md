@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-11): BM01–BM14 done (the core part, TODO.md B3, the bench frame, workspaces and sandbox, `orchbench mine`, the final check, `orchbench validate`, the config runners, `orchbench run`, `orchbench summarize`, the end-to-end test with fakes, the container image, the documentation: `bench/README.md`, MVP.md, CLAUDE.md, README.md). A first round ran on 2026-10-12 (8 private Go tasks, configs A–D, 3 reps; BM16 "Progress"): it raised the example's stage thresholds (MVP.md §9.1) and found two bench defects, fixed the same day (the final check removes the model's added test files; a subscription's limit is an infra error). Left: the task set (BM15), the runs (BM16), the decision (BM17) and contributed results (BM18). The design questions are answered
+Status: **in progress** (2026-10-26): BM01–BM17 done. The full run (`round2`, 2026-10-20 … 24: 31 tasks, A–D × 3 reps, 372 cells) and the decision (`bench/DECISION.md`: the value is in the gates and the governance, not in the adaptive choice of stages; phase 3 next, then a simpler decision in TODO.md Q8). Left: the run of the new config E (the current pipeline) added to `round2`, a round 3 on a grown set (en/ru pairs, harder tasks), and contributed results (BM18). The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -39,9 +39,9 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 | [BM12](tasks/TASK-BM12-integration.md) | end-to-end test with fakes ✓ | B2 | M | BM10, BM11 |
 | [BM13](tasks/TASK-BM13-container.md) | container image for running the benchmark ✓ | B2 | S | BM10 |
 | [BM14](tasks/TASK-BM14-documentation.md) | `bench/README.md`, MVP.md, CLAUDE.md, README, TODO.md ✓ | B1–B3 | S | BM03, BM12 |
-| [BM15](tasks/TASK-BM15-task-set.md) | the 30 tasks (owner + assistant) | B1 | L | BM06, BM08 |
-| [BM16](tasks/TASK-BM16-pilot-and-full-run.md) | pilot, then the full run | B2 | M | BM13, BM14, BM15 |
-| [BM17](tasks/TASK-BM17-decision.md) | `bench/DECISION.md` | B4 | S | BM16 |
+| [BM15](tasks/TASK-BM15-task-set.md) | the 30 tasks (owner + assistant) ✓ | B1 | L | BM06, BM08 |
+| [BM16](tasks/TASK-BM16-pilot-and-full-run.md) | pilot, then the full run ✓ | B2 | M | BM13, BM14, BM15 |
+| [BM17](tasks/TASK-BM17-decision.md) | `bench/DECISION.md` ✓ | B4 | S | BM16 |
 | [BM18](tasks/TASK-BM18-contributed-results.md) | contributed results: export, merge, images, guide | B5 | L | BM17 |
 
 ```

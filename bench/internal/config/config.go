@@ -53,6 +53,7 @@ type file struct {
 	Config       string   `yaml:"config"`
 	Tools        []string `yaml:"tools"`
 	PromptSuffix string   `yaml:"prompt_suffix"`
+	Setup        string   `yaml:"setup"`
 }
 
 // Config is one loaded benchmark config.
@@ -68,6 +69,10 @@ type Config struct {
 	// names the test command, kind claude only.
 	Tools        []string
 	PromptSuffix string
+	// Setup is run in the workspace's sandbox, without network, after the task's
+	// setup_command and before the config: what the config needs in the tree (a code graph).
+	// Empty runs nothing.
+	Setup string
 	// Model is common.yaml's model.
 	Model string
 	// SHA256 is the hash of the config file's bytes.
@@ -117,6 +122,7 @@ func Load(dir, name string) (Config, error) {
 		Template:     f.Config,
 		Tools:        f.Tools,
 		PromptSuffix: f.PromptSuffix,
+		Setup:        f.Setup,
 		Model:        common.Model,
 		SHA256:       task.SHA256Bytes(data),
 	}
