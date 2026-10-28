@@ -175,6 +175,10 @@ test:
   # see README). Without bwrap (macOS, a host that cannot sandbox) write `sandbox: none`:
   # the tests then reach the network, $HOME and your files, and every run says so.
   sandbox: bwrap
+  # Optional, only with actions.implement.verify: what the session's run_tests runs instead of
+  # `command`, e.g. a script that tests only the packages changed since $ORCH_BASE_REF (git
+  # works read-only in the sandbox). The test step always runs `command`.
+  # verify_command: "sh scripts/check-changed.sh"
   # Re-expose caches inside the sandbox, e.g. for Go:
   # ro_binds: [~/go/pkg/mod]        # module cache, read-only
   # rw_binds: [~/.cache/go-build]   # build cache, writable
@@ -270,7 +274,18 @@ execution:
 # implement; none of them widens what a step may do.
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
-  protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+  # Required: the patterns implement must not change - the whole list, nothing is built in. A
+  # write to these turns into execution later (agent settings and hooks, MCP servers, CI, direnv,
+  # editor tasks). A pattern matches at any depth (.gitlab-ci.yml is also examples/ci/.gitlab-ci.yml);
+  # a leading / matches only from the repository root (/.gitlab-ci.yml). [] protects nothing.
+  # The orchestrator's own config file, when it is in the repository, is always protected.
+  protected_paths:
+    - .claude/**
+    - .mcp.json
+    - .github/workflows/**
+    - .gitlab-ci.yml
+    - .envrc
+    - .vscode/**
   # Every run checks the provider CLI's version against the range its permission flags were
   # verified on (MVP.md §41.4) and refuses one outside it; true goes on, with a red warning.
   # allow_unverified_cli: false
@@ -345,6 +360,6 @@ security:
 #   spec_dir: specs                # in the story home
 #   max_tasks: 12                  # 2..30
 #   max_cost_usd: 20               # optional; the whole story - needs cost-reporting providers
-#   max_parallel: 1                # 1..8; ready tasks story run runs at once, each its own run; tasks of one service share its ports and databases
+#   max_parallel: 1                # 1..8; ready tasks story run runs at once, each its own run; tasks of one service run one at a time
 #   max_acceptance_chars: 300      # 50..2000; one acceptance item of a task file story run reads
 #   jira_issue_types: [Epic]       # run --jira on these refuses; default none

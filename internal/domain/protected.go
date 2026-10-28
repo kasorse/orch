@@ -6,27 +6,17 @@ import (
 	"strings"
 )
 
-// DefaultProtectedPaths are files an implement step must never change, because a write to
-// them turns into execution later: agent settings and hooks, MCP servers, CI pipelines,
-// direnv, editor tasks (specs/permissions/SPEC.md §7.3). The orchestrator's own config
-// file is added at run time, and security.protected_paths extends the list. .git is
-// guarded separately, by fingerprint - git status never reports it.
-var DefaultProtectedPaths = []string{
-	".claude/**",
-	".mcp.json",
-	".github/workflows/**",
-	".gitlab-ci.yml",
-	".envrc",
-	".vscode/**",
-}
-
 // MatchProtected reports whether the repository-relative, slash-separated path p is
 // covered by pattern. A pattern ending in "/**" covers everything under that directory;
 // any other pattern is a path.Match glob against the whole remaining path. Patterns match
 // at any depth - ".claude/**" also covers "sub/.claude/settings.json" - which errs on the
-// side of protecting.
+// side of protecting; a pattern starting with "/" matches only from the repository root -
+// "/.gitlab-ci.yml" is not "examples/ci/.gitlab-ci.yml" (TODO.md S9).
 func MatchProtected(pattern, p string) bool {
 	segs := strings.Split(p, "/")
+	if rooted, ok := strings.CutPrefix(pattern, "/"); ok {
+		return matchAt(rooted, segs)
+	}
 	for i := range segs {
 		if matchAt(pattern, segs[i:]) {
 			return true
@@ -48,15 +38,17 @@ func matchAt(pattern string, segs []string) bool {
 	return ok
 }
 
-// ValidateProtectedPattern rejects a pattern MatchProtected cannot use: empty, absolute,
-// or not a valid glob.
+// ValidateProtectedPattern rejects a pattern MatchProtected cannot use: empty, nothing after
+// the leading "/" that anchors it at the root, or not a valid glob.
 func ValidateProtectedPattern(pattern string) error {
+	rooted, anchored := strings.CutPrefix(pattern, "/")
 	switch {
 	case strings.TrimSpace(pattern) == "":
 		return errors.New("must not be empty")
-	case strings.HasPrefix(pattern, "/"):
-		return errors.New("must be relative to the repository root")
+	case anchored && (strings.TrimSpace(rooted) == "" || strings.HasPrefix(rooted, "/")):
+		return errors.New(`a leading "/" anchors the pattern at the repository root and must be followed by a path`)
 	}
+	pattern = rooted
 	glob, _ := strings.CutSuffix(pattern, "/**")
 	if _, err := path.Match(glob, ""); err != nil {
 		return err

@@ -22,6 +22,7 @@ func validConfig() Config {
 			Review:      ActionConfig{ProviderModel: ProviderModel{Provider: "codex", Model: "gpt"}},
 		},
 		Test:      TestConfig{Command: "go test ./..."},
+		Security:  SecurityConfig{ProtectedPaths: []string{".claude/**"}, protectedPathsSet: true},
 		Limits:    LimitsConfig{MaxSteps: 12, MaxFixIterations: 2},
 		Execution: ExecutionConfig{Timeout: 15 * time.Minute},
 		Decision: DecisionConfig{
@@ -216,18 +217,55 @@ func TestValidate_AggregatesAllProblems(t *testing.T) {
 
 func TestValidate_ProtectedPaths(t *testing.T) {
 	cfg := validConfig()
-	cfg.Security.ProtectedPaths = []string{"go.mod", "/etc/hosts", "["}
+	cfg.Security.ProtectedPaths = []string{"go.mod", "/", "[", "/.gitlab-ci.yml"}
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected invalid protected_paths to fail")
 	}
-	for _, want := range []string{`security.protected_paths[1] "/etc/hosts"`, `security.protected_paths[2] "["`} {
+	for _, want := range []string{`security.protected_paths[1] "/"`, `security.protected_paths[2] "["`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected %q in:\n%v", want, err)
 		}
 	}
-	if strings.Contains(err.Error(), `"go.mod"`) {
-		t.Errorf("go.mod is a valid pattern:\n%v", err)
+	if strings.Contains(err.Error(), `"go.mod"`) || strings.Contains(err.Error(), `"/.gitlab-ci.yml"`) {
+		t.Errorf("go.mod and the rooted /.gitlab-ci.yml are valid patterns:\n%v", err)
+	}
+}
+
+// TestLoad_ProtectedPathsRequired: there is no built-in list, so the key must be written; [] is the
+// empty list, written out (TODO.md S9).
+func TestLoad_ProtectedPathsRequired(t *testing.T) {
+	for name, tc := range map[string]struct {
+		security string
+		wantErr  bool
+		want     []string
+	}{
+		"absent":        {"", true, nil},
+		"block without": {"security: {require_clean_worktree: true}", true, nil},
+		"null":          {"security: {protected_paths: null}", true, nil},
+		"empty":         {"security: {protected_paths: []}", false, []string{}},
+		"listed":        {"security: {protected_paths: [\".envrc\", \"/.gitlab-ci.yml\"]}", false, []string{".envrc", "/.gitlab-ci.yml"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			yaml := strings.Replace(validV2(""), `security: {protected_paths: [".claude/**"]}`, tc.security, 1)
+			cfg, err := Load(writeTempConfig(t, yaml))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = Validate(cfg)
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "security.protected_paths is required") {
+					t.Fatalf("Validate = %v, want the required-key error", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Join(cfg.Security.ProtectedPaths, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("protected_paths = %v, want %v", cfg.Security.ProtectedPaths, tc.want)
+			}
+		})
 	}
 }
 
@@ -442,6 +480,18 @@ func TestValidate_Verify(t *testing.T) {
 	if err := Validate(cfg); err != nil {
 		t.Errorf("explicit limits.verify: %v", err)
 	}
+
+	cfg.Actions.Implement.Verify = true
+	cfg.Test.VerifyCommand = "scripts/check-changed.sh"
+	if err := Validate(cfg); err != nil {
+		t.Errorf("test.verify_command with verify: %v", err)
+	}
+
+	cfg = validConfig()
+	cfg.Test.VerifyCommand = "scripts/check-changed.sh"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "test.verify_command needs actions.implement.verify") {
+		t.Errorf("test.verify_command without verify: %v", err)
+	}
 }
 
 func TestVerifyLimits_Defaults(t *testing.T) {
@@ -623,10 +673,10 @@ func TestValidate_SecretScan(t *testing.T) {
 		}
 	}
 	cfg := validConfig()
-	cfg.Security.SecretScan = SecretScanConfig{Mode: "log", AllowPaths: []string{"/abs/**", "bad[", ""}}
+	cfg.Security.SecretScan = SecretScanConfig{Mode: "log", AllowPaths: []string{"//abs/**", "bad[", ""}}
 	err := Validate(cfg)
 	for _, want := range []string{`security.secret_scan.mode must be stop (the default), warn or off, got "log"`,
-		`allow_paths[0] "/abs/**": must be relative`, `allow_paths[1] "bad["`, `allow_paths[2] "": must not be empty`} {
+		`allow_paths[0] "//abs/**": a leading "/" anchors`, `allow_paths[1] "bad["`, `allow_paths[2] "": must not be empty`} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want %q in %v", want, err)
 		}

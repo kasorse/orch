@@ -20,7 +20,7 @@ type (
 	RepoGuard  = guard.RepoGuard
 )
 
-// NewRepoGuard guards domain.DefaultProtectedPaths plus extra.
+// NewRepoGuard guards the patterns it is given; there is no built-in list.
 var NewRepoGuard = guard.NewRepoGuard
 
 // gitViolation names a change to .git/config or the hooks in the list Changed returns.

@@ -73,6 +73,9 @@ first and gets a new worktree from there; a merge conflict stops the story for a
 - **Two tasks of one repository may run at once**: each is its own worktree run on its own
   branch. No git call of the parent or a child writes the shared `.git/config` or the hooks while
   children run, because every child's guard fingerprints them (contract C3).
+  *Superseded 2026-10-28 (TODO.md S10):* tasks of one service run one at a time; a ready task
+  whose service is busy waits and the slot goes to another service's. Their tests shared ports,
+  databases and files outside the worktree, and their changes met in the merge (MVP.md §48.6).
 - **More than one slot**: a child gets no stdin (`/dev/null`; children run `--mode auto`). Its
   stdout and stderr go to `.orchestrator/stories/<slug>/logs/task-<ID>.<attempt>.log` (0600,
   appended when the run is resumed). The console gets one line when it starts,
@@ -182,7 +185,7 @@ Author's defaults (the owner may override any):
 | # | default | why |
 |---|---|---|
 | A1 | The spec branch is `story/<slug>/spec`, created by Go, never the operator's branch | the operator's branch is checked out in their tree (the story base is what is checked out at the first start), and in another service it may be `main`: writing it would move their tree and skip review |
-| A2 | Tasks of one repository may run at once, under C3 | D1 says every ready task; worktrees keep the trees apart, and C3 keeps the guards apart |
+| A2 | ~~Tasks of one repository may run at once, under C3~~ superseded 2026-10-28 (TODO.md S10): one at a time per service | D1 says every ready task; worktrees keep the trees apart, and C3 keeps the guards apart |
 | A3 | One slot by default, at most 8 | today's behaviour stays the default; more children than that mostly wait on the provider |
 | A4 | After a failure nothing new starts, and the running children finish | stops the spend as today's sequential stop does, without killing work in flight |
 | A5 | With more than one slot, a log file per task and one console line per start and end | interleaved output of several children cannot be read |

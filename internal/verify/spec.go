@@ -111,7 +111,7 @@ func (s *Spec) Validate() error {
 	if !filepath.IsAbs(s.RepoRoot) {
 		return fmt.Errorf("repo_root %q is not an absolute path", s.RepoRoot)
 	}
-	if len(s.Before.Patterns()) == 0 {
+	if !s.Before.Taken() {
 		return errors.New("before: the guard state is empty")
 	}
 	if !s.Tests() {

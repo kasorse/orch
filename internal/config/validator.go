@@ -119,6 +119,12 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	if !cfg.Security.protectedPathsSet {
+		problems = append(problems, "security.protected_paths is required: the patterns implement must not change "+
+			"(there is no built-in list; the orchestrator's config file stays protected). The list that used to be built in: "+
+			"[.claude/**, .mcp.json, .github/workflows/**, .gitlab-ci.yml, .envrc, .vscode/**]; "+
+			"a leading / matches only from the repository root; write protected_paths: [] to protect nothing")
+	}
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
 			problems = append(problems, fmt.Sprintf("security.protected_paths[%d] %q: %v", i, p, err))
@@ -184,6 +190,9 @@ func verifyProblems(cfg Config) []string {
 		if o.a.verifySet || o.a.Verify {
 			problems = append(problems, fmt.Sprintf("actions.%s.verify: unknown key (verify is accepted only on actions.implement)", o.name))
 		}
+	}
+	if strings.TrimSpace(cfg.Test.VerifyCommand) != "" && !cfg.Actions.Implement.Verify {
+		problems = append(problems, "test.verify_command needs actions.implement.verify: only the verify tool runs it")
 	}
 	if cfg.Actions.Implement.Verify {
 		if strings.TrimSpace(cfg.Test.Command) == "" {

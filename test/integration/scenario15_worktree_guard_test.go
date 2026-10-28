@@ -72,7 +72,7 @@ func TestScenario15_DirtyTreeAllowedByConfig(t *testing.T) {
 	repoDir := dirtyFixture(t)
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	j := startJev(t, scriptBugfixMedium())
-	cfg := jevConfig(t, j, func(o *configOptions) { o.extraYAML = "\nsecurity:\n  require_clean_worktree: false\n" })
+	cfg := jevConfig(t, j, func(o *configOptions) { o.security = "  require_clean_worktree: false\n" })
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "fix Add in fixture.go")
 	mustSucceed(t, stdout, stderr, err)

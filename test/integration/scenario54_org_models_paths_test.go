@@ -42,7 +42,7 @@ func TestScenario54_ProtectedPathsAreTheUnionOfOrgAndRepository(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repoDir := fakeexec.InitGitFixture(t)
 			r := newStageRun(t, repoDir, func(o *configOptions) {
-				o.extraYAML = "\nsecurity:\n  protected_paths: [\"docs/**\"]\n"
+				o.protectedPaths = []string{"docs/**"}
 			})
 			useOrgConfig(t, "security:\n  protected_paths: [\"secrets/**\"]\n")
 			// Empty directories are invisible to git, so the tree stays clean.

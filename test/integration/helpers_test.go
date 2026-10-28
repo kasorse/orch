@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -56,9 +57,11 @@ type configOptions struct {
 	testBaseline string
 	// promptLimits is rendered verbatim under limits:, e.g. "  prompt:\n    max_diff_bytes: 65536\n".
 	promptLimits string
-	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
-	// via defaultConfigOptions - tests only override it to exercise the run-wide
-	// timeout (MVP.md §25) with a short deadline.
+	// timeout is the rendered execution.timeout value (e.g. "500ms"). Defaults to "5m" via
+	// defaultConfigOptions: only a guard against a hang, never a speed check - a run takes about
+	// a second, but under load (three scripts/check.sh at once in bwrap) more than 25 times that,
+	// and a 30s budget failed runs that were only slow (TODO.md S7). Tests override it to exercise
+	// the run-wide timeout (MVP.md §25) with a short deadline.
 	timeout string
 	// jevURL is decision.jev.base_url - the fake Jev server's URL.
 	jevURL string
@@ -67,8 +70,15 @@ type configOptions struct {
 	// decisionModel overrides decision.model; empty keeps jev-1.13.0 (or "fake" for a CLI
 	// decision provider).
 	decisionModel string
-	// extraYAML is appended to the rendered config verbatim (e.g. a security: block).
+	// extraYAML is appended to the rendered config verbatim. A security: key goes in security,
+	// since the config always has that section.
 	extraYAML string
+	// protectedPaths is security.protected_paths, which has no built-in default (TODO.md S9):
+	// defaultConfigOptions sets the list orchestrator.example.yaml gives, an empty list renders
+	// `[]` and nil leaves the key out. security is more security: lines verbatim (two spaces of indent), e.g.
+	// "  require_clean_worktree: false\n".
+	protectedPaths []string
+	security       string
 	// jira renders a jira: section when set (specs/jira/SPEC.md §7); nil leaves it out,
 	// so every other scenario's config is unchanged.
 	jira *jiraOptions
@@ -228,10 +238,30 @@ func defaultConfigOptions() configOptions {
 		maxFixIterations: 2,
 		testCommand:      "go test ./...",
 		testBaseline:     "off",
-		timeout:          "30s",
+		protectedPaths:   exampleProtectedPaths,
+		timeout:          "5m",
 		jevURL:           "http://127.0.0.1:1", // tests using Jev replace it with their server's
 		onFailure:        "fail",
 	}
+}
+
+// exampleProtectedPaths is the security.protected_paths list orchestrator.example.yaml gives, the
+// one built into Go before TODO.md S9.
+var exampleProtectedPaths = []string{".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"}
+
+// securityYAML renders the security: section: protected_paths (none when nil), then o.security.
+func (o configOptions) securityYAML() string {
+	if o.protectedPaths == nil {
+		if o.security == "" {
+			return ""
+		}
+		return "\nsecurity:\n" + o.security
+	}
+	quoted := make([]string, len(o.protectedPaths))
+	for i, p := range o.protectedPaths {
+		quoted[i] = strconv.Quote(p)
+	}
+	return "\nsecurity:\n  protected_paths: [" + strings.Join(quoted, ", ") + "]\n" + o.security
 }
 
 // writeConfig renders a version 2 orchestrator.yaml matching internal/config's schema
@@ -325,6 +355,7 @@ execution:
 %s%s`, p.Decision, decisionModel, opts.onFailure, opts.jevURL, p.Translation, clarifyYAML,
 		opts.pathRulesYAML(), opts.actionsYAML(),
 		sandbox, opts.testBaseline, opts.testCommand, envPassYAML(opts.testEnvPass), opts.maxSteps, opts.maxFixIterations, opts.stopWithoutProgress, opts.limitsYAML(), opts.timeout, isolation, opts.extraYAML)
+	content += opts.securityYAML()
 	content += opts.tailYAML()
 	content += opts.jira.yaml()
 

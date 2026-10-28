@@ -90,6 +90,9 @@ func (d *Dispatcher) verifySpec(run *domain.Run, before GuardState, replace bool
 	}
 	v := d.Config.Limits.Verify
 	spec.TestCommand, spec.Checks, spec.PreRunRef = d.Config.Test.Command, checks, run.PreRunRef
+	if c := d.Config.Test.VerifyCommand; strings.TrimSpace(c) != "" {
+		spec.TestCommand = c
+	}
 	spec.Sandbox, spec.TestEnv = d.Runner.Sandbox, env
 	spec.MaxCalls, spec.CallTimeout = v.MaxCalls(), v.Timeout()
 	spec.OutputBytes = d.Config.Limits.Prompt.TestOutputBytes()

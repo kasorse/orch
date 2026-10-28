@@ -50,7 +50,7 @@ func runDirContains(t *testing.T, repoDir, needle string) bool {
 
 func secretScanYAML(mode string, extra string) func(*configOptions) {
 	return func(o *configOptions) {
-		o.extraYAML = "\nsecurity:\n  secret_scan:\n    mode: " + mode + "\n" + extra
+		o.security = "  secret_scan:\n    mode: " + mode + "\n" + extra
 	}
 }
 

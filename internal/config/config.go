@@ -261,6 +261,10 @@ func (a ActionsConfig) EscalatedRoute(t domain.ActionType, d *domain.Decision) (
 
 type TestConfig struct {
 	Command string `yaml:"command"`
+	// VerifyCommand is what run_tests runs inside an implement session (actions.implement.verify)
+	// in place of Command, e.g. a script that narrows the tests to the files changed since
+	// $ORCH_BASE_REF (TODO.md Q10). The test step and the pre-run test always run Command.
+	VerifyCommand string `yaml:"verify_command"`
 	// Sandbox is "bwrap" (or empty, the default): run the command under bubblewrap with the
 	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8) -
 	// or "none", written out, to run it unsandboxed.
@@ -629,9 +633,11 @@ type SecurityConfig struct {
 	// RequireCleanWorktree is a pointer so an absent key (nil) can default to true while an
 	// explicit false still means false; read it through CleanWorktreeRequired.
 	RequireCleanWorktree *bool `yaml:"require_clean_worktree"`
-	// ProtectedPaths extends domain.DefaultProtectedPaths: patterns an implement step must
-	// not change.
-	ProtectedPaths []string `yaml:"protected_paths"`
+	// ProtectedPaths are the patterns an implement step must not change: the whole list, there
+	// is no built-in one (TODO.md S9). The key is required - `[]` written out is the empty list -
+	// and protectedPathsSet records that it was written. The org layer only adds to it.
+	ProtectedPaths    []string `yaml:"protected_paths"`
+	protectedPathsSet bool
 	// AllowUnverifiedCLI lets a run proceed on a provider CLI version outside the range its
 	// permission flags were verified on; the run records and warns about it
 	// (specs/hardening/SPEC.md §7.2). A CLI that cannot be executed is refused regardless.
@@ -639,6 +645,25 @@ type SecurityConfig struct {
 	// SecretScan is what happens when implement or the test command adds what looks like a
 	// secret to the working tree (specs/hardening/SPEC.md §9).
 	SecretScan SecretScanConfig `yaml:"secret_scan"`
+}
+
+// UnmarshalYAML records whether security.protected_paths was written, which an absent key and
+// `[]` would otherwise both leave empty.
+func (s *SecurityConfig) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw struct {
+		RequireCleanWorktree *bool            `yaml:"require_clean_worktree"`
+		ProtectedPaths       *[]string        `yaml:"protected_paths"`
+		AllowUnverifiedCLI   bool             `yaml:"allow_unverified_cli"`
+		SecretScan           SecretScanConfig `yaml:"secret_scan"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	*s = SecurityConfig{RequireCleanWorktree: raw.RequireCleanWorktree, AllowUnverifiedCLI: raw.AllowUnverifiedCLI, SecretScan: raw.SecretScan}
+	if raw.ProtectedPaths != nil {
+		s.ProtectedPaths, s.protectedPathsSet = *raw.ProtectedPaths, true
+	}
+	return nil
 }
 
 // SecretScanConfig is security.secret_scan.

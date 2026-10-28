@@ -205,13 +205,15 @@ and review), without it, as the last read-only step, it writes the answer.
   is named by the repository's instructions, a template or `orchestrator/<run-id>`, MVP.md
   §50.3), so a resume checks the recorded name's format and `git worktree list`; the mode comes from
   `options.isolation`, not the current config. The `.git` pointer is checked in Go before
-  every fingerprint, `worktree.setup` runs only before any step, and a new test or scenario
+  every fingerprint, every `git worktree add/list/remove/prune` holds the flock
+  `<state>/orchestrator/worktrees/<repo-id>.lock` (git races itself, MVP.md §47.2), `worktree.setup` runs only before any step, and a new test or scenario
   that reads the result in the working tree pins `isolation: inplace`. New run artifacts:
   `run.json: worktree` and `logs/setup.{stdout,stderr}.log`.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
   run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)
-  compares protected paths (git-ignored ones
+  compares protected paths (`security.protected_paths`, required, no built-in list, a leading
+  `/` anchors at the root; plus the config file, always; git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. In a worktree run
@@ -261,8 +263,8 @@ and review), without it, as the last read-only step, it writes the answer.
 - **Verify is not a shell** (MVP.md §38.1, §44.3, `specs/permissions/DECISIONS.md` D16). With
   `actions.implement.verify: true` the session gets `mcp__orch__run_tests` and
   `mcp__orch__run_check` from the orchestrator's own MCP server; the adapter's `--tools` does
-  not change. The command comes from config (`test.command`, a configured check), never from
-  the model; the model picks only whether to run, a check name from a closed list, and a
+  not change. The command comes from config (`test.verify_command` else `test.command`, a
+  configured check), never from the model; the model picks only whether to run, a check name from a closed list, and a
   filter matching `^[A-Za-z0-9_./:-]{1,200}$` that reaches the process only as
   `ORCH_TEST_FILTER` (the `test` step never sets it). The sandbox is mandatory (`verify` with
   `test.sandbox: none` is a config error), the guard compares the repository with the step's
@@ -392,7 +394,7 @@ fallback: stacked on the same-repository task it
   clarify step,
   the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer;
   stories do not nest. `story run` runs up to `story.max_parallel` (`--parallel N`, 1..8, default
-  1) ready tasks at once, each its own child run, with one goroutine owning `story.json`, the
+  1) ready tasks of different services at once (tasks of one service one at a time), each its own child run, with one goroutine owning `story.json`, the
   README, the task files and the console (the children's goroutines only run a process); while
   children run no git call writes `.git/config` or the hooks (every child's guard fingerprints
   them), and nothing new starts after a task that did not end done. A

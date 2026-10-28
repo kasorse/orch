@@ -269,11 +269,12 @@ before the outcome is accepted, and so before `test` can execute anything:
    listed individually and ignored build output is not walked) are matched against the
    protected patterns. Ignored files matter: this repository ignores its own
    `orchestrator.yaml`, and Claude ignores `.claude/settings.local.json` — both invisible to
-   a plain status, both able to change what runs next. The patterns: `.claude/**`, `.mcp.json`,
-   `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`
-   (`domain.DefaultProtectedPaths`), the in-use config file when it is inside the worktree,
-   plus `security.protected_paths`. Patterns match at any depth (`.claude/**` also covers
-   `sub/.claude/…`). Each matching file's content is hashed, so a protected file that was
+   a plain status, both able to change what runs next. The patterns: `security.protected_paths`
+   and the in-use config file when it is inside the worktree. *Changed 2026-10-28 (TODO.md S9):*
+   there is no built-in list any more (it was `.claude/**`, `.mcp.json`,
+   `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`, `domain.DefaultProtectedPaths`,
+   now written out in `orchestrator.example.yaml`); the key is required. Patterns match at any
+   depth (`.claude/**` also covers `sub/.claude/…`), or only from the root with a leading `/`. Each matching file's content is hashed, so a protected file that was
    already changed before the call (possible only with `require_clean_worktree: false`) is
    a violation only if the call touches it.
 2. A fingerprint of the repository config (from `--git-common-dir`, so worktrees work) and

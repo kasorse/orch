@@ -3,6 +3,9 @@
 **Size** L (about 4 days, plus the contributors' time) · **TODO** B5 · **Depends on** BM17 ·
 **Blocks** —
 
+**Cancelled 2026-10-28** (TODO.md B5): no bundles from contributors. Tasks in other languages
+are mined from commits of open GitHub repositories, and the owner runs every configuration.
+
 ## Goal
 
 Colleagues and friends outside the company add results in Node.js, Go, C++ and PHP from

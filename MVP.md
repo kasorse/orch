@@ -400,9 +400,10 @@ execution:
 #   remote: origin
 #   target_branch: main        # the merge request target when HEAD is detached
 
-security:                      # optional (§38); no key widens what a step may do
+security:                      # required for protected_paths (§38.3); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
-  protected_paths: []          # extra patterns implement must not change
+  protected_paths: [".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"]
+                               # required: the whole list implement must not change; [] is none
   allow_unverified_cli: false  # run on a provider CLI outside the verified range (§41.4)
   secret_scan:                 # what implement and the tests add (§41.6)
     mode: stop                 # stop | warn | off
@@ -3239,8 +3240,8 @@ before-state before every call.
 gets two more tools from an MCP server named `orch` that the orchestrator itself serves,
 `mcp__orch__run_tests` and `mcp__orch__run_check`. This is not a shell and does not change the
 authority: the adapter's `--tools` stays `Read,Grep,Glob,Edit,Write` and only the two MCP names
-join `--allowed-tools`. The command is `test.command` or a configured check, chosen in Go,
-never by the model; the model picks only whether to run it, which configured check (a closed
+join `--allowed-tools`. The command is `test.verify_command` (else `test.command`) or a
+configured check, chosen in Go, never by the model; the model picks only whether to run it, which configured check (a closed
 list) and a filter string that cannot hold shell syntax and reaches the process only as
 `ORCH_TEST_FILTER`. Every run is under bwrap (`test.sandbox: none` with verify is a config
 error), preceded by a guard comparison, and a `violation` marker fails the step. Decision D16
@@ -3310,13 +3311,24 @@ human sees and confirms between steps.
   `git update-ref -d refs/orchestrator/runs/<run-id>` drops one.
 * **Protected paths.** Around every `implement` call, a snapshot before is compared with
   one after, before the outcome is accepted and so before `test` runs anything: files that
-  differ from HEAD or are git-ignored and match `.claude/**`, `.mcp.json`,
-  `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`, the config file when it
-  lives in the worktree, or `security.protected_paths` (at any depth, by content hash); and
+  differ from HEAD or are git-ignored and match `security.protected_paths` or the config file
+  when it lives in the worktree (by content hash); and
   a fingerprint of the repository's git config and effective hooks directory. A change
   fails the step (`WorkflowError`, exit 4) naming the paths and the restore point; the
   changes stay on disk. Without a guard, or when its snapshot fails, `implement` refuses
   before the provider call.
+  `security.protected_paths` is the whole list: nothing is built in, and the key is required
+  (a config without it is a config error before any call; `[]` written out protects nothing, and
+  like `test.sandbox: none` every run with implement says so: `Protected paths: none: …` - a
+  config written before, when `[]` meant the built-in list, shows there).
+  `orchestrator.example.yaml` writes the list that was built in before: `.claude/**`,
+  `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`. A pattern
+  matches at any depth (`.claude/**` also covers `sub/.claude/…`); one with a leading `/`
+  matches only from the repository root (`/.gitlab-ci.yml` is not `examples/ci/.gitlab-ci.yml`),
+  in every place that takes this syntax (`secret_scan.allow_paths`, `policy.paths`). The config
+  file stays protected in Go: it is the one path whose change would let the next run or resume
+  read a weaker guard. The org layer's `protected_paths` are added, and the repository cannot
+  remove them (§45).
 * **Resume inputs.** The step guard also protects the run directory's resume inputs:
   `run.json`, `workflow.json`, `decision.json` and `artifacts/**` of **every** run under
   the runs directory (`action.RunDirPatterns`). Logs are output and never read back, so
@@ -4292,7 +4304,7 @@ subcommand claude starts over stdio):
 
 | tool | arguments | runs |
 |---|---|---|
-| `mcp__orch__run_tests` | `filter` (optional string) | `test.command`; returns the exit code and bounded output |
+| `mcp__orch__run_tests` | `filter` (optional string) | `test.verify_command`, else `test.command`; returns the exit code and bounded output |
 | `mcp__orch__run_check` | `name` (one of the configured check names, an `enum`) | that one check; offered only when `checks` is not empty |
 
 * **Not a shell** (D16, §38.1). The command comes from config; the model supplies only whether to
@@ -4301,6 +4313,13 @@ subcommand claude starts over stdio):
   nothing. A valid filter is passed only as `ORCH_TEST_FILTER` of that one run, never put
   into a command line; whether `test.command` uses it is the operator's choice
   (`'go test ./... ${ORCH_TEST_FILTER:+-run "$ORCH_TEST_FILTER"}'`). The `test` step never sets it.
+* **`test.verify_command`** (optional, only with `verify: true`, else a config error) is what
+  `run_tests` runs in place of `test.command`: a script that narrows the tests to what the run
+  changed, which it finds itself with `git diff --name-only $ORCH_BASE_REF` and
+  `git ls-files -o --exclude-standard` (the sandbox binds the git directories read-only). Which
+  tests that is stays the operator's script, not Go and not the model; the filter can only
+  narrow it further. The `test` step and the pre-run test always run `test.command`, so the
+  narrowing is a hint only (§31.4). This repository's is `scripts/check-changed.sh`.
 * **Fail fast** (`Validate`, `ValidateDependencies`): `verify: true` needs `test.command`,
   `test.sandbox` other than `none` and provider `claude`; `verify` on any other action is an
   unknown key; `extensions.mcp.orch` and any server name containing `__` are refused.
@@ -4383,6 +4402,8 @@ it. The implement prompt names the tool. Design: `specs/quality/SPEC.md` §6.11,
 ```yaml
 checks:                          # §44.2
   - {name: vet, command: "go vet ./..."}
+test:
+  verify_command: ""             # §44.3, run_tests in place of test.command; needs verify
 actions:
   implement:
     verify: false                # §44.3, implement only
@@ -4401,7 +4422,8 @@ limits:
 Every key is optional. For a config that sets none of them the behavior changes only where it
 is on by default: the richer prompts (§44.1) and the no-progress stop (§44.6). Invalid values
 are config errors (exit 2) before any call: a bad `checks` entry, `checks` without
-`test.command`, `verify` without a sandbox or on another action, a reserved or ambiguous MCP
+`test.command`, `verify` without a sandbox or on another action, `test.verify_command` without
+`verify`, a reserved or ambiguous MCP
 server name, an invalid `by_complexity`, `models` on a non-review action.
 
 ## 44.6 Stop without progress
@@ -4909,6 +4931,12 @@ The path comes from the run ID alone; the branch is no longer derived from it, s
 checks the recorded name against §50.3's character and format rules and against `git worktree
 list` showing the derived path on exactly that branch. The orchestrator refuses rather than
 reuse either.
+Every `git worktree add`, `list`, `remove` and `prune` the orchestrator runs in a repository holds
+an exclusive flock on `<state>/orchestrator/worktrees/<repo-id>.lock` and waits for it: git 2.43
+that reads a worktree another git is still creating dies ("failed to read
+.git/worktrees/<id>/commondir") after `add -b` has made its branch, and two story tasks of one
+repository start at once (§48.6). A failed `add` that leaves the branch reports git's error with
+the refusal.
 `run.json: worktree` is saved at once: `path`, `branch`, `base_ref`, `base_branch` (empty when
 detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every step, guard,
 sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its
@@ -4960,12 +4988,19 @@ A story task (§48.5) is the same run from a base that the story gives it (a giv
 instead of HEAD, on a branch named by its repository's rules, `story/<slug>/<ID>` only the
 fallback (§50.8); its commit message carries the `Orchestrator-Story` trailer (§42.2).
 
-## 47.6 `orchestrator runs clean [--older-than 7d] [--dry-run]`
+## 47.6 `orchestrator runs clean [--older-than 7d | --unreadable] [--dry-run]`
 
 For every run older than the limit whose worktree is not removed and whose lock is free,
 removes the worktree with `git worktree remove` (a worktree with changes is kept and listed),
 then `git worktree prune`, and sets `worktree.removed`. It never deletes a branch, a ref or a
-run directory.
+run directory. A run it cannot read is skipped, with a pointer to `--unreadable`.
+
+`runs clean --unreadable [--dry-run]` (not with `--older-than`) removes, whatever their age, the
+run directories whose `run.json` this version reads but cannot decode or validate - a run started
+before a layout change (`specs/clarify`), a damaged file - and nothing else: a missing or
+unreadable file is no reason. A run whose lock is held is skipped. A worktree at the run's
+derived path is removed first, without `--force`; git refusing it keeps the worktree and the run.
+No branch is deleted.
 
 ## 47.7 Not covered
 
@@ -5005,7 +5040,7 @@ story:
   spec_dir: specs                 # in the story home
   max_tasks: 12                   # 2..30
   max_cost_usd: 20                # optional; the whole story, every call and run
-  max_parallel: 1                 # 1..8; ready tasks run at once; story run --parallel N overrides
+  max_parallel: 1                 # 1..8; ready tasks of different services run at once; --parallel N overrides
   max_acceptance_chars: 300       # 50..2000; one acceptance item of a task file story run reads
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
 jira:
@@ -5166,14 +5201,16 @@ directory; the state is flocked by the one `story run` that owns it.
 3. **Children in Jira** (§48.7), then the tasks, in Go's order, **up to `slots` at once**, where
    `slots` is `--parallel N` else `story.max_parallel` (1..8, default 1). A task is **ready**
    when every `depends_on` task is done and it is itself pending, failed or stopped with a run,
-   blocked or `conflict`; done and running tasks are not. Whenever a slot is free the next ready
-   task in the story's order is started: done → skipped; failed or stopped with a run → that run
+   blocked or `conflict`; done and running tasks are not. Tasks of one service (its `repo`) run one
+   at a time: a ready task whose service has a task running waits, and the slot goes to the next
+   ready task of another service; their tests would share the service's ports, databases and files
+   outside the worktree, and their changes meet in its merge. Whenever a slot is free the next ready
+   task in the story's order whose service is free is started: done → skipped; failed or stopped with a run → that run
    resumed (`orchestrator resume <id> --mode auto` in its repository); blocked → looked at again
    (step 4); `conflict` → its parents merged again (§48.4); pending → its parents merged on the
    spec branch if there are several (§48.4), the task input written to `tasks/<ID>.json`, the
    file's sha256 recorded (the task is frozen from now) and `<orchestrator> run --mode auto
-   --story-task <file>` run as a child process in the task's repository. Two tasks of one
-   repository may run at once, each in its own worktree on its own branch; while children run no
+   --story-task <file>` run as a child process in the task's repository. While children run no
    git call of `story run` writes the shared `.git/config` or the hooks, because each child's
    guard (§47.5) fingerprints them. The child's run is found by its `task.source`; none found
    (the child failed its own fail-fast chain) means the task `failed`.
@@ -5204,8 +5241,14 @@ directory; the state is flocked by the one `story run` that owns it.
    **When a task does not end done** (failed, stopped, blocked or `conflict`) nothing new is
    started; the children still running are not killed, they run to their end and are settled;
    then the story stops with the status of the first task in the story's order that is not done,
-   and the hints of every such task are printed. Tasks that were independent of it and not yet
-   started wait for the next `story run`.
+   and the hints of every such task are printed: for a run, its status, the step that failed and
+   the reason the run recorded, then `Led to it:` - the run's last red test (its failed check or
+   failing tests, and the log) or failed review (its blocking issues and unmet criteria, and the
+   artifact) - and where the summary and the step's logs are. Tasks that were ready and not
+   started are named on one line (`Note: not started because of the stop: …`) and wait for the
+   next `story run`. A run directory of a service that this version cannot read is warned about
+   at once only when its `task.source` names this story; the others are counted, one line per
+   service at the end, with `runs clean --unreadable` (§47.6).
 5. **After each task** Go appends `## As built (<date>)` to the task file - run, outcome, branch
    and base, commit, cost, the run's `summary_short`, conflicts with the base branch - and
    rewrites `README.md`. Nothing a model wrote goes there except `summary_short`, as data.
@@ -5264,8 +5307,6 @@ commit on the spec branch.
   with argv only, each running its own fail-fast chain, guard and sandbox.
 * The operator's checkouts and branches are never touched: every task runs in a worktree, and
   the spec branch is merged with `merge-tree` and `commit-tree`, never in a tree.
-* Tests of tasks of one service that run at once may share ports, databases or files outside
-  the worktree; the operator chooses `max_parallel` (one slot for such a service).
 
 ## 48.9 The scope question (shadow)
 

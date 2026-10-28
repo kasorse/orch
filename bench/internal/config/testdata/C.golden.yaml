@@ -72,4 +72,5 @@ execution:
 
 security:
   require_clean_worktree: true
-  protected_paths: []
+  # The list that was built into the orchestrator before TODO.md S9, written out.
+  protected_paths: [".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"]

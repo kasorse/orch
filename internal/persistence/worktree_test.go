@@ -313,3 +313,38 @@ func TestStateDir(t *testing.T) {
 		t.Errorf("StateDir() = %q, %v, want /home/u/.local/state", got, err)
 	}
 }
+
+// TestLockWorktrees: a second holder waits until the first lets go, so two processes never run git
+// worktree commands of one repository at once (TODO.md S7).
+func TestLockWorktrees(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "orchestrator", "worktrees", "0123456789abcdef")
+	unlock, err := LockWorktrees(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(chan func(), 1)
+	go func() {
+		second, err := LockWorktrees(dir)
+		if err != nil {
+			t.Error(err)
+			second = func() {}
+		}
+		got <- second
+	}()
+	select {
+	case second := <-got:
+		second()
+		t.Fatal("the second lock was taken while the first was held")
+	case <-time.After(200 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case second := <-got:
+		second()
+	case <-time.After(10 * time.Second):
+		t.Fatal("the second lock was not taken after the first was released")
+	}
+	if _, err := os.Stat(dir + ".lock"); err != nil {
+		t.Errorf("the lock file: %v", err)
+	}
+}

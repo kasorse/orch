@@ -124,7 +124,7 @@ execution:
 
 security:
   require_clean_worktree: true
-  protected_paths: []
+  protected_paths: [".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"]
   allow_unverified_cli: false
   secret_scan:
     mode: stop               # stop | warn | off
@@ -204,9 +204,12 @@ security:
   files as a stat line, the rest in full while it fits). Artifacts and logs keep everything.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the
   decision — except the time you spend on a manual choice.
-- **`security`** (optional) never widens what a step may do. `require_clean_worktree`
-  (default `true`) makes a workflow with `implement` refuse to start on a dirty worktree;
-  `protected_paths` adds patterns `implement` must not change; `allow_unverified_cli` lets a
+- **`security`** never widens what a step may do. `protected_paths` is required: the whole
+  list of patterns `implement` must not change (nothing is built in; `[]` protects nothing;
+  copy the list above). A pattern matches at any depth, or only from the repository root with
+  a leading `/` (`/.gitlab-ci.yml` leaves `examples/ci/.gitlab-ci.yml` alone).
+  `require_clean_worktree` (default `true`) makes a workflow with `implement` refuse to start
+  on a dirty worktree; `allow_unverified_cli` lets a
   run go on with a provider CLI outside the verified version range (warned and recorded);
   `secret_scan` decides what happens when a step adds what looks like a secret. See
   [Security model](#security-model).
@@ -351,9 +354,8 @@ Around `implement` the orchestrator itself guards the result, for any provider:
   `git for-each-ref refs/orchestrator` lists them,
   `git update-ref -d refs/orchestrator/runs/<run-id>` removes one.
 - After every `implement` call, before anything runs its output, it checks that no protected
-  file changed — `.claude/**`, `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`,
-  `.envrc`, `.vscode/**`, the config file when it lives in the repository (even if
-  git-ignored), `security.protected_paths` — and that `.git/config` and the git hooks are
+  file changed — the patterns of `security.protected_paths` and the config file when it lives
+  in the repository (even if git-ignored) — and that `.git/config` and the git hooks are
   untouched. Otherwise the run stops (exit 4) naming the files; the changes stay for you to
   inspect.
 - In `manual` mode the prompt before the step after `implement` lists what it changed.
@@ -478,6 +480,9 @@ orchestrator itself (`orchestrator mcp-verify`, a hidden subcommand), `run_tests
 - The model picks only a check name or a test filter (`[A-Za-z0-9_./:-]`, reaching the command
   as `ORCH_TEST_FILTER`); the command is `test.command` or a check from your config, never
   model text. It needs `test.command`, `test.sandbox: bwrap` and provider `claude`.
+- `test.verify_command` (optional) is what `run_tests` runs instead of `test.command`, e.g. a
+  script that tests only what the run changed since `$ORCH_BASE_REF` (this repository's
+  `scripts/check-changed.sh`). The `test` step always runs `test.command`.
 - Each call runs under the test sandbox, after the protected-paths guard has compared the
   repository with the start of the step. If the model has changed hooks, CI or the
   orchestrator config, the call is refused, nothing more runs in the step, and the step fails
@@ -700,7 +705,7 @@ orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID
 orchestrator [--config path] story status <spec_dir>/<slug>
 orchestrator [--config path] [--mode m] [--claude-auth m] [--codex-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
-orchestrator runs clean [--older-than <N>d] [--dry-run]
+orchestrator runs clean [--older-than <N>d | --unreadable] [--dry-run]
 orchestrator decisions report
 orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
@@ -744,6 +749,9 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
   use is skipped; a worktree git refuses to remove (uncommitted files) is kept and listed with
   git's reason. Never `--force`, and no branch is deleted: the run's branch stays.
   `--dry-run` lists what would be removed and changes nothing.
+- `runs clean --unreadable [--dry-run]` — removes the run directories this version cannot read
+  (a run started before a layout change, a damaged `run.json`), whatever their age, with their
+  worktree when git lets it go; locked runs are skipped and no branch is deleted.
 - `decisions report` — the older name of the last part of `runs report`, kept as an alias:
   compares the two complexity questions (`choice` and `score`) over
   the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,
@@ -1113,7 +1121,7 @@ story:
   spec_dir: specs           # in the repository you run the commands in (the story home)
   max_tasks: 12
   max_cost_usd: 20          # optional; the whole story
-  max_parallel: 1           # 1..8; ready tasks run at once; --parallel N overrides it
+  max_parallel: 1           # 1..8; ready tasks of different services run at once; --parallel N overrides it
   jira_issue_types: [Epic]  # run --jira on these refuses and points to story plan
 ```
 
@@ -1136,11 +1144,13 @@ story:
    branches are not touched. `--parallel N` (or `story.max_parallel`, 1 to 8, default 1) runs up
    to N ready tasks at once, each its own run in its own worktree; with more than one, each
    task's output goes to `.orchestrator/stories/<slug>/logs/task-<ID>.<attempt>.log` and the
-   console gets one line per start and end. Tests of tasks of one service that run at once may
-   share ports, databases or files outside the worktree: keep one slot for such a service. When
+   console gets one line per start and end. Only tasks of different services run at once: a ready
+   task waits while another task of its service runs, and the slot goes to the next service. When
    a task is done Go appends `## As built` to its file and updates the spec's `README.md`. A
    failure stops the story after the tasks already running end; run `story run` again to resume
-   it, or `--retry <ID>` to start a failed task over on a new branch. A task whose run completed
+   it, or `--retry <ID>` to start a failed task over on a new branch. For each task that did not
+   pass, the output names the step, the reason and the red test or failed review that led to it,
+   and one line lists the ready tasks the stop kept from starting. A task whose run completed
    without a commit (a failing review, a secret warning) blocks the story until you commit in
    its worktree or drop the work. A task whose parents do not merge cleanly on the spec branch
    is `conflict`: Go lists the files and the story blocks until you merge the parents' branches

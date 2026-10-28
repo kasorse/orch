@@ -166,6 +166,28 @@ func TestExecuteImplement_VerifyExtensionsAndSpec(t *testing.T) {
 	}
 }
 
+// TestExecuteImplement_VerifyCommand: test.verify_command is what run_tests runs; the test step
+// keeps test.command (TODO.md Q10).
+func TestExecuteImplement_VerifyCommand(t *testing.T) {
+	client := &sessionClient{}
+	d := newVerifyDispatcher(client)
+	d.Config.Test.VerifyCommand = "scripts/check-changed.sh"
+	var spec *verify.Spec
+	client.run = func(_ context.Context, dir string) (provider.Result, error) {
+		var err error
+		if spec, err = verify.ReadSpec(dir); err != nil {
+			t.Errorf("the server could not read its input: %v", err)
+		}
+		return provider.Result{Output: `{"summary":"done"}`}, nil
+	}
+	if _, err := d.Execute(context.Background(), domain.ActionImplement, verifyRun()); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if spec == nil || spec.TestCommand != "scripts/check-changed.sh" {
+		t.Errorf("spec = %+v, want test_command scripts/check-changed.sh", spec)
+	}
+}
+
 func TestExecuteImplement_VerifyOffAddsNothing(t *testing.T) {
 	client := &fakeClient{output: `{"summary":"done"}`}
 	d := newDispatcher(client)

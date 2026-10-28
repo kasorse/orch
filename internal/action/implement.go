@@ -229,7 +229,8 @@ func violationMessage(heading string, changed []string, restoreRef string) strin
 		fmt.Fprintf(&b, " Restore point: %s", restoreRef)
 	}
 	b.WriteString("\nThese files make code run later (hooks, CI, agent settings, the orchestrator config); " +
-		"if the change is intended, make it yourself or remove the path from security.protected_paths.")
+		"if the change is intended, make it yourself, remove the pattern from security.protected_paths, " +
+		"or anchor it at the repository root with a leading / when only the root file must not change.")
 	return b.String()
 }
 

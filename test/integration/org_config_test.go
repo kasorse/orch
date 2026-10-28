@@ -102,7 +102,7 @@ func TestOrgConfig_ARepositoryConflictIsAConfigError(t *testing.T) {
 	j := startJev(t, scriptBugfixMedium())
 	orgPath := useOrgConfig(t, "security:\n  require_clean_worktree: true\n")
 
-	cfg := jevConfig(t, j, func(o *configOptions) { o.extraYAML = "\nsecurity:\n  require_clean_worktree: false\n" })
+	cfg := jevConfig(t, j, func(o *configOptions) { o.security = "  require_clean_worktree: false\n" })
 	_, _, err := runOrchestrator(t, repoDir, cfg, "validate")
 	if err == nil {
 		t.Fatal("expected the conflict")

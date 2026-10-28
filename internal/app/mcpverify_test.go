@@ -97,7 +97,7 @@ func mcpRepo(t *testing.T) (repoDir, verifyDir string) {
 	run("commit", "-qm", "init")
 
 	repo := &repository.Repository{Dir: repoDir, Executor: execution.NewOSProcessExecutor()}
-	before, err := guard.NewRepoGuard(repo, nil).Snapshot(context.Background())
+	before, err := guard.NewRepoGuard(repo, []string{".github/workflows/**"}).Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"orchestrator/internal/apperr"
+	"orchestrator/internal/domain"
 )
 
 func TestRunsCleanArgs(t *testing.T) {
@@ -30,6 +31,11 @@ func TestRunsCleanArgs(t *testing.T) {
 		{"missing value", []string{"--older-than"}, cleanArgs{}, true},
 		{"unknown", []string{"--force"}, cleanArgs{}, true},
 		{"dry run twice", []string{"--dry-run", "--dry-run"}, cleanArgs{}, true},
+		{"unreadable", []string{"--unreadable"}, cleanArgs{olderThan: 7 * 24 * time.Hour, unreadable: true}, false},
+		{"unreadable dry run", []string{"--dry-run", "--unreadable"}, cleanArgs{olderThan: 7 * 24 * time.Hour, dryRun: true, unreadable: true}, false},
+		{"unreadable twice", []string{"--unreadable", "--unreadable"}, cleanArgs{}, true},
+		{"unreadable then an age", []string{"--unreadable", "--older-than", "2d"}, cleanArgs{}, true},
+		{"an age then unreadable", []string{"--older-than=2d", "--unreadable"}, cleanArgs{}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,6 +153,92 @@ func TestCleanWorktrees(t *testing.T) {
 		}
 		if !strings.Contains(out, "would remove "+path) {
 			t.Fatalf("dry run did not list the worktree:\n%s", out)
+		}
+	})
+}
+
+// TestCleanUnreadable: runs clean --unreadable removes a run whose run.json this version cannot
+// decode, with its worktree, and leaves a readable run, a run without a run.json, a locked run and
+// the branch (TODO.md S8).
+func TestCleanUnreadable(t *testing.T) {
+	clean := func(t *testing.T, s *session, dryRun bool) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := cleanUnreadable(context.Background(), &out, s.store, s.repo, dryRun); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	exists := func(path string) bool { _, err := os.Lstat(path); return err == nil }
+	// unreadable gives the session's run a worktree, then a run.json this version cannot decode.
+	unreadable := func(t *testing.T, s *session) (runDir, worktree string) {
+		t.Helper()
+		worktree = oldWorktreeRun(t, s, time.Hour)
+		runDir = s.store.RunDir(s.run.ID)
+		if err := os.WriteFile(filepath.Join(runDir, "run.json"), []byte(`{"id":"`+s.run.ID+`","from":"an older layout"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return runDir, worktree
+	}
+
+	t.Run("removed with its worktree, the rest stays", func(t *testing.T) {
+		s, dir, _ := worktreeSession(t, true, implementTest)
+		runDir, worktree := unreadable(t, s)
+		branch := s.run.Worktree.Branch
+		readable, err := s.store.NewRun(domain.Task{Description: "readable"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bare, err := s.store.NewRun(domain.Task{Description: "no run.json"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(s.store.RunDir(bare.ID), "run.json")); err != nil {
+			t.Fatal(err)
+		}
+
+		out := clean(t, s, false)
+		if exists(runDir) || exists(worktree) || !strings.Contains(out, "removed "+runDir) || !strings.Contains(out, "1 unreadable run(s) removed, 0 kept") {
+			t.Fatalf("the unreadable run or its worktree is still there:\n%s", out)
+		}
+		if !exists(s.store.RunDir(readable.ID)) || !exists(s.store.RunDir(bare.ID)) {
+			t.Errorf("a readable run or a run without run.json was removed:\n%s", out)
+		}
+		if refs := gitIn(t, dir, "for-each-ref"); !strings.Contains(refs, "refs/heads/"+branch) {
+			t.Errorf("the branch %s was deleted:\n%s", branch, refs)
+		}
+	})
+
+	t.Run("locked run is skipped", func(t *testing.T) {
+		s, _, _ := worktreeSession(t, true, implementTest)
+		runDir, _ := unreadable(t, s)
+		unlock, err := s.store.Lock(s.run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unlock()
+		if out := clean(t, s, false); !exists(runDir) || !strings.Contains(out, "in use") {
+			t.Fatalf("locked run not skipped:\n%s", out)
+		}
+	})
+
+	t.Run("an uncommitted file keeps the worktree and the run", func(t *testing.T) {
+		s, _, _ := worktreeSession(t, true, implementTest)
+		runDir, worktree := unreadable(t, s)
+		if err := os.WriteFile(filepath.Join(worktree, "new.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out := clean(t, s, false); !exists(runDir) || !exists(worktree) || !strings.Contains(out, "kept "+runDir) {
+			t.Fatalf("the run was not kept with its worktree:\n%s", out)
+		}
+	})
+
+	t.Run("dry run changes nothing", func(t *testing.T) {
+		s, _, _ := worktreeSession(t, true, implementTest)
+		runDir, worktree := unreadable(t, s)
+		out := clean(t, s, true)
+		if !exists(runDir) || !exists(worktree) || !strings.Contains(out, "would remove "+runDir+" and its worktree "+worktree) {
+			t.Fatalf("dry run changed something or did not list the run:\n%s", out)
 		}
 	})
 }

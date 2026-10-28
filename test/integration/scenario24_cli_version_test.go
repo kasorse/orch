@@ -15,7 +15,7 @@ import (
 // refused before any call, unless security.allow_unverified_cli says otherwise; the version
 // is recorded in run.json and in each resume entry.
 
-const allowUnverified = "\nsecurity:\n  allow_unverified_cli: true\n"
+const allowUnverified = "  allow_unverified_cli: true\n"
 
 type recordedCLI struct {
 	ProviderCLI map[string]struct {
@@ -81,7 +81,7 @@ func TestScenario24_OverrideRunsAndRecords(t *testing.T) {
 	decisionEnv(t, repoDir)
 	t.Setenv("FAKE_CLI_VERSION", "2.2.0 (Claude Code)")
 	j := startJev(t, scriptBugfixMedium())
-	cfg := jevConfig(t, j, func(o *configOptions) { o.extraYAML = allowUnverified })
+	cfg := jevConfig(t, j, func(o *configOptions) { o.security = allowUnverified })
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", "fix Add()")
 	mustSucceed(t, stdout, stderr, err)
