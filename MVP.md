@@ -5021,7 +5021,7 @@ story:
   spec_dir: specs                 # in the story home
   max_tasks: 12                   # 2..30
   max_cost_usd: 20                # optional; the whole story, every call and run
-  max_parallel: 1                 # 1..8; ready tasks run at once; story run --parallel N overrides
+  max_parallel: 1                 # 1..8; ready tasks of different services run at once; --parallel N overrides
   max_acceptance_chars: 300       # 50..2000; one acceptance item of a task file story run reads
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
 jira:
@@ -5182,14 +5182,16 @@ directory; the state is flocked by the one `story run` that owns it.
 3. **Children in Jira** (§48.7), then the tasks, in Go's order, **up to `slots` at once**, where
    `slots` is `--parallel N` else `story.max_parallel` (1..8, default 1). A task is **ready**
    when every `depends_on` task is done and it is itself pending, failed or stopped with a run,
-   blocked or `conflict`; done and running tasks are not. Whenever a slot is free the next ready
-   task in the story's order is started: done → skipped; failed or stopped with a run → that run
+   blocked or `conflict`; done and running tasks are not. Tasks of one service (its `repo`) run one
+   at a time: a ready task whose service has a task running waits, and the slot goes to the next
+   ready task of another service; their tests would share the service's ports, databases and files
+   outside the worktree, and their changes meet in its merge. Whenever a slot is free the next ready
+   task in the story's order whose service is free is started: done → skipped; failed or stopped with a run → that run
    resumed (`orchestrator resume <id> --mode auto` in its repository); blocked → looked at again
    (step 4); `conflict` → its parents merged again (§48.4); pending → its parents merged on the
    spec branch if there are several (§48.4), the task input written to `tasks/<ID>.json`, the
    file's sha256 recorded (the task is frozen from now) and `<orchestrator> run --mode auto
-   --story-task <file>` run as a child process in the task's repository. Two tasks of one
-   repository may run at once, each in its own worktree on its own branch; while children run no
+   --story-task <file>` run as a child process in the task's repository. While children run no
    git call of `story run` writes the shared `.git/config` or the hooks, because each child's
    guard (§47.5) fingerprints them. The child's run is found by its `task.source`; none found
    (the child failed its own fail-fast chain) means the task `failed`.
@@ -5280,8 +5282,6 @@ commit on the spec branch.
   with argv only, each running its own fail-fast chain, guard and sandbox.
 * The operator's checkouts and branches are never touched: every task runs in a worktree, and
   the spec branch is merged with `merge-tree` and `commit-tree`, never in a tree.
-* Tests of tasks of one service that run at once may share ports, databases or files outside
-  the worktree; the operator chooses `max_parallel` (one slot for such a service).
 
 ## 48.9 The scope question (shadow)
 

@@ -1116,7 +1116,7 @@ story:
   spec_dir: specs           # in the repository you run the commands in (the story home)
   max_tasks: 12
   max_cost_usd: 20          # optional; the whole story
-  max_parallel: 1           # 1..8; ready tasks run at once; --parallel N overrides it
+  max_parallel: 1           # 1..8; ready tasks of different services run at once; --parallel N overrides it
   jira_issue_types: [Epic]  # run --jira on these refuses and points to story plan
 ```
 
@@ -1139,8 +1139,8 @@ story:
    branches are not touched. `--parallel N` (or `story.max_parallel`, 1 to 8, default 1) runs up
    to N ready tasks at once, each its own run in its own worktree; with more than one, each
    task's output goes to `.orchestrator/stories/<slug>/logs/task-<ID>.<attempt>.log` and the
-   console gets one line per start and end. Tests of tasks of one service that run at once may
-   share ports, databases or files outside the worktree: keep one slot for such a service. When
+   console gets one line per start and end. Only tasks of different services run at once: a ready
+   task waits while another task of its service runs, and the slot goes to the next service. When
    a task is done Go appends `## As built` to its file and updates the spec's `README.md`. A
    failure stops the story after the tasks already running end; run `story run` again to resume
    it, or `--retry <ID>` to start a failed task over on a new branch. A task whose run completed

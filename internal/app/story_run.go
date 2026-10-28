@@ -802,15 +802,22 @@ func (r *storyRunner) dispatchAll() error {
 	return r.conclude(lp)
 }
 
-// nextReady is the first task story.Ready names that was not looked at in this loop and does not
-// wait for a task without a merge request, "" for none.
-func (r *storyRunner) nextReady(looked map[string]bool) string {
+// nextReady is the first task story.Ready names that was not looked at in this loop, does not
+// wait for a task without a merge request and whose service has no task running, "" for none.
+// Tasks of one service run one at a time: their tests share its ports, databases and files outside
+// the worktree, and their changes meet in its merge (TODO.md S10); the next ready task of another
+// service takes the slot meanwhile.
+func (r *storyRunner) nextReady(looked map[string]bool, running map[string]*childJob) string {
 	states := make(map[string]story.TaskStatus, len(r.rec.Tasks))
 	for id, rt := range r.rec.Tasks {
 		states[id] = rt.Status
 	}
+	busy := map[string]bool{}
+	for _, job := range running {
+		busy[job.repo] = true
+	}
 	for _, id := range story.Ready(r.spec.tasks, states) {
-		if !looked[id] && len(r.withoutMR(id)) == 0 {
+		if !looked[id] && !busy[r.byID[id].Repo] && len(r.withoutMR(id)) == 0 {
 			return id
 		}
 	}
@@ -880,7 +887,7 @@ func (r *storyRunner) hintMissingMR(missing []string) {
 // operator may have merged by hand, and it goes from the tip if they are all in it.
 func (r *storyRunner) fill(lp *dispatchLoop) {
 	for !lp.draining() && len(lp.running) < lp.slots {
-		id := r.nextReady(lp.looked)
+		id := r.nextReady(lp.looked, lp.running)
 		if id == "" {
 			return
 		}

@@ -393,7 +393,7 @@ fallback: stacked on the same-repository task it
   clarify step,
   the task's acceptance items as review criteria and the `Orchestrator-Story` commit trailer;
   stories do not nest. `story run` runs up to `story.max_parallel` (`--parallel N`, 1..8, default
-  1) ready tasks at once, each its own child run, with one goroutine owning `story.json`, the
+  1) ready tasks of different services at once (tasks of one service one at a time), each its own child run, with one goroutine owning `story.json`, the
   README, the task files and the console (the children's goroutines only run a process); while
   children run no git call writes `.git/config` or the hooks (every child's guard fingerprints
   them), and nothing new starts after a task that did not end done. A

@@ -100,27 +100,33 @@ func implementCalls(t *testing.T, f *storyRunFixture) int {
 	return n
 }
 
-// Two slots, two independent tasks: both children are running at the same time - each implement
-// call waits, with a timeout, for the other's - in two repositories and in one. Both commit on
-// their own branches, nothing is reported as a conflict, the logs hold the children's output and
-// the console only the start and result lines.
+// Two slots, two independent tasks: in two services both children are running at the same time -
+// each implement call waits, with a timeout, for the other's; in one service the second starts only
+// once the first is done (TODO.md S10). Both commit on their own branches, nothing is reported as a
+// conflict, the logs hold the children's output and the console only the start and result lines.
 func TestStoryRun_TwoSlotsRunTwoTasksAtOnce(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		repos []string
+		name   string
+		repos  []string
+		atOnce bool
 	}{
-		{"two repositories", []string{"billing", "gateway"}},
-		{"one repository", []string{"billing", "billing"}},
+		{"two repositories", []string{"billing", "gateway"}, true},
+		{"one repository", []string{"billing", "billing"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newStoryRunFixture(t, withTasks(parallelTasks(tc.repos...)))
 			f.writePlanRecord(t)
-			t.Setenv("FAKE_RENDEZVOUS_DIR", t.TempDir())
-			t.Setenv("FAKE_RENDEZVOUS_ACTION", "implement")
-			t.Setenv("FAKE_RENDEZVOUS_COUNT", "2")
+			if tc.atOnce {
+				t.Setenv("FAKE_RENDEZVOUS_DIR", t.TempDir())
+				t.Setenv("FAKE_RENDEZVOUS_ACTION", "implement")
+				t.Setenv("FAKE_RENDEZVOUS_COUNT", "2")
+			}
 
 			stdout, stderr, err := f.run(t, "--parallel", "2")
 			mustSucceed(t, stdout, stderr, err)
+			if !tc.atOnce {
+				assertAfter(t, stdout, "▶ RF02 · billing · 2/2 · log ", "RF01: done")
+			}
 
 			rec := f.record(t)
 			if rec.Status != story.StatusCompleted {
@@ -378,16 +384,17 @@ func assertAfter(t *testing.T, stdout, after string, befores ...string) {
 	}
 }
 
-// Scenario 1: RF01, RF02 and RF04 run at once - each implement call waits for the other two's -
-// RF03 starts after RF01 and RF02 are done, from the merge commit the parent made on the spec
-// branch, and the story completes. Every target in the end table is the spec branch.
+// Scenario 1: RF01 and RF04, of two services, run at once - each implement call waits for the
+// other's - and RF02, of RF01's service, starts once RF01 is done (TODO.md S10). RF03 starts after
+// RF01 and RF02 are done, from the merge commit the parent made on the spec branch, and the story
+// completes. Every target in the end table is the spec branch.
 func TestStoryRun_ParallelDiamondRunsAtOnceAndMergesTheParents(t *testing.T) {
 	f := newDiamondFixture(t)
 	before := f.checkouts(t)
 	bases := map[string]string{"billing": f.head(t, "billing"), "gateway": f.head(t, "gateway")}
 	t.Setenv("FAKE_RENDEZVOUS_DIR", t.TempDir())
 	t.Setenv("FAKE_RENDEZVOUS_ACTION", "implement")
-	t.Setenv("FAKE_RENDEZVOUS_COUNT", "3")
+	t.Setenv("FAKE_RENDEZVOUS_COUNT", "2")
 
 	stdout, stderr, err := f.run(t, "--parallel", "3")
 	mustSucceed(t, stdout, stderr, err)
@@ -431,9 +438,11 @@ func TestStoryRun_ParallelDiamondRunsAtOnceAndMergesTheParents(t *testing.T) {
 		t.Errorf("RF03 base_branch = %s, want its merge request's target, the spec branch %s", in.BaseBranch, specBranch)
 	}
 
-	// RF03 was started after RF01 and RF02 were done, and the three at once were started in order.
+	// RF04 took the slot RF02 had to leave while RF01 ran; RF02 started after RF01 was done, and RF03
+	// after RF01 and RF02.
+	assertAfter(t, stdout, "▶ RF04 · gateway · 4/4 · log ", "▶ RF01 · billing · 1/4 · log ")
+	assertAfter(t, stdout, "▶ RF02 · billing · 2/4 · log ", "RF01: done")
 	assertAfter(t, stdout, "▶ RF03 · billing · 3/4 · log ", "RF01: done", "RF02: done")
-	assertAfter(t, stdout, "▶ RF04 · gateway · 4/4 · log ", "▶ RF01 · billing · 1/4 · log ", "▶ RF02 · billing · 2/4 · log ")
 	assertContains(t, "stdout", stdout, "✓ Story completed: all 4 tasks done",
 		"RF01 · billing · story/refunds/RF01 → story/refunds/spec",
 		"RF02 · billing · story/refunds/RF02 → story/refunds/spec",
@@ -514,14 +523,15 @@ func TestStoryRun_ParallelConflictThenAManualMerge(t *testing.T) {
 	assertContains(t, "stdout", stdout, "✓ Story completed: all 4 tasks done", "RF03 · billing · story/refunds/RF03 → story/refunds/spec")
 }
 
-// Scenario 3: RF02 fails while RF01 runs. RF01 is settled, RF03 and RF04 are never started and the
-// story is failed. The next story run resumes RF02's run, and starts RF03 only once RF02 is done.
+// Scenario 3: RF04 fails while RF01 runs; RF02, of RF01's service, waits for it (TODO.md S10). RF01
+// is settled, RF02 and RF03 are never started and the story is failed. The next story run resumes
+// RF04's run, runs RF02, and starts RF03 only once RF02 is done.
 func TestStoryRun_ParallelFailureThenResumeRunsTheMergeTask(t *testing.T) {
 	f := newDiamondFixture(t)
 	t.Setenv("FAKE_FAIL_ACTION", "implement")
-	t.Setenv("FAKE_FAIL_BRANCH", "story/"+storyRunSlug+"/RF02")
-	// RF01 waits in its review until RF02 is recorded failed, so RF01 is still running then.
-	released := holdReview(t, f, "RF01", func(rec persistence.StoryRecord) bool { return rec.Tasks["RF02"].Status == story.TaskFailed })
+	t.Setenv("FAKE_FAIL_BRANCH", "story/"+storyRunSlug+"/RF04")
+	// RF01 waits in its review until RF04 is recorded failed, so RF01 is still running then.
+	released := holdReview(t, f, "RF01", func(rec persistence.StoryRecord) bool { return rec.Tasks["RF04"].Status == story.TaskFailed })
 
 	stdout, stderr, err := f.run(t, "--parallel", "2")
 	if err == nil {
@@ -529,20 +539,20 @@ func TestStoryRun_ParallelFailureThenResumeRunsTheMergeTask(t *testing.T) {
 	}
 	assertWorkflowError(t, err)
 	if at, ok := released(); !ok || at.Tasks["RF01"].Status != story.TaskRunning {
-		t.Fatalf("RF01 was not running when RF02 was recorded failed (seen %v): %+v", ok, at.Tasks["RF01"])
+		t.Fatalf("RF01 was not running when RF04 was recorded failed (seen %v): %+v", ok, at.Tasks["RF01"])
 	}
 	rec := f.record(t)
-	failed := rec.Tasks["RF02"]
+	failed := rec.Tasks["RF04"]
 	if rec.Status != story.StatusFailed || failed.Status != story.TaskFailed || failed.RunID == "" || rec.Tasks["RF01"].Status != story.TaskDone {
-		t.Fatalf("status = %s, RF01 = %+v, RF02 = %+v; want a failed story, RF01 done and RF02 failed with its run", rec.Status, rec.Tasks["RF01"], failed)
+		t.Fatalf("status = %s, RF01 = %+v, RF04 = %+v; want a failed story, RF01 done and RF04 failed with its run", rec.Status, rec.Tasks["RF01"], failed)
 	}
+	assertNotStarted(t, f, rec, stdout, "RF02")
 	assertNotStarted(t, f, rec, stdout, "RF03")
-	assertNotStarted(t, f, rec, stdout, "RF04")
-	assertContains(t, "stdout", stdout, "RF01: done", "RF02: failed", "resumes run "+failed.RunID)
+	assertContains(t, "stdout", stdout, "RF01: done", "RF04: failed", "resumes run "+failed.RunID)
 	rf01 := rec.Tasks["RF01"]
 	runs := f.runCount(t)
 
-	// The next run resumes RF02's run, with nothing failing any more.
+	// The next run resumes RF04's run, with nothing failing any more.
 	t.Setenv("FAKE_FAIL_ACTION", "")
 	t.Setenv("FAKE_SLEEP_ACTION", "")
 	stdout, stderr, err = f.run(t, "--parallel", "2")
@@ -551,18 +561,18 @@ func TestStoryRun_ParallelFailureThenResumeRunsTheMergeTask(t *testing.T) {
 	if rec.Status != story.StatusCompleted {
 		t.Fatalf("status = %s, want completed\n%s", rec.Status, stdout)
 	}
-	if rt := rec.Tasks["RF02"]; rt.Status != story.TaskDone || rt.RunID != failed.RunID || rt.Attempt != 1 {
-		t.Errorf("RF02 = %+v, want done on the same run %s and attempt 1", rt, failed.RunID)
+	if rt := rec.Tasks["RF04"]; rt.Status != story.TaskDone || rt.RunID != failed.RunID || rt.Attempt != 1 {
+		t.Errorf("RF04 = %+v, want done on the same run %s and attempt 1", rt, failed.RunID)
 	}
 	if rt := rec.Tasks["RF01"]; rt.RunID != rf01.RunID || rt.Commit != rf01.Commit {
 		t.Errorf("RF01 = %+v, was %+v: a done task must not run again", rt, rf01)
 	}
-	// RF03 and RF04 made the only new runs: RF02 was resumed, RF01 not touched.
+	// RF02 and RF03 made the only new runs: RF04 was resumed, RF01 not touched.
 	if got := f.runCount(t); got != runs+2 {
 		t.Errorf("%d runs, want %d", got, runs+2)
 	}
-	if resumed := f.runRecord(t, "billing", "RF02", 1); resumed.Status != domain.RunCompleted || len(resumed.Resumes) != 1 {
-		t.Errorf("RF02's run = %s with %d resumes, want completed with one", resumed.Status, len(resumed.Resumes))
+	if resumed := f.runRecord(t, "gateway", "RF04", 1); resumed.Status != domain.RunCompleted || len(resumed.Resumes) != 1 {
+		t.Errorf("RF04's run = %s with %d resumes, want completed with one", resumed.Status, len(resumed.Resumes))
 	}
 	f.assertMergeOf(t, "billing", f.input(t, "RF03").BaseRef, rec.Tasks["RF01"].Commit, rec.Tasks["RF02"].Commit)
 	assertAfter(t, stdout, "▶ RF03 · billing · 3/4 · log ", "RF02: done")

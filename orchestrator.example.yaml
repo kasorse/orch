@@ -349,6 +349,6 @@ security:
 #   spec_dir: specs                # in the story home
 #   max_tasks: 12                  # 2..30
 #   max_cost_usd: 20               # optional; the whole story - needs cost-reporting providers
-#   max_parallel: 1                # 1..8; ready tasks story run runs at once, each its own run; tasks of one service share its ports and databases
+#   max_parallel: 1                # 1..8; ready tasks story run runs at once, each its own run; tasks of one service run one at a time
 #   max_acceptance_chars: 300      # 50..2000; one acceptance item of a task file story run reads
 #   jira_issue_types: [Epic]       # run --jira on these refuses; default none
