@@ -205,7 +205,8 @@ and review), without it, as the last read-only step, it writes the answer.
   is named by the repository's instructions, a template or `orchestrator/<run-id>`, MVP.md
   §50.3), so a resume checks the recorded name's format and `git worktree list`; the mode comes from
   `options.isolation`, not the current config. The `.git` pointer is checked in Go before
-  every fingerprint, `worktree.setup` runs only before any step, and a new test or scenario
+  every fingerprint, every `git worktree add/list/remove/prune` holds the flock
+  `<state>/orchestrator/worktrees/<repo-id>.lock` (git races itself, MVP.md §47.2), `worktree.setup` runs only before any step, and a new test or scenario
   that reads the result in the working tree pins `isolation: inplace`. New run artifacts:
   `run.json: worktree` and `logs/setup.{stdout,stderr}.log`.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with

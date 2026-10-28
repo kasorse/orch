@@ -56,9 +56,11 @@ type configOptions struct {
 	testBaseline string
 	// promptLimits is rendered verbatim under limits:, e.g. "  prompt:\n    max_diff_bytes: 65536\n".
 	promptLimits string
-	// timeout is the rendered execution.timeout value (e.g. "30s"). Defaults to "30s"
-	// via defaultConfigOptions - tests only override it to exercise the run-wide
-	// timeout (MVP.md §25) with a short deadline.
+	// timeout is the rendered execution.timeout value (e.g. "500ms"). Defaults to "5m" via
+	// defaultConfigOptions: only a guard against a hang, never a speed check - a run takes about
+	// a second, but under load (three scripts/check.sh at once in bwrap) more than 25 times that,
+	// and a 30s budget failed runs that were only slow (TODO.md S7). Tests override it to exercise
+	// the run-wide timeout (MVP.md §25) with a short deadline.
 	timeout string
 	// jevURL is decision.jev.base_url - the fake Jev server's URL.
 	jevURL string
@@ -228,7 +230,7 @@ func defaultConfigOptions() configOptions {
 		maxFixIterations: 2,
 		testCommand:      "go test ./...",
 		testBaseline:     "off",
-		timeout:          "30s",
+		timeout:          "5m",
 		jevURL:           "http://127.0.0.1:1", // tests using Jev replace it with their server's
 		onFailure:        "fail",
 	}

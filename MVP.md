@@ -4919,6 +4919,12 @@ The path comes from the run ID alone; the branch is no longer derived from it, s
 checks the recorded name against §50.3's character and format rules and against `git worktree
 list` showing the derived path on exactly that branch. The orchestrator refuses rather than
 reuse either.
+Every `git worktree add`, `list`, `remove` and `prune` the orchestrator runs in a repository holds
+an exclusive flock on `<state>/orchestrator/worktrees/<repo-id>.lock` and waits for it: git 2.43
+that reads a worktree another git is still creating dies ("failed to read
+.git/worktrees/<id>/commondir") after `add -b` has made its branch, and two story tasks of one
+repository start at once (§48.6). A failed `add` that leaves the branch reports git's error with
+the refusal.
 `run.json: worktree` is saved at once: `path`, `branch`, `base_ref`, `base_branch` (empty when
 detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every step, guard,
 sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its

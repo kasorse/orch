@@ -128,11 +128,16 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	}
 	run.BranchNaming = naming
 
+	unlock, err := persistence.LockWorktrees(filepath.Dir(path))
+	if err != nil {
+		return nil, &apperr.WorkflowError{Msg: "cannot create the run's worktree", Err: err}
+	}
+	defer unlock()
 	// Neither is ever reused: an existing one belongs to something else.
 	if exists, err := repo.BranchExists(ctx, branch); err != nil {
 		return nil, err
 	} else if exists {
-		return nil, branchExistsError(branch)
+		return nil, branchExistsError(branch, nil)
 	}
 	if _, err := os.Lstat(path); err == nil {
 		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("the run's worktree path %s already exists; it is not reused. Remove it, or start a new run.", path)}
@@ -151,10 +156,11 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	}
 	admin, err := repo.AddWorktree(ctx, path, branch, base)
 	if err != nil {
-		// git refuses an existing branch too, when one appeared after the check above.
+		// git refuses an existing branch too, when one appeared after the check above; or it made
+		// the branch and then failed. git's own error says which.
 		if _, statErr := os.Lstat(path); errors.Is(statErr, fs.ErrNotExist) {
 			if exists, _ := repo.BranchExists(ctx, branch); exists {
-				return nil, branchExistsError(branch)
+				return nil, branchExistsError(branch, err)
 			}
 		}
 		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("failed to create the run's worktree %s on %s", path, branch), Err: err}
@@ -221,7 +227,12 @@ func openReviewWorktree(ctx context.Context, s *session) (*repository.Repository
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := persistence.LockWorktrees(filepath.Dir(path))
+	if err != nil {
+		return nil, &apperr.WorkflowError{Msg: "cannot create the run's worktree", Err: err}
+	}
 	admin, err := repo.AddDetachedWorktree(ctx, path, head)
+	unlock()
 	if err != nil {
 		return nil, &apperr.WorkflowError{Msg: fmt.Sprintf("failed to create the run's worktree %s at %s", path, head), Err: err}
 	}
@@ -261,7 +272,7 @@ func endReviewWorktree(ctx context.Context, s *session) {
 		return
 	}
 	// A cancelled context must not keep git from removing what the run made.
-	if err := s.operator.RemoveWorktree(context.WithoutCancel(ctx), w.Path); err != nil {
+	if err := removeWorktree(context.WithoutCancel(ctx), s.operator, w.Path); err != nil {
 		s.reporter.WorktreeKept(w.Path, err.Error())
 		return
 	}
@@ -273,8 +284,20 @@ func endReviewWorktree(ctx context.Context, s *session) {
 	saveSummary(s.store, run)
 }
 
-func branchExistsError(branch string) error {
-	return &apperr.WorkflowError{Msg: fmt.Sprintf("the branch %s already exists; it is not reused. Delete it (git branch -D %s), or start a new run.", branch, branch)}
+// branchExistsError is the refusal of an existing branch; err is git's, when its worktree add
+// failed with the branch there.
+func branchExistsError(branch string, err error) error {
+	return &apperr.WorkflowError{Msg: fmt.Sprintf("the branch %s already exists; it is not reused. Delete it (git branch -D %s), or start a new run.", branch, branch), Err: err}
+}
+
+// removeWorktree is RemoveWorktree under the repository's worktrees lock (persistence.LockWorktrees).
+func removeWorktree(ctx context.Context, repo *repository.Repository, path string) error {
+	unlock, err := persistence.LockWorktrees(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return repo.RemoveWorktree(ctx, path)
 }
 
 // switchToWorktree moves everything that runs a step or checks one to the worktree
@@ -385,7 +408,12 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 		return nil, refuse(apperr.RunCorrupt, fmt.Sprintf("run.json: worktree.admin_dir %s is not directly under %s", w.AdminDir, worktrees), nil)
 	}
 
+	unlock, err := persistence.LockWorktrees(filepath.Dir(want))
+	if err != nil {
+		return nil, err
+	}
 	list, err := repo.ListWorktrees(ctx)
+	unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -436,7 +464,7 @@ func finishWorktree(ctx context.Context, s *session, sha string) error {
 	}
 	deliveryErr := deliver(ctx, s, sha)
 	// Without --force: git refuses when anything is left in the worktree, which then stays.
-	if err := s.operator.RemoveWorktree(ctx, w.Path); err != nil {
+	if err := removeWorktree(ctx, s.operator, w.Path); err != nil {
 		s.reporter.WorktreeKept(w.Path, err.Error())
 		return deliveryErr
 	}

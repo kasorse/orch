@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -128,7 +129,7 @@ func cleanWorktrees(ctx context.Context, stdout io.Writer, store *persistence.St
 			gone = true // only git's administrative data is left; the prune below drops it
 		}
 		if !gone {
-			if err := repo.RemoveWorktree(ctx, w.Path); err != nil {
+			if err := removeWorktree(ctx, repo, w.Path); err != nil {
 				unlock()
 				kept++
 				fmt.Fprintf(stdout, "kept %s (run %s, branch %s): %v\n", w.Path, id, w.Branch, err)
@@ -148,9 +149,28 @@ func cleanWorktrees(ctx context.Context, stdout io.Writer, store *persistence.St
 	if args.dryRun {
 		return nil
 	}
-	if err := repo.PruneWorktrees(ctx); err != nil {
+	if err := pruneWorktrees(ctx, repo); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "%d worktree(s) removed, %d kept\n", removed, kept)
 	return nil
+}
+
+// pruneWorktrees is PruneWorktrees under the repository's worktrees lock: a prune that meets a
+// worktree another process is still creating drops its half-written administrative directory.
+func pruneWorktrees(ctx context.Context, repo *repository.Repository) error {
+	common, err := repo.CommonDir(ctx)
+	if err != nil {
+		return err
+	}
+	state, err := persistence.StateDir()
+	if err != nil {
+		return err
+	}
+	unlock, err := persistence.LockWorktrees(filepath.Dir(persistence.WorktreePath(state, common, "lock")))
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return repo.PruneWorktrees(ctx)
 }

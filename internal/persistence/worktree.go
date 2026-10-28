@@ -3,10 +3,12 @@ package persistence
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"orchestrator/internal/domain"
 )
@@ -38,6 +40,37 @@ func WorktreePath(stateDir, commonDir, runID string) string {
 	}
 	sum := sha256.Sum256([]byte(filepath.Clean(resolved)))
 	return filepath.Join(stateDir, "orchestrator", "worktrees", hex.EncodeToString(sum[:])[:16], runID)
+}
+
+// LockWorktrees takes an exclusive flock on <repo-id>.lock beside dir, the <repo-id> directory
+// that holds a repository's run worktrees (the parent of a WorktreePath), and waits while another
+// process holds it. Every git worktree add, list, remove and prune of the orchestrator runs under
+// it: git 2.43 that reads a worktree another git is still creating or removing dies ("failed to
+// read .git/worktrees/<id>/commondir"), and `worktree add -b` has made its branch by then; two
+// story tasks of one repository start at once (TODO.md S7). The kernel drops the lock with the
+// process. The returned func releases it.
+func LockWorktrees(dir string) (unlock func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return nil, fmt.Errorf("create the worktrees directory: %w", err)
+	}
+	f, err := os.OpenFile(dir+".lock", os.O_RDWR|os.O_CREATE|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open the worktrees lock: %w", err)
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("lock the worktrees: %w", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
 }
 
 // validateWorktree applies the checks that need no repository (specs/worktree/SPEC.md §8.2).
