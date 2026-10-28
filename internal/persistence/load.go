@@ -331,3 +331,46 @@ func loadRunDir(dir string) (FoundRun, error) {
 	}
 	return found, nil
 }
+
+// maxProbeBytes bounds what RunStory reads of a run.json it cannot trust to be a run.
+const maxProbeBytes = 16 << 20
+
+// RunStory is the story a run directory's run.json names in task.source (kind story), read
+// loosely: "" when there is none, or the file cannot be read or decoded. It is how a run that this
+// version cannot read is still told apart as one of a story's tasks (TODO.md S8); it decides
+// nothing else.
+func RunStory(dir string) string {
+	f, err := os.Open(filepath.Join(dir, "run.json"))
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	var p struct {
+		Task struct {
+			Source *struct {
+				Kind  string `json:"kind"`
+				Story string `json:"story"`
+			} `json:"source"`
+		} `json:"task"`
+	}
+	if json.NewDecoder(io.LimitReader(f, maxProbeBytes)).Decode(&p) != nil || p.Task.Source == nil || p.Task.Source.Kind != domain.TaskSourceStory {
+		return ""
+	}
+	return p.Task.Source.Story
+}
+
+// UnreadableRun is why this version cannot read the run: its run.json was read but does not decode
+// or validate (a run of an older layout, a damaged file). It is nil for a run that reads, and also
+// when run.json is missing or cannot be read, which says nothing about its content: runs clean
+// --unreadable removes only what this returns an error for.
+func (s *Store) UnreadableRun(runID string) error {
+	if !isRunID(runID) {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(s.runDir(runID), "run.json"))
+	if err != nil {
+		return nil
+	}
+	_, err = decodeRun(data, runID)
+	return err
+}

@@ -167,6 +167,11 @@ type storyRunner struct {
 	merged       map[string]bool
 	// remotes are the git remotes the services deliver to (their delivery.remote), by service.
 	remotes map[string]string
+	// unreadable are the run directories settle found that this version cannot read, by runs
+	// directory, reported once at the end (reportUnreadable); warned are those of this story's
+	// tasks, each warned about at once.
+	unreadable map[string]map[string]bool
+	warned     map[string]bool
 }
 
 func (r *storyRunner) run() error {
@@ -208,6 +213,7 @@ func (r *storyRunner) run() error {
 	if err := r.applyRetry(); err != nil {
 		return err
 	}
+	defer r.reportUnreadable()
 	return r.dispatchAll()
 }
 
@@ -1292,6 +1298,44 @@ func mapRunStatus(run *domain.Run) story.TaskStatus {
 	return story.TaskStopped
 }
 
+// noteUnreadable records the unreadable run directories under runs: one of this story's tasks (by
+// its task.source) is warned about at once, the rest only counted for reportUnreadable - old runs
+// of other work would otherwise fill the console (TODO.md S8). A run another process holds locked
+// is a sibling in progress, not a damaged run.
+func (r *storyRunner) noteUnreadable(runs string, bad []persistence.UnreadableDir) {
+	for _, b := range bad {
+		if persistence.DirLocked(b.Dir) {
+			continue
+		}
+		if persistence.RunStory(b.Dir) == r.loc.slug {
+			if !r.warned[b.Dir] {
+				if r.warned == nil {
+					r.warned = map[string]bool{}
+				}
+				r.warned[b.Dir] = true
+				fmt.Fprintf(r.stderr, "Warning: %s is a run of this story that cannot be read and is ignored: %v\n", b.Dir, b.Err)
+			}
+			continue
+		}
+		if r.unreadable == nil {
+			r.unreadable = map[string]map[string]bool{}
+		}
+		if r.unreadable[runs] == nil {
+			r.unreadable[runs] = map[string]bool{}
+		}
+		r.unreadable[runs][b.Dir] = true
+	}
+}
+
+// reportUnreadable says, one line per runs directory, how many runs settle ignored there because
+// this version cannot read them, and how to remove them.
+func (r *storyRunner) reportUnreadable() {
+	for _, runs := range slices.Sorted(maps.Keys(r.unreadable)) {
+		fmt.Fprintf(r.stderr, "Warning: %d run(s) in %s cannot be read by this version and are ignored; "+
+			"`orchestrator runs clean --unreadable` in %s removes them\n", len(r.unreadable[runs]), runs, filepath.Dir(filepath.Dir(runs)))
+	}
+}
+
 // runCostUSD is what the run reported it cost; false when it has no outcome and so no cost is
 // known.
 func runCostUSD(run *domain.Run) (float64, bool) {
@@ -1309,13 +1353,7 @@ func (r *storyRunner) settle(id string, exit int) (story.TaskStatus, error) {
 	if err != nil {
 		fmt.Fprintf(r.stderr, "Warning: cannot list the runs of %s: %v\n", rt.Repo, err)
 	}
-	for _, b := range bad {
-		// A run another process holds locked is a sibling in progress, not a damaged run.
-		if persistence.DirLocked(b.Dir) {
-			continue
-		}
-		fmt.Fprintf(r.stderr, "Warning: %s is not a readable run and is ignored: %v\n", b.Dir, b.Err)
-	}
+	r.noteUnreadable(filepath.Join(r.rec.Services[rt.Repo], runsBaseDir), bad)
 	run := pickSettledRun(found, r.loc.slug, id, rt.Attempt, rt.RunID)
 
 	// No run: the child failed before it made one (its own fail-fast chain, a refused input).
@@ -1516,10 +1554,30 @@ func (r *storyRunner) stopAll(ids []string) error {
 	for _, notDone := range ids {
 		r.hints(notDone)
 	}
+	if held := r.heldByStop(ids); len(held) > 0 {
+		r.reporter.StoryNote(fmt.Sprintf("not started because of the stop: %s - ready, the next story run starts them", strings.Join(held, ", ")))
+	}
 	if status == story.TaskStopped && r.ctx.Err() != nil {
 		return fmt.Errorf("story %s stopped at %s: %w", r.loc.slug, id, r.ctx.Err())
 	}
 	return &apperr.WorkflowError{Msg: fmt.Sprintf("story %s is %s: %s is %s", r.loc.slug, storyStatus, id, status)}
+}
+
+// heldByStop are the tasks that were ready to start when the story stopped and were not started for
+// it, in the story's order: the tasks that did not end done (ids) are not among them, nor a task
+// that waits for a merge request (TODO.md S8).
+func (r *storyRunner) heldByStop(ids []string) []string {
+	states := make(map[string]story.TaskStatus, len(r.rec.Tasks))
+	for id, rt := range r.rec.Tasks {
+		states[id] = rt.Status
+	}
+	var held []string
+	for _, id := range story.Ready(r.spec.tasks, states) {
+		if !slices.Contains(ids, id) && len(r.withoutMR(id)) == 0 {
+			held = append(held, id)
+		}
+	}
+	return held
 }
 
 // hints tells the operator what to do next for a task that did not get to done.
@@ -1579,11 +1637,52 @@ func (r *storyRunner) runFailureHints(id string, rt persistence.StoryTask) []str
 	for _, l := range strings.Split(strings.TrimSpace(reason), "\n") {
 		hints = append(hints, "  "+l)
 	}
+	hints = append(hints, fixCauseHint(run, store)...)
 	where := "Details: " + filepath.Join(store.RunDir(run.ID), "summary.md")
 	if failed != nil {
 		where += ", the step's output: " + store.LogPath(run.ID, failed.Index, failed.Action, "stderr") + " (and .stdout.log)"
 	}
 	return append(hints, where)
+}
+
+// fixCauseHint is the run's last red test or failed review, with where its output is: what sent the
+// run back to implement, so a stop in the fix loop - no progress, max_fix_iterations, an implement
+// that failed - names the failure it was fixing (TODO.md S8). Empty when the run had neither.
+func fixCauseHint(run *domain.Run, store *persistence.Store) []string {
+	for i := len(run.Executions) - 1; i >= 0; i-- {
+		e := run.Executions[i]
+		if t := e.TestResult; t != nil && !t.Success {
+			what, logAction := fmt.Sprintf("exit code %d", t.ExitCode), e.Action
+			switch {
+			case t.FailedCheck != "":
+				what = fmt.Sprintf("the check %s failed (exit code %d)", t.FailedCheck, t.ExitCode)
+				logAction = e.Action + domain.ActionType("."+t.FailedCheck)
+			case len(t.FailedTests) > 0:
+				what = fmt.Sprintf("%d failing test(s): %s", len(t.FailedTests), listSome(t.FailedTests, 5))
+			}
+			return []string{fmt.Sprintf("Led to it: step %d (%s) was red, %s; its output: %s", e.Index, e.Action, what,
+				store.LogPath(run.ID, e.Index, logAction, "stdout"))}
+		}
+		if rv := e.ReviewResult; rv != nil && rv.Decide() == domain.ReviewFail {
+			blocking := 0
+			for _, issue := range rv.Issues {
+				if issue.Severity == domain.SeverityCritical || issue.Severity == domain.SeverityHigh {
+					blocking++
+				}
+			}
+			return []string{fmt.Sprintf("Led to it: step %d (%s) failed, %d critical or high issue(s), %d unmet criteria; the review: %s",
+				e.Index, e.Action, blocking, len(rv.UnmetCriteria()), filepath.Join(store.RunDir(run.ID), e.ArtifactPath))}
+		}
+	}
+	return nil
+}
+
+// listSome joins the first n of items, and says how many more there are.
+func listSome(items []string, n int) string {
+	if len(items) <= n {
+		return strings.Join(items, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(items[:n], ", "), len(items)-n)
 }
 
 func fileExists(path string) bool {

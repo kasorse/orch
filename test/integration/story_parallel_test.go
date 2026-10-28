@@ -205,7 +205,8 @@ func TestStoryRun_AFailingTaskLetsTheRunningOneEnd(t *testing.T) {
 	if run := f.runRecord(t, "gateway", "RF02", 1); run.Status != domain.RunCompleted {
 		t.Errorf("RF02's run is %s, want completed", run.Status)
 	}
-	assertContains(t, "stdout", stdout, "RF01: failed", "RF02: done", "resumes run "+rec.Tasks["RF01"].RunID, "--retry RF01")
+	assertContains(t, "stdout", stdout, "RF01: failed", "RF02: done", "resumes run "+rec.Tasks["RF01"].RunID, "--retry RF01",
+		"Note: not started because of the stop: RF03 - ready, the next story run starts them")
 }
 
 // The budget reached while one child runs: every implement costs $1 and story.max_cost_usd is
@@ -548,7 +549,9 @@ func TestStoryRun_ParallelFailureThenResumeRunsTheMergeTask(t *testing.T) {
 	}
 	assertNotStarted(t, f, rec, stdout, "RF02")
 	assertNotStarted(t, f, rec, stdout, "RF03")
-	assertContains(t, "stdout", stdout, "RF01: done", "RF04: failed", "resumes run "+failed.RunID)
+	// RF02 was ready once RF01 was done; RF03 waits for it and is not named.
+	assertContains(t, "stdout", stdout, "RF01: done", "RF04: failed", "resumes run "+failed.RunID,
+		"Note: not started because of the stop: RF02 - ready, the next story run starts them")
 	rf01 := rec.Tasks["RF01"]
 	runs := f.runCount(t)
 

@@ -4976,12 +4976,19 @@ A story task (§48.5) is the same run from a base that the story gives it (a giv
 instead of HEAD, on a branch named by its repository's rules, `story/<slug>/<ID>` only the
 fallback (§50.8); its commit message carries the `Orchestrator-Story` trailer (§42.2).
 
-## 47.6 `orchestrator runs clean [--older-than 7d] [--dry-run]`
+## 47.6 `orchestrator runs clean [--older-than 7d | --unreadable] [--dry-run]`
 
 For every run older than the limit whose worktree is not removed and whose lock is free,
 removes the worktree with `git worktree remove` (a worktree with changes is kept and listed),
 then `git worktree prune`, and sets `worktree.removed`. It never deletes a branch, a ref or a
-run directory.
+run directory. A run it cannot read is skipped, with a pointer to `--unreadable`.
+
+`runs clean --unreadable [--dry-run]` (not with `--older-than`) removes, whatever their age, the
+run directories whose `run.json` this version reads but cannot decode or validate - a run started
+before a layout change (`specs/clarify`), a damaged file - and nothing else: a missing or
+unreadable file is no reason. A run whose lock is held is skipped. A worktree at the run's
+derived path is removed first, without `--force`; git refusing it keeps the worktree and the run.
+No branch is deleted.
 
 ## 47.7 Not covered
 
@@ -5222,8 +5229,14 @@ directory; the state is flocked by the one `story run` that owns it.
    **When a task does not end done** (failed, stopped, blocked or `conflict`) nothing new is
    started; the children still running are not killed, they run to their end and are settled;
    then the story stops with the status of the first task in the story's order that is not done,
-   and the hints of every such task are printed. Tasks that were independent of it and not yet
-   started wait for the next `story run`.
+   and the hints of every such task are printed: for a run, its status, the step that failed and
+   the reason the run recorded, then `Led to it:` - the run's last red test (its failed check or
+   failing tests, and the log) or failed review (its blocking issues and unmet criteria, and the
+   artifact) - and where the summary and the step's logs are. Tasks that were ready and not
+   started are named on one line (`Note: not started because of the stop: …`) and wait for the
+   next `story run`. A run directory of a service that this version cannot read is warned about
+   at once only when its `task.source` names this story; the others are counted, one line per
+   service at the end, with `runs clean --unreadable` (§47.6).
 5. **After each task** Go appends `## As built (<date>)` to the task file - run, outcome, branch
    and base, commit, cost, the run's `summary_short`, conflicts with the base branch - and
    rewrites `README.md`. Nothing a model wrote goes there except `summary_short`, as data.

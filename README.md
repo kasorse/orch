@@ -703,7 +703,7 @@ orchestrator [--config path] [--mode m] story run <spec_dir>/<slug> [--retry <ID
 orchestrator [--config path] story status <spec_dir>/<slug>
 orchestrator [--config path] [--mode m] [--claude-auth m] [--codex-auth m] resume <run-id>
 orchestrator runs report [--dir <path>]
-orchestrator runs clean [--older-than <N>d] [--dry-run]
+orchestrator runs clean [--older-than <N>d | --unreadable] [--dry-run]
 orchestrator decisions report
 orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
@@ -747,6 +747,9 @@ orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/
   use is skipped; a worktree git refuses to remove (uncommitted files) is kept and listed with
   git's reason. Never `--force`, and no branch is deleted: the run's branch stays.
   `--dry-run` lists what would be removed and changes nothing.
+- `runs clean --unreadable [--dry-run]` — removes the run directories this version cannot read
+  (a run started before a layout change, a damaged `run.json`), whatever their age, with their
+  worktree when git lets it go; locked runs are skipped and no branch is deleted.
 - `decisions report` — the older name of the last part of `runs report`, kept as an alias:
   compares the two complexity questions (`choice` and `score`) over
   the `decision.json` of every run in `.orchestrator/runs/`: agreement rate, a 3×3 matrix,
@@ -1143,7 +1146,9 @@ story:
    task waits while another task of its service runs, and the slot goes to the next service. When
    a task is done Go appends `## As built` to its file and updates the spec's `README.md`. A
    failure stops the story after the tasks already running end; run `story run` again to resume
-   it, or `--retry <ID>` to start a failed task over on a new branch. A task whose run completed
+   it, or `--retry <ID>` to start a failed task over on a new branch. For each task that did not
+   pass, the output names the step, the reason and the red test or failed review that led to it,
+   and one line lists the ready tasks the stop kept from starting. A task whose run completed
    without a commit (a failing review, a secret warning) blocks the story until you commit in
    its worktree or drop the work. A task whose parents do not merge cleanly on the spec branch
    is `conflict`: Go lists the files and the story blocks until you merge the parents' branches
