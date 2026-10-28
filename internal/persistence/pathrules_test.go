@@ -121,7 +121,7 @@ func TestValidateRun_PathRules(t *testing.T) {
 		{"path outside the repository", run(domain.ActionImplement, with(func(m *domain.PathRuleMatch) {
 			m.Files = []string{"../etc/passwd"}
 		})), "path_rules[0]: files"},
-		{"bad pattern", run(domain.ActionImplement, with(func(m *domain.PathRuleMatch) { m.Match = "/abs" })), "path_rules[0]: match"},
+		{"bad pattern", run(domain.ActionImplement, with(func(m *domain.PathRuleMatch) { m.Match = "//abs" })), "path_rules[0]: match"},
 		{"bad approval", run(domain.ActionImplement, with(func(m *domain.PathRuleMatch) { m.Approval = "auto" })), "path_rules[0]: approval"},
 		{"empty rule in options", &domain.Run{ID: "r", Status: domain.RunFailed,
 			Options: domain.RunOptions{PathRules: []domain.PathRule{{Match: "a/**"}}}}, "options.path_rules[0]"},

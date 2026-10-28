@@ -715,6 +715,19 @@ func (r *ConsoleReporter) SecretScanOff() {
 	fmt.Fprintln(r.Out, "Secret scan: off - what steps add is not checked for secrets")
 }
 
+// ProtectedPathsNone follows the authority line of a workflow with implement when
+// security.protected_paths is []: like test.sandbox: none, every run says what that costs, and a
+// config written before TODO.md S9, when [] meant the built-in list, shows here.
+func (r *ConsoleReporter) ProtectedPathsNone() {
+	const msg = "none: implement may change agent settings, CI, hooks and editor tasks (security.protected_paths is []; before S9 [] meant a built-in list)"
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "     %s %s\n", st.gray(fmt.Sprintf("%-12s", "protected")), st.yellow(msg))
+		return
+	}
+	fmt.Fprintln(r.Out, "Protected paths: "+msg)
+}
+
 // Warning reports a problem a step went on despite.
 func (r *ConsoleReporter) Warning(step domain.ActionType, msg string) {
 	r.stopSpin()

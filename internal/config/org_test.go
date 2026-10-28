@@ -379,7 +379,7 @@ func TestLoadOrg_RejectsValuesThatLowerAFloor(t *testing.T) {
 		"unverified cli true":  {"security:\n  allow_unverified_cli: true\n", "security.allow_unverified_cli may only be false"},
 		"sandbox none":         {"test:\n  sandbox: none\n", "test.sandbox may only be bwrap"},
 		"bad mode":             {"security:\n  secret_scan:\n    mode: loud\n", "security.secret_scan.mode must be off, warn or stop"},
-		"bad protected path":   {"security:\n  protected_paths: [\"/abs\"]\n", "security.protected_paths[0]"},
+		"bad protected path":   {"security:\n  protected_paths: [\"//abs\"]\n", "security.protected_paths[0]"},
 		"bad allow path":       {"security:\n  secret_scan:\n    allow_paths: [\"\"]\n", "security.secret_scan.allow_paths[0]"},
 		"bad rule":             {"policy:\n  paths:\n    - match: \"a/**\"\n", "policy.paths[0] is empty"},
 		"bad force complexity": {"policy:\n  stages:\n    force:\n      huge: [review]\n", `unknown complexity "huge"`},

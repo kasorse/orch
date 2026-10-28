@@ -119,6 +119,12 @@ func Validate(cfg Config) error {
 		}
 	}
 
+	if !cfg.Security.protectedPathsSet {
+		problems = append(problems, "security.protected_paths is required: the patterns implement must not change "+
+			"(there is no built-in list; the orchestrator's config file stays protected). The list that used to be built in: "+
+			"[.claude/**, .mcp.json, .github/workflows/**, .gitlab-ci.yml, .envrc, .vscode/**]; "+
+			"a leading / matches only from the repository root; write protected_paths: [] to protect nothing")
+	}
 	for i, p := range cfg.Security.ProtectedPaths {
 		if err := domain.ValidateProtectedPattern(p); err != nil {
 			problems = append(problems, fmt.Sprintf("security.protected_paths[%d] %q: %v", i, p, err))

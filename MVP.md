@@ -400,9 +400,10 @@ execution:
 #   remote: origin
 #   target_branch: main        # the merge request target when HEAD is detached
 
-security:                      # optional (§38); no key widens what a step may do
+security:                      # required for protected_paths (§38.3); no key widens what a step may do
   require_clean_worktree: true # a workflow with implement refuses a dirty tree
-  protected_paths: []          # extra patterns implement must not change
+  protected_paths: [".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"]
+                               # required: the whole list implement must not change; [] is none
   allow_unverified_cli: false  # run on a provider CLI outside the verified range (§41.4)
   secret_scan:                 # what implement and the tests add (§41.6)
     mode: stop                 # stop | warn | off
@@ -3310,13 +3311,24 @@ human sees and confirms between steps.
   `git update-ref -d refs/orchestrator/runs/<run-id>` drops one.
 * **Protected paths.** Around every `implement` call, a snapshot before is compared with
   one after, before the outcome is accepted and so before `test` runs anything: files that
-  differ from HEAD or are git-ignored and match `.claude/**`, `.mcp.json`,
-  `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`, the config file when it
-  lives in the worktree, or `security.protected_paths` (at any depth, by content hash); and
+  differ from HEAD or are git-ignored and match `security.protected_paths` or the config file
+  when it lives in the worktree (by content hash); and
   a fingerprint of the repository's git config and effective hooks directory. A change
   fails the step (`WorkflowError`, exit 4) naming the paths and the restore point; the
   changes stay on disk. Without a guard, or when its snapshot fails, `implement` refuses
   before the provider call.
+  `security.protected_paths` is the whole list: nothing is built in, and the key is required
+  (a config without it is a config error before any call; `[]` written out protects nothing, and
+  like `test.sandbox: none` every run with implement says so: `Protected paths: none: …` - a
+  config written before, when `[]` meant the built-in list, shows there).
+  `orchestrator.example.yaml` writes the list that was built in before: `.claude/**`,
+  `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`, `.envrc`, `.vscode/**`. A pattern
+  matches at any depth (`.claude/**` also covers `sub/.claude/…`); one with a leading `/`
+  matches only from the repository root (`/.gitlab-ci.yml` is not `examples/ci/.gitlab-ci.yml`),
+  in every place that takes this syntax (`secret_scan.allow_paths`, `policy.paths`). The config
+  file stays protected in Go: it is the one path whose change would let the next run or resume
+  read a weaker guard. The org layer's `protected_paths` are added, and the repository cannot
+  remove them (§45).
 * **Resume inputs.** The step guard also protects the run directory's resume inputs:
   `run.json`, `workflow.json`, `decision.json` and `artifacts/**` of **every** run under
   the runs directory (`action.RunDirPatterns`). Logs are output and never read back, so

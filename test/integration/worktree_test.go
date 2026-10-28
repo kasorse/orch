@@ -851,7 +851,7 @@ func TestWorktree_RefusedBeforeTheWorktreeWhenItCouldNotDeliver(t *testing.T) {
 		{"no remote", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "remote", "remove", "origin") }, nil, `remote "origin"`},
 		{"detached HEAD without a target", func(t *testing.T, repoDir string) { gitRun(t, repoDir, "checkout", "-q", "--detach") }, nil, "delivery.target_branch"},
 		{"secret scan off", func(t *testing.T, repoDir string) {},
-			func(o *configOptions) { o.extraYAML += "\nsecurity:\n  secret_scan:\n    mode: \"off\"\n" }, "security.secret_scan.mode is off"},
+			func(o *configOptions) { o.security += "  secret_scan:\n    mode: \"off\"\n" }, "security.secret_scan.mode is off"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -124,7 +124,7 @@ execution:
 
 security:
   require_clean_worktree: true
-  protected_paths: []
+  protected_paths: [".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"]
   allow_unverified_cli: false
   secret_scan:
     mode: stop               # stop | warn | off
@@ -204,9 +204,12 @@ security:
   files as a stat line, the rest in full while it fits). Artifacts and logs keep everything.
 - `execution.timeout` (Go duration syntax, e.g. `15m`) bounds the whole run, including the
   decision — except the time you spend on a manual choice.
-- **`security`** (optional) never widens what a step may do. `require_clean_worktree`
-  (default `true`) makes a workflow with `implement` refuse to start on a dirty worktree;
-  `protected_paths` adds patterns `implement` must not change; `allow_unverified_cli` lets a
+- **`security`** never widens what a step may do. `protected_paths` is required: the whole
+  list of patterns `implement` must not change (nothing is built in; `[]` protects nothing;
+  copy the list above). A pattern matches at any depth, or only from the repository root with
+  a leading `/` (`/.gitlab-ci.yml` leaves `examples/ci/.gitlab-ci.yml` alone).
+  `require_clean_worktree` (default `true`) makes a workflow with `implement` refuse to start
+  on a dirty worktree; `allow_unverified_cli` lets a
   run go on with a provider CLI outside the verified version range (warned and recorded);
   `secret_scan` decides what happens when a step adds what looks like a secret. See
   [Security model](#security-model).
@@ -351,9 +354,8 @@ Around `implement` the orchestrator itself guards the result, for any provider:
   `git for-each-ref refs/orchestrator` lists them,
   `git update-ref -d refs/orchestrator/runs/<run-id>` removes one.
 - After every `implement` call, before anything runs its output, it checks that no protected
-  file changed — `.claude/**`, `.mcp.json`, `.github/workflows/**`, `.gitlab-ci.yml`,
-  `.envrc`, `.vscode/**`, the config file when it lives in the repository (even if
-  git-ignored), `security.protected_paths` — and that `.git/config` and the git hooks are
+  file changed — the patterns of `security.protected_paths` and the config file when it lives
+  in the repository (even if git-ignored) — and that `.git/config` and the git hooks are
   untouched. Otherwise the run stops (exit 4) naming the files; the changes stay for you to
   inspect.
 - In `manual` mode the prompt before the step after `implement` lists what it changed.

@@ -77,7 +77,7 @@ func TestRepoGuard(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo, dir := guardRepo(t)
-			g := NewRepoGuard(repo, []string{"orchestrator.yaml", "go.mod"})
+			g := NewRepoGuard(repo, slices.Concat(builtIn, []string{"orchestrator.yaml", "go.mod"}))
 			ctx := context.Background()
 			before, err := g.Snapshot(ctx)
 			if err != nil {
@@ -100,7 +100,7 @@ func TestRepoGuard(t *testing.T) {
 func TestRepoGuard_PreExistingChange(t *testing.T) {
 	repo, dir := guardRepo(t)
 	put(t, dir, ".envrc", "export A=1\n")
-	g := NewRepoGuard(repo, nil)
+	g := NewRepoGuard(repo, builtIn)
 	ctx := context.Background()
 
 	before, err := g.Snapshot(ctx)
@@ -128,7 +128,7 @@ func TestRepoGuard_PreExistingChange(t *testing.T) {
 // guard's own git status, so a moved fingerprint must be reported without running it.
 func TestRepoGuard_GitChangeStopsBeforeGitStatus(t *testing.T) {
 	repo, dir := guardRepo(t)
-	g := NewRepoGuard(repo, nil)
+	g := NewRepoGuard(repo, builtIn)
 	ctx := context.Background()
 	before, err := g.Snapshot(ctx)
 	if err != nil {
@@ -196,11 +196,47 @@ func baselineOf(t *testing.T, g *RepoGuard) []byte {
 	return data
 }
 
+// builtIn is the list orchestrator.example.yaml gives security.protected_paths, which was built
+// into Go before TODO.md S9.
+var builtIn = []string{".claude/**", ".mcp.json", ".github/workflows/**", ".gitlab-ci.yml", ".envrc", ".vscode/**"}
+
+// TestRepoGuard_RootedAndNone: a leading "/" guards the root file only, and a guard with no
+// patterns still compares the git fingerprint, and its state survives a round trip.
+func TestRepoGuard_RootedAndNone(t *testing.T) {
+	repo, dir := guardRepo(t)
+	g := NewRepoGuard(repo, []string{"/.gitlab-ci.yml"})
+	before, err := g.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	put(t, dir, "examples/ci/.gitlab-ci.yml", "stages: [x]\n")
+	if changed, err := g.Changed(context.Background(), before); err != nil || len(changed) != 0 {
+		t.Fatalf("a nested .gitlab-ci.yml is not the root one: %v, %v", changed, err)
+	}
+	put(t, dir, ".gitlab-ci.yml", "stages: [y]\n")
+	if changed, err := g.Changed(context.Background(), before); err != nil || !slices.Equal(changed, []string{".gitlab-ci.yml"}) {
+		t.Fatalf("Changed = %v, %v; want the root .gitlab-ci.yml", changed, err)
+	}
+
+	none := NewRepoGuard(repo, nil)
+	data := baselineOf(t, none)
+	var back State
+	if err := json.Unmarshal(data, &back); err != nil || !back.Taken() || len(back.Patterns()) != 0 {
+		t.Fatalf("a state with no patterns: %v, %+v", err, back)
+	}
+	if changed, err := none.Changed(context.Background(), back); err != nil || len(changed) != 0 {
+		t.Errorf("Changed with no patterns on an unchanged tree = %v, %v", changed, err)
+	}
+	if (State{}).Taken() {
+		t.Error("the zero State is taken")
+	}
+}
+
 func TestState_JSONRoundTrip(t *testing.T) {
 	repo, dir := guardRepo(t)
 	// A pre-existing protected change is part of the baseline, not a violation.
 	put(t, dir, ".claude/settings.local.json", `{"x":1}`)
-	g := NewRepoGuard(repo, []string{"orchestrator.yaml"})
+	g := NewRepoGuard(repo, slices.Concat(builtIn, []string{"orchestrator.yaml"}))
 	data := baselineOf(t, g)
 
 	var back State
@@ -232,7 +268,6 @@ func TestState_JSONRoundTrip(t *testing.T) {
 	for name, raw := range map[string]string{
 		"unknown field":  `{"patterns":["a"],"git_fingerprint":"f","protected":{},"extra":1}`,
 		"no fingerprint": `{"patterns":["a"],"git_fingerprint":"","protected":{}}`,
-		"no patterns":    `{"patterns":[],"git_fingerprint":"f","protected":{}}`,
 		"no protected":   `{"patterns":["a"],"git_fingerprint":"f"}`,
 		"trailing data":  `{"patterns":["a"],"git_fingerprint":"f","protected":{}} {}`,
 	} {
@@ -245,7 +280,7 @@ func TestState_JSONRoundTrip(t *testing.T) {
 func TestCheckBaseline(t *testing.T) {
 	t.Run("unchanged", func(t *testing.T) {
 		repo, dir := guardRepo(t)
-		baseline := baselineOf(t, NewRepoGuard(repo, nil))
+		baseline := baselineOf(t, NewRepoGuard(repo, builtIn))
 		put(t, dir, "main.go", "package main // a normal source edit\n")
 		if changed, err := CheckBaseline(context.Background(), repo, baseline); err != nil || len(changed) != 0 {
 			t.Errorf("CheckBaseline = %v, %v", changed, err)
@@ -254,7 +289,7 @@ func TestCheckBaseline(t *testing.T) {
 
 	t.Run("uses the baseline's own patterns", func(t *testing.T) {
 		repo, dir := guardRepo(t)
-		baseline := baselineOf(t, NewRepoGuard(repo, []string{"go.mod"}))
+		baseline := baselineOf(t, NewRepoGuard(repo, slices.Concat(builtIn, []string{"go.mod"})))
 		put(t, dir, "go.mod", "module x\n")
 		changed, err := CheckBaseline(context.Background(), repo, baseline)
 		if err != nil || !slices.Equal(changed, []string{"go.mod"}) {
@@ -264,7 +299,7 @@ func TestCheckBaseline(t *testing.T) {
 
 	t.Run("a protected change left by a crash or a failed step", func(t *testing.T) {
 		repo, dir := guardRepo(t)
-		baseline := baselineOf(t, NewRepoGuard(repo, nil))
+		baseline := baselineOf(t, NewRepoGuard(repo, builtIn))
 		put(t, dir, ".claude/settings.json", `{"hooks":{}}`)
 		changed, _ := CheckBaseline(context.Background(), repo, baseline)
 		if !slices.Equal(changed, []string{".claude/settings.json"}) {
@@ -279,7 +314,7 @@ func TestCheckBaseline(t *testing.T) {
 
 	t.Run("fingerprint before any git status", func(t *testing.T) {
 		repo, dir := guardRepo(t)
-		baseline := baselineOf(t, NewRepoGuard(repo, nil))
+		baseline := baselineOf(t, NewRepoGuard(repo, builtIn))
 		f, err := os.OpenFile(filepath.Join(dir, ".git", "config"), os.O_APPEND|os.O_WRONLY, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -306,7 +341,7 @@ func TestCheckBaseline(t *testing.T) {
 
 	t.Run("the worktree pointer the baseline names", func(t *testing.T) {
 		wt, admin := linkedWorktree(t)
-		baseline := baselineOf(t, &RepoGuard{Repo: wt, Patterns: NewRepoGuard(wt, nil).Patterns, GitPointer: admin})
+		baseline := baselineOf(t, &RepoGuard{Repo: wt, Patterns: NewRepoGuard(wt, builtIn).Patterns, GitPointer: admin})
 		if changed, err := CheckBaseline(context.Background(), wt, baseline); err != nil || len(changed) != 0 {
 			t.Fatalf("CheckBaseline on an untouched worktree = %v, %v", changed, err)
 		}
@@ -393,7 +428,7 @@ func TestRepoGuard_GitPointer(t *testing.T) {
 
 	t.Run("an untouched worktree", func(t *testing.T) {
 		wt, admin := linkedWorktree(t)
-		g := NewRepoGuard(wt, nil)
+		g := NewRepoGuard(wt, builtIn)
 		g.GitPointer = admin
 		before, err := g.Snapshot(context.Background())
 		if err != nil {

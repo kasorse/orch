@@ -80,6 +80,9 @@ limits:
 execution:
   timeout: 15m
 
+security:
+  protected_paths: [".claude/**", "/.gitlab-ci.yml"]
+
 clarify:
   provider: claude
   model: sonnet
@@ -244,6 +247,7 @@ test: {command: "go test ./..."}
 limits: {max_steps: 12, max_fix_iterations: 2}
 execution: {timeout: 15m}
 clarify: {enabled: false}
+security: {protected_paths: [".claude/**"]}
 ` + extra
 }
 
@@ -383,7 +387,7 @@ func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 		yaml string
 		want []string
 	}{
-		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 26: exectuion"}},
+		"top level": {validV2("exectuion: {timeout: 1m}\n"), []string{"line 27: exectuion"}},
 		// actions, translation and jira decode through their own UnmarshalYAML: strictness
 		// must reach inside those too.
 		"inside an action": {strings.Replace(validV2(""), "review: {provider: claude, model: sonnet}",
@@ -391,10 +395,10 @@ func TestLoad_StrictRejectsUnknownKeys(t *testing.T) {
 		"translation effort": {strings.Replace(validV2(""), "model: haiku,", "model: haiku, effort: high,", 1),
 			[]string{"line 9: effort"}},
 		"inside jira": {validV2("jira:\n  base_url: https://x.atlassian.net\n  auth: basic\n  email_env: E\n  token_env: T\n  timeuot: 5s\n"),
-			[]string{"line 31: timeuot"}},
+			[]string{"line 32: timeuot"}},
 		"inside clarify": {strings.Replace(validV2(""), "clarify: {enabled: false}", "clarify: {enabled: false, max_round: 3}", 1),
 			[]string{"line 25: max_round"}},
-		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 26: limit", "line 27: securty"}},
+		"several": {validV2("limit: {max_steps: 1}\nsecurty: {}\n"), []string{"line 27: limit", "line 28: securty"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeTempConfig(t, tc.yaml))

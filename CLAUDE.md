@@ -212,7 +212,8 @@ and review), without it, as the last read-only step, it writes the answer.
 - **Guard implement's result before anything runs it** (MVP.md §38.3): a workflow with
   `implement` needs a clean worktree (unless `security.require_clean_worktree: false`); the
   run records `pre_run_ref`; `guard.Guard` (`internal/guard`, aliased as `action.Guard`)
-  compares protected paths (git-ignored ones
+  compares protected paths (`security.protected_paths`, required, no built-in list, a leading
+  `/` anchors at the root; plus the config file, always; git-ignored ones
   included) and the git config/hooks fingerprint around every `implement` call and every
   test command (both run code a model wrote) and fails the step. The fingerprint is compared
   before any `git status` — git status runs a planted `core.fsmonitor`. In a worktree run

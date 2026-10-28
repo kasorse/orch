@@ -1520,6 +1520,9 @@ func executeWorkflow(ctx context.Context, s *session, opts tailOptions) error {
 	if !cfg.Security.SecretScan.Enabled() {
 		s.reporter.SecretScanOff()
 	}
+	if len(cfg.Security.ProtectedPaths) == 0 && run.Workflow.Contains(domain.ActionImplement) {
+		s.reporter.ProtectedPathsNone()
+	}
 	if len(run.Executions) > 0 && run.PreRunRef != "" {
 		s.reporter.RestorePoint(run.PreRunRef)
 	}

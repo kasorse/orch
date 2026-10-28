@@ -60,7 +60,7 @@ func TestValidate_PathRuleErrors(t *testing.T) {
 		"unknown stage":   {"    - match: \"a/**\"\n      require_stages: [qa]\n", "policy.paths[0].require_stages[0]: unsupported stage \"qa\""},
 		"duplicate stage": {"    - match: \"a/**\"\n      require_stages: [review, review]\n", "policy.paths[0].require_stages[1]: duplicate stage \"review\""},
 		"bad pattern":     {"    - match: \"[\"\n      approval: manual\n", "policy.paths[0].match \"[\""},
-		"absolute":        {"    - match: \"/etc/**\"\n      approval: manual\n", "policy.paths[0].match \"/etc/**\": must be relative"},
+		"absolute":        {"    - match: \"//etc/**\"\n      approval: manual\n", "policy.paths[0].match \"//etc/**\": a leading \"/\" anchors"},
 		"no match":        {"    - approval: manual\n", "policy.paths[0].match \"\": must not be empty"},
 		"approval auto":   {"    - match: \"a/**\"\n      approval: auto\n", "policy.paths[0].approval must be \"manual\" or absent, got \"auto\""},
 		"deny_change": {

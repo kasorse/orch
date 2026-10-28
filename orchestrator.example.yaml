@@ -274,7 +274,18 @@ execution:
 # implement; none of them widens what a step may do.
 security:
   require_clean_worktree: true   # a workflow with implement refuses a dirty worktree
-  protected_paths: []            # extra patterns implement must not change, e.g. [go.mod]
+  # Required: the patterns implement must not change - the whole list, nothing is built in. A
+  # write to these turns into execution later (agent settings and hooks, MCP servers, CI, direnv,
+  # editor tasks). A pattern matches at any depth (.gitlab-ci.yml is also examples/ci/.gitlab-ci.yml);
+  # a leading / matches only from the repository root (/.gitlab-ci.yml). [] protects nothing.
+  # The orchestrator's own config file, when it is in the repository, is always protected.
+  protected_paths:
+    - .claude/**
+    - .mcp.json
+    - .github/workflows/**
+    - .gitlab-ci.yml
+    - .envrc
+    - .vscode/**
   # Every run checks the provider CLI's version against the range its permission flags were
   # verified on (MVP.md §41.4) and refuses one outside it; true goes on, with a red warning.
   # allow_unverified_cli: false

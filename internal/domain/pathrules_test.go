@@ -127,7 +127,7 @@ func TestPathRule_Validate(t *testing.T) {
 		{"unknown stage", PathRule{Match: "a/**", RequireStages: []Stage{"qa"}}, "unsupported stage"},
 		{"duplicate stage", PathRule{Match: "a/**", RequireStages: []Stage{StageReview, StageReview}}, "duplicate stage"},
 		{"auto approval", PathRule{Match: "a/**", Approval: "auto"}, `approval "auto"`},
-		{"absolute pattern", PathRule{Match: "/a", Approval: "manual"}, "relative to the repository root"},
+		{"a root with no path", PathRule{Match: "/", Approval: "manual"}, `a leading "/" anchors`},
 		{"bad glob", PathRule{Match: "[", Approval: "manual"}, "match"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

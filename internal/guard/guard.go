@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"orchestrator/internal/domain"
 	"orchestrator/internal/repository"
@@ -57,6 +58,10 @@ type State struct {
 // Patterns returns a copy of the protected patterns the snapshot was taken with.
 func (s State) Patterns() []string { return append([]string(nil), s.patterns...) }
 
+// Taken reports whether the state is a snapshot, not the zero State: it always has the git
+// fingerprint, while its patterns may be none (security.protected_paths: [], TODO.md S9).
+func (s State) Taken() bool { return s.gitFingerprint != "" }
+
 // GitPointer returns the admin directory the snapshot expects the .git file to name, "" in
 // place.
 func (s State) GitPointer() string { return s.gitPointer }
@@ -78,11 +83,10 @@ type RepoGuard struct {
 	GitPointer string
 }
 
-// NewRepoGuard guards domain.DefaultProtectedPaths plus extra (security.protected_paths
-// and the config file when it lives in the worktree).
-func NewRepoGuard(repo *repository.Repository, extra []string) *RepoGuard {
-	patterns := append(append([]string(nil), domain.DefaultProtectedPaths...), extra...)
-	return &RepoGuard{Repo: repo, Patterns: patterns}
+// NewRepoGuard guards patterns: security.protected_paths, the config file when it lives in the
+// worktree and the run directories' resume inputs. There is no built-in list (TODO.md S9).
+func NewRepoGuard(repo *repository.Repository, patterns []string) *RepoGuard {
+	return &RepoGuard{Repo: repo, Patterns: append([]string(nil), patterns...)}
 }
 
 func (g *RepoGuard) Snapshot(ctx context.Context) (State, error) {
@@ -184,7 +188,8 @@ func (s *State) UnmarshalJSON(data []byte) error {
 	if err := decodeStrict(data, &j); err != nil {
 		return err
 	}
-	if j.GitFingerprint == "" || len(j.Patterns) == 0 || j.Protected == nil {
+	// No patterns is a state too: security.protected_paths: [] with nothing else to protect.
+	if j.GitFingerprint == "" || j.Protected == nil {
 		return errors.New("incomplete guard state")
 	}
 	if j.Pointer != "" && !filepath.IsAbs(j.Pointer) {
@@ -210,11 +215,16 @@ func CheckBaseline(ctx context.Context, repo *repository.Repository, baseline js
 }
 
 // pathspecs renders the patterns as git glob pathspecs anchored at the top and matching
-// at any depth, like domain.MatchProtected; protects re-checks every path git returns.
+// at any depth, or only at the top for a pattern with a leading "/", like
+// domain.MatchProtected; protects re-checks every path git returns.
 func (g *RepoGuard) pathspecs() []string {
 	specs := make([]string, len(g.Patterns))
 	for i, p := range g.Patterns {
-		specs[i] = ":(top,glob)**/" + p
+		if rooted, ok := strings.CutPrefix(p, "/"); ok {
+			specs[i] = ":(top,glob)" + rooted
+		} else {
+			specs[i] = ":(top,glob)**/" + p
+		}
 	}
 	return specs
 }
