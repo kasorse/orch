@@ -478,6 +478,9 @@ orchestrator itself (`orchestrator mcp-verify`, a hidden subcommand), `run_tests
 - The model picks only a check name or a test filter (`[A-Za-z0-9_./:-]`, reaching the command
   as `ORCH_TEST_FILTER`); the command is `test.command` or a check from your config, never
   model text. It needs `test.command`, `test.sandbox: bwrap` and provider `claude`.
+- `test.verify_command` (optional) is what `run_tests` runs instead of `test.command`, e.g. a
+  script that tests only what the run changed since `$ORCH_BASE_REF` (this repository's
+  `scripts/check-changed.sh`). The `test` step always runs `test.command`.
 - Each call runs under the test sandbox, after the protected-paths guard has compared the
   repository with the start of the step. If the model has changed hooks, CI or the
   orchestrator config, the call is refused, nothing more runs in the step, and the step fails

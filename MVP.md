@@ -3239,8 +3239,8 @@ before-state before every call.
 gets two more tools from an MCP server named `orch` that the orchestrator itself serves,
 `mcp__orch__run_tests` and `mcp__orch__run_check`. This is not a shell and does not change the
 authority: the adapter's `--tools` stays `Read,Grep,Glob,Edit,Write` and only the two MCP names
-join `--allowed-tools`. The command is `test.command` or a configured check, chosen in Go,
-never by the model; the model picks only whether to run it, which configured check (a closed
+join `--allowed-tools`. The command is `test.verify_command` (else `test.command`) or a
+configured check, chosen in Go, never by the model; the model picks only whether to run it, which configured check (a closed
 list) and a filter string that cannot hold shell syntax and reaches the process only as
 `ORCH_TEST_FILTER`. Every run is under bwrap (`test.sandbox: none` with verify is a config
 error), preceded by a guard comparison, and a `violation` marker fails the step. Decision D16
@@ -4292,7 +4292,7 @@ subcommand claude starts over stdio):
 
 | tool | arguments | runs |
 |---|---|---|
-| `mcp__orch__run_tests` | `filter` (optional string) | `test.command`; returns the exit code and bounded output |
+| `mcp__orch__run_tests` | `filter` (optional string) | `test.verify_command`, else `test.command`; returns the exit code and bounded output |
 | `mcp__orch__run_check` | `name` (one of the configured check names, an `enum`) | that one check; offered only when `checks` is not empty |
 
 * **Not a shell** (D16, §38.1). The command comes from config; the model supplies only whether to
@@ -4301,6 +4301,13 @@ subcommand claude starts over stdio):
   nothing. A valid filter is passed only as `ORCH_TEST_FILTER` of that one run, never put
   into a command line; whether `test.command` uses it is the operator's choice
   (`'go test ./... ${ORCH_TEST_FILTER:+-run "$ORCH_TEST_FILTER"}'`). The `test` step never sets it.
+* **`test.verify_command`** (optional, only with `verify: true`, else a config error) is what
+  `run_tests` runs in place of `test.command`: a script that narrows the tests to what the run
+  changed, which it finds itself with `git diff --name-only $ORCH_BASE_REF` and
+  `git ls-files -o --exclude-standard` (the sandbox binds the git directories read-only). Which
+  tests that is stays the operator's script, not Go and not the model; the filter can only
+  narrow it further. The `test` step and the pre-run test always run `test.command`, so the
+  narrowing is a hint only (§31.4). This repository's is `scripts/check-changed.sh`.
 * **Fail fast** (`Validate`, `ValidateDependencies`): `verify: true` needs `test.command`,
   `test.sandbox` other than `none` and provider `claude`; `verify` on any other action is an
   unknown key; `extensions.mcp.orch` and any server name containing `__` are refused.
@@ -4383,6 +4390,8 @@ it. The implement prompt names the tool. Design: `specs/quality/SPEC.md` §6.11,
 ```yaml
 checks:                          # §44.2
   - {name: vet, command: "go vet ./..."}
+test:
+  verify_command: ""             # §44.3, run_tests in place of test.command; needs verify
 actions:
   implement:
     verify: false                # §44.3, implement only
@@ -4401,7 +4410,8 @@ limits:
 Every key is optional. For a config that sets none of them the behavior changes only where it
 is on by default: the richer prompts (§44.1) and the no-progress stop (§44.6). Invalid values
 are config errors (exit 2) before any call: a bad `checks` entry, `checks` without
-`test.command`, `verify` without a sandbox or on another action, a reserved or ambiguous MCP
+`test.command`, `verify` without a sandbox or on another action, `test.verify_command` without
+`verify`, a reserved or ambiguous MCP
 server name, an invalid `by_complexity`, `models` on a non-review action.
 
 ## 44.6 Stop without progress

@@ -175,6 +175,10 @@ test:
   # see README). Without bwrap (macOS, a host that cannot sandbox) write `sandbox: none`:
   # the tests then reach the network, $HOME and your files, and every run says so.
   sandbox: bwrap
+  # Optional, only with actions.implement.verify: what the session's run_tests runs instead of
+  # `command`, e.g. a script that tests only the packages changed since $ORCH_BASE_REF (git
+  # works read-only in the sandbox). The test step always runs `command`.
+  # verify_command: "sh scripts/check-changed.sh"
   # Re-expose caches inside the sandbox, e.g. for Go:
   # ro_binds: [~/go/pkg/mod]        # module cache, read-only
   # rw_binds: [~/.cache/go-build]   # build cache, writable

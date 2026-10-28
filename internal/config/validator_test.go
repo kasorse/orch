@@ -442,6 +442,18 @@ func TestValidate_Verify(t *testing.T) {
 	if err := Validate(cfg); err != nil {
 		t.Errorf("explicit limits.verify: %v", err)
 	}
+
+	cfg.Actions.Implement.Verify = true
+	cfg.Test.VerifyCommand = "scripts/check-changed.sh"
+	if err := Validate(cfg); err != nil {
+		t.Errorf("test.verify_command with verify: %v", err)
+	}
+
+	cfg = validConfig()
+	cfg.Test.VerifyCommand = "scripts/check-changed.sh"
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "test.verify_command needs actions.implement.verify") {
+		t.Errorf("test.verify_command without verify: %v", err)
+	}
 }
 
 func TestVerifyLimits_Defaults(t *testing.T) {

@@ -261,6 +261,10 @@ func (a ActionsConfig) EscalatedRoute(t domain.ActionType, d *domain.Decision) (
 
 type TestConfig struct {
 	Command string `yaml:"command"`
+	// VerifyCommand is what run_tests runs inside an implement session (actions.implement.verify)
+	// in place of Command, e.g. a script that narrows the tests to the files changed since
+	// $ORCH_BASE_REF (TODO.md Q10). The test step and the pre-run test always run Command.
+	VerifyCommand string `yaml:"verify_command"`
 	// Sandbox is "bwrap" (or empty, the default): run the command under bubblewrap with the
 	// filesystem read-only, $HOME hidden and no network (specs/permissions/SPEC.md §8) -
 	// or "none", written out, to run it unsandboxed.

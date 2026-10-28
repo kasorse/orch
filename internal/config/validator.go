@@ -185,6 +185,9 @@ func verifyProblems(cfg Config) []string {
 			problems = append(problems, fmt.Sprintf("actions.%s.verify: unknown key (verify is accepted only on actions.implement)", o.name))
 		}
 	}
+	if strings.TrimSpace(cfg.Test.VerifyCommand) != "" && !cfg.Actions.Implement.Verify {
+		problems = append(problems, "test.verify_command needs actions.implement.verify: only the verify tool runs it")
+	}
 	if cfg.Actions.Implement.Verify {
 		if strings.TrimSpace(cfg.Test.Command) == "" {
 			problems = append(problems, "actions.implement.verify needs test.command: it is the command the verify tool runs")

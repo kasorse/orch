@@ -1,6 +1,6 @@
 # Benchmark — prove the value (phase 1)
 
-Status: **in progress** (2026-10-26): BM01–BM17 done. The full run (`round2`, 2026-10-20 … 24: 31 tasks, A–D × 3 reps, 372 cells) and the decision (`bench/DECISION.md`: the value is in the gates and the governance, not in the adaptive choice of stages; phase 3 next, then a simpler decision in TODO.md Q8). Left: the run of the new config E (the current pipeline) added to `round2`, a round 3 on a grown set (en/ru pairs, harder tasks), and contributed results (BM18). The design questions are answered
+Status: **in progress** (2026-10-26): BM01–BM17 done. The full run (`round2`, 2026-10-20 … 24: 31 tasks, A–D × 3 reps, 372 cells) and the decision (`bench/DECISION.md`: the value is in the gates and the governance, not in the adaptive choice of stages; phase 3 next, then a simpler decision in TODO.md Q8). Left: the run of the new config E (the current pipeline) added to `round2`, a round 3 on a grown set (en/ru pairs, harder tasks), and no contributed results: BM18 was cancelled 2026-10-28, tasks in other languages come from commits of open GitHub repositories. The design questions are answered
 (`SPEC.md` §14, Q1–Q15). Covers TODO.md phase 1 (B1–B4) and B5 (contributed results, after
 B4).
 
@@ -42,7 +42,7 @@ run cost and how it ended (B3). The owner then writes the go / pivot decision fr
 | [BM15](tasks/TASK-BM15-task-set.md) | the 30 tasks (owner + assistant) ✓ | B1 | L | BM06, BM08 |
 | [BM16](tasks/TASK-BM16-pilot-and-full-run.md) | pilot, then the full run ✓ | B2 | M | BM13, BM14, BM15 |
 | [BM17](tasks/TASK-BM17-decision.md) | `bench/DECISION.md` ✓ | B4 | S | BM16 |
-| [BM18](tasks/TASK-BM18-contributed-results.md) | contributed results: export, merge, images, guide | B5 | L | BM17 |
+| [BM18](tasks/TASK-BM18-contributed-results.md) | ~~contributed results: export, merge, images, guide~~ — cancelled 2026-10-28 | B5 | L | BM17 |
 
 ```
 core    BM01 → BM02 → BM03
@@ -53,7 +53,7 @@ bench   BM04 → BM05 → BM07 → BM08
         BM07 + BM08 + BM09 → BM10 → BM12 → BM14   (BM14 also needs BM03)
                              BM10 → BM13
 tasks   BM06 + BM08 → BM15
-runs    BM13 + BM14 + BM15 → BM16 → BM17 → BM18 (B5, later)
+runs    BM13 + BM14 + BM15 → BM16 → BM17 → BM18 (B5, cancelled)
 ```
 
 Estimate: about 17 engineering days for BM01–BM14, plus the task set (BM15: about a week of

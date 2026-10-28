@@ -261,8 +261,8 @@ and review), without it, as the last read-only step, it writes the answer.
 - **Verify is not a shell** (MVP.md §38.1, §44.3, `specs/permissions/DECISIONS.md` D16). With
   `actions.implement.verify: true` the session gets `mcp__orch__run_tests` and
   `mcp__orch__run_check` from the orchestrator's own MCP server; the adapter's `--tools` does
-  not change. The command comes from config (`test.command`, a configured check), never from
-  the model; the model picks only whether to run, a check name from a closed list, and a
+  not change. The command comes from config (`test.verify_command` else `test.command`, a
+  configured check), never from the model; the model picks only whether to run, a check name from a closed list, and a
   filter matching `^[A-Za-z0-9_./:-]{1,200}$` that reaches the process only as
   `ORCH_TEST_FILTER` (the `test` step never sets it). The sandbox is mandatory (`verify` with
   `test.sandbox: none` is a config error), the guard compares the repository with the step's
