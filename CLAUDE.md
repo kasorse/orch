@@ -40,7 +40,11 @@ delivery - the commit type and trailer, the branch name, `report.md`, the push t
 merge request, the Jira comment and transition, `--output json` and the exit codes, `orchestrator
 review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its design record in
 `specs/delivery/`; `delivery.push: false`, the run and the story that end at the commit: MVP.md
-§50.5, §50.8, with its design record in `specs/delivery-push/`.
+§50.5, §50.8, with its design record in `specs/delivery-push/`;
+the Jira listener (`orchestrator jira listen`: tickets labelled `ai-run` become runs, one at a
+time, the `listener` and `gitlab` sections, the git credential helper, `run --listener-task`,
+`failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design record in
+`specs/jira-listener/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -412,6 +416,21 @@ fallback: stacked on the same-repository task it
   (`mr.state: created`; the same intent-first, never-repeated rules; a failure is a warning;
   `options.jira_write` is the copy a resume uses, and a resume still reads nothing from Jira).
   `story plan` writes nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
+- **The listener owns Jira; its child never calls it** (MVP.md §51, `specs/jira-listener/`).
+  `orchestrator jira listen` is a supervisor like `story run`: it polls Jira (JQL built by Go,
+  re-checked in Go), claims a ticket by a transition, finds the service and project from the
+  labels and components (never a model), clones or fast-forwards the checkout, and runs the ticket
+  as a child `run --listener-task <file> --mode auto --output json`, which builds no Jira client
+  and has `jira.write` off; the listener reads the child's JSON line and `run.json` and only then
+  writes a comment and a transition (intent first in `.orchestrator/listener/state.json`, never
+  repeated, a failure is a log line). The GitLab token reaches only git, through the credential
+  helper (the hidden `git-credential`), never a URL, argv, `.git/config`, log, state or comment, and
+  never a provider CLI or the test command; the child gets no Jira variables. Only allowlisted
+  groups (`gitlab.allowed_groups`) are cloned, and only reporters in `listener.query.reporters`
+  start a run (the label alone is not enough). A cloned repository's `orchestrator.yaml` is
+  trusted because its group is. `internal/listener` is pure (domain and the standard library);
+  HTTP stays in `internal/jira`, git in `internal/repository`, processes in `app`. One listener
+  per working directory (flock), one ticket at a time.
 - Stages always get the user's original request (through `action.taskBlock`); the translation
   is only for the decision provider and relevant-file search. After a clarify step the stages
   that take the task (research, investigate, implement, review) get, after it, the rendered
@@ -420,13 +439,15 @@ fallback: stacked on the same-repository task it
 ## Out of scope (MVP.md §30)
 
 No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
-decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
+decision API, reading one Jira issue for `run --jira` and the listener's Jira calls), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
-API/IDE plugin, no GitHub integration and for GitLab only the push that opens a merge request (no
-API client, no token), no Jira beyond reading one issue, creating the child issues of an approved
-story and the comment and transition after a merge request (no JQL, links or worklogs), no remote repository execution, no RAG or persistent
+API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and the push that opens
+a merge request (no API client; a token only for the listener's git credential helper, MVP.md §50.13),
+no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
+transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
+comments and transitions without a merge request (no links or worklogs), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
@@ -544,6 +565,12 @@ prompt as sent, the excerpts' paths and headings, the parsed points), `logs/<NNN
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
 `logs/decide-{context,classify}.*`, `logs/clarify-<N>.*`, `logs/decide-clarity-<N>.*` (one per
 re-check), `logs/pre-run-test.*`, `logs/pre-run-test.<check>.*` and `logs/branch-name.*` (the branch-naming call).
+
+`jira listen` keeps its own home in the working directory (MVP.md §51.9): `.orchestrator/listener/`
+holds `state.json` (per ticket: attempts, service, phase, run id, outcome, the writes done, `next_try_at`),
+`lock` (flocked, one listener per directory) and `tasks/<KEY>.<attempt>.json` (a child's task input,
+whose `run.json` has `task.source.listener: true`); the clones live in `listener.services_dir`
+(`.clone-*` is a clone in progress).
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`

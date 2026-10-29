@@ -943,14 +943,26 @@ shadow-вопрос `scope.story` в классификации, ничего н
 Спека: [`specs/delivery-push/`](specs/delivery-push/README.md). Повод: `origin` на GitHub отклоняет
 push с GitLab-опциями, и story `jira-listener` встала на JL01.
 
-### [ ] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
-**Спека:** [`specs/jira-listener/`](specs/jira-listener/README.md) (2026-10-29), задачи JL01–JL06,
-решения D1–D21. `orchestrator jira listen` в рабочей директории (Docker-volume): опрос Jira по JQL,
-claim переходом в In Progress, сервис и проект из лейблов/компонентов, clone из allowlist-групп
-GitLab (токен только через git credential helper), дочерний `run --listener-task --mode auto`,
-исход → комментарий и переход (`done`/`blocked`/`failed`/`retry`). Меняет §30 и §50.13 (SPEC §12).
-**Потом:** story-режим для эпиков и мультисервисных тикетов (D18); все репортеры, не только
-список (D19).
+### [x] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
+**Сделано (2026-10-29, JL01–JL06; MVP.md §51, §30, §39, §50.10, §50.13):** `orchestrator jira listen`
+в рабочей директории (Docker-volume): опрос Jira по JQL, claim переходом в In Progress, сервис и
+проект из лейблов/компонентов, clone из allowlist-групп GitLab (токен только через git credential
+helper), дочерний `run --listener-task --mode auto`, исход → комментарий и переход
+(`done`/`blocked`/`failed`/`retry`), состояние в `.orchestrator/listener/`. Спека:
+[`specs/jira-listener/`](specs/jira-listener/README.md), решения D1–D21. Живой прогон на Jira и
+GitLab — за оператором.
+
+### [ ] D18. Listener: story-режим для эпиков и мультисервисных тикетов — P2 · L · ⚠ спека
+Сейчас тикет типа из `story.jira_issue_types` получает комментарий «plan it as a story» и `blocked`;
+тикет с несколькими `service:` — `blocked`. **Как сделать:** listener запускает `story plan --jira` и
+`story run` для таких тикетов (решение D18 в `specs/jira-listener/`), с теми же claim, исходами и
+состоянием. **Готово, когда:** эпик с двумя сервисами доходит до merge request в каждом.
+
+### [ ] D19. Listener: любой репортёр, не только список — P2 · M · ⚠ спека
+Сейчас `listener.query.reporters` обязателен, и только перечисленные репортёры запускают run
+(решение D19). **Как сделать:** модель доверия для остальных (членство в группе Jira, одобрение
+второго человека или метка, которую ставит только доверенный) вместо списка; проверка остаётся в Go.
+**Готово, когда:** тикет постороннего репортёра не запускает run без явного одобрения.
 
 ---
 

@@ -1170,6 +1170,47 @@ once: a request that may have reached Jira is never repeated, and an interrupted
 stops the next start until you set `jira: <KEY>` (or `none`) in the task file. Details:
 `MVP.md` §48 and `specs/story/`.
 
+### Running the Jira listener (`orchestrator jira listen`)
+
+The listener takes the Jira tickets labelled `ai-run`, one at a time, and runs each as an
+ordinary worktree run in its service's checkout (MVP.md §51, design record
+`specs/jira-listener/`). Add the `listener` and `gitlab` sections to its configuration file
+(`orchestrator.example.yaml` has them, commented), export `JIRA_EMAIL`, `JIRA_API_TOKEN`,
+`GITLAB_TOKEN` and the provider's credential, and start it in a working directory:
+
+```bash
+orchestrator jira listen --config orchestrator.yaml        # poll until SIGTERM
+orchestrator jira listen --config orchestrator.yaml --once # one poll and its ticket, then exit
+```
+
+A ticket names its service with a label `service:billing` (or a component of that name) and, when
+the checkout is not there yet, its GitLab project with `gitlab:backend/billing`. The reporter
+must be one of `listener.query.reporters`; the label alone starts nothing. The outcome is a
+comment starting `[orchestrator]` and a transition: merge request opened → `done`; an unclear
+task, an unknown service or a ticket that is too long → `blocked` (answer in a comment and move
+the ticket back to the queue's status); a red run → `failed`; a provider or network failure →
+`retry`, without spending one of `max_attempts`.
+
+In Docker:
+
+* **The working directory is a volume.** The clones (`listener.services_dir`) and
+  `.orchestrator/listener/` (the state, the lock, the task files) must survive a restart; that is
+  how a ticket interrupted by `docker stop` is resumed. Run one listener per volume.
+* **Give the stop timeout more than the child's wait delay** (`docker stop --time` or
+  `stop_grace_period`): on SIGTERM the listener sends SIGINT to the running child and waits for
+  it to stop; a SIGKILL before that leaves the ticket in the start status for the next start.
+* **Check the Jira workflow first.** The `start` transition must be allowed from the status in
+  `query.statuses` (it is the only lock: a second listener's claim fails), and `start`,
+  `blocked`, `failed`, `done` and `retry` must exist as transitions from the statuses the ticket
+  can be in, with no required screen fields the REST call cannot fill.
+* **A cloned repository's `orchestrator.yaml` is trusted**, test command and `worktree.setup`
+  included, because its group is in `gitlab.allowed_groups`. Allow only groups whose members you
+  trust to run code on this machine. A repository without the file runs under
+  `listener.default_config`.
+* The GitLab token reaches only git, through a credential helper the listener configures for
+  `gitlab.base_url`; it is in no URL, `.git/config`, log or comment, and not in the provider
+  CLIs' or the test command's environment. The Jira variables are not passed to the child runs.
+
 ## Run artifacts
 
 Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target repository:

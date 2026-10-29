@@ -353,6 +353,36 @@ security:
 #     transition: In Review        # move the issue by the transition of this name, or leading to this status; case does not matter
 #                                  # the run needs the credential variables when this is set; a failure here is a warning, never the run's result
 
+# Optional: `orchestrator jira listen` (MVP.md §51) takes the tickets labelled ai-run, one at a
+# time, and runs each as a child run in its service's directory. It needs the jira section above
+# (credentials only; jira.write is off in the child) and the gitlab section below. Run it in a
+# working directory that is a volume. The lines are commented so a plain run is unchanged.
+# listener:
+#   poll_interval: 1m              # 30s..1h; waited while no ticket is dispatched
+#   services_dir: .                # relative to the working directory; one directory per service
+#   default_config: service.yaml   # optional; --config for a service without its own orchestrator.yaml
+#   max_attempts: 3                # 1..10 finished runs per ticket
+#   clone_timeout: 10m             # 1m..1h
+#   query:
+#     projects: [PAY]              # required, at least one
+#     label: ai-run
+#     statuses: ["To Do"]          # required; tickets are picked only from these
+#     reporters: ["5b10a2844c20165700ede21g"]   # required: accountId on Cloud, username on DC
+#   labels:
+#     service_prefix: "service:"   # a label service:billing names the service
+#     project_prefix: "gitlab:"    # a label gitlab:backend/billing names the GitLab project
+#   transitions:                   # a transition's name or its target status, as jira.write.transition
+#     start: In Progress           # the claim; the workflow must allow it from the statuses above
+#     blocked: Blocked
+#     failed: Failed
+#     done: Ready to Review
+#     retry: To Do                 # back to the queue after an infrastructure failure
+# gitlab:
+#   base_url: https://gitlab.corp  # https, no userinfo
+#   token_env: GITLAB_TOKEN        # env only, reaches git through a credential helper; a literal token is refused
+#   username: oauth2
+#   allowed_groups: [backend, platform/payments]   # required; clone only from under these
+
 # Optional: a task split into a specification and ordered subtasks across services
 # (specs/story/SPEC.md §5). The task names the services it touches; they are the checkouts
 # directly under these roots. Nothing is listed per service.
