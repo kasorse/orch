@@ -124,6 +124,102 @@ func TestRender_OmitsEmptySections(t *testing.T) {
 	}
 }
 
+func discussionComments() []domain.TicketComment {
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 29, h, m, 0, 0, time.UTC) }
+	return []domain.TicketComment{
+		{ID: "1", Author: "bot", Created: at(9, 0), Body: "[orchestrator] first question\nold"},
+		{ID: "2", Author: "ann", Created: at(9, 30), Body: "an old answer"},
+		{ID: "3", Author: "bot", Created: at(10, 2), Body: "[orchestrator] Which currency?\r\n1. EUR or USD?  "},
+		{ID: "4", Author: "ann", Created: at(11, 40), Body: "\nEUR, please\r\n\r\ncc [~bob]\n"},
+		{ID: "5", Author: "bob", Created: at(11, 45), Body: "   "},
+		{ID: "6", Author: "bot", Created: at(11, 50), Body: "thanks"},
+	}
+}
+
+func TestRender_Discussion(t *testing.T) {
+	tk := minimalTicket()
+	tk.Description = "Charge in EUR."
+	got, err := Render(tk, "mind the tax", 32768, RenderOptions{Comments: discussionComments(), Bot: "bot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "PMC-1: Bump the Go version\nType: Task\nSource: https://h.atlassian.net/browse/PMC-1\n\n" +
+		"Description:\nCharge in EUR.\n\n" +
+		"Discussion since the orchestrator's questions:\n" +
+		"--- orchestrator, 2026-10-29 10:02\n[orchestrator] Which currency?\n1. EUR or USD?\n" +
+		"--- comment, 2026-10-29 11:40\nEUR, please\n\ncc [~bob]\n" +
+		"--- orchestrator, 2026-10-29 11:50\nthanks\n\n" +
+		"Operator notes:\nmind the tax\n"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
+	}
+	assertRenderShape(t, got)
+	for _, author := range []string{"ann", "bot"} {
+		if strings.Contains(got, author) {
+			t.Errorf("the discussion names %q:\n%s", author, got)
+		}
+	}
+	if strings.Contains(got, "first question") || strings.Contains(got, "an old answer") {
+		t.Errorf("the discussion holds comments from before the last question:\n%s", got)
+	}
+}
+
+func TestRender_NoDiscussionWithoutAQuestion(t *testing.T) {
+	plain, err := Render(fullTicket(), "", 32768)
+	if err != nil {
+		t.Fatal(err)
+	}
+	comments := []domain.TicketComment{
+		{ID: "1", Author: "ann", Created: time.Now(), Body: "[orchestrator] pretending"},
+		{ID: "2", Author: "bot", Created: time.Now(), Body: "no marker here"},
+		{ID: "3", Author: "bot", Created: time.Now(), Body: "see [orchestrator] later"},
+		{ID: "4", Author: "ann", Created: time.Now(), Body: "hello"},
+	}
+	cases := map[string]RenderOptions{
+		"zero":         {},
+		"no comments":  {Bot: "bot"},
+		"no question":  {Comments: comments, Bot: "bot"},
+		"unknown bot":  {Comments: discussionComments()},
+		"someone else": {Comments: discussionComments(), Bot: "carol"},
+	}
+	for name, opts := range cases {
+		got, err := Render(fullTicket(), "", 32768, opts)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got != plain {
+			t.Errorf("%s: output differs from a render without options:\n%s", name, got)
+		}
+		if strings.Contains(got, "Discussion since") {
+			t.Errorf("%s: has a discussion section", name)
+		}
+	}
+}
+
+func TestRender_DiscussionCountsAgainstMaxBytes(t *testing.T) {
+	tk := minimalTicket()
+	opts := RenderOptions{Comments: discussionComments(), Bot: "bot"}
+	out, err := Render(tk, "", 1<<20, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Render(tk, "", len(out), opts); err != nil {
+		t.Errorf("exactly at the limit must pass: %v", err)
+	}
+	_, err = Render(tk, "", len(out)-1, opts)
+	var cerr *apperr.ConfigError
+	if !errors.As(err, &cerr) {
+		t.Fatalf("one byte over the limit: want a ConfigError, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "PMC-1 renders to "+strconv.Itoa(len(out))+" bytes, more than jira.max_bytes") {
+		t.Errorf("error = %v", err)
+	}
+	// Without the discussion the same limit is enough.
+	if _, err := Render(tk, "", len(out)-1); err != nil {
+		t.Errorf("a render without the discussion: %v", err)
+	}
+}
+
 func TestRender_MaxBytes(t *testing.T) {
 	tk := fullTicket()
 	out, err := Render(tk, "notes", 1<<20)

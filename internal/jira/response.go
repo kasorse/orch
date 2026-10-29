@@ -95,6 +95,21 @@ func toTicket(raw []byte, requestedKey string, opts Options, now time.Time) (dom
 		return domain.Ticket{}, detail
 	}
 
+	// status, labels and reporter are for the listener's re-check; an answer without them
+	// (an older fixture, a proxy) still gives a ticket.
+	status, detail := toStatus(resp.Fields["status"], "fields", false)
+	if detail != "" {
+		return domain.Ticket{}, detail
+	}
+	labels, detail := toLabels(resp.Fields["labels"], "fields")
+	if detail != "" {
+		return domain.Ticket{}, detail
+	}
+	reporter, detail := toReporter(resp.Fields["reporter"], "fields", opts.Auth)
+	if detail != "" {
+		return domain.Ticket{}, detail
+	}
+
 	var fields []domain.TicketField
 	for _, f := range opts.Fields {
 		value, _, err := optionalString(resp.Fields[f.ID])
@@ -117,6 +132,9 @@ func toTicket(raw []byte, requestedKey string, opts Options, now time.Time) (dom
 		Components:  components,
 		Fields:      fields,
 		FetchedAt:   now,
+		Status:      status,
+		Labels:      labels,
+		Reporter:    reporter,
 	}
 	// A moved issue answers under its new key (SPEC.md F6): keep both.
 	if key != requestedKey {
@@ -167,6 +185,93 @@ func toComponents(raw json.RawMessage) ([]string, string) {
 		}
 	}
 	return names, ""
+}
+
+const (
+	// maxLabels and maxLabelBytes bound fields.labels; Jira's own limit on a label is 255.
+	maxLabels     = 100
+	maxLabelBytes = 255
+)
+
+// toStatus reads fields.status.name. path is the JSON path of the fields object, for the
+// detail. A missing status is an error only when required.
+func toStatus(raw json.RawMessage, path string, required bool) (string, string) {
+	if isNull(raw) {
+		if required {
+			return "", path + ".status: missing"
+		}
+		return "", ""
+	}
+	var s struct {
+		Name *string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return "", path + ".status: not an object"
+	}
+	if s.Name == nil || !validName(*s.Name) {
+		return "", path + ".status.name: missing, too long or not one line"
+	}
+	return *s.Name, ""
+}
+
+// toLabels reads fields.labels: absent, null and [] give none; every entry must be a string.
+func toLabels(raw json.RawMessage, path string) ([]string, string) {
+	if isNull(raw) {
+		return nil, ""
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, path + ".labels: not an array"
+	}
+	if len(entries) > maxLabels {
+		return nil, fmt.Sprintf("%s.labels: more than %d entries", path, maxLabels)
+	}
+	var labels []string
+	for i, e := range entries {
+		var label string
+		if err := json.Unmarshal(e, &label); err != nil || isNull(e) {
+			return nil, fmt.Sprintf("%s.labels[%d]: not a string", path, i)
+		}
+		if len(label) > maxLabelBytes {
+			return nil, fmt.Sprintf("%s.labels[%d]: longer than %d bytes", path, i, maxLabelBytes)
+		}
+		labels = append(labels, label)
+	}
+	return labels, ""
+}
+
+// reporterKey is the key that identifies a user: accountId on Jira Cloud (auth basic), name on
+// Data Center (auth bearer).
+func reporterKey(auth string) string {
+	if auth == AuthBearer {
+		return "name"
+	}
+	return "accountId"
+}
+
+// toReporter reads the identity out of fields.reporter. An issue without a reporter gives "".
+func toReporter(raw json.RawMessage, path, auth string) (string, string) {
+	if isNull(raw) {
+		return "", ""
+	}
+	return toUser(raw, path+".reporter", auth)
+}
+
+// toUser reads the identity of the user object in raw: accountId on Cloud, name on Data Center.
+func toUser(raw json.RawMessage, path, auth string) (string, string) {
+	var u map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &u); err != nil || u == nil {
+		return "", path + ": not an object"
+	}
+	key := reporterKey(auth)
+	id, ok, err := optionalString(u[key])
+	switch {
+	case err != nil || !ok || strings.TrimSpace(id) == "":
+		return "", fmt.Sprintf("%s.%s: missing or empty", path, key)
+	case !validName(id):
+		return "", fmt.Sprintf("%s.%s: too long or not one line", path, key)
+	}
+	return id, ""
 }
 
 // optionalString decodes a JSON string, reporting ok=false for an absent field or null

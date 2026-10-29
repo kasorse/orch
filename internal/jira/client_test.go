@@ -155,7 +155,7 @@ func TestFetch_Request(t *testing.T) {
 			if r.Method != http.MethodGet || r.URL.Path != "/jira/rest/api/2/issue/PMC-2789" {
 				t.Errorf("got %s %s", r.Method, r.URL.Path)
 			}
-			if got, want := r.URL.RawQuery, "fields=summary,description,issuetype,parent,components,customfield_10035,customfield_10036"; got != want {
+			if got, want := r.URL.RawQuery, "fields=summary,description,issuetype,parent,components,status,labels,reporter,customfield_10035,customfield_10036"; got != want {
 				t.Errorf("query = %q, want %q", got, want)
 			}
 			if got := r.Header.Get("Authorization"); got != tc.want {
@@ -187,6 +187,74 @@ func TestFetch_FullIssue(t *testing.T) {
 		FetchedAt:   testFetched,
 	}
 	assertTicket(t, got, want)
+}
+
+func TestFetch_StatusLabelsReporter(t *testing.T) {
+	body := `{"key":"PAY-1","fields":{"summary":"S","issuetype":{"name":"Task"},"status":{"name":"To Do","id":"1"},` +
+		`"labels":["ai-run","service:billing"],"reporter":{"accountId":"acc-1","name":"jdoe"}}}`
+	cases := []struct {
+		name     string
+		opts     func(string) Options
+		creds    Credentials
+		reporter string
+	}{
+		{"cloud", testOptions, basicCreds(), "acc-1"},
+		{"data center", bearerOptions, NewCredentials(AuthBearer, "", testToken), "jdoe"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer(t, answer(http.StatusOK, body))
+			c, _ := testClient(tc.opts(srv.URL), tc.creds)
+			got, err := c.Fetch(context.Background(), "PAY-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != "To Do" || !reflect.DeepEqual(got.Labels, []string{"ai-run", "service:billing"}) || got.Reporter != tc.reporter {
+				t.Errorf("status %q labels %q reporter %q", got.Status, got.Labels, got.Reporter)
+			}
+			// None of them is part of the task text.
+			text, err := Render(got, "", 32768)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, leaked := range []string{"To Do", "ai-run", tc.reporter} {
+				if strings.Contains(text, leaked) {
+					t.Errorf("the rendered ticket holds %q:\n%s", leaked, text)
+				}
+			}
+		})
+	}
+}
+
+func TestFetch_StatusLabelsReporterInvalid(t *testing.T) {
+	cases := []struct{ name, fields, detail string }{
+		{"status string", `"status":"To Do"`, "fields.status: not an object"},
+		{"status no name", `"status":{}`, "fields.status.name"},
+		{"labels string", `"labels":"ai-run"`, "fields.labels: not an array"},
+		{"label object", `"labels":[{}]`, "fields.labels[0]: not a string"},
+		{"reporter no accountId", `"reporter":{"name":"jdoe"}`, "fields.reporter.accountId: missing or empty"},
+		{"reporter string", `"reporter":"x"`, "fields.reporter: not an object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newServer(t, answer(http.StatusOK, `{"key":"PAY-1","fields":{"summary":"S","issuetype":{"name":"Task"},`+tc.fields+`}}`))
+			c, _ := testClient(testOptions(srv.URL), basicCreds())
+			_, err := c.Fetch(context.Background(), "PAY-1")
+			jerr := asJiraError(t, err)
+			if jerr.Kind != apperr.JiraInvalidResponse || !strings.Contains(jerr.Detail, tc.detail) {
+				t.Errorf("got %s %q, want invalid_response containing %q", jerr.Kind, jerr.Detail, tc.detail)
+			}
+		})
+	}
+}
+
+func TestFetch_NullReporterAndLabels(t *testing.T) {
+	srv := newServer(t, answer(http.StatusOK, `{"key":"PAY-1","fields":{"summary":"S","issuetype":{"name":"Task"},"status":null,"labels":null,"reporter":null}}`))
+	c, _ := testClient(testOptions(srv.URL), basicCreds())
+	got, err := c.Fetch(context.Background(), "PAY-1")
+	if err != nil || got.Status != "" || got.Labels != nil || got.Reporter != "" {
+		t.Errorf("got %+v, %v", got, err)
+	}
 }
 
 func assertTicket(t *testing.T, got, want domain.Ticket) {

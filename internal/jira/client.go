@@ -41,7 +41,7 @@ const (
 )
 
 // systemFields are always requested; configured custom fields follow, in config order.
-var systemFields = []string{"summary", "description", "issuetype", "parent", "components"}
+var systemFields = []string{"summary", "description", "issuetype", "parent", "components", "status", "labels", "reporter"}
 
 // Credentials authenticate the request. It prints as [REDACTED], and the values sit
 // behind a pointer: fmt cannot call String on an unexported field (Client.creds), and a
@@ -159,24 +159,33 @@ func NewHTTPClient(opts Options, creds Credentials) *Client {
 // waited for. Cancellation and an expired parent deadline are never retried.
 func (c *Client) Fetch(ctx context.Context, key string) (domain.Ticket, error) {
 	key = strings.ToUpper(key)
+	return retrying(ctx, c, key, func() (domain.Ticket, time.Duration, *apperr.JiraError) {
+		return c.attempt(ctx, key)
+	})
+}
+
+// retrying runs once until it succeeds or fails for good, with the retry rule of Fetch. once
+// returns the value, or the failure and the parsed Retry-After of the response that caused it.
+func retrying[T any](ctx context.Context, c *Client, key string, once func() (T, time.Duration, *apperr.JiraError)) (T, error) {
+	var zero T
 	for attempt := 1; ; attempt++ {
-		ticket, retryAfter, jerr := c.attempt(ctx, key)
+		value, retryAfter, jerr := once()
 		if jerr == nil {
-			return ticket, nil
+			return value, nil
 		}
 		jerr.Attempts = attempt
 		if !jerr.Kind.Transient() || attempt > c.opts.MaxRetries || ctx.Err() != nil {
-			return domain.Ticket{}, jerr
+			return zero, jerr
 		}
 		wait := min(baseBackoff<<(attempt-1), c.opts.Timeout)
 		if retryAfter > 0 {
 			if retryAfter > c.opts.Timeout {
-				return domain.Ticket{}, jerr
+				return zero, jerr
 			}
 			wait = retryAfter
 		}
 		if err := c.sleep(ctx, wait); err != nil {
-			return domain.Ticket{}, c.contextError(ctx, key, attempt)
+			return zero, c.contextError(ctx, key, attempt)
 		}
 	}
 }
