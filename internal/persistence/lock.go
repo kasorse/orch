@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -45,6 +46,35 @@ func (s *Store) Lock(runID string) (unlock func(), err error) {
 			dir.Close()
 		})
 	}, nil
+}
+
+// LockFile takes an exclusive, non-blocking flock on the file at path, creating it (and its
+// directory) when it does not exist: the listener's lock, so that two listeners never share a
+// working directory (specs/jira-listener/SPEC.md §9). The kernel releases the lock when the process
+// dies. held is true when another process has it. The returned func releases the lock.
+func LockFile(path string) (unlock func(), held bool, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, false, fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o644)
+	if err != nil {
+		return nil, false, fmt.Errorf("open %s: %w", path, err)
+	}
+	fd := int(f.Fd())
+	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, true, nil
+		}
+		return nil, false, fmt.Errorf("lock %s: %w", path, err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			_ = syscall.Flock(fd, syscall.LOCK_UN)
+			f.Close()
+		})
+	}, false, nil
 }
 
 // lockRetries and lockRetryWait are how often, and how far apart, Lock tries again a lock it finds

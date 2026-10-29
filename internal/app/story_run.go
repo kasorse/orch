@@ -71,8 +71,14 @@ func selfExecutable() (string, error) {
 // Cancelling ctx sends the child SIGINT, as Ctrl-C does, so it can record its run as stopped; it
 // is killed only after childWaitDelay.
 func runChild(ctx context.Context, exe, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return runChildEnv(ctx, exe, dir, nil, args, stdin, stdout, stderr)
+}
+
+// runChildEnv is runChild with the child's whole environment; nil inherits this process's.
+func runChildEnv(ctx context.Context, exe, dir string, env, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Dir = dir
+	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = childWaitDelay
@@ -132,6 +138,7 @@ func storyRun(ctx context.Context, dirArg string, opts storyRunOptions, stdin io
 	r := &storyRunner{
 		ctx: ctx, bg: context.WithoutCancel(ctx), dirArg: dirArg, opts: opts, cfg: cfg, osExec: osExec,
 		reporter: reporter, stdin: stdin, stdout: stdout, stderr: stderr, exe: exe, loc: loc,
+		noPush: !cfg.Story.PushEnabled(),
 	}
 	return r.run()
 }
@@ -167,6 +174,9 @@ type storyRunner struct {
 	merged       map[string]bool
 	// remotes are the git remotes the services deliver to (their delivery.remote), by service.
 	remotes map[string]string
+	// noPush is the story home's story.push: false (specs/delivery-push §4): no task, spec branch
+	// or service pushes or needs a remote, and the result lands on the base branches.
+	noPush bool
 	// unreadable are the run directories settle found that this version cannot read, by runs
 	// directory, reported once at the end (reportUnreadable); warned are those of this story's
 	// tasks, each warned about at once.
@@ -425,7 +435,11 @@ func (r *storyRunner) checkRepository(name, path string) error {
 	}
 
 	r.reporter.StoryChecking(name, path)
-	if code := r.child(path, "validate"); code != 0 {
+	validate := []string{"validate"}
+	if r.noPush {
+		validate = []string{"--story-no-push", "validate"}
+	}
+	if code := r.child(path, validate...); code != 0 {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("orchestrator validate failed in service %s (%s, exit code %d): no task was started", name, path, code)}
 	}
 	if err := r.checkDeliverable(name, path, repo); err != nil {
@@ -455,7 +469,7 @@ func (r *storyRunner) checkDeliverable(name, path string, repo *repository.Repos
 		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s): cannot read its config: %v", name, path, err)}
 	}
 	remote := svc.Delivery.RemoteName()
-	if _, err := repo.RemoteURL(r.ctx, remote); err != nil {
+	if _, err := repo.RemoteURL(r.ctx, remote); err != nil && !r.noPush {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s) has no git remote %q (delivery.remote), and every task of a story is pushed and "+
 			"opened as a merge request there: add the remote; no task was started", name, path, remote), Err: err}
 	}
@@ -834,8 +848,13 @@ func (r *storyRunner) nextReady(looked map[string]bool, running map[string]*chil
 // not be on the remote, so a merge request stacked on it cannot be opened (specs/delivery/SPEC.md
 // §9). A task counts when its run completed with a commit and its push reported no merge request;
 // one the operator marked done by committing in the kept worktree has not been pushed by anyone,
-// and is the operator's to open.
+// and is the operator's to open. A task of a story that does not push (story.push: false) waits for
+// none: it opens no merge request, so it needs no parent's branch on the remote and stacks on the
+// parent's local commit (specs/delivery-push §4).
 func (r *storyRunner) withoutMR(id string) []string {
+	if r.noPush {
+		return nil
+	}
 	var held []string
 	for _, dep := range r.byID[id].DependsOn {
 		rt := r.rec.Tasks[dep]
@@ -1155,7 +1174,7 @@ func (r *storyRunner) prepareDispatch(pos int, id string, logged bool) (*childJo
 	file, err := persistence.WriteStoryTaskInput(r.loc.storyDir, story.TaskInput{
 		Story: r.loc.slug, Task: id, Attempt: attempt, Title: story.InputTitle(t.Title), Branch: fallback, BaseRef: baseRef,
 		// The merge request's target, and the branch the child's conflict check merges against.
-		BaseBranch: r.targetBranch(id), Jira: jira, Acceptance: acceptance, Text: text,
+		BaseBranch: r.targetBranch(id), Jira: jira, Acceptance: acceptance, Text: text, NoPush: r.noPush,
 	})
 	if err != nil {
 		return nil, "", &apperr.ConfigError{Msg: fmt.Sprintf("%s: %v", id, err)}
@@ -1769,5 +1788,5 @@ func (r *storyRunner) finish() error {
 		rows = append(rows, row)
 	}
 	r.reporter.StoryEnd(rows)
-	return nil
+	return r.landAll()
 }

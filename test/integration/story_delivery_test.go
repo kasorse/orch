@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/exitcode"
 	"orchestrator/internal/story"
 	"orchestrator/internal/testutil/fakeexec"
 )
@@ -282,5 +283,167 @@ func TestStoryRun_ASpecBranchThatMovedOnTheRemoteStopsTheStory(t *testing.T) {
 	}
 	if rec.Status != story.StatusFailed {
 		t.Errorf("status = %s, want failed", rec.Status)
+	}
+}
+
+// A story whose config says story.push: false (specs/delivery-push §4) needs no remote: its
+// tasks end at their commits, a dependent is stacked on its parent's local commit, nothing is
+// pushed (the spec branch neither), and the end names the command that pushes what is left.
+func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{
+			{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
+			{ID: "RF02", Repo: "billing", Title: "Round the refunded amount", DependsOn: []string{"RF01"}},
+		}
+		o.noPush = true
+	})
+	gitRun(t, f.repos["billing"], "remote", "remove", "origin")
+
+	stdout, stderr, err := f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+
+	rec := f.record(t)
+	first, second := rec.Tasks["RF01"], rec.Tasks["RF02"]
+	if first.Status != story.TaskDone || second.Status != story.TaskDone || first.Commit == "" || second.Commit == "" {
+		t.Fatalf("RF01 = %+v, RF02 = %+v; want both done with a commit", first, second)
+	}
+	if second.BaseRef != first.Commit {
+		t.Errorf("RF02 is based on %s, want RF01's commit %s", second.BaseRef, first.Commit)
+	}
+	if first.MR != nil || second.MR != nil || rec.Bases["billing"].SpecPush != nil {
+		t.Errorf("mr = %+v / %+v, spec_push = %+v; want none", first.MR, second.MR, rec.Bases["billing"].SpecPush)
+	}
+	// The child got the story's story.push: false through its task input (specs/delivery-push §4).
+	if run := f.runRecord(t, "billing", "RF02", 1); run.Options.Pushes() || run.MR == nil || run.MR.Skipped != domain.MRSkippedPushDisabled {
+		t.Errorf("RF02's run: options = %+v, mr = %+v; want push false and the MR skipped", run.Options, run.MR)
+	}
+	if refs, _ := gitOutput(f.remotes["billing"], "for-each-ref"); refs != "" {
+		t.Errorf("billing's remote received refs:\n%s", refs)
+	}
+	if rec.Status != story.StatusCompleted {
+		t.Errorf("status = %s, want completed", rec.Status)
+	}
+	// The land (specs/story-land): the checked-out base branch is fast-forwarded to the last task.
+	if head, _ := gitOutput(f.repos["billing"], "rev-parse", "HEAD"); strings.TrimSpace(head) != second.Commit {
+		t.Errorf("billing's HEAD = %s, want RF02's commit %s", head, second.Commit)
+	}
+	if _, err := os.Stat(f.repos["billing"] + "/added.txt"); err != nil {
+		t.Errorf("billing's tree does not have the tasks' change: %v", err)
+	}
+	base := rec.Bases["billing"].Branch
+	assertContains(t, "stdout", stdout, "Landed on "+base+": "+second.Commit[:12]+" ("+second.Branch+")\n")
+	assertContains(t, "stdout", stdout, "Not pushed (story.push: false): git push origin "+base+"\n")
+}
+
+// A land git refuses leaves the base branch as it was and the story needs a person; the next
+// story run lands it (specs/story-land §3, §5): not where the base branch is checked out in
+// another worktree, and with update-ref once it is checked out nowhere.
+func TestStoryRun_ALandThatWasRefusedIsTriedAgain(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"}}
+		o.noPush = true
+	})
+	billing := f.repos["billing"]
+	before, _ := gitOutput(billing, "rev-parse", "HEAD")
+	// A local change to the file the task changes: the fast-forward would overwrite it.
+	if err := os.WriteFile(billing+"/fixture.go", []byte(readFile(t, billing+"/fixture.go")+"\n// mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := f.run(t)
+	if exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Fatalf("exit code %d (%v), want %d\nstdout:\n%s\nstderr:\n%s", exitcode.FromError(err), err, exitcode.NeedsPerson, stdout, stderr)
+	}
+	rec := f.record(t)
+	base, done := rec.Bases["billing"].Branch, rec.Tasks["RF01"]
+	if rec.Status != story.StatusCompleted {
+		t.Errorf("status = %s, want completed", rec.Status)
+	}
+	if head, _ := gitOutput(billing, "rev-parse", "HEAD"); head != before {
+		t.Errorf("billing's HEAD moved to %s", head)
+	}
+	assertContains(t, "stdout", stdout, "Not landed on "+base+": git merge --ff-only refused")
+	assertContains(t, "stdout", stdout, "Not pushed (story.push: false): git push origin "+done.Branch+"\n")
+
+	// The operator moves to another branch, and the base branch is checked out in a worktree.
+	gitRun(t, billing, "switch", "-q", "-c", "mine")
+	wt := t.TempDir() + "/wt"
+	gitRun(t, billing, "worktree", "add", "-q", wt, base)
+	stdout, _, err = f.run(t)
+	if exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Fatalf("exit code %d (%v), want %d\nstdout:\n%s", exitcode.FromError(err), err, exitcode.NeedsPerson, stdout)
+	}
+	assertContains(t, "stdout", stdout, "Not landed on "+base+": "+base+" is checked out in "+wt)
+
+	gitRun(t, billing, "worktree", "remove", wt)
+	stdout, stderr, err = f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+	if tip, _ := gitOutput(billing, "rev-parse", base); strings.TrimSpace(tip) != done.Commit {
+		t.Errorf("%s = %s, want RF01's commit %s", base, tip, done.Commit)
+	}
+	if !strings.Contains(readFile(t, billing+"/fixture.go"), "// mine") {
+		t.Error("the operator's change in the checkout is gone")
+	}
+
+	stdout, stderr, err = f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+	assertContains(t, "stdout", stdout, base+" already has the story's result")
+}
+
+// A story whose spec directory is in the service records itself on the base branch after the land
+// (specs/story-land §4): the README and the task's As built, in a commit of their own.
+func TestStoryRun_TheLandCommitsTheStoryFilesInTheService(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"}}
+		o.noPush = true
+		o.homeService = "billing"
+	})
+	stdout, stderr, err := f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+
+	billing := f.repos["billing"]
+	done := f.record(t).Tasks["RF01"]
+	if parent, _ := gitOutput(billing, "rev-parse", "HEAD^"); strings.TrimSpace(parent) != done.Commit {
+		t.Errorf("HEAD^ = %s, want RF01's commit %s", parent, done.Commit)
+	}
+	files, _ := gitOutput(billing, "show", "--name-only", "--format=%s", "HEAD")
+	if want := "Record the " + storyRunSlug + " story: README and As built\n\nspecs/" + storyRunSlug + "/README.md\nspecs/" +
+		storyRunSlug + "/tasks/" + story.TaskFileName("RF01", "Store the refunded amount"); files != want {
+		t.Errorf("the record commit:\n%s\nwant:\n%s", files, want)
+	}
+	if status, _ := gitOutput(billing, "status", "--porcelain", "--", "specs"); status != "" {
+		t.Errorf("the spec directory is left changed:\n%s", status)
+	}
+	assertContains(t, "stdout", stdout, "Recorded the story on ")
+}
+
+// A story held because its first task's push opened no merge request goes on once the service
+// turns the push off (specs/delivery-push §4): the dependent opens none, so it is stacked on the
+// parent's local commit.
+func TestStoryRun_TurningThePushOffReleasesATaskHeldForAMergeRequest(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{
+			{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
+			{ID: "RF02", Repo: "billing", Title: "Round the refunded amount", DependsOn: []string{"RF01"}},
+		}
+	})
+	if _, err := gitOutput(f.remotes["billing"], "config", "receive.advertisePushOptions", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.run(t); err == nil || f.record(t).Status != story.StatusBlocked {
+		t.Fatalf("the first story run: %v, status %s; want blocked on RF01's merge request", err, f.record(t).Status)
+	}
+
+	if err := os.WriteFile(f.cfg, []byte(strings.Replace(readFile(t, f.cfg), "  max_tasks: 12\n", "  max_tasks: 12\n  push: false\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+	rec := f.record(t)
+	if rt := rec.Tasks["RF02"]; rt.Status != story.TaskDone || rt.BaseRef != rec.Tasks["RF01"].Commit {
+		t.Errorf("RF02 = %+v, want done on RF01's commit %s", rt, rec.Tasks["RF01"].Commit)
+	}
+	if rec.Status != story.StatusCompleted {
+		t.Errorf("status = %s, want completed", rec.Status)
 	}
 }

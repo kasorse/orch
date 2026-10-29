@@ -33,6 +33,9 @@ type TaskInput struct {
 	Jira       string   `json:"jira"`
 	Acceptance []string `json:"acceptance"`
 	Text       string   `json:"text"`
+	// NoPush is story.push: false of the story home's config: the child ends at its commit
+	// (specs/delivery-push).
+	NoPush bool `json:"no_push,omitempty"`
 }
 
 // MaxTitleRunes bounds a task input's title.

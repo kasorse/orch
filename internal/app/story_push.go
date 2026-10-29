@@ -45,7 +45,7 @@ func (r *storyRunner) pushSpecBranches() error {
 // story, before the next dispatch, with the command to push it by hand.
 func (r *storyRunner) pushSpecBranch(name string) error {
 	b, ok := r.rec.Bases[name]
-	if !ok || b.SpecBranch == "" {
+	if !ok || b.SpecBranch == "" || r.noPush {
 		return nil
 	}
 	repo, err := repository.Open(r.ctx, r.rec.Services[name], r.osExec)

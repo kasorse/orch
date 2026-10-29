@@ -198,6 +198,43 @@ func TestLoad_ExampleConfigIsValid(t *testing.T) {
 	}
 }
 
+// The example's listener and gitlab sections are commented; with their lines uncommented (and a
+// jira section, which the listener needs) the file still loads and validates.
+func TestLoad_ExampleListenerSectionsAreValid(t *testing.T) {
+	raw, err := os.ReadFile("../../orchestrator.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	uncommented := 0
+	inBlock := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		switch {
+		case line == "# listener:" || line == "# gitlab:":
+			inBlock = true
+		case inBlock && !strings.HasPrefix(line, "#   "):
+			inBlock = false
+		}
+		if inBlock {
+			line = strings.TrimPrefix(line, "# ")
+			uncommented++
+		}
+		out = append(out, line)
+	}
+	if uncommented < 20 {
+		t.Fatalf("found only %d listener/gitlab lines in the example", uncommented)
+	}
+	jira := "jira:\n  base_url: https://example.atlassian.net\n  auth: basic\n  email_env: JIRA_EMAIL\n  token_env: JIRA_API_TOKEN\n"
+	path := writeTempConfig(t, strings.Join(out, "\n")+"\n"+jira)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("load example with the listener lines uncommented: %v", err)
+	}
+	if err := Validate(cfg); err != nil {
+		t.Errorf("example with the listener lines uncommented must pass Validate: %v", err)
+	}
+}
+
 func TestLoad_RequireCleanWorktree(t *testing.T) {
 	cases := map[string]bool{
 		"": true, // no security block

@@ -51,7 +51,14 @@ type StoryConfig struct {
 	MaxCostUSD *float64
 	// JiraIssueTypes are the Jira issue types run --jira refuses in favour of story plan.
 	JiraIssueTypes []string
+	// Push is false to end every task of a story at its commit, with no push and no merge
+	// request, and to land the result on the base branch (specs/delivery-push, specs/story-land).
+	// Read it through PushEnabled.
+	Push *bool
 }
+
+// PushEnabled is story.push, true when absent (and without a story section).
+func (s *StoryConfig) PushEnabled() bool { return s == nil || s.Push == nil || *s.Push }
 
 // UnmarshalYAML applies the defaults for absent keys.
 func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -64,6 +71,7 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxAcceptance  *int     `yaml:"max_acceptance_chars"`
 		MaxCostUSD     *float64 `yaml:"max_cost_usd"`
 		JiraIssueTypes []string `yaml:"jira_issue_types"`
+		Push           *bool    `yaml:"push"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -77,6 +85,7 @@ func (s *StoryConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxAcceptanceChars: DefaultStoryMaxAcceptanceChars,
 		MaxCostUSD:         raw.MaxCostUSD,
 		JiraIssueTypes:     raw.JiraIssueTypes,
+		Push:               raw.Push,
 	}
 	if raw.MaxServices != nil {
 		s.MaxServices = *raw.MaxServices

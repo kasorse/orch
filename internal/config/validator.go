@@ -134,6 +134,18 @@ func Validate(cfg Config) error {
 	if cfg.Jira != nil {
 		problems = append(problems, validateJira(*cfg.Jira)...)
 	}
+	if cfg.GitLab != nil {
+		problems = append(problems, validateGitLab(*cfg.GitLab)...)
+	}
+	if cfg.Listener != nil {
+		problems = append(problems, validateListener(*cfg.Listener)...)
+		if cfg.Jira == nil {
+			problems = append(problems, "listener needs a jira section")
+		}
+		if cfg.GitLab == nil {
+			problems = append(problems, "listener needs a gitlab section")
+		}
+	}
 	if cfg.Story != nil {
 		problems = append(problems, validateStory(*cfg.Story)...)
 	}

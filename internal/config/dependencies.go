@@ -44,6 +44,10 @@ type DependencyOptions struct {
 	// run --jira, and orchestrator validate whenever the section is present.
 	Jira bool
 
+	// Listener checks what orchestrator jira listen needs: the Jira section and its variables (as
+	// Jira), the GitLab token variable and git (specs/jira-listener/SPEC.md §2).
+	Listener bool
+
 	// Cost says which providers report a call's cost, for limits.max_cost_usd. *provider.Registry
 	// implements it. Nil means none does, so a budget is then refused.
 	Cost CostChecker
@@ -72,8 +76,14 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
 	problems = append(problems, budgetProblems(cfg, opts.Cost)...)
 	problems = append(problems, storyBudgetProblems(cfg, opts.Cost)...)
-	if opts.Jira {
+	if opts.Jira || opts.Listener {
 		problems = append(problems, jiraCredentialProblems(cfg.Jira, opts.getenv)...)
+	}
+	if opts.Listener {
+		problems = append(problems, listenerCredentialProblems(cfg.GitLab, opts.getenv)...)
+		if _, err := checker.LookPath("git"); err != nil {
+			problems = append(problems, "the listener runs git, but executable \"git\" was not found in PATH")
+		}
 	}
 	if len(problems) == 0 {
 		return nil

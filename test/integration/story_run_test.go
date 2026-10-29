@@ -74,6 +74,11 @@ type storyRunFixtureOpts struct {
 	simple bool
 	// serviceYAML is appended to the config of each service (a worktree: block, for instance).
 	serviceYAML string
+	// noPush writes story.push: false in the story home's config.
+	noPush bool
+	// homeService, when set, puts the spec directory in that service: the story home is the
+	// service's checkout, as in a repository whose own specs are run as stories.
+	homeService string
 }
 
 type storyRunFixture struct {
@@ -144,13 +149,25 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		f.repos[name] = dst
 	}
 
+	if o.homeService != "" {
+		f.home = f.repos[o.homeService]
+		homeOpts := opts
+		homeOpts.extraYAML = o.serviceYAML + "\nstory:\n  roots: [" + yamlQuote(src) + "]\n  max_tasks: 12\n" + storyPushYAML(o.noPush)
+		f.cfg = writeConfig(t, f.home, homeOpts)
+		f.specDir = filepath.Join(f.home, "specs", storyRunSlug)
+		f.storyDir = filepath.Join(f.home, ".orchestrator", "stories", storyRunSlug)
+		f.writeSpec(t)
+		commitAll(t, f.home, "the spec")
+		return f
+	}
+
 	f.home = filepath.Join(base, "platform")
 	if err := os.MkdirAll(f.home, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	homeOpts := opts
 	homeOpts.jira = o.jira
-	homeOpts.extraYAML = "\nstory:\n  roots: [" + yamlQuote(src) + "]\n  max_tasks: 12\n"
+	homeOpts.extraYAML = "\nstory:\n  roots: [" + yamlQuote(src) + "]\n  max_tasks: 12\n" + storyPushYAML(o.noPush)
 	if o.maxCostUSD > 0 {
 		homeOpts.extraYAML += fmt.Sprintf("  max_cost_usd: %v\n", o.maxCostUSD)
 	}
@@ -162,6 +179,13 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 	gitRun(t, f.home, "add", "-A")
 	gitRun(t, f.home, "commit", "-q", "-m", "the spec")
 	return f
+}
+
+func storyPushYAML(noPush bool) string {
+	if noPush {
+		return "  push: false\n"
+	}
+	return ""
 }
 
 func writeStoryFile(t *testing.T, path string, data []byte) {

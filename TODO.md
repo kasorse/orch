@@ -936,6 +936,44 @@ shadow-вопрос `scope.story` в классификации, ничего н
 задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
 `conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`, MVP.md §50.8).
 
+### [x] DP. `story.push: false`: задачи story заканчиваются коммитом — P1 · S
+**Сделано (2026-10-29, DP01–DP03; MVP.md §50.5, §50.7, §50.8):** ключ сначала был
+`delivery.push` и действовал на любой run; в тот же день перенесён в `story.push` (конфиг дома story,
+для всех её сервисов) — выключать push имеет смысл только у story. Ребёнок получает его как `no_push`
+в task input и копирует в `options.push`, после коммита нет push, MR и вопросов, exit 0, remote не нужен; `story run` строит
+задачи на локальных ветках, spec-ветку не пушит и в конце печатает `git push` для оставленных веток.
+Спека: [`specs/delivery-push/`](specs/delivery-push/README.md). Повод: `origin` на GitHub отклоняет
+push с GitLab-опциями, и story `jira-listener` встала на JL01.
+
+### [x] SL. Story без push сама вливает результат в базовую ветку — P1 · S
+**Сделано (2026-10-29, SL01; MVP.md §50.8):** в конце завершённой story с
+`story.push: false` каждый сервис получает результат задач в ветке, от которой story стартовала:
+fast-forward или merge-коммит, сделанный Go (`merge-tree`/`commit-tree`); выписанную ветку двигает
+только `git merge --ff-only`; README и As built коммитятся туда же, если спека в этом репозитории;
+отказ git — exit 6, следующий `story run` пробует снова. Спека:
+[`specs/story-land/`](specs/story-land/README.md).
+
+### [x] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
+**Сделано (2026-10-29, JL01–JL06; MVP.md §51, §30, §39, §50.10, §50.13):** `orchestrator jira listen`
+в рабочей директории (Docker-volume): опрос Jira по JQL, claim переходом в In Progress, сервис и
+проект из лейблов/компонентов, clone из allowlist-групп GitLab (токен только через git credential
+helper), дочерний `run --listener-task --mode auto`, исход → комментарий и переход
+(`done`/`blocked`/`failed`/`retry`), состояние в `.orchestrator/listener/`. Спека:
+[`specs/jira-listener/`](specs/jira-listener/README.md), решения D1–D21. Живой прогон на Jira и
+GitLab — за оператором.
+
+### [ ] D18. Listener: story-режим для эпиков и мультисервисных тикетов — P2 · L · ⚠ спека
+Сейчас тикет типа из `story.jira_issue_types` получает комментарий «plan it as a story» и `blocked`;
+тикет с несколькими `service:` — `blocked`. **Как сделать:** listener запускает `story plan --jira` и
+`story run` для таких тикетов (решение D18 в `specs/jira-listener/`), с теми же claim, исходами и
+состоянием. **Готово, когда:** эпик с двумя сервисами доходит до merge request в каждом.
+
+### [ ] D19. Listener: любой репортёр, не только список — P2 · M · ⚠ спека
+Сейчас `listener.query.reporters` обязателен, и только перечисленные репортёры запускают run
+(решение D19). **Как сделать:** модель доверия для остальных (членство в группе Jira, одобрение
+второго человека или метка, которую ставит только доверенный) вместо списка; проверка остаётся в Go.
+**Готово, когда:** тикет постороннего репортёра не запускает run без явного одобрения.
+
 ---
 
 ## Фаза 4 — Управление для команд (за это платят)

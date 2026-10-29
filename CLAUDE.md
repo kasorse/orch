@@ -39,7 +39,13 @@ Jira, the scope question): MVP.md §48 and §39.11, with its design record in `s
 delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
 merge request, the Jira comment and transition, `--output json` and the exit codes, `orchestrator
 review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its design record in
-`specs/delivery/`.
+`specs/delivery/`; `story.push: false`, the story whose tasks end at the commit: MVP.md
+§50.5, §50.8, with its design record in `specs/delivery-push/`; the land of such a story on its
+base branch: MVP.md §50.8, with its design record in `specs/story-land/`;
+the Jira listener (`orchestrator jira listen`: tickets labelled `ai-run` become runs, one at a
+time, the `listener` and `gitlab` sections, the git credential helper, `run --listener-task`,
+`failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design record in
+`specs/jira-listener/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -367,7 +373,13 @@ and review), without it, as the last read-only step, it writes the answer.
   `--force`; without a commit the worktree stays.
 - **Delivery: ask unless `--mode auto`, the push opens the merge request, no GitLab credentials**
   (MVP.md §50, `specs/delivery/`). A worktree run that completes with `implement` ends with commit
-  → push → merge request → worktree removal, with no flag; `--inplace` is the only way out. Only
+  → push → merge request → worktree removal, with no flag; `--inplace` leaves it out, and
+  a story's `story.push: false` (the home's config; each child gets `no_push` in its task input
+  and copies it into `options.push`, `specs/delivery-push`; `delivery` has no push key) ends each
+  task at the commit with exit 0, needs no remote, stacks the tasks on local branches, and at the
+  story's end Go lands the result on each service's base branch (`specs/story-land`, MVP.md §50.8: merges
+  by `merge-tree`/`commit-tree`, the checked-out branch only by `git merge --ff-only`, the story's
+  README and As built committed when the spec is in that checkout; a refused land is exit 6). Only
   `--mode auto` takes the three yeses in advance (and then the §42.6 refusals apply); every other
   mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
   merge request is opened by the one `git push -u … -o merge_request.create -o
@@ -409,6 +421,21 @@ fallback: stacked on the same-repository task it
   (`mr.state: created`; the same intent-first, never-repeated rules; a failure is a warning;
   `options.jira_write` is the copy a resume uses, and a resume still reads nothing from Jira).
   `story plan` writes nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
+- **The listener owns Jira; its child never calls it** (MVP.md §51, `specs/jira-listener/`).
+  `orchestrator jira listen` is a supervisor like `story run`: it polls Jira (JQL built by Go,
+  re-checked in Go), claims a ticket by a transition, finds the service and project from the
+  labels and components (never a model), clones or fast-forwards the checkout, and runs the ticket
+  as a child `run --listener-task <file> --mode auto --output json`, which builds no Jira client
+  and has `jira.write` off; the listener reads the child's JSON line and `run.json` and only then
+  writes a comment and a transition (intent first in `.orchestrator/listener/state.json`, never
+  repeated, a failure is a log line). The GitLab token reaches only git, through the credential
+  helper (the hidden `git-credential`), never a URL, argv, `.git/config`, log, state or comment, and
+  never a provider CLI or the test command; the child gets no Jira variables. Only allowlisted
+  groups (`gitlab.allowed_groups`) are cloned, and only reporters in `listener.query.reporters`
+  start a run (the label alone is not enough). A cloned repository's `orchestrator.yaml` is
+  trusted because its group is. `internal/listener` is pure (domain and the standard library);
+  HTTP stays in `internal/jira`, git in `internal/repository`, processes in `app`. One listener
+  per working directory (flock), one ticket at a time.
 - Stages always get the user's original request (through `action.taskBlock`); the translation
   is only for the decision provider and relevant-file search. After a clarify step the stages
   that take the task (research, investigate, implement, review) get, after it, the rendered
@@ -417,13 +444,15 @@ fallback: stacked on the same-repository task it
 ## Out of scope (MVP.md §30)
 
 No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
-decision API and reading one Jira issue for `run --jira`), no model benchmarking in the core
+decision API, reading one Jira issue for `run --jira` and the listener's Jira calls), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
-API/IDE plugin, no GitHub integration and for GitLab only the push that opens a merge request (no
-API client, no token), no Jira beyond reading one issue, creating the child issues of an approved
-story and the comment and transition after a merge request (no JQL, links or worklogs), no remote repository execution, no RAG or persistent
+API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and the push that opens
+a merge request (no API client; a token only for the listener's git credential helper, MVP.md §50.13),
+no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
+transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
+comments and transitions without a merge request (no links or worklogs), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 
@@ -500,8 +529,8 @@ remote, source, target, iid?, url?, skipped?, error?}`: the intent is saved befo
 has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
 holds variable names only; each
 `resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
-`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, and `jira_write`, a copy of
-`jira.write`, all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
+`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, `jira_write`, a copy of
+`jira.write`, and `push: false`, a copy of a story task input's `no_push` (`story.push: false`), all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `provider.model_source` (`base`, `by_complexity.<level>` or `escalated.<level>`), `attempt`,
 `usage` (with `partial` for a call cut off before its final report), `call` (`api_key_source`
@@ -541,6 +570,12 @@ prompt as sent, the excerpts' paths and headings, the parsed points), `logs/<NNN
 `logs/<NNN>-implement.verify-<K>.*`), and for calls outside steps `logs/translate.*`,
 `logs/decide-{context,classify}.*`, `logs/clarify-<N>.*`, `logs/decide-clarity-<N>.*` (one per
 re-check), `logs/pre-run-test.*`, `logs/pre-run-test.<check>.*` and `logs/branch-name.*` (the branch-naming call).
+
+`jira listen` keeps its own home in the working directory (MVP.md §51.9): `.orchestrator/listener/`
+holds `state.json` (per ticket: attempts, service, phase, run id, outcome, the writes done, `next_try_at`),
+`lock` (flocked, one listener per directory) and `tasks/<KEY>.<attempt>.json` (a child's task input,
+whose `run.json` has `task.source.listener: true`); the clones live in `listener.services_dir`
+(`.clone-*` is a clone in progress).
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`

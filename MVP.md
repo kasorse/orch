@@ -257,7 +257,7 @@ The exit code is part of the interface, for a CI job as much as for a person (§
 | 3 | a provider failed |
 | 4 | the workflow failed or a limit stopped it (a red test, `max_steps`, the budget, no progress, `task needs input`) |
 | 5 | cancelled by the operator |
-| 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict |
+| 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict. A story task of a story with `story.push: false` that committed is 0 (§50.5) |
 
 Support configuration file selection, for example:
 
@@ -423,6 +423,32 @@ security:                      # required for protected_paths (§38.3); no key w
 #   write:                     # a comment and a transition after a merge request (§39.12)
 #     comment: true
 #     transition: "In Review"
+
+# listener:                    # optional; needed only for `jira listen` (§51), with jira and gitlab
+#   poll_interval: 1m          # 30s..1h
+#   services_dir: .            # relative to the working directory
+#   default_config: service.yaml   # optional; --config for a service without orchestrator.yaml
+#   max_attempts: 3            # 1..10 finished runs per ticket
+#   clone_timeout: 10m         # 1m..1h
+#   query:
+#     projects: [PAY]          # required, at least one
+#     label: ai-run
+#     statuses: ["To Do"]      # required; tickets are picked only from these
+#     reporters: ["5b10a2844c20165700ede21g"]   # required: accountId (Cloud) or username (DC)
+#   labels:
+#     service_prefix: "service:"
+#     project_prefix: "gitlab:"
+#   transitions:               # each a transition's name or its target status
+#     start: In Progress
+#     blocked: Blocked
+#     failed: Failed
+#     done: Ready to Review
+#     retry: To Do
+# gitlab:                      # optional; needed only for `jira listen`
+#   base_url: https://gitlab.corp   # https, no userinfo
+#   token_env: GITLAB_TOKEN    # env only; a literal token is refused
+#   username: oauth2
+#   allowed_groups: [backend, platform/payments]   # required; clone only from under these
 ```
 
 Model names must be treated as opaque provider-specific strings.
@@ -473,7 +499,18 @@ Validate:
   `bearer`, both valid variable names; `timeout` > 0, `max_retries` in 0–3, `max_bytes` in
   1024–262144; each `fields[]` a `customfield_<N>` id with a unique, single-line label
   that is not a reserved section name. A literal `token`, `api_token`, `password`, `pat` or
-  `email` key is an error.
+  `email` key is an error;
+* `listener`, when present (§51.2): `poll_interval` in 30s–1h, `clone_timeout` in 1m–1h,
+  `max_attempts` in 1–10, one-line `services_dir`, `query.projects`, `query.statuses` and
+  `query.reporters` non-empty, every JQL value one printable line without `"` or `\` (so Go's
+  quoting is total), a `query.label` without whitespace, two different label prefixes, and the five
+  `transitions` (`start`, `blocked`, `failed`, `done`, `retry`) all present. `listener` without
+  `jira` and `gitlab` is an error;
+* `gitlab`, when present: an absolute `https` `base_url` with no userinfo, query or fragment (a
+  context path is allowed), `token_env` a valid variable name, `username` (default `oauth2`),
+  `allowed_groups` non-empty project-path prefixes. A literal `token`, `api_token`, `password` or
+  `pat` key is an error. `gitlab.token_env` and the Jira variables are registered with
+  `execution.ScrubCredentials` right after `Validate`.
 
 All problems are aggregated into one error.
 
@@ -2554,6 +2591,17 @@ call (the last two with no request); a resume makes no request and needs no Jira
 variables; neither the test command nor a provider CLI inherits `JIRA_API_TOKEN`,
 `JIRA_EMAIL` or `JEV_API_KEY`; a `jira` section without `--jira` changes nothing.
 
+The listener (§51) has its own scenarios (`test/integration/listen_test.go`,
+`listener_task_test.go`) against a fake Jira, extended with a search, a
+comments endpoint, `/myself` and transitions, and a fake GitLab remote: a labelled ticket is
+claimed, cloned, run as a child and ends in a comment and the `done` transition; a ticket from a
+reporter outside `query.reporters`, or of a foreign project, is never dispatched; an unknown or
+ambiguous service and an unlisted group are `blocked` with a comment and no run; a clarify stop
+is `blocked` with the numbered points, a red run `failed`; a provider failure is `retry` with a
+backoff and no attempt counted; a spent ticket is commented once; a restart resumes a `running`
+ticket from the state; a second listener in the same directory refuses; the GitLab token appears
+in no argv, URL, `.git/config`, log, comment or child environment.
+
 ### Decision scenarios
 
 `specs/JEV integration/TASKS.md` T13: project context without secrets, depth none
@@ -2583,7 +2631,8 @@ open points in `summary.md`, and a `resume` that refuses; a failed clarify call 
 Do not implement:
 
 ```text
-HTTP provider APIs (except the Jev decision API and reading one Jira issue, §2)
+HTTP provider APIs (except the Jev decision API, reading Jira issues, and the Jira calls of
+  the listener, §2, §51)
 OpenRouter
 LiteLLM
 model benchmarking
@@ -2596,10 +2645,12 @@ multi-agent parallel execution
 Web UI
 REST API
 IDE plugin
-GitHub integration; GitLab beyond one push of the run's branch, which opens one merge
-  request (§50.6): no API client, no token; Jira beyond reading one issue for `run --jira`
-  (§39), the child issues of an approved story (§48.7), and a comment and a transition
-  after a merge request (§39.12)
+GitHub integration; GitLab beyond clone, fetch and the push of the run's branch, which opens
+  one merge request (§50.6): no API client, and a token only for the git credential helper of
+  the listener (§51.6, §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
+  issues of an approved story (§48.7), a comment and a transition after a merge request
+  (§39.12), and, for `jira listen` only (§51), a JQL search, reading comments and `/myself`,
+  and comments and transitions without a merge request (no links or worklogs)
 remote repository execution
 RAG
 persistent conversational memory
@@ -3474,6 +3525,13 @@ Authorization: Basic … | Bearer …
   Otherwise the backoff is 250 ms doubling, capped at `timeout`. Cancellation and the
   run's deadline are never retried.
 
+The listener (§51) adds three more requests with the same client rules (no redirect, 1 MiB per
+page, the same retries and redaction): the JQL search (`GET /rest/api/2/search/jql` with
+`nextPageToken` on Cloud, `GET /rest/api/2/search` with `startAt` on Data Center), the comments
+(`GET /rest/api/2/issue/{key}/comment?orderBy=created`, paged, at most 100) and `GET
+/rest/api/2/myself` (the bot's own account, once at start). `jira.Fetch` then also asks for
+`status`, `labels` and `reporter`. `run --jira` makes none of them.
+
 ## 39.4 Response validation
 
 Strict. Anything else is `invalid_response` naming the JSON path. Unknown keys are
@@ -3490,6 +3548,10 @@ ignored.
 | `fields.<customfield_N>` | absent, `null` or string; any other type: `not a text field; remove it from jira.fields` |
 
 `\r\n` becomes `\n` in every text value. A blank custom field is left out.
+
+For the listener (§51) the same validation covers `fields.status.name` (non-empty string),
+`fields.labels` (an array of at most 100 strings) and `fields.reporter` (`{accountId}` on Cloud,
+`{name}` on Data Center), and each search page and comment page is validated as strictly.
 
 ## 39.5 Rendering
 
@@ -3517,6 +3579,20 @@ notes are trimmed and come last, so the operator's own words are the final thing
 reads. The text ends with one newline. Longer than `max_bytes` is refused, never
 truncated (`ConfigError`, exit 2: `PMC-2789 renders to 51203 bytes, more than
 jira.max_bytes (32768); raise the limit or trim the ticket`).
+
+For the listener's tasks only (§51.7) there is one more section, after the description:
+
+```text
+Discussion since the orchestrator's questions:
+--- orchestrator, 2026-10-29 10:02
+<the bot's last question comment, as posted>
+--- comment, 2026-10-29 11:40
+<a person's answer>
+```
+
+It holds the bot's **last** comment that asked questions (first line `[orchestrator]`, the bot
+being the account `/myself` answered) and every comment after it; without such a comment there
+is no section. Authors are not named. `run --jira` renders no comments.
 
 ## 39.6 Order of operations
 
@@ -3547,6 +3623,7 @@ task.source.requested_key   the key asked for, only when the issue has moved
 task.source.url             <base_url>/browse/<key>
 task.source.fetched_at
 task.source.notes           operator notes were appended
+task.source.listener        true for a task `jira listen` handed to the child (§51.7)
 ```
 
 `task.description` stays the complete rendered text. Loading validates the source like
@@ -3591,9 +3668,11 @@ header shows the source line (§27).
 ## 39.10 Not covered
 
 * Writing to Jira other than the child issues of an approved story (§39.11, §48.7) and the
-  comment and transition after a merge request (§39.12): worklogs, links, a comment on a run
-  without a merge request.
-* Comments, linked issues, sub-tasks, attachments, images; JQL, boards, sprints.
+  comment and transition after a merge request (§39.12) and, for the listener only, its
+  comments and transitions without a merge request (§51.8): worklogs, links, assigning a
+  ticket, a comment on a `run --jira` run without a merge request.
+* Linked issues, sub-tasks, attachments, images; boards, sprints. Comments and JQL belong to
+  the listener alone (§51): `run --jira` reads neither.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
 * Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
 * `--jira` on `resume` or `validate`.
@@ -4060,7 +4139,7 @@ rules, is §50.4.
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
 | Approval | Only when `outcome.approval_required`: `Commit needs manual approval (policy.paths)`. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
-| Merge request | Only for a worktree run that reached the end chain (§50.5): the URL (`!12: <url>`), or `pushed, no merge request`, or the skip or the error (`mr.skipped`, `mr.error`). |
+| Merge request | Only for a worktree run that reached the end chain (§50.5): the URL (`!12: <url>`), or `pushed, no merge request`, or the skip or the error (`mr.skipped`, `mr.error`; `skipped: push disabled (story.push: false)` for a story task that does not push). |
 
 ### Clarification
 
@@ -4966,7 +5045,8 @@ a timeout fails the run before any step (`worktree setup failed (exit <n>)`), ou
 ## 47.5 The end of the run
 
 A completed run with `implement` ends with the chain of §50.5: commit on the run's branch, the
-conflict check below, push, merge request, worktree removal. Every mode but `--mode auto` asks
+conflict check below, push, merge request, worktree removal (for a story task with `story.push: false`: no
+push and no merge request, §50.5). Every mode but `--mode auto` asks
 (`Commit to <branch>? [y]es / [N]o / [e]dit message`, §42.2, then the push and the merge request,
 §50.5); `--mode auto` commits without the question under the §42.6 rules (no commit when the
 question would show a warning, when there is no `summary_short`, or when the last implement
@@ -5043,6 +5123,7 @@ story:
   max_parallel: 1                 # 1..8; ready tasks of different services run at once; --parallel N overrides
   max_acceptance_chars: 300       # 50..2000; one acceptance item of a task file story run reads
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
+  push: false                     # default true; false: every task ends at its commit, the result lands on the base branch (§50.8)
 jira:
   create:                         # absent: story run creates nothing in Jira
     issue_type: Story
@@ -5121,7 +5202,8 @@ status changes. A spec written by hand runs too.
   before the Jira children and the first dispatch, and records `bases.<repo>.spec_branch`; a
   continued story whose record lacks it gets it at `bases.<repo>.sha` before anything is
   dispatched, and a recorded branch that git lacks stops the story. Go never writes the
-  operator's branch (the story base branch). `spec` is not a task ID, so the name cannot clash
+  operator's branch (the story base branch), except the land of a service that does not push
+  (§50.8). `spec` is not a task ID, so the name cannot clash
   with `story/<slug>/<ID>`; the unknown-branch check of §48.6 knows it.
 * **The merge** of several parents is made by `story run` in R's checkout, just before T is
   dispatched, one merge at a time, the parents in ID order, each: already an ancestor of the spec
@@ -5658,7 +5740,8 @@ record, with the owner's decisions D1-D22 and the author's defaults A1-A24, is
 2. **No delivery without the commit.** The push and the merge request happen only after the run
    committed; they never relax the §42.6 rules.
 3. **Only `--mode auto` delivers without asking.** Every other mode asks before the commit, the
-   push and the merge request, and a no stops there.
+   push and the merge request, and a no stops there. `story.push: false` ends every mode's
+   chain of a story's tasks at the commit (§50.5).
 4. **Writes outside the machine happen once, after an intent, never retried blindly**: the push
    and every Jira write record an intent first (the §48.7 discipline).
 5. **The orchestrator holds no GitLab credentials.** The merge request is opened by the push
@@ -5772,7 +5855,9 @@ one, cost, active time and version.
 ## 50.5 The end of a worktree run
 
 A worktree run that completes with `implement` in its workflow ends with this chain. There is no
-flag; `--inplace` is the only way out. Each step runs only after the one before it succeeded:
+flag; `--inplace` leaves it out, and a story task of a story with `story.push: false` ends it after
+step 2 (below). Each step
+runs only after the one before it succeeded:
 
 1. **commit** on the run's branch, in the worktree (§42.2 message, §42.3 commit);
 2. the conflict check (`merge-tree`, §47.5);
@@ -5799,6 +5884,15 @@ flag; `--inplace` is the only way out. Each step runs only after the one before 
 * A workflow without `implement` runs in place and has no chain. A resume that completes the run
   runs the same chain (the mode is the resume's own `--mode`, the isolation `options.isolation`).
   A completed run is not resumable, so a failed push is finished by hand with the printed command.
+* **`story.push: false`** (`specs/delivery-push`): the push is the story's to turn off, and only
+  the story's (a plain `run` always pushes; `delivery` has no `push` key). `story run` writes
+  `no_push: true` into each child's task input, and the child copies it at run start into
+  `options.push: false`, read from there by a resume: after the commit and the conflict check
+  nothing is asked or pushed (no `ls-remote`, no Jira write-back), `mr.skipped: push disabled
+  (story.push: false)`, the worktree is removed, the branch stays, and the console prints `Push
+  disabled (story.push: false); the branch <branch> stays in this repository.` with `To publish
+  it: git push <remote> <branch>`. Exit code 0: the config declined the push, as a person's no
+  does. The commit question and the §42.6 rules are unchanged.
 
 ## 50.6 The push, which opens the merge request
 
@@ -5852,13 +5946,18 @@ delivery:
   target_branch: main     # optional: the target when HEAD is detached
 ```
 
-Strict schema, both keys optional, the section optional. No token, no URL. Checked once the
+The push itself is turned off for a story only, by `story.push: false` (§48.1, §50.5, §50.8).
+
+Strict schema, every key optional, the section optional. No token, no URL. Checked once the
 workflow is known and approved (with `--stage`, before any call), before the worktree is created,
 for a run that will be a worktree run: `git remote get-url <remote>` succeeds; a target is known
 (the current branch, else `delivery.target_branch`); `security.secret_scan.mode` is not `off`
 (a push publishes the tree). A failure is a config error (exit 2) whose message names
 `--inplace`. Whether the remote is GitLab is not checked. `orchestrator validate` makes the first
-and third checks when the configured isolation is `worktree`.
+and third checks when the configured isolation is `worktree`. For a story task with `options.push:
+false` the remote and the target are not checked (nothing reaches them), nor is the remote by the
+`validate` that `story run` makes in each service (the hidden `--story-no-push`); the secret-scan check stays, since the branch is
+still meant to be published by a person.
 
 ## 50.8 `story run`
 
@@ -5871,6 +5970,28 @@ and third checks when the configured isolation is `worktree`.
   `story status` and the end table print it. A child that ends with exit 6 (no merge request) is
   `completed` without one: the story stops before the next task that depends on it and continues
   the independent ones. `story run --retry <ID>` works as before.
+* **A story with `story.push: false`** (the story home's config, for every service) needs no remote; its children end at their commits
+  (exit 0, no `mr`); a task of it is stacked on its parent's local commit and never held for the
+  parent's merge request (it opens none); its spec branch is merged into locally and never pushed (`spec_push`
+  stays absent).
+* **The land** (`specs/story-land`). At the end of a completed story (and at every later `story
+  run` of it, derived from git) each service gets the result on its base branch
+  (`bases.<repo>.branch`): Go starts at the branch's current tip and merges the service's leaves
+  (done tasks no task of the service starts from), in the story's order, as on the spec branch:
+  already in, a fast-forward, or `merge-tree` + `commit-tree` (`Merge <branch> into <base>`, the
+  `Orchestrator-Story` trailer; a conflict lands nothing). The fingerprint is compared first. The
+  branch then moves: checked out in the service's checkout, by `git merge --ff-only` there (git
+  refuses rather than overwrite a local change); checked out in another worktree, not at all; else
+  by `git update-ref` with its old value. This is the one place Go writes the operator's branch
+  and checkout: the confirmation of a story whose service does not push is the yes to it. When
+  the story home is that checkout and on the base branch, the README and the task files `story
+  run` changed are committed there (`git commit -- <paths>`, `Record the <slug> story: README and
+  As built`). The console says `Landed on <base>: <sha> (<branches>)`, `Recorded the story on
+  <base>: <sha>`, then `Not pushed (story.push: false): git push <remote> <base>`. A land that
+  was refused prints `Not landed on <base>: <why>` with the hints and the same line with the
+  tasks' branches (the spec branch first when a task was based on a merge there), and the story
+  ends with exit 6, `status: completed`; the next `story run` tries again. A story started on a
+  detached HEAD lands nothing.
 * **The spec branch.** A task with no parent, or with several, targets `story/<slug>/spec`; a task
   with one parent targets that parent's branch. The parent `story run` pushes the spec branch, once
   after the approval at the first start and after every merge Go makes on it, before the task
@@ -5910,9 +6031,13 @@ A comment and a transition after a merge request: §39.12.
  "cost_usd":0.84,"cost_partial":false,"run_dir":".orchestrator/runs/<id>","report":"…/report.md"}
 ```
 
+  A story task with `options.push: false` that committed has `"mr":null`, `"mr_skipped":"push
+  disabled (story.push: false)"`, its `branch` and `commit`, and exit code 0.
   An error before a run exists is `{"v":1,"run_id":"","status":"error","exit_code":2,"error":"…"}`
   (the message as printed, already redacted). Fields that do not apply are empty or null, never
-  absent; `v` changes only on an incompatible change. `--output json` is not offered for
+  absent; `v` changes only on an incompatible change. `failure_kind` is `auth` for a
+  `FailureAuth` and a rejected decision key, else `""`: a compatible addition (`v` stays 1)
+  that `jira listen` reads to stop instead of counting an attempt (§51.8, §51.10). `--output json` is not offered for
   `story run` and `story plan`.
 * **Exit codes** are the table of §4.
 * **Docker and CI.** The `Dockerfile` at the repository root builds the orchestrator with git,
@@ -5965,7 +6090,9 @@ All optional on load, strictly validated when present.
 | `branch_naming` | `{source, proposed?, rejected?, usage?, call?}`; `proposed` at most 255 printable bytes, `rejected` one line at most 500 bytes; absent for an inplace or review run |
 | `worktree.branch` | any name that passes §50.3's rules (a story task: those, or its fallback's story pattern); empty only on a run with `review_target` |
 | story task input `title` | one line, 1-200 runes, printable; required |
+| story task input `no_push` | a boolean, optional; `true` when the story says `story.push: false` |
 | `options.jira_write` | `{comment: bool, transition: string}`, copied from `jira.write` at run start |
+| `options.push` | `false` only, copied from the story task input's `no_push: true` (`story.push: false`) at run start; absent pushes |
 | `mr` | `{state: intent\|pushed\|created, remote, source, target, iid?, url?, skipped?, error?}`; `iid` and `url` only with `created`; `url` https on the remote's host, ending `/-/merge_requests/<iid>`; `skipped` and `error` one line, at most 500 bytes, redacted; `skipped` alone (no `state`) when the chain stopped before the push |
 | `jira_write` | `{comment: {state, id?}, transition: {name, state}}` (§39.12) |
 | `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable, at most 255 |
@@ -5976,8 +6103,14 @@ All optional on load, strictly validated when present.
 
 ## 50.13 Security
 
-* No GitLab credentials in the orchestrator: no token variable, no API client, no request to
-  GitLab but the push, which uses the operator's git credentials like every git call.
+* No GitLab API client, and no request to GitLab but git's own: the push, and for `jira listen`
+  the clone and fetch (§51.6). `run`, `resume`, `review` and `story` read no GitLab token and
+  use the operator's git credentials like every git call. Only `jira listen` has a token
+  variable (`gitlab.token_env`); it reaches nothing but git, through a credential helper (the
+  hidden `orchestrator git-credential`), never a URL, argv, `.git/config`, log, state or comment,
+  and never a provider CLI, the test command or a Jira call (§51.11). The child runs of the
+  listener inherit the helper configuration (their push needs it) and the variable the helper
+  reads, which `ScrubCredentials` removes from every provider CLI and `TestEnv` omits.
 * Push: only the run's own branch, an explicit refspec, no `--force`, after the operator
   fingerprint check, and never to a branch that already exists on the remote: a model-proposed or
   template name cannot move somebody else's branch. The `-o` values are built by Go, escaped and
@@ -6001,7 +6134,8 @@ All optional on load, strictly validated when present.
 * Updating an existing merge request or pushing again to it; force-push after a story rebase.
 * `review --mr`, merge request notes from the orchestrator, inline review comments; reviewing a
   fork's merge request.
-* Jira comments on a failed run or without a merge request; links between issues.
+* Jira comments on a failed run or without a merge request, outside the listener (§51); links
+  between issues.
 * Publishing a Docker image; macOS images; a non-GitLab CI example.
 * A retry command for a push or merge request that failed at the end of a completed run.
 * An org-level floor that forbids or forces delivery or `inplace`.
@@ -6010,3 +6144,188 @@ All optional on load, strictly validated when present.
 * Parallel agents, a separate worktree for review, resolving merge conflicts, integrating
   changes automatically, a lifecycle manager over persistent state.
 * The live check on gitlab.com (`specs/delivery/SPEC.md` §15) is the operator's gate, not a test.
+
+---
+
+# 51. The Jira listener
+
+Normative as a summary; the design record, with the decisions D1–D21 and the plan as built, is
+`specs/jira-listener/` (`SPEC.md` is the full text, `tasks/` the tasks JL01–JL06). Its §N below
+is that SPEC's section.
+
+`orchestrator jira listen` is a supervisor like `story run` (§48.6). It polls Jira for tickets
+labelled `ai-run`, and takes them one at a time: it claims a ticket by a transition, finds the
+service and the GitLab project from the ticket, clones or updates the checkout, runs the ticket
+as a child `orchestrator run --listener-task <file> --mode auto --output json` in the service's
+directory, and writes the outcome to Jira. The child is an ordinary worktree run (clarify, the
+decision, the guard, the sandbox, delivery with the merge request) and knows nothing about the
+listener. **The listener owns Jira; its child never calls it.** No model is called by the
+listener itself: every word it writes to Jira is Go's, and model-written text is escaped and
+bounded.
+
+## 51.1 CLI (SPEC §1)
+
+```bash
+orchestrator jira listen [--config orchestrator.yaml] [--once]
+```
+
+Runs in the current directory (the container's working directory, a volume); no git repository
+is needed there. `--once` runs one poll and the ticket it dispatches, then exits (tests, cron).
+It cannot be combined with `--mode`, `--stage`, `--jira`, `--output`, task text or `--inplace`.
+Exit: 0 after SIGTERM/SIGINT with nothing left half-written; 2 for a configuration, credential or
+`FailureAuth` stop (§51.10); 1 for an unexpected error. Logs go to stderr, one line per event
+(`listen: PAY-12 claimed`, `listen: PAY-12 → Ready to Review (!12)`). At start: the fail-fast
+chain of the listener's file (`ValidateDependencies` with `DependencyOptions{Jira: true}` plus the
+GitLab variable, `git` and the listener's own executable; the provider CLIs are checked per
+service by the child), `GET /myself`, the flock, and the recovery of the state (§51.9). The
+org layer applies to the listener's file as to any other.
+
+## 51.2 Configuration (SPEC §2)
+
+The `listener` and `gitlab` sections next to `jira` (§5, §6, `orchestrator.example.yaml`), a
+strict schema validated in `config.Validate`. `listener.query` names the projects, the label
+(default `ai-run`), the statuses tickets are picked from and the reporters allowed to start a
+run (`accountId` on Cloud, username on Data Center); `listener.labels` the prefixes of the
+service and project labels (`service:`, `gitlab:`); `listener.transitions` the five transitions
+`start`, `blocked`, `failed`, `done`, `retry`, each a name or a target status as
+`jira.write.transition`. `gitlab` has `base_url`, `token_env` (env only), `username` (default
+`oauth2`) and the required `allowed_groups`. A `listener` without `jira` or `gitlab` is a
+configuration error. Only `jira`, `listener`, `gitlab`, `story.jira_issue_types`, the provider
+sections the chain checks and `security` matter to the listener; each service's run uses that
+service's own configuration (§51.6).
+
+## 51.3 Polling (SPEC §3)
+
+Go builds the JQL, nothing comes from the configuration as JQL: `project in (…) AND labels =
+"ai-run" AND status in (…) AND reporter in (…) ORDER BY priority DESC, created ASC`, on the
+search of §39.3, at most 200 issues a poll. It polls only while no child runs: after a poll
+that dispatched a ticket, again at once when the ticket is finished, otherwise after
+`poll_interval`. A failed poll is a log line and the next one waits twice as long (up to 1 h);
+401 stops the listener. **The search is a filter, not a boundary**: Go re-checks, for each
+issue, the project, the exact label, the status (case-insensitive), the reporter, that the
+issue type is not in `story.jira_issue_types`, and that the state has no `next_try_at` in the
+future. An Epic-type issue gets a comment ("plan it as a story") and `blocked` (D18: story
+mode is later).
+
+## 51.4 Claim (SPEC §4)
+
+The transition `start` from the issue's current status (§39.12's lookup and POST). The workflow
+allows it only from the queue's status, so a second listener, or a person who moved the ticket,
+makes it fail and the issue is skipped: this is the only lock in Jira. The state records
+`claiming` before it and `claimed` after. The ticket is not assigned to the bot.
+
+## 51.5 Service and project (SPEC §5)
+
+From the ticket, never from a model. **Service**: every label `service:<name>` and every
+component whose name equals (fold case) a directory under `services_dir`; exactly one distinct
+name valid for `story.ValidRepo`, otherwise a comment naming the labels found and `blocked`. The
+description is not read. **Project**: at most one label `gitlab:<group>/<path>` (segments of
+`[A-Za-z0-9_.-]+`, no `.` or `..`, `.git` stripped); several → `blocked`. If
+`<services_dir>/<service>` exists it must be a git work tree's top level, and with a project label
+`origin`'s URL must name that project on `gitlab.base_url`, else `failed`; without a label it is
+used as is. If it does not exist a project label is required and the project must lie under one
+of `allowed_groups` (whole segments: `backend` allows `backend/x`, not `backend-old/x`);
+otherwise `blocked`.
+
+## 51.6 Checkout (SPEC §6)
+
+* **Clone**: `git clone --no-recurse-submodules -- <base_url>/<path>.git
+  <services_dir>/.clone-<service>-<rand>` under `clone_timeout`, then `os.Rename` to the
+  service's directory, so a cut clone never looks like a service; a `.clone-*` left by a crash
+  is removed at start.
+* **The GitLab credential**: the token never enters a URL, argv or `.git/config`. Every git
+  process of the listener, and every child, has in its environment `GIT_CONFIG_COUNT`/`KEY_n`/
+  `VALUE_n` setting `credential.<gitlab.base_url>.helper` to `!<listener executable>
+  git-credential`, a hidden subcommand that answers git's `get` with the username and the token
+  from `gitlab.token_env`, only for exactly that protocol and host. Provider CLIs never see the
+  token (`ScrubCredentials`), and `test.command` has `TestEnv`'s allowlist. The child's
+  environment has no Jira variables.
+* **A fresh base**: before each run `git fetch origin`, the default branch from `origin/HEAD`,
+  the checkout must be on it and clean, then `git merge --ff-only origin/<default>`. Otherwise
+  a comment ("the service checkout is not on a clean <default>") and `failed`: the listener
+  owns the services directory, nobody works in it by hand (D16).
+* **The service's configuration**: `<service>/orchestrator.yaml` when it exists (its test
+  command, checks, protected paths, routes, limits and instruction files apply, D7); otherwise
+  `listener.default_config` as `--config` (D6); without one, a comment and `failed`.
+
+## 51.7 The task (SPEC §7)
+
+`jira.Fetch` and `jira.Render` as in §39.4–§39.5, plus the discussion section (§39.5), where the
+comments come from `GET …/comment` (at most 100). A text longer than `jira.max_bytes` gets a
+comment and `blocked`. The listener writes `.orchestrator/listener/tasks/<KEY>.<attempt>.json`
+(`{v: 1, key, url, fetched_at, description, scrub_env}`) and starts `run --listener-task
+<file>` (hidden, like `--story-task`), which reads it with a size cap and validates it strictly.
+The child records `task.source {kind: jira, key, url, fetched_at, listener: true}`, builds no
+Jira client and needs no `jira` section, runs the clarify step like any run (unlike a story
+task), and has `jira.write` off (`options.jira_write` empty) whatever the service's file says
+(D14). It refuses `--stage`, `--jira`, `--story-task`, task text and `--inplace`.
+
+## 51.8 Outcomes (SPEC §8)
+
+The child's exit code and JSON line, then `run.json` loaded with the persistence validators.
+Every comment starts `[orchestrator]`, is Go's wiki markup with model text escaped (§39.12,
+§50.4), is bounded to 8 KiB and ends with `Run <run-id>`.
+
+| child | comment | transition | attempt counted |
+|---|---|---|---|
+| 0, `mr.state: created` | merge request link, commit header, review, tests, cost | `done` | yes |
+| 4, `task needs input` | the open points of `task.clarification`, numbered; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
+| 4, any other reason | the failure reason and the last test or check that failed | `failed` | yes |
+| 6 | the verdict and its issues, or why there is no merge request | `failed` | yes |
+| 2 with `failure_kind: auth` | none | `retry`; the listener stops | no |
+| 2 otherwise | the error as printed (already redacted) | `failed` | yes |
+| 1 | the error | `failed` | yes |
+| 3, a clone or fetch that failed on the network | none | `retry`, `next_try_at` with backoff from `poll_interval`, doubling, at most 1 h | no |
+| 5 / killed (the listener is stopping) | none | none: stays `start`, resumed on restart | no |
+
+A ticket blocked before the run (service, project, size, Epic) counts no attempt. At most
+`max_attempts` finished runs per ticket: one more pick of a spent ticket gets a comment ("N
+attempts spent; remove PAY-12 from .orchestrator/listener/state.json to try again") and `failed`,
+once. Before the final transition the status is read again: no longer `start` (a person moved it)
+→ the comment is posted, the transition is not (D13). Writes follow §39.12: an intent in the
+state before each request, the id or `done` after it, never repeated once it may have reached
+Jira; a failed write is a log line, not a retry loop. `--output json` has `failure_kind` (§50.10).
+
+## 51.9 State and restart (SPEC §9)
+
+`.orchestrator/listener/state.json` in the working directory, owned by one goroutine, written
+atomically, with `.orchestrator/listener/lock` flocked (a second listener in the same directory
+refuses at once). Per key: `attempts`, `service`, `phase` (`claiming|claimed|running|finished`),
+`run_id`, `run_dir` (derived from the service and the id, checked on load, never trusted as a
+path), `outcome`, `writes {comment, transition}`, `next_try_at`. Strict validation on load; a
+corrupt file stops the listener (exit 2). At start, for every key not `finished`: `claiming` →
+the status is read, in `start` it counts as `claimed`, else the entry is dropped; `claimed`
+without a run → transition `retry`, no attempt; `running` → a non-terminal `run.json` is resumed
+(`orchestrator resume <id> --mode auto --output json` in the service directory, D15) and then
+§51.8, a terminal one goes to §51.8 straight (only the writes not yet done); an intent without
+its result is not repeated, a log line.
+
+## 51.10 Stopping (SPEC §10)
+
+SIGTERM/SIGINT: no new poll or claim; a running child gets SIGINT and up to `childWaitDelay`;
+the state is saved; the ticket stays in `start` and is resumed on restart. The container's stop
+timeout must exceed `childWaitDelay` (README). Exit 2, after saving the state and putting a
+claimed-but-not-run ticket back to `retry`: Jira 401 on any call, `failure_kind: auth` from a
+child, a clone that git says was refused for authentication.
+
+## 51.11 Security (SPEC §11)
+
+* **Who can start a run**: only reporters in `listener.query.reporters`, re-checked in Go; the
+  label alone is not enough (D19: every reporter is later).
+* **What gets cloned**: only from `gitlab.base_url` under `allowed_groups`; the ticket names the
+  path, the configuration bounds it. A cloned repository's `orchestrator.yaml` and
+  `test.command` are trusted because its group is allowlisted; the default configuration applies
+  to a repository without one.
+* **Credentials**: the Jira and GitLab tokens come from the environment only, never from argv,
+  URLs, `.git/config`, logs, state or comments; the child gets no Jira variables; provider CLIs
+  and the test command get no token (§51.6).
+* **Comments**: Go's template; the only model text is the clarify points and review issues,
+  escaped, bounded and secret-scanned (a finding → "(withheld: looked like a secret)").
+* Ticket and comment text is task text (§38.5): no authority comes from it.
+
+## 51.12 Not covered
+
+* Story mode for Epics and multi-service tickets (D18); every reporter (D19); assigning the
+  ticket to the bot; several tickets at once; a webhook instead of polling.
+* A service worked on by hand (D16); a retry command; a UI.
+* The live Jira and GitLab check is the operator's gate (no `-tags security` suite).

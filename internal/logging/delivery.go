@@ -27,6 +27,20 @@ func (r *ConsoleReporter) Pushed(branch, remote string) {
 	fmt.Fprintf(r.Out, "Pushed %s to %s.\n", branch, remote)
 }
 
+// PushDisabled says that the run ends at its commit (story.push: false, specs/delivery-push)
+// and how to publish the branch by hand.
+func (r *ConsoleReporter) PushDisabled(branch, remote string) {
+	r.stopSpin()
+	text := "Push disabled (story.push: false); the branch " + branch + " stays in this repository."
+	manual := "git push " + shellWord(remote) + " " + shellWord(branch)
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintf(r.Out, "%s\n  %s\n  %s\n", text, st.gray("To publish it:"), manual)
+		return
+	}
+	fmt.Fprintf(r.Out, "%s\nTo publish it: %s\n", text, manual)
+}
+
 // MergeRequest reports the merge request the push opened.
 func (r *ConsoleReporter) MergeRequest(iid int, url string) {
 	r.stopSpin()

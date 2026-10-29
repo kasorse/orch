@@ -402,3 +402,44 @@ func TestDeliver_NoMergeRequestInTheAnswer(t *testing.T) {
 		t.Errorf("the remote's %s = %s, want the pushed %s", s.worktree.Branch, got, sha)
 	}
 }
+
+// push: false recorded in the run (specs/delivery-push §2): after the commit nothing is
+// asked or pushed, mr.skipped says why, the worktree is removed, and the exit is 0.
+func TestDeliver_PushDisabled(t *testing.T) {
+	for _, mode := range []domain.RunMode{domain.ModeAuto, domain.ModeAcceptEdits} {
+		t.Run(string(mode), func(t *testing.T) {
+			s, dir, out := finishedWorktreeRun(t, mode, nil, nil)
+			s.run.Options.Push = new(bool)
+			s.prompter = interaction.NewTerminalPrompter(strings.NewReader("y\n"), out)
+			ctx := context.Background()
+			sha := offerCommit(ctx, s, mode != domain.ModeAuto)
+			if sha == "" {
+				t.Fatalf("no commit:\n%s", out)
+			}
+			if err := finishWorktree(ctx, s, sha); err != nil {
+				t.Fatalf("finishWorktree = %v, want nil (exit 0)\n%s", err, out)
+			}
+			for _, unwanted := range []string{"Push " + s.worktree.Branch + " to origin?", "Open a merge request"} {
+				if strings.Contains(out.String(), unwanted) {
+					t.Errorf("asked %q:\n%s", unwanted, out)
+				}
+			}
+			want := "Push disabled (story.push: false); the branch " + s.worktree.Branch + " stays in this repository.\nTo publish it: git push origin " + s.worktree.Branch + "\n"
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("output lacks %q:\n%s", want, out)
+			}
+			if got := gitIn(t, dir, "ls-remote", "origin"); got != "" {
+				t.Errorf("the remote has refs:\n%s", got)
+			}
+			if mr := savedMR(t, s); mr == nil || *mr != (domain.RunMR{Skipped: domain.MRSkippedPushDisabled}) {
+				t.Errorf("mr = %+v", mr)
+			}
+			if !s.worktree.Removed {
+				t.Error("the worktree was not removed")
+			}
+			if got := gitIn(t, dir, "rev-parse", s.worktree.Branch); got != sha {
+				t.Errorf("the branch %s = %s, want %s", s.worktree.Branch, got, sha)
+			}
+		})
+	}
+}

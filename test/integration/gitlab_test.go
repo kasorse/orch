@@ -860,3 +860,14 @@ func TestDelivery77_ABranchThatExistsOnTheRemoteIsNotPushedOver(t *testing.T) {
 	}
 	assertContains(t, "stdout", stdout, "already exists on origin")
 }
+
+// 78: the push is the story's to turn off (story.push, specs/delivery-push): delivery.push is
+// not a key, and a run's config that names it is refused before anything runs.
+func TestDelivery78_DeliveryPushIsNotAKey(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.extraYAML += "delivery:\n  push: false\n" })
+	_, _, err := runOrchestrator(t, repoDir, r.cfg, "run", "--mode", "auto", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	if err == nil || !strings.Contains(err.Error(), "push") {
+		t.Fatalf("err = %v, want the unknown key push refused", err)
+	}
+}

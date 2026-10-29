@@ -229,6 +229,10 @@ func closingTicks(s string, n int) int {
 	return -1
 }
 
+// Escape writes s so that wiki syntax reads it as plain text: the escaping every text a model
+// wrote goes through before it is part of a comment (specs/delivery/SPEC.md §39.12).
+func Escape(s string) string { return escape(s) }
+
 // escape writes s so that wiki syntax reads it as plain text.
 func escape(s string) string {
 	var b strings.Builder

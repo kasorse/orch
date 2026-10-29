@@ -58,10 +58,16 @@ func skipDelivery(s *session) error {
 // repeated: run.json: mr says intent before it. Once the merge request is created the task's
 // Jira issue gets a comment and a transition (writeJira, specs/delivery/SPEC.md §10), and only
 // then. Nothing here changes the run's status; what did not happen is recorded in run.mr and
-// returned as a NeedsPersonError (exit code 6), unless a person said no.
+// returned as a NeedsPersonError (exit code 6), unless a person said no. A run that recorded
+// options.push: false (a story with story.push: false) stops here before anything is asked or pushed (specs/delivery-push).
 func deliver(ctx context.Context, s *session, sha string) error {
 	run, w := s.run, s.worktree
 	remote := s.cfg.Delivery.RemoteName()
+	if !run.Options.Pushes() {
+		recordMR(s, domain.RunMR{Skipped: domain.MRSkippedPushDisabled})
+		s.reporter.PushDisabled(w.Branch, remote)
+		return nil
+	}
 	target := firstNonEmpty(w.BaseBranch, s.cfg.Delivery.TargetBranch)
 	out := s.reporter.PausingWriter()
 

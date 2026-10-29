@@ -31,6 +31,9 @@ import (
 type Repository struct {
 	Dir      string
 	Executor execution.ProcessExecutor
+	// Env is the whole environment of the git processes that talk to a remote (FetchFastForward);
+	// nil inherits. Every other call inherits.
+	Env []string
 }
 
 // Open verifies dir is inside a Git working tree.

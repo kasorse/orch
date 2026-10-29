@@ -19,7 +19,7 @@ import (
 
 // resultFields is the field set of the result line, in order: a change to it is an incompatible
 // change of the interface (specs/delivery/SPEC.md §11.2).
-var resultFields = []string{"v", "run_id", "status", "exit_code", "failure_reason", "error", "workflow", "commit", "branch",
+var resultFields = []string{"v", "run_id", "status", "exit_code", "failure_reason", "failure_kind", "error", "workflow", "commit", "branch",
 	"mr", "mr_skipped", "mr_error", "review_verdict", "tests_passed_final", "approval_required", "cost_usd", "cost_partial", "run_dir", "report"}
 
 // pipeStdin is a stdin that is no terminal, as in CI.
