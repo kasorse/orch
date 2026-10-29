@@ -52,7 +52,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--output json] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|jira listen [--once]|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]>`
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -233,6 +233,12 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 			return err
 		}
 		return runMCPVerify(ctx, dir, stdin, stdout, stderr)
+	case "jira":
+		once, err := jiraListenArgs(cli, rest)
+		if err != nil {
+			return err
+		}
+		return listen(ctx, listenOptions{configPath: cli.configPath, once: once, verbose: cli.verbose}, stderr)
 	case "git-credential":
 		// Hidden, like mcp-verify: git starts it as the listener's credential helper
 		// (specs/jira-listener/SPEC.md §6.2), with the listener's --config.

@@ -71,8 +71,14 @@ func selfExecutable() (string, error) {
 // Cancelling ctx sends the child SIGINT, as Ctrl-C does, so it can record its run as stopped; it
 // is killed only after childWaitDelay.
 func runChild(ctx context.Context, exe, dir string, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	return runChildEnv(ctx, exe, dir, nil, args, stdin, stdout, stderr)
+}
+
+// runChildEnv is runChild with the child's whole environment; nil inherits this process's.
+func runChildEnv(ctx context.Context, exe, dir string, env, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	cmd := exec.CommandContext(ctx, exe, args...)
 	cmd.Dir = dir
+	cmd.Env = env
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = childWaitDelay
