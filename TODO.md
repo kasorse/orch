@@ -936,6 +936,15 @@ shadow-вопрос `scope.story` в классификации, ничего н
 задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
 `conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`, MVP.md §50.8).
 
+### [ ] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
+**Спека:** [`specs/jira-listener/`](specs/jira-listener/README.md) (2026-10-29), задачи JL01–JL06,
+решения D1–D21. `orchestrator jira listen` в рабочей директории (Docker-volume): опрос Jira по JQL,
+claim переходом в In Progress, сервис и проект из лейблов/компонентов, clone из allowlist-групп
+GitLab (токен только через git credential helper), дочерний `run --listener-task --mode auto`,
+исход → комментарий и переход (`done`/`blocked`/`failed`/`retry`). Меняет §30 и §50.13 (SPEC §12).
+**Потом:** story-режим для эпиков и мультисервисных тикетов (D18); все репортеры, не только
+список (D19).
+
 ---
 
 ## Фаза 4 — Управление для команд (за это платят)
