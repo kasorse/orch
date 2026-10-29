@@ -1,10 +1,10 @@
 # Jira listener: tickets labelled `ai-run` become runs, one at a time
 
-Status: **planned** (0 of 6 tasks done)
+Status: **blocked** (1 of 6 tasks done)
 
 | done | task | title | repository | depends on | jira | status | branch |
 |---|---|---|---|---|---|---|---|
-| [ ] | JL01 | internal/jira: search, comments, /myself, the discussion section | orche | — | — | pending | — |
+| [x] | JL01 | internal/jira: search, comments, /myself, the discussion section | orche | — | — | done | `story/jira-listener/JL01` |
 | [ ] | JL02 | Config: the listener and gitlab sections, validation, scrubbing | orche | JL01 | — | pending | — |
 | [ ] | JL03 | run --listener-task and failure_kind in --output json | orche | JL02 | — | pending | — |
 | [ ] | JL04 | Service, project, clone, the git credential helper, a fresh base | orche | JL03 | — | pending | — |

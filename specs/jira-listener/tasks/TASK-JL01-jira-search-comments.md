@@ -50,3 +50,10 @@ additions: `run --jira`, `story` and their tests behave exactly as before.
 
 Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md
 (JL06 documents §39's new endpoints).
+
+## As built (2026-10-29)
+
+Run `f7e76b55-2bba-4540-91cc-e077b6920626` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/jira-listener/JL01` on `spec/jira-listener` @ 88c5c76, commit 22b9019.
+Cost $1.73. Implementation summary: Add Jira search, comments, /myself, BuildJQL and discussion rendering.
+Conflicts with spec/jira-listener: none.
