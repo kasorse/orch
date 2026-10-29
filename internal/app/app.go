@@ -885,12 +885,20 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 	registry := newRegistry(executor)
 	cfg, clis, org, _, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
-			return config.DependencyOptions{Jira: cfg.Jira != nil}
+			return config.DependencyOptions{Jira: cfg.Jira != nil, Listener: cfg.Listener != nil}
 		})
 	if err != nil {
 		return err
 	}
 	reporter.OrgConfig(org.Path)
+	if cfg.Listener != nil {
+		reporter.ConfigSection(fmt.Sprintf("listener: %s every %s, services in %s",
+			strings.Join(cfg.Listener.Query.Projects, ", "), cfg.Listener.PollInterval, cfg.Listener.ServicesDir))
+	}
+	if cfg.GitLab != nil {
+		reporter.ConfigSection(fmt.Sprintf("gitlab: %s, clones from %s", cfg.GitLab.BaseURL,
+			strings.Join(cfg.GitLab.AllowedGroups, ", ")))
+	}
 	for _, id := range config.ProvidersInUse(cfg) {
 		if cli, ok := clis[id]; ok {
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)

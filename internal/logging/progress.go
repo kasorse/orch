@@ -327,6 +327,16 @@ func (r *ConsoleReporter) ProviderCLIVersion(id, version, verifiedRange string, 
 	fmt.Fprintf(r.Out, "%s %s\n", mark, text)
 }
 
+// ConfigSection reports a checked configuration section, e.g. "gitlab: https://gitlab.corp".
+func (r *ConsoleReporter) ConfigSection(text string) {
+	if r.Pretty {
+		st := r.st()
+		fmt.Fprintln(r.Out, st.green("✓")+" "+st.gray(text))
+		return
+	}
+	fmt.Fprintf(r.Out, "✓ %s\n", text)
+}
+
 // JevModelServed reports that Jev serves the configured decision model (validate only;
 // a run stays silent when the check passes).
 func (r *ConsoleReporter) JevModelServed(model string) {
