@@ -32,19 +32,31 @@ loop (only when idle, every listener.poll_interval):
     outcome → comment + transition (§8)
 ```
 
-### Ground rules for the tasks
+### Ground rules for the tasks of this story
 
-- CLAUDE.md's invariants hold unless §12 changes them, and the task that changes one edits
-  CLAUDE.md and MVP.md in the same change.
-- `internal/listener` is pure (domain and the standard library, an `imports_test.go` like
-  `internal/story`'s): label parsing, project paths, JQL building, the outcome table, the state's
-  validation. HTTP stays in `internal/jira`, git in `internal/repository`, processes in `app`.
+- This is a story task, run with `orchestrator story run specs/jira-listener`. `story run` writes
+  `specs/jira-listener/README.md` and each task's `## As built`: **do not edit anything under
+  `specs/jira-listener/`**. CLAUDE.md's bookkeeping for `specs/*/tasks` (ticking, the `Status:`
+  line, As built) is done by `story run` for these tasks.
+- Only JL06 edits the shared documents (MVP.md, CLAUDE.md, TODO.md, README.md,
+  `orchestrator.example.yaml`), so the task branches do not conflict on them. Every other task
+  says in its commit what JL06 must document.
+- The tasks form one chain (JL01 → … → JL06), each stacked on the one before: no task needs a
+  merge of several parents.
+- Read this file in full before starting: the task text names its sections (§N), the prompt
+  carries only this Approach and may cut it.
+- CLAUDE.md's invariants hold unless §12 changes them. `internal/listener` is pure (domain and the
+  standard library, an `imports_test.go` like `internal/story`'s): label parsing, project paths,
+  JQL values, the outcome table, the state's validation. HTTP stays in `internal/jira`, git in
+  `internal/repository`, processes in `app`.
 - Git is argv only. No model is called by the listener itself: every word it writes to Jira is
   Go's, and model-written text (the clarify points) is escaped and bounded.
-- Each task updates the documentation its change makes out of date (CLAUDE.md "Tasks from
-  `specs/*/tasks`"). The gate is `scripts/check.sh`.
+- No task changes behaviour outside the listener: `run`, `run --jira`, `story run` and their
+  tests stay as they are; change a test only where the task's own change requires it, and say so
+  in the commit.
+- The gate is `scripts/check.sh`. No live gate (`-tags security`) is needed.
 
-## 1. CLI
+### 1. CLI
 
 ```bash
 orchestrator jira listen [--config orchestrator.yaml] [--once]
@@ -57,7 +69,7 @@ orchestrator jira listen [--config orchestrator.yaml] [--once]
   `FailureAuth` stop (§10); 1 for an unexpected error. Logs go to stderr, one line per event
   (`listen: PAY-12 claimed`, `listen: PAY-12 → Ready to Review (!12)`).
 
-## 2. Configuration
+### 2. Configuration
 
 The listener's own config file (in the working directory by default). Only `jira`, `listener`,
 `gitlab`, `story.jira_issue_types`, `claude`/provider sections it checks, and `security`
@@ -100,9 +112,9 @@ gitlab:
   and the listener's own executable. The provider CLIs are checked per service by the child.
 - The org layer applies to the listener's file as to any other.
 
-## 3. Polling
+### 3. Polling
 
-### 3.1 The query
+#### 3.1 The query
 
 Go builds it; no JQL comes from the config:
 
@@ -120,12 +132,12 @@ AND reporter in ("…") ORDER BY priority DESC, created ASC
   408/429/5xx, redaction. A failed poll is a log line and the next poll waits twice as long
   (up to 1 h); 401 stops the listener (§10).
 
-### 3.2 When
+#### 3.2 When
 
 Only while no child runs. A poll that dispatched a ticket is followed by an immediate poll after
 the ticket finishes; otherwise the listener sleeps `poll_interval`.
 
-### 3.3 Go re-checks what JQL filtered
+#### 3.3 Go re-checks what JQL filtered
 
 The search is a filter, not a boundary. Each issue is used only if, in Go: its project is in
 `query.projects`, it has the label exactly, its status name equals one of `query.statuses`
@@ -133,7 +145,7 @@ The search is a filter, not a boundary. Each issue is used only if, in Go: its p
 `story.jira_issue_types`, and its state (§9) has no `next_try_at` in the future. An Epic-type
 issue: comment "plan it as a story" + blocked (D18; story mode is a later task in TODO.md).
 
-## 4. Claim
+### 4. Claim
 
 - The transition `start` from the issue's current status (`GET …/transitions`, then `POST`;
   the existing `jira.Client.Transitions/Transition`). The workflow allows it only from the
@@ -142,7 +154,7 @@ issue: comment "plan it as a story" + blocked (D18; story mode is a later task i
 - Before the claim the state records `{key, phase: claiming}`; after it `phase: claimed`.
 - Assigning the ticket to the bot is not done (needs an edit permission; later).
 
-## 5. Service and project
+### 5. Service and project
 
 From the ticket, never from a model:
 
@@ -161,16 +173,16 @@ From the ticket, never from a model:
   under one of `gitlab.allowed_groups` (whole segments: `backend` allows `backend/x`, not
   `backend-old/x`); outside → comment + blocked. Then §6.1.
 
-## 6. Checkout
+### 6. Checkout
 
-### 6.1 Clone
+#### 6.1 Clone
 
 `git clone --no-recurse-submodules -- <base_url>/<path>.git <services_dir>/.clone-<service>-<rand>`
 under `clone_timeout`, then `os.Rename` to `<services_dir>/<service>`: a cut clone never looks
 like a service. A `.clone-*` directory left by a crash is removed at start. Failure: infrastructure
 (§8), except an authentication answer, which stops the listener (§10).
 
-### 6.2 The GitLab credential
+#### 6.2 The GitLab credential
 
 The token never enters a URL, argv or `.git/config`. Every git process the listener starts, and
 every child (whose push needs it), gets in its environment
@@ -181,7 +193,7 @@ and host, and says nothing otherwise. Provider CLIs never see the token: the chi
 the names the task input lists (§7.2) with `ScrubCredentials`, and `test.command` has
 `TestEnv`'s allowlist. The child's environment has no Jira variables at all.
 
-### 6.3 Fresh base
+#### 6.3 Fresh base
 
 Before each run: `git fetch origin`, the default branch from `origin/HEAD`, the checkout must be
 on it and clean (`git status --porcelain` after the fingerprint, §38.3), then `git merge
@@ -189,16 +201,16 @@ on it and clean (`git status --porcelain` after the fingerprint, §38.3), then `
 not on a clean <default>") + failed: the listener owns the services directory, nobody works in
 it by hand (D16). The run's worktree is then based on the fresh head (MVP.md §47).
 
-### 6.4 The service's config
+#### 6.4 The service's config
 
 `<service>/orchestrator.yaml` when it exists: the repository's own rules (test command, checks,
 protected paths, routes, limits) and its instruction files apply (D7). Otherwise
 `listener.default_config` is passed as `--config` (D6); without one → comment + failed. The child
 runs the whole fail-fast chain; a config error there is the service's fault (§8).
 
-## 7. The task
+### 7. The task
 
-### 7.1 Rendering
+#### 7.1 Rendering
 
 `jira.Fetch` (gaining `status`, `labels`, `reporter`, fields as configured) and
 `jira.Render` as today (§39.5), plus one new section after the description:
@@ -219,7 +231,7 @@ Discussion since the orchestrator's questions:
 - Longer than `jira.max_bytes` → comment ("the ticket and its discussion are longer than … ;
   shorten it") + blocked.
 
-### 7.2 `run --listener-task <file>` (hidden)
+#### 7.2 `run --listener-task <file>` (hidden)
 
 Like `--story-task`: a task input file written by the listener under
 `.orchestrator/listener/tasks/<KEY>.<attempt>.json`, read with a size cap and validated strictly:
@@ -234,7 +246,7 @@ Like `--story-task`: a task input file written by the listener under
 `--output json` gains `failure_kind` (`auth` for `FailureAuth` and a rejected decision key, else
 `""`): a compatible addition, `v` stays 1.
 
-## 8. Outcomes
+### 8. Outcomes
 
 The child's exit code and JSON line, then `run.json` (loaded with the persistence validators) for
 the details. Every comment starts `[orchestrator]`, is Go's wiki markup with model text escaped
@@ -262,7 +274,7 @@ the details. Every comment starts `[orchestrator]`, is Go's wiki markup with mod
 - Writes follow §39.12: an intent in the state before each request, the id or `done` after it,
   never repeated once it may have reached Jira; a failed write is a log line, not a retry loop.
 
-## 9. State and restart
+### 9. State and restart
 
 `.orchestrator/listener/state.json` in the working directory, owned by one goroutine,
 written atomically, flocked through `.orchestrator/listener/lock` (a second listener in the same
@@ -280,7 +292,7 @@ At start, for every key not `finished`:
   from `outcome`), the writes not yet done only.
 - An intent without its result: not repeated, a log line.
 
-## 10. Stopping
+### 10. Stopping
 
 - SIGTERM/SIGINT: no new poll or claim; a running child gets SIGINT (`runChild`) and up to
   `childWaitDelay`; the state is saved; the ticket stays in `start` and is resumed on restart.
@@ -289,7 +301,7 @@ At start, for every key not `finished`:
   `retry`: Jira 401 on any call, `failure_kind: auth` from a child, a clone that git says was
   refused for authentication.
 
-## 11. Security
+### 11. Security
 
 - **Who can start a run**: only reporters in `query.reporters` (D19), re-checked in Go; the
   label alone is not enough.
@@ -305,24 +317,34 @@ At start, for every key not `finished`:
   secret)").
 - Ticket and comment text is task text (§38.5): no authority from it.
 
-## 12. Changes to MVP.md and CLAUDE.md
+### 12. Changes to MVP.md and CLAUDE.md
 
 - §30 / CLAUDE.md "Out of scope": Jira gains a JQL search, reading comments and `/myself`, and
   comments and transitions without a merge request — for the listener only. GitLab gains a
   token, used only by the git credential helper for clone, fetch and push to `gitlab.base_url`;
   still no API client (§50.13 amended).
 - §39.10: comments as a section — for the listener's tasks only.
-- New §51 (the listener) and an invariant paragraph in CLAUDE.md: "the listener owns Jira; the
+- New §51 (the listener) and an invariant paragraph in CLAUDE.md (all of §12 is JL06's): "the listener owns Jira; the
   child never calls it".
 - §50.10: `failure_kind`; §4 exit codes unchanged.
 
-## 13. Not covered (later)
+## Out of scope
 
 Several tickets at once; assigning the ticket; tickets for every reporter; story mode for Epics
 and multi-service tickets; webhooks instead of polling; a command to reset attempts; a daily
 budget (D21: not wanted).
 
-## 14. Decisions (owner, 2026-10-29)
+## Risks
+
+- A Jira workflow without a direct transition from `start` to `blocked`, `failed` or `done`, or
+  with required fields on its screen, answers 400: the ticket stays in `start` with a log line.
+  The operator checks the workflow before enabling the listener (README, JL06).
+- Jira Cloud's search API (`/search/jql`) is new and may change; Data Center keeps `/search`.
+- A cloned repository's `test.command` runs on the machine: the group allowlist is the boundary.
+
+## Decisions
+
+### Owner (2026-10-29)
 
 | | decision |
 |---|---|
@@ -348,7 +370,7 @@ budget (D21: not wanted).
 | D20 | Poll only while idle |
 | D21 | No daily budget |
 
-## 15. Author's defaults (confirmed by the owner, 2026-10-29)
+### Author's defaults (confirmed by the owner, 2026-10-29)
 
 | | default |
 |---|---|

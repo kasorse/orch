@@ -1,33 +1,49 @@
-# JL04 — Service, project, clone, the git credential helper, fresh base
+---
+id: JL04
+repo: orche
+depends_on: [JL03]
+jira: none
+---
+# JL04 — Service, project, clone, the git credential helper, a fresh base
 
 **Size** M
 
 ## Goal
 
 SPEC.md §5 and §6: from a ticket's labels and components to a clean, fresh checkout of the right
-repository, and a git credential that never leaves git.
+repository, and a GitLab credential that only git ever sees.
 
 ## Files
 
-- `internal/listener` (new, pure; `imports_test.go`): `Service(labels, components, dirs []string,
-  prefix) (string, error)`, `Project(labels, prefix) (string, error)`, `Allowed(path, groups)`,
-  `SameProject(originURL, baseURL, path) bool` (normalised).
-- `internal/repository`: `Clone(ctx, url, dir)` (`--no-recurse-submodules`, `--` before the URL),
-  `DefaultBranch` (`origin/HEAD`), `FetchFastForward(ctx, branch)`; argv only.
+- `internal/listener` (new, pure, with an `imports_test.go` allowing only `domain` and the
+  standard library): `Service(labels, components, dirs []string, prefix string) (string, error)`,
+  `Project(labels []string, prefix string) (string, error)`, `Allowed(path string, groups
+  []string) bool` (whole segments), `SameProject(originURL, baseURL, path string) bool`
+  (normalised scheme, host, default port, path, optional `.git`).
+- `internal/repository`: `Clone(ctx, url, dir string, env []string)` (`git clone
+  --no-recurse-submodules -- <url> <dir>`), `DefaultBranch` (from `origin/HEAD`),
+  `FetchFastForward(ctx, branch)`; argv only.
 - `internal/app/gitcredential.go`: the hidden `orchestrator git-credential get`: reads git's
-  request on stdin, answers `username`/`password` from `gitlab.token_env` only for the exact
-  protocol and host of `gitlab.base_url`, nothing otherwise; `listenerGitEnv(exe, base)` builds the
-  `GIT_CONFIG_COUNT/KEY_n/VALUE_n` entries.
-- `internal/app/listen_checkout.go`: clone into `.clone-<service>-<rand>` then rename; cleanup of
-  stale `.clone-*`; the fingerprint, clean and on-default checks, then fast-forward.
+  credential request on stdin, answers `username` and `password` (from `gitlab.token_env`) only
+  for the exact protocol, host and port of `gitlab.base_url`, prints nothing otherwise; and
+  `listenerGitEnv(exe, baseURL string) []string`, the `GIT_CONFIG_COUNT/KEY_0/VALUE_0` entries of
+  SPEC §6.2.
+- `internal/app/listen_checkout.go`: resolve the directory (SPEC §5), clone into
+  `.clone-<service>-<rand>` then `os.Rename`, remove stale `.clone-*`, then the git fingerprint,
+  the clean and on-default checks and the fast-forward (SPEC §6.3); each failure a distinct error
+  kind the loop (JL05) maps to SPEC §8.
 
 ## Acceptance
 
-- `Service`: one label; one matching component; label + same component; two names → error naming
-  both; none → error; an invalid name → error.
-- `Allowed`: `backend` allows `backend/x`, not `backend-old/x` nor `backend`.
-- A clone from a local bare repository through a fake `https` remote is not needed: the helper is
-  tested by feeding git's protocol on stdin; the clone path by a `file://` remote with the helper
-  env present and `.git/config` holding no token afterwards.
-- A dirty checkout, one on another branch, one that diverged: each a distinct error.
+- `Service`: one label; one matching component; a label and the same component; two names gives an error naming both; none gives an error; an invalid name gives an error.
+- `Allowed`: `backend` allows `backend/x` and `backend/x/y`, not `backend-old/x` nor `backend` itself.
+- `SameProject` treats `https://h/g/p`, `https://h:443/g/p.git` as one project, and another host, port or path as different.
+- `git-credential get` answers for the configured host and is silent for another host or protocol (tested by feeding git's protocol on stdin).
+- A clone from a `file://` bare repository with the helper environment set leaves no token in `.git/config`; a cut clone leaves no `<service>` directory.
+- A dirty checkout, one on another branch and one that diverged from origin give three distinct errors; a behind checkout is fast-forwarded.
 - `scripts/check.sh` passes.
+
+## Notes
+
+Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md
+(JL06 documents §50.13's change).
