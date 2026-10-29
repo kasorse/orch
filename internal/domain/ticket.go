@@ -33,6 +33,38 @@ type Ticket struct {
 	// Fields are the configured jira.fields with a non-empty value, in config order.
 	Fields    []TicketField `json:"fields,omitempty"`
 	FetchedAt time.Time     `json:"fetched_at"`
+	// Status, Labels and Reporter are what the Jira listener re-checks (specs/jira-listener/SPEC.md
+	// §3.3). None of them is rendered into the task text. Reporter is the accountId on Jira
+	// Cloud and the username on Data Center; "" when the issue has none.
+	Status   string   `json:"status,omitempty"`
+	Labels   []string `json:"labels,omitempty"`
+	Reporter string   `json:"reporter,omitempty"`
+}
+
+// TicketHead is one issue of a search result: what the Jira listener needs to pick a ticket
+// and to re-check it in Go (specs/jira-listener/SPEC.md §3).
+type TicketHead struct {
+	Key     string
+	Summary string
+	// Status and Type are the names of the issue's status and issue type.
+	Status string
+	Type   string
+	Labels []string
+	// Components are the names of the issue's components, in Jira's order.
+	Components []string
+	// Reporter is the accountId on Jira Cloud and the username on Data Center.
+	Reporter string
+}
+
+// TicketComment is one comment of an issue.
+type TicketComment struct {
+	ID string
+	// Author is the accountId on Jira Cloud and the username on Data Center, comparable with
+	// what GET /myself answers.
+	Author  string
+	Created time.Time
+	// Body is the wiki markup, verbatim.
+	Body string
 }
 
 // TicketParent is a sub-task's parent or, on Jira Cloud, the epic.

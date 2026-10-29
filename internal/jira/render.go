@@ -14,8 +14,13 @@ import (
 // that \r\n becomes \n, trailing whitespace is removed from every line and blank lines at
 // both ends of each section are dropped. Wiki markup is not converted. Empty sections are
 // left out, and the notes come last so the operator's own words are the final thing each
-// stage reads. A text longer than maxBytes is refused, never truncated.
-func Render(t domain.Ticket, notes string, maxBytes int) (string, error) {
+// stage reads. A text longer than maxBytes is refused, never truncated. At most one
+// RenderOptions may follow; without it the output has no discussion.
+func Render(t domain.Ticket, notes string, maxBytes int, opts ...RenderOptions) (string, error) {
+	var opt RenderOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
 	header := []string{clean(t.Key + ": " + t.Summary)}
 	if typ := clean(t.Type); typ != "" {
 		header = append(header, "Type: "+typ)
@@ -37,6 +42,7 @@ func Render(t domain.Ticket, notes string, maxBytes int) (string, error) {
 		}
 	}
 	section("Description", t.Description)
+	section(discussionLabel, opt.discussion())
 	for _, f := range t.Fields {
 		section(f.Label, f.Value)
 	}
@@ -50,6 +56,54 @@ func Render(t domain.Ticket, notes string, maxBytes int) (string, error) {
 			t.Key, len(out), maxBytes), nil)
 	}
 	return out, nil
+}
+
+const (
+	discussionLabel = "Discussion since the orchestrator's questions"
+	// BotMarker starts the first line of every comment the orchestrator posts
+	// (specs/jira-listener/SPEC.md §8).
+	BotMarker = "[orchestrator]"
+)
+
+// RenderOptions add the comments of the issue to the task text, for the Jira listener's
+// tasks only (specs/jira-listener/SPEC.md §7.1).
+type RenderOptions struct {
+	// Comments are the issue's comments, oldest first.
+	Comments []domain.TicketComment
+	// Bot is the account the credentials belong to (Client.Myself); the comments it wrote
+	// carry BotMarker on their first line. Without it there is no discussion.
+	Bot string
+}
+
+// discussion is the section's body: the bot's last comment that starts with BotMarker and every
+// comment after it, each under a "--- who, when" line. Authors are not named. With no such
+// comment it is empty, and the section is left out.
+func (o RenderOptions) discussion() string {
+	if o.Bot == "" {
+		return ""
+	}
+	last := -1
+	for i, c := range o.Comments {
+		if c.Author == o.Bot && strings.HasPrefix(clean(c.Body), BotMarker) {
+			last = i
+		}
+	}
+	if last < 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range o.Comments[last:] {
+		body := clean(c.Body)
+		if body == "" {
+			continue
+		}
+		who := "comment"
+		if c.Author == o.Bot {
+			who = "orchestrator"
+		}
+		parts = append(parts, fmt.Sprintf("--- %s, %s\n%s", who, c.Created.UTC().Format("2006-01-02 15:04"), body))
+	}
+	return strings.Join(parts, "\n")
 }
 
 // clean normalises line endings, strips each line's trailing whitespace and drops blank

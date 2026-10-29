@@ -94,7 +94,7 @@ func TestScenario19a_JiraSuccess(t *testing.T) {
 		t.Fatalf("Jira got %d requests, want 1", len(reqs))
 	}
 	if reqs[0].Path != "/rest/api/2/issue/PMC-1" ||
-		reqs[0].Query != "fields=summary,description,issuetype,parent,components,customfield_10035,customfield_10036" {
+		reqs[0].Query != "fields=summary,description,issuetype,parent,components,status,labels,reporter,customfield_10035,customfield_10036" {
 		t.Errorf("request = %+v", reqs[0])
 	}
 
