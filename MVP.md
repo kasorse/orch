@@ -5122,7 +5122,8 @@ status changes. A spec written by hand runs too.
   before the Jira children and the first dispatch, and records `bases.<repo>.spec_branch`; a
   continued story whose record lacks it gets it at `bases.<repo>.sha` before anything is
   dispatched, and a recorded branch that git lacks stops the story. Go never writes the
-  operator's branch (the story base branch). `spec` is not a task ID, so the name cannot clash
+  operator's branch (the story base branch), except the land of a service that does not push
+  (§50.8). `spec` is not a task ID, so the name cannot clash
   with `story/<slug>/<ID>`; the unknown-branch check of §48.6 knows it.
 * **The merge** of several parents is made by `story run` in R's checkout, just before T is
   dispatched, one merge at a time, the parents in ID order, each: already an ancestor of the spec
@@ -5889,9 +5890,25 @@ still meant to be published by a person.
 * **A service with `delivery.push: false`** needs no remote; its children end at their commits
   (exit 0, no `mr`); a task of it is stacked on its parent's local commit and never held for the
   parent's merge request (it opens none); its spec branch is merged into locally and never pushed (`spec_push`
-  stays absent). The end table is followed by one `Not pushed (delivery.push: false): git push
-  <remote> <branches>` line per such service: the spec branch first when a task was based on a
-  merge there, then the tasks' branches in the story's order.
+  stays absent).
+* **The land** (`specs/story-land`). At the end of a completed story (and at every later `story
+  run` of it, derived from git) each such service gets the result on its base branch
+  (`bases.<repo>.branch`): Go starts at the branch's current tip and merges the service's leaves
+  (done tasks no task of the service starts from), in the story's order, as on the spec branch:
+  already in, a fast-forward, or `merge-tree` + `commit-tree` (`Merge <branch> into <base>`, the
+  `Orchestrator-Story` trailer; a conflict lands nothing). The fingerprint is compared first. The
+  branch then moves: checked out in the service's checkout, by `git merge --ff-only` there (git
+  refuses rather than overwrite a local change); checked out in another worktree, not at all; else
+  by `git update-ref` with its old value. This is the one place Go writes the operator's branch
+  and checkout: the confirmation of a story whose service does not push is the yes to it. When
+  the story home is that checkout and on the base branch, the README and the task files `story
+  run` changed are committed there (`git commit -- <paths>`, `Record the <slug> story: README and
+  As built`). The console says `Landed on <base>: <sha> (<branches>)`, `Recorded the story on
+  <base>: <sha>`, then `Not pushed (delivery.push: false): git push <remote> <base>`. A land that
+  was refused prints `Not landed on <base>: <why>` with the hints and the same line with the
+  tasks' branches (the spec branch first when a task was based on a merge there), and the story
+  ends with exit 6, `status: completed`; the next `story run` tries again. A story started on a
+  detached HEAD lands nothing.
 * **The spec branch.** A task with no parent, or with several, targets `story/<slug>/spec`; a task
   with one parent targets that parent's branch. The parent `story run` pushes the spec branch, once
   after the approval at the first start and after every merge Go makes on it, before the task

@@ -74,6 +74,9 @@ type storyRunFixtureOpts struct {
 	simple bool
 	// serviceYAML is appended to the config of each service (a worktree: block, for instance).
 	serviceYAML string
+	// homeService, when set, puts the spec directory in that service: the story home is the
+	// service's checkout, as in a repository whose own specs are run as stories.
+	homeService string
 }
 
 type storyRunFixture struct {
@@ -142,6 +145,18 @@ func newStoryRunFixture(t *testing.T, mutate ...func(*storyRunFixtureOpts)) *sto
 		writeConfig(t, dst, svcOpts)
 		commitAll(t, dst, "add the orchestrator config")
 		f.repos[name] = dst
+	}
+
+	if o.homeService != "" {
+		f.home = f.repos[o.homeService]
+		homeOpts := opts
+		homeOpts.extraYAML = o.serviceYAML + "\nstory:\n  roots: [" + yamlQuote(src) + "]\n  max_tasks: 12\n"
+		f.cfg = writeConfig(t, f.home, homeOpts)
+		f.specDir = filepath.Join(f.home, "specs", storyRunSlug)
+		f.storyDir = filepath.Join(f.home, ".orchestrator", "stories", storyRunSlug)
+		f.writeSpec(t)
+		commitAll(t, f.home, "the spec")
+		return f
 	}
 
 	f.home = filepath.Join(base, "platform")

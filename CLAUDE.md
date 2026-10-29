@@ -40,7 +40,8 @@ delivery - the commit type and trailer, the branch name, `report.md`, the push t
 merge request, the Jira comment and transition, `--output json` and the exit codes, `orchestrator
 review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its design record in
 `specs/delivery/`; `delivery.push: false`, the run and the story that end at the commit: MVP.md
-§50.5, §50.8, with its design record in `specs/delivery-push/`.
+§50.5, §50.8, with its design record in `specs/delivery-push/`; the land of such a story on its
+base branch: MVP.md §50.8, with its design record in `specs/story-land/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -370,7 +371,10 @@ and review), without it, as the last read-only step, it writes the answer.
   (MVP.md §50, `specs/delivery/`). A worktree run that completes with `implement` ends with commit
   → push → merge request → worktree removal, with no flag; `--inplace` leaves it out, and
   `delivery.push: false` (copied into `options.push`, `specs/delivery-push`) ends it at the commit
-  with exit 0, needs no remote, and in a story stacks the tasks on local branches. Only
+  with exit 0, needs no remote, and in a story stacks the tasks on local branches; at the story's
+  end Go lands the result on the service's base branch (`specs/story-land`, MVP.md §50.8: merges
+  by `merge-tree`/`commit-tree`, the checked-out branch only by `git merge --ff-only`, the story's
+  README and As built committed when the spec is in that checkout; a refused land is exit 6). Only
   `--mode auto` takes the three yeses in advance (and then the §42.6 refusals apply); every other
   mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
   merge request is opened by the one `git push -u … -o merge_request.create -o

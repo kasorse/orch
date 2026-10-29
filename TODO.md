@@ -943,6 +943,14 @@ shadow-вопрос `scope.story` в классификации, ничего н
 Спека: [`specs/delivery-push/`](specs/delivery-push/README.md). Повод: `origin` на GitHub отклоняет
 push с GitLab-опциями, и story `jira-listener` встала на JL01.
 
+### [x] SL. Story без push сама вливает результат в базовую ветку — P1 · S
+**Сделано (2026-10-29, SL01; MVP.md §50.8):** в конце завершённой story сервис с
+`delivery.push: false` получает результат задач в ветке, от которой story стартовала:
+fast-forward или merge-коммит, сделанный Go (`merge-tree`/`commit-tree`); выписанную ветку двигает
+только `git merge --ff-only`; README и As built коммитятся туда же, если спека в этом репозитории;
+отказ git — exit 6, следующий `story run` пробует снова. Спека:
+[`specs/story-land/`](specs/story-land/README.md).
+
 ---
 
 ## Фаза 4 — Управление для команд (за это платят)

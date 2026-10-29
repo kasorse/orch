@@ -61,3 +61,34 @@ func (r *Repository) CommitAll(ctx context.Context, message string) (string, err
 	}
 	return r.HeadRef(ctx)
 }
+
+// CommitPaths commits the working-tree content of paths (relative to Dir) and nothing else the
+// index holds: git add, then git commit -- <paths>. The repository's hooks run, as for CommitAll.
+func (r *Repository) CommitPaths(ctx context.Context, message string, paths []string) (string, error) {
+	if _, err := r.git(ctx, append([]string{"add", "--"}, paths...)...); err != nil {
+		return "", err
+	}
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git",
+		Args: append([]string{"commit", "--quiet", "--file=-", "--"}, paths...), Stdin: message, WorkingDir: r.Dir})
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to run git commit", Err: err}
+	}
+	if result.ExitCode != 0 {
+		return "", &apperr.RepositoryError{Msg: "git commit failed: " + strings.TrimSpace(result.Stderr+"\n"+result.Stdout)}
+	}
+	return r.HeadRef(ctx)
+}
+
+// MergeFastForward fast-forwards the checked-out branch to commit: git merge --ff-only, which
+// refuses rather than overwrite a local change or an untracked file.
+func (r *Repository) MergeFastForward(ctx context.Context, commit string) error {
+	result, err := r.Executor.Run(ctx, execution.Spec{Executable: "git",
+		Args: []string{"merge", "--ff-only", "--quiet", "--no-edit", commit}, WorkingDir: r.Dir})
+	if err != nil {
+		return &apperr.RepositoryError{Msg: "failed to run git merge", Err: err}
+	}
+	if result.ExitCode != 0 {
+		return &apperr.RepositoryError{Msg: "git merge --ff-only refused: " + strings.TrimSpace(result.Stderr+"\n"+result.Stdout)}
+	}
+	return nil
+}

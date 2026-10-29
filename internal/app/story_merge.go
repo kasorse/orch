@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -79,7 +80,7 @@ func (r *storyRunner) startRef(id string) (string, *persistence.StoryConflict, e
 // mergeParents merges the commits of the parents of task id, in ID order, on the spec branch of
 // the task's repository. Each is, in turn: already in the spec tip (nothing), a descendant of it
 // (a fast-forward), or merged into a commit by merge-tree and commit-tree, which write objects
-// only. The ref moves with its old value, so a branch that moved meanwhile is not overwritten.
+// only. The ref moves once, with its old value, so a branch that moved meanwhile is not overwritten.
 func (r *storyRunner) mergeParents(id string, parents []string) (string, *persistence.StoryConflict, error) {
 	t := r.byID[id]
 	base := r.rec.Bases[t.Repo]
@@ -105,41 +106,57 @@ func (r *storyRunner) mergeParents(id string, parents []string) (string, *persis
 			"reset it to a commit that does", t.Repo, spec, shortSHA(base.SHA))}
 	}
 
-	ref := "refs/heads/" + spec
-	for _, p := range parents {
-		parent := r.rec.Tasks[p]
-		if ok, err := repo.IsAncestor(r.ctx, parent.Commit, tip); err != nil {
-			return "", nil, err
-		} else if ok {
-			continue
+	commits := make([]string, len(parents))
+	for i, p := range parents {
+		commits[i] = r.rec.Tasks[p].Commit
+	}
+	merged, files, err := mergeOnto(r.ctx, repo, tip, commits, func(i int) string {
+		return fmt.Sprintf("Merge %s for %s\n\nOrchestrator-Story: %s/%s", r.rec.Tasks[parents[i]].Branch, id, r.loc.slug, id)
+	}, func() error { return r.checkFingerprint(t.Repo, repo) })
+	if merged != tip {
+		if uerr := repo.UpdateRef(r.ctx, "refs/heads/"+spec, merged, tip); uerr != nil {
+			return "", nil, uerr
 		}
-		if ok, err := repo.IsAncestor(r.ctx, tip, parent.Commit); err != nil {
-			return "", nil, err
-		} else if ok {
-			if err := repo.UpdateRef(r.ctx, ref, parent.Commit, tip); err != nil {
-				return "", nil, err
-			}
-			tip = parent.Commit
-			continue
-		}
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	if len(files) > 0 {
+		return "", &persistence.StoryConflict{Parents: parents, Files: persistence.ConflictFiles(files)}, nil
+	}
+	return merged, nil, nil
+}
 
-		if err := r.checkFingerprint(t.Repo, repo); err != nil {
-			return "", nil, err
+// mergeOnto merges commits onto tip in order: a commit already in the tip adds nothing, a
+// descendant of it becomes the tip (a fast-forward), and any other is merged by merge-tree and
+// commit-tree, which write objects only, with message(i); ready runs before each merge-tree. It
+// moves no ref. On a conflict it returns the tip reached before it and the conflicting files.
+func mergeOnto(ctx context.Context, repo *repository.Repository, tip string, commits []string, message func(int) string, ready func() error) (string, []string, error) {
+	for i, c := range commits {
+		if ok, err := repo.IsAncestor(ctx, c, tip); err != nil {
+			return tip, nil, err
+		} else if ok {
+			continue
 		}
-		tree, files, err := repo.MergeTreeWrite(r.ctx, tip, parent.Commit)
+		if ok, err := repo.IsAncestor(ctx, tip, c); err != nil {
+			return tip, nil, err
+		} else if ok {
+			tip = c
+			continue
+		}
+		if err := ready(); err != nil {
+			return tip, nil, err
+		}
+		tree, files, err := repo.MergeTreeWrite(ctx, tip, c)
 		if err != nil {
-			return "", nil, err
+			return tip, nil, err
 		}
 		if len(files) > 0 {
-			return "", &persistence.StoryConflict{Parents: parents, Files: persistence.ConflictFiles(files)}, nil
+			return tip, files, nil
 		}
-		message := fmt.Sprintf("Merge %s for %s\n\nOrchestrator-Story: %s/%s", parent.Branch, id, r.loc.slug, id)
-		commit, err := repo.CommitTree(r.ctx, tree, []string{tip, parent.Commit}, message)
+		commit, err := repo.CommitTree(ctx, tree, []string{tip, c}, message(i))
 		if err != nil {
-			return "", nil, err
-		}
-		if err := repo.UpdateRef(r.ctx, ref, commit, tip); err != nil {
-			return "", nil, err
+			return tip, nil, err
 		}
 		tip = commit
 	}
