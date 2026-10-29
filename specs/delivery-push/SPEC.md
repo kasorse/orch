@@ -55,13 +55,14 @@ The chain of §50.5 stops after the commit:
 6. **Exit code 0**: nothing was left undone that the config asked for. `--output json`:
    `status: completed`, `exit_code: 0`, `mr: null`, `mr_skipped: "push disabled
    (delivery.push: false)"`, `branch` and `commit` set.
-7. `summary.md`: the Merge request row reads `push disabled (delivery.push: false)`.
+7. `summary.md`: the Merge request row reads `skipped: push disabled (delivery.push: false)`.
    `report.md` is written as today (it is the reviewer's report too).
 
 ### 3. The checks before the worktree (§50.7)
 
 With `push: false` the remote is not needed: the `git remote get-url <remote>` check is skipped
-(in `run`, in `orchestrator validate` and in `story run`'s service check). The rule that
+(in `run`, in `orchestrator validate` and in `story run`'s service check), and so is the target
+check of a detached HEAD (there is no merge request to target). The rule that
 `security.secret_scan.mode` must not be `off` stays: the branch is still meant to be published
 later, by a person.
 
@@ -123,7 +124,7 @@ A `--push`/`--no-push` flag; GitHub pull requests; pushing without opening a mer
 |---|---|
 | D1 | A config key `delivery.push: false` turns the push (and so the merge request) off |
 
-### Author's defaults (to confirm)
+### Author's defaults (accepted with "сделай сразу", 2026-10-29)
 
 | | default |
 |---|---|

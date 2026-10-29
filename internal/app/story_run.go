@@ -167,6 +167,9 @@ type storyRunner struct {
 	merged       map[string]bool
 	// remotes are the git remotes the services deliver to (their delivery.remote), by service.
 	remotes map[string]string
+	// noPush are the services whose config says delivery.push: false (specs/delivery-push §4):
+	// their spec branch is not pushed, and they need no remote.
+	noPush map[string]bool
 	// unreadable are the run directories settle found that this version cannot read, by runs
 	// directory, reported once at the end (reportUnreadable); warned are those of this story's
 	// tasks, each warned about at once.
@@ -455,7 +458,11 @@ func (r *storyRunner) checkDeliverable(name, path string, repo *repository.Repos
 		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s): cannot read its config: %v", name, path, err)}
 	}
 	remote := svc.Delivery.RemoteName()
-	if _, err := repo.RemoteURL(r.ctx, remote); err != nil {
+	if r.noPush == nil {
+		r.noPush = map[string]bool{}
+	}
+	r.noPush[name] = !svc.Delivery.PushEnabled()
+	if _, err := repo.RemoteURL(r.ctx, remote); err != nil && !r.noPush[name] {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("service %s (%s) has no git remote %q (delivery.remote), and every task of a story is pushed and "+
 			"opened as a merge request there: add the remote; no task was started", name, path, remote), Err: err}
 	}
@@ -834,7 +841,8 @@ func (r *storyRunner) nextReady(looked map[string]bool, running map[string]*chil
 // not be on the remote, so a merge request stacked on it cannot be opened (specs/delivery/SPEC.md
 // §9). A task counts when its run completed with a commit and its push reported no merge request;
 // one the operator marked done by committing in the kept worktree has not been pushed by anyone,
-// and is the operator's to open.
+// and is the operator's to open; one whose run recorded delivery.push: false has no merge request
+// by design, and its dependents stack on its local branch (specs/delivery-push §4).
 func (r *storyRunner) withoutMR(id string) []string {
 	var held []string
 	for _, dep := range r.byID[id].DependsOn {
@@ -842,7 +850,7 @@ func (r *storyRunner) withoutMR(id string) []string {
 		if rt.Status != story.TaskDone || rt.MR != nil {
 			continue
 		}
-		if run, err := r.loadRun(rt); err == nil && run.Commit != "" && (run.MR == nil || run.MR.State != domain.MRCreated) {
+		if run, err := r.loadRun(rt); err == nil && run.Commit != "" && run.Options.Pushes() && (run.MR == nil || run.MR.State != domain.MRCreated) {
 			held = append(held, dep)
 		}
 	}
@@ -1769,5 +1777,32 @@ func (r *storyRunner) finish() error {
 		rows = append(rows, row)
 	}
 	r.reporter.StoryEnd(rows)
+	r.reportNotPushed()
 	return nil
+}
+
+// reportNotPushed prints, for every service with delivery.push: false, the one command that pushes
+// what the story left in it (specs/delivery-push §4): the spec branch first when a task of the
+// service was based on a merge there, then the tasks' branches in the story's order.
+func (r *storyRunner) reportNotPushed() {
+	for _, name := range slices.Sorted(maps.Keys(r.noPush)) {
+		if !r.noPush[name] {
+			continue
+		}
+		var branches []string
+		for _, id := range r.order {
+			if parents, _ := story.Parents(r.spec.tasks, id); r.byID[id].Repo == name && len(parents) > 1 {
+				branches = append(branches, r.rec.Bases[name].SpecBranch)
+				break
+			}
+		}
+		for _, id := range r.order {
+			if rt := r.rec.Tasks[id]; rt.Repo == name && rt.Commit != "" && rt.Branch != "" {
+				branches = append(branches, rt.Branch)
+			}
+		}
+		if len(branches) > 0 {
+			r.reporter.StoryNotPushed(r.remotes[name], branches)
+		}
+	}
 }

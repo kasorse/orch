@@ -25,11 +25,15 @@ func checkDeliverable(ctx context.Context, repo *repository.Repository, cfg conf
 	if source != nil && source.Kind == domain.TaskSourceStory {
 		src = source
 	}
-	if err := checkDeliveryRemote(ctx, repo, cfg); err != nil {
-		return err
-	}
-	if err := checkDeliveryTarget(ctx, repo, cfg, src); err != nil {
-		return err
+	// Without a push there is no remote to reach and no merge request to target
+	// (specs/delivery-push §3); the branch is still meant to be published, so the scan stays.
+	if cfg.Delivery.PushEnabled() {
+		if err := checkDeliveryRemote(ctx, repo, cfg); err != nil {
+			return err
+		}
+		if err := checkDeliveryTarget(ctx, repo, cfg, src); err != nil {
+			return err
+		}
 	}
 	return checkDeliverySecretScan(cfg)
 }

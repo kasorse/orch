@@ -36,3 +36,10 @@ The shared documents DP01 and DP02 made out of date. Read their commits for what
 ## Notes
 
 Do not edit anything under `specs/delivery-push/` (story run writes its README and As built).
+
+## As built (2026-10-29)
+
+MVP.md §4 (exit 6 row), §43 (the Merge request row), §47.5, §50.1, §50.5, §50.7 (the key, the
+skipped checks), §50.8 (a service that does not push), §50.10 (`--output json`), §50.12
+(`options.push`); CLAUDE.md (the opening pointer, the delivery invariant, the run artifacts'
+`options`); `orchestrator.example.yaml`; README.md (the delivery paragraph); TODO.md (item DP).

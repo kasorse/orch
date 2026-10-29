@@ -1,5 +1,6 @@
 // This file defines the optional delivery section (specs/delivery/SPEC.md §8): where a worktree
-// run's branch is pushed and which branch a merge request targets when HEAD names none.
+// run's branch is pushed, which branch a merge request targets when HEAD names none, and whether
+// it is pushed at all (specs/delivery-push).
 package config
 
 import "strings"
@@ -14,7 +15,13 @@ type DeliveryConfig struct {
 	Remote string `yaml:"remote"`
 	// TargetBranch is the merge request's target when HEAD is detached (a CI checkout).
 	TargetBranch string `yaml:"target_branch"`
+	// Push is false to end a worktree run at its commit, with no push and no merge request
+	// (specs/delivery-push). Read it through PushEnabled.
+	Push *bool `yaml:"push"`
 }
+
+// PushEnabled is delivery.push, true when absent.
+func (d DeliveryConfig) PushEnabled() bool { return d.Push == nil || *d.Push }
 
 // RemoteName is delivery.remote, origin when absent.
 func (d DeliveryConfig) RemoteName() string {

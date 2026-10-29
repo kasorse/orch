@@ -39,7 +39,8 @@ Jira, the scope question): MVP.md §48 and §39.11, with its design record in `s
 delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
 merge request, the Jira comment and transition, `--output json` and the exit codes, `orchestrator
 review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its design record in
-`specs/delivery/`.
+`specs/delivery/`; `delivery.push: false`, the run and the story that end at the commit: MVP.md
+§50.5, §50.8, with its design record in `specs/delivery-push/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -367,7 +368,9 @@ and review), without it, as the last read-only step, it writes the answer.
   `--force`; without a commit the worktree stays.
 - **Delivery: ask unless `--mode auto`, the push opens the merge request, no GitLab credentials**
   (MVP.md §50, `specs/delivery/`). A worktree run that completes with `implement` ends with commit
-  → push → merge request → worktree removal, with no flag; `--inplace` is the only way out. Only
+  → push → merge request → worktree removal, with no flag; `--inplace` leaves it out, and
+  `delivery.push: false` (copied into `options.push`, `specs/delivery-push`) ends it at the commit
+  with exit 0, needs no remote, and in a story stacks the tasks on local branches. Only
   `--mode auto` takes the three yeses in advance (and then the §42.6 refusals apply); every other
   mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
   merge request is opened by the one `git push -u … -o merge_request.create -o
@@ -500,8 +503,8 @@ remote, source, target, iid?, url?, skipped?, error?}`: the intent is saved befo
 has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
 holds variable names only; each
 `resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
-`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, and `jira_write`, a copy of
-`jira.write`, all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
+`options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, `jira_write`, a copy of
+`jira.write`, and `push: false`, a copy of `delivery.push: false`, all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's
 `provider.authority`, `provider.model_source` (`base`, `by_complexity.<level>` or `escalated.<level>`), `attempt`,
 `usage` (with `partial` for a call cut off before its final report), `call` (`api_key_source`

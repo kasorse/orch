@@ -38,3 +38,14 @@ stacks tasks on local branches, and prints what to push at the end.
 
 Do not edit anything under `specs/delivery-push/`, nor MVP.md, CLAUDE.md, TODO.md, README.md,
 `orchestrator.example.yaml` (DP03).
+
+## As built (2026-10-29)
+
+Built by hand on `spec/delivery-push`. `storyRunner.noPush` is filled by the service check, which
+skips the remote check for such a service and keeps the secret-scan check; `pushSpecBranch`
+returns at once for it; `withoutMR` holds a dependent only when the parent's run pushed
+(`run.Options.Pushes()`); `finish` calls `reportNotPushed`, which prints
+`ConsoleReporter.StoryNotPushed` per service, the spec branch first when a task of the service
+has several parents. A parent done without a push and a service that turns the push on later are
+left as SPEC Risks says: the operator pushes the printed branches first. Test:
+`TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches` (two chained tasks, no remote).

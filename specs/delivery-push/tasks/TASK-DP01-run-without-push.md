@@ -42,3 +42,16 @@ the end of a worktree run without a push, exit 0. `story run` is DP02.
 
 Do not edit anything under `specs/delivery-push/`, nor MVP.md, CLAUDE.md, TODO.md, README.md,
 `orchestrator.example.yaml` (DP03).
+
+## As built (2026-10-29)
+
+Built by hand on `spec/delivery-push`. `config.DeliveryConfig.Push *bool` with `PushEnabled()`,
+`domain.RunOptions.Push *bool` with `Pushes()` and `MRSkippedPushDisabled`; `runOptions` records
+`push: false` only. `checkDeliverable` skips the remote check and also the detached-HEAD target
+check when the config does not push (SPEC §3 amended: there is no merge request to target).
+`deliver` returns at its top for a run that does not push, before any question or `ls-remote`;
+`ConsoleReporter.PushDisabled` prints the two lines. The summary row needed no code: it reads
+`skipped: push disabled (delivery.push: false)` from `mr.skipped` (SPEC §2.7 amended). Tests:
+`TestDeliver_PushDisabled` (auto and accept-edits), `TestEnterWorktree_PushDisabledNeedsNoRemote`,
+`TestRunOptions_Push`, the config load test, and integration scenario 78
+(`TestDelivery78_PushDisabledEndsAtTheCommit`, no remote, `--output json`).
