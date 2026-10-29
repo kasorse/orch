@@ -19,7 +19,7 @@ stacks tasks on local branches, and prints what to push at the end.
   without a push the remote check is skipped (the secret-scan check stays).
 - The spec branch: `pushSpecBranches` and `pushSpecBranch` skip a service that does not push;
   `spec_push` stays absent.
-- `withoutMR`: a done parent whose run recorded `options.push: false` does not hold its dependents.
+- `withoutMR`: a task of a service that does not push is never held for a parent's merge request.
 - The end of the story: the merge-request column `—` for such tasks and one `Not pushed
   (delivery.push: false): git push <remote> <branches>` line per service (SPEC §4).
 - Tests next to the existing story run tests, and an integration scenario: a two-task chain in a
@@ -43,9 +43,11 @@ Do not edit anything under `specs/delivery-push/`, nor MVP.md, CLAUDE.md, TODO.m
 
 Built by hand on `spec/delivery-push`. `storyRunner.noPush` is filled by the service check, which
 skips the remote check for such a service and keeps the secret-scan check; `pushSpecBranch`
-returns at once for it; `withoutMR` holds a dependent only when the parent's run pushed
-(`run.Options.Pushes()`); `finish` calls `reportNotPushed`, which prints
+returns at once for it; `withoutMR` holds nothing for a task whose service does not push
+(first built as "only when the parent's run pushed", changed the same day: the hold exists for the
+dependent's merge request, so the dependent's service decides; this also lets a story whose first
+task's push failed continue once the service turns the push off); `finish` calls `reportNotPushed`, which prints
 `ConsoleReporter.StoryNotPushed` per service, the spec branch first when a task of the service
 has several parents. A parent done without a push and a service that turns the push on later are
-left as SPEC Risks says: the operator pushes the printed branches first. Test:
+held for as before (SPEC Risks). Test:
 `TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches` (two chained tasks, no remote).

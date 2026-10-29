@@ -5887,8 +5887,8 @@ still meant to be published by a person.
   `completed` without one: the story stops before the next task that depends on it and continues
   the independent ones. `story run --retry <ID>` works as before.
 * **A service with `delivery.push: false`** needs no remote; its children end at their commits
-  (exit 0, no `mr`); a dependent is stacked on its parent's local commit and is not held for the
-  missing merge request; its spec branch is merged into locally and never pushed (`spec_push`
+  (exit 0, no `mr`); a task of it is stacked on its parent's local commit and never held for the
+  parent's merge request (it opens none); its spec branch is merged into locally and never pushed (`spec_push`
   stays absent). The end table is followed by one `Not pushed (delivery.push: false): git push
   <remote> <branches>` line per such service: the spec branch first when a task was based on a
   merge there, then the tasks' branches in the story's order.

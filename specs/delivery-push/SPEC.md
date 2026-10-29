@@ -77,8 +77,9 @@ already loads the service's config) and keeps it per service.
   later `story run` finds the service's `push` turned on, the existing continued-story path pushes
   it before the first merge request targets it.
 - **Stacking**: a task stacked on a done parent uses the parent's recorded commit, which exists
-  locally: nothing changes. `withoutMR` no longer holds a dependent task for a parent whose run
-  recorded `options.push: false`: such a parent is done without a merge request by design.
+  locally: nothing changes. `withoutMR` holds nothing in a service with `push: false`: the dependent
+  opens no merge request, so it needs no parent's branch on the remote, whatever the parent's run
+  did (a parent whose push failed before the service turned the push off is stacked on too).
 - **The child** is the ordinary run of §2: exit 0 with a commit is `done`; `tasks.<ID>.mr` stays
   absent.
 - **The end**: the end table shows `—` in the merge-request column for these tasks, and the story
@@ -111,10 +112,9 @@ A `--push`/`--no-push` flag; GitHub pull requests; pushing without opening a mer
 - An operator turns the push off and forgets the branches: the console line and `summary.md` say
   what to push, and the story's end prints the command.
 - A story continued after the option changed from `false` to `true`: the parents done without a
-  merge request stay without one, and a new task stacked on such a parent would target a branch
-  that is not on the remote. DP02 keeps it simple: such a dependent is held by `withoutMR` as
-  today only when its parent's run pushed; otherwise the operator pushes the printed branches
-  first. DP02 states what it built in its As built.
+  merge request are held for as today (`withoutMR`), since a dependent's merge request would target
+  a branch that is not on the remote; the operator pushes them and records their merge requests,
+  as the hint says.
 
 ## Decisions
 

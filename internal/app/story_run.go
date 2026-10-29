@@ -841,16 +841,20 @@ func (r *storyRunner) nextReady(looked map[string]bool, running map[string]*chil
 // not be on the remote, so a merge request stacked on it cannot be opened (specs/delivery/SPEC.md
 // §9). A task counts when its run completed with a commit and its push reported no merge request;
 // one the operator marked done by committing in the kept worktree has not been pushed by anyone,
-// and is the operator's to open; one whose run recorded delivery.push: false has no merge request
-// by design, and its dependents stack on its local branch (specs/delivery-push §4).
+// and is the operator's to open. A task whose service does not push (delivery.push: false) waits for
+// none: it opens no merge request, so it needs no parent's branch on the remote and stacks on the
+// parent's local commit (specs/delivery-push §4).
 func (r *storyRunner) withoutMR(id string) []string {
+	if r.noPush[r.byID[id].Repo] {
+		return nil
+	}
 	var held []string
 	for _, dep := range r.byID[id].DependsOn {
 		rt := r.rec.Tasks[dep]
 		if rt.Status != story.TaskDone || rt.MR != nil {
 			continue
 		}
-		if run, err := r.loadRun(rt); err == nil && run.Commit != "" && run.Options.Pushes() && (run.MR == nil || run.MR.State != domain.MRCreated) {
+		if run, err := r.loadRun(rt); err == nil && run.Commit != "" && (run.MR == nil || run.MR.State != domain.MRCreated) {
 			held = append(held, dep)
 		}
 	}
