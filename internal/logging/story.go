@@ -406,3 +406,28 @@ func shellWord(s string) string {
 	}
 	return s
 }
+
+// StoryLanded says that the base branch of a service that does not push now has the story's
+// result (specs/story-land §5).
+func (r *ConsoleReporter) StoryLanded(base, sha string, branches []string) {
+	r.storyLine(fmt.Sprintf("Landed on %s: %s (%s)", base, sha, strings.Join(branches, ", ")))
+}
+
+// StoryRecorded says that the story's README and As built were committed on the base branch.
+func (r *ConsoleReporter) StoryRecorded(base, sha string) {
+	r.storyLine(fmt.Sprintf("Recorded the story on %s: %s", base, sha))
+}
+
+// StoryNotLanded says why the base branch was left as it was; the hints follow.
+func (r *ConsoleReporter) StoryNotLanded(base, why string) {
+	r.storyLine(fmt.Sprintf("Not landed on %s: %s", base, why))
+}
+
+func (r *ConsoleReporter) storyLine(line string) {
+	r.stopSpin()
+	if r.Pretty {
+		r.detail(line)
+		return
+	}
+	fmt.Fprintf(r.Out, "%s\n", line)
+}

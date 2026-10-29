@@ -923,7 +923,10 @@ options). Before the worktree is created the run checks that the remote exists, 
 and `security.secret_scan.mode` is not `off` (a push publishes the tree); the message names
 `--inplace` as the way out. `delivery: {push: false}` ends the run at the commit on its branch:
 no push, no merge request, no remote needed, exit 0, and the command to push it printed; a story
-of such a service stacks its tasks on the local branches.
+of such a service stacks its tasks on the local branches and, once every task is done, lands the
+result on the branch it was started from (a fast-forward, or a merge Go makes; git refuses rather
+than overwrite your local changes, and the story then exits 6 until a later `story run` lands it),
+committing the story's README and As built there when the spec lives in that repository.
 
 If your branch moved on and the merge would conflict, the run says so and lists the files
 (`git merge-tree`, git ≥ 2.38); you resolve it with git. A failed or stopped run keeps its

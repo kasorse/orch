@@ -1787,32 +1787,5 @@ func (r *storyRunner) finish() error {
 		rows = append(rows, row)
 	}
 	r.reporter.StoryEnd(rows)
-	r.reportNotPushed()
-	return nil
-}
-
-// reportNotPushed prints, for every service with delivery.push: false, the one command that pushes
-// what the story left in it (specs/delivery-push §4): the spec branch first when a task of the
-// service was based on a merge there, then the tasks' branches in the story's order.
-func (r *storyRunner) reportNotPushed() {
-	for _, name := range slices.Sorted(maps.Keys(r.noPush)) {
-		if !r.noPush[name] {
-			continue
-		}
-		var branches []string
-		for _, id := range r.order {
-			if parents, _ := story.Parents(r.spec.tasks, id); r.byID[id].Repo == name && len(parents) > 1 {
-				branches = append(branches, r.rec.Bases[name].SpecBranch)
-				break
-			}
-		}
-		for _, id := range r.order {
-			if rt := r.rec.Tasks[id]; rt.Repo == name && rt.Commit != "" && rt.Branch != "" {
-				branches = append(branches, rt.Branch)
-			}
-		}
-		if len(branches) > 0 {
-			r.reporter.StoryNotPushed(r.remotes[name], branches)
-		}
-	}
+	return r.landAll()
 }
