@@ -936,6 +936,13 @@ shadow-вопрос `scope.story` в классификации, ничего н
 задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
 `conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`, MVP.md §50.8).
 
+### [x] DP. `delivery.push: false`: run и story заканчиваются коммитом — P1 · S
+**Сделано (2026-10-29, DP01–DP03; MVP.md §50.5, §50.7, §50.8):** ключ копируется в
+`options.push`, после коммита нет push, MR и вопросов, exit 0, remote не нужен; `story run` строит
+задачи на локальных ветках, spec-ветку не пушит и в конце печатает `git push` для оставленных веток.
+Спека: [`specs/delivery-push/`](specs/delivery-push/README.md). Повод: `origin` на GitHub отклоняет
+push с GitLab-опциями, и story `jira-listener` встала на JL01.
+
 ### [ ] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
 **Спека:** [`specs/jira-listener/`](specs/jira-listener/README.md) (2026-10-29), задачи JL01–JL06,
 решения D1–D21. `orchestrator jira listen` в рабочей директории (Docker-volume): опрос Jira по JQL,

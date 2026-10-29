@@ -284,3 +284,71 @@ func TestStoryRun_ASpecBranchThatMovedOnTheRemoteStopsTheStory(t *testing.T) {
 		t.Errorf("status = %s, want failed", rec.Status)
 	}
 }
+
+// A service whose config says delivery.push: false (specs/delivery-push §4) needs no remote: its
+// tasks end at their commits, a dependent is stacked on its parent's local commit, nothing is
+// pushed (the spec branch neither), and the end names the command that pushes what is left.
+func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{
+			{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
+			{ID: "RF02", Repo: "billing", Title: "Round the refunded amount", DependsOn: []string{"RF01"}},
+		}
+		o.serviceYAML = "\ndelivery:\n  push: false\n"
+	})
+	gitRun(t, f.repos["billing"], "remote", "remove", "origin")
+
+	stdout, stderr, err := f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+
+	rec := f.record(t)
+	first, second := rec.Tasks["RF01"], rec.Tasks["RF02"]
+	if first.Status != story.TaskDone || second.Status != story.TaskDone || first.Commit == "" || second.Commit == "" {
+		t.Fatalf("RF01 = %+v, RF02 = %+v; want both done with a commit", first, second)
+	}
+	if second.BaseRef != first.Commit {
+		t.Errorf("RF02 is based on %s, want RF01's commit %s", second.BaseRef, first.Commit)
+	}
+	if first.MR != nil || second.MR != nil || rec.Bases["billing"].SpecPush != nil {
+		t.Errorf("mr = %+v / %+v, spec_push = %+v; want none", first.MR, second.MR, rec.Bases["billing"].SpecPush)
+	}
+	if refs, _ := gitOutput(f.remotes["billing"], "for-each-ref"); refs != "" {
+		t.Errorf("billing's remote received refs:\n%s", refs)
+	}
+	if rec.Status != story.StatusCompleted {
+		t.Errorf("status = %s, want completed", rec.Status)
+	}
+	assertContains(t, "stdout", stdout, "Not pushed (delivery.push: false): git push origin "+first.Branch+" "+second.Branch+"\n")
+}
+
+// A story held because its first task's push opened no merge request goes on once the service
+// turns the push off (specs/delivery-push §4): the dependent opens none, so it is stacked on the
+// parent's local commit.
+func TestStoryRun_TurningThePushOffReleasesATaskHeldForAMergeRequest(t *testing.T) {
+	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
+		o.tasks = []story.Task{
+			{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
+			{ID: "RF02", Repo: "billing", Title: "Round the refunded amount", DependsOn: []string{"RF01"}},
+		}
+	})
+	if _, err := gitOutput(f.remotes["billing"], "config", "receive.advertisePushOptions", "false"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.run(t); err == nil || f.record(t).Status != story.StatusBlocked {
+		t.Fatalf("the first story run: %v, status %s; want blocked on RF01's merge request", err, f.record(t).Status)
+	}
+
+	cfgPath := f.repos["billing"] + "/orchestrator.yaml"
+	if err := os.WriteFile(cfgPath, []byte(readFile(t, cfgPath)+"\ndelivery:\n  push: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, err := f.run(t)
+	mustSucceed(t, stdout, stderr, err)
+	rec := f.record(t)
+	if rt := rec.Tasks["RF02"]; rt.Status != story.TaskDone || rt.BaseRef != rec.Tasks["RF01"].Commit {
+		t.Errorf("RF02 = %+v, want done on RF01's commit %s", rt, rec.Tasks["RF01"].Commit)
+	}
+	if rec.Status != story.StatusCompleted {
+		t.Errorf("status = %s, want completed", rec.Status)
+	}
+}

@@ -18,7 +18,7 @@ func checkValidateDelivery(ctx context.Context, cfg config.Config, executor exec
 	if cfg.Execution.IsolationMode() != config.IsolationWorktree {
 		return nil
 	}
-	if cwd, err := os.Getwd(); err == nil {
+	if cwd, err := os.Getwd(); err == nil && cfg.Delivery.PushEnabled() {
 		if repo, err := repository.Open(ctx, cwd, executor); err == nil {
 			if err := checkDeliveryRemote(ctx, repo, cfg); err != nil {
 				return err

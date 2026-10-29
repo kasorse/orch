@@ -860,3 +860,37 @@ func TestDelivery77_ABranchThatExistsOnTheRemoteIsNotPushedOver(t *testing.T) {
 	}
 	assertContains(t, "stdout", stdout, "already exists on origin")
 }
+
+// 78: delivery.push: false (specs/delivery-push) ends a --mode auto worktree run at its commit:
+// no remote is needed, nothing is pushed, the branch stays in the repository with the commit, the
+// worktree is removed, and the exit is 0 with mr_skipped saying why.
+func TestDelivery78_PushDisabledEndsAtTheCommit(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.extraYAML += "delivery:\n  push: false\n" })
+	if _, err := gitOutput(repoDir, "remote", "remove", "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "--output", "json", "run", "--mode", "auto", "--stage", "development", "--stage", "testing", "fix Add in fixture.go")
+	mustSucceed(t, stdout, stderr, err)
+
+	run := loadDeliveryRun(t, repoDir)
+	w := run.Worktree
+	if run.Status != "completed" || run.Commit == "" || w == nil || !w.Removed {
+		t.Fatalf("status = %s, commit = %q, worktree = %+v; want completed, committed, removed", run.Status, run.Commit, w)
+	}
+	if tip, err := gitOutput(repoDir, "rev-parse", w.Branch); err != nil || tip != run.Commit {
+		t.Errorf("%s = %q (%v), want the run's commit %s", w.Branch, tip, err, run.Commit)
+	}
+	if mr := run.MR; mr == nil || mr.Skipped != "push disabled (delivery.push: false)" || mr.State != "" || mr.Error != "" {
+		t.Errorf("mr = %+v, want only skipped", mr)
+	}
+	if raw, _ := runFile(t, repoDir, "run.json"); !strings.Contains(raw, `"push": false`) {
+		t.Errorf("run.json does not record options.push: false")
+	}
+	m := resultLine(t, stdout, stderr, err)
+	if m["status"] != "completed" || m["mr"] != nil || m["mr_skipped"] != "push disabled (delivery.push: false)" || m["commit"] != run.Commit || m["branch"] != w.Branch {
+		t.Errorf("line = %v", m)
+	}
+	assertContains(t, "stderr", stderr, "To publish it: git push origin "+w.Branch)
+}

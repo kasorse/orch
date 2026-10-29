@@ -921,7 +921,9 @@ commit, the run says why, keeps the branch (and the worktree when there is no co
 the command to finish by hand and exits 6. A remote that is not GitLab fails at the push (push
 options). Before the worktree is created the run checks that the remote exists, a target is known
 and `security.secret_scan.mode` is not `off` (a push publishes the tree); the message names
-`--inplace` as the way out.
+`--inplace` as the way out. `delivery: {push: false}` ends the run at the commit on its branch:
+no push, no merge request, no remote needed, exit 0, and the command to push it printed; a story
+of such a service stacks its tasks on the local branches.
 
 If your branch moved on and the merge would conflict, the run says so and lists the files
 (`git merge-tree`, git ≥ 2.38); you resolve it with git. A failed or stopped run keeps its

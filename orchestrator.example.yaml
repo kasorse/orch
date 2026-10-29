@@ -268,6 +268,8 @@ execution:
 # delivery:
 #   remote: origin                   # default origin
 #   target_branch: main              # the target when HEAD is detached (a CI checkout)
+#   push: false                      # end at the commit: no push, no merge request (a remote that
+#                                    # is not GitLab, a local-only story); default true
 
 # What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement
 # writes, and only inside the repository. These keys only tighten the guards around

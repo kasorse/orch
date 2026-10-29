@@ -1786,7 +1786,11 @@ func preRunTest(ctx context.Context, s *session) error {
 // runOptions are the config rules a new run follows from here on; a resume reads them back from
 // run.json and never from the config (specs/quality/SPEC.md §7.3).
 func runOptions(cfg config.Config) domain.RunOptions {
-	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules(), JiraWrite: jiraWriteOptions(cfg)}
+	opts := domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules(), JiraWrite: jiraWriteOptions(cfg)}
+	if !cfg.Delivery.PushEnabled() {
+		opts.Push = new(bool)
+	}
+	return opts
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

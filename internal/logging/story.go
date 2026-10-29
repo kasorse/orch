@@ -349,6 +349,21 @@ func (r *ConsoleReporter) StoryEnd(rows []StoryEndRow) {
 	fmt.Fprintf(r.Out, "%s\n", next)
 }
 
+// StoryNotPushed prints the command that pushes the branches a story left in a service whose config
+// says delivery.push: false (specs/delivery-push §4).
+func (r *ConsoleReporter) StoryNotPushed(remote string, branches []string) {
+	words := make([]string, 0, len(branches))
+	for _, b := range branches {
+		words = append(words, shellWord(b))
+	}
+	line := "Not pushed (delivery.push: false): git push " + shellWord(remote) + " " + strings.Join(words, " ")
+	if r.Pretty {
+		r.detail(line)
+		return
+	}
+	fmt.Fprintf(r.Out, "%s\n", line)
+}
+
 // StoryStatusTable prints the README table story status shows, as it is.
 func (r *ConsoleReporter) StoryStatusTable(readme string) {
 	fmt.Fprint(r.Out, readme)
