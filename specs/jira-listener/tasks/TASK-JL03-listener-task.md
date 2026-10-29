@@ -44,3 +44,10 @@ Jira call, and a JSON line that says when a failure was a credential.
 
 Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md
 (JL06 documents §50.10's field and §39.7's flag).
+
+## As built (2026-10-29)
+
+Run `3e46caea-cbf5-4258-b1bf-f641b0938681` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/jira-listener/JL03` on `story/jira-listener/JL02.2` @ ab32019, commit e0ea6a3.
+Cost $2.93. Implementation summary: Add run --listener-task and failure_kind to --output json.
+Conflicts with spec/jira-listener: none.

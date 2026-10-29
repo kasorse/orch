@@ -43,3 +43,10 @@ SPEC.md §2 in the strict schema and the fail-fast chain. Nothing reads the sect
 
 Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md,
 `orchestrator.example.yaml` (JL06 documents the keys).
+
+## As built (2026-10-29)
+
+Run `25bd7926-dae0-43c5-83ef-009ba22016b3` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/jira-listener/JL02.2` on `story/jira-listener/JL01` @ d166f0b, commit ab32019.
+Cost $0.66. Implementation summary: Add listener and gitlab config sections with validation.
+Conflicts with spec/jira-listener: none.

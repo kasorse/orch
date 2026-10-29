@@ -47,3 +47,10 @@ repository, and a GitLab credential that only git ever sees.
 
 Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md
 (JL06 documents §50.13's change).
+
+## As built (2026-10-29)
+
+Run `3b3001ed-2068-4e11-b487-665ab316098e` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/jira-listener/JL04` on `story/jira-listener/JL03` @ e0ea6a3, commit 461cbb8.
+Cost $3.24. Implementation summary: Add listener service/project resolution, clone and git credential helper.
+Conflicts with spec/jira-listener: none.

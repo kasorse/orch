@@ -45,3 +45,10 @@ exists. Read the commits of JL01–JL05 (`git log`) for what they left for this 
 ## Notes
 
 Do not edit anything under `specs/jira-listener/` (story run writes its README and As built).
+
+## As built (2026-10-29)
+
+Run `b75bd0db-ffc0-4e16-805a-5bb7a0587efa` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/jira-listener/JL06` on `story/jira-listener/JL05` @ 0653d07, commit f116e0c.
+Cost $0.98. Implementation summary: Document the Jira listener: MVP.md §51, CLAUDE.md, README, TODO.
+Conflicts with spec/jira-listener: none.

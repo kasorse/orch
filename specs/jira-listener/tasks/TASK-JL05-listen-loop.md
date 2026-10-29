@@ -47,3 +47,10 @@ The supervisor (SPEC.md §1, §3.2, §3.3, §4, §7, §8, §9, §10), built on J
 
 Do not edit anything under `specs/jira-listener/`, nor MVP.md, CLAUDE.md, TODO.md, README.md
 (JL06 writes MVP.md §51).
+
+## As built (2026-10-29)
+
+Run `1f93dbf1-f338-4289-8901-70053da7a5b8` in orche: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/jira-listener/JL05` on `story/jira-listener/JL04` @ 461cbb8, commit 0653d07.
+Cost $8.45. Implementation summary: Add jira listen supervisor: poll, claim, run, outcomes, state, restart.
+Conflicts with spec/jira-listener: none.
