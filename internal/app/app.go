@@ -131,6 +131,11 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, validate and story run"}
 	}
+	if cli.listenerTaskFile != "" {
+		if err := checkListenerTaskFlags(cli, rest); err != nil {
+			return err
+		}
+	}
 	if cli.storyTaskFile != "" {
 		if err := checkStoryTaskFlags(cli, rest); err != nil {
 			return err
@@ -145,7 +150,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		return runValidate(ctx, cli.configPath, cli.claudeAuth, cli.codexAuth, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
-		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
+		if cli.jiraRef == "" && cli.storyTaskFile == "" && cli.listenerTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
 		if err := checkNotAStory(rest[1:]); err != nil {
@@ -154,7 +159,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err := checkTerminal(cli.mode, stdin); err != nil {
 			return err
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.listenerTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "review":
 		if len(rest) != 1 {
 			return &apperr.ConfigError{Msg: reviewUsage}
@@ -354,6 +359,9 @@ type cliArgs struct {
 	// storyTaskFile is the hidden --story-task's value: the task input file of a story's child
 	// run (specs/story/SPEC.md §11.1).
 	storyTaskFile string
+	// listenerTaskFile is the hidden --listener-task's value: the task file the Jira listener wrote
+	// for its child run (specs/jira-listener/SPEC.md §7.2).
+	listenerTaskFile string
 	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
 	// §4); empty means the decision layer chooses.
 	stages []domain.Stage
@@ -392,7 +400,7 @@ type cliArgs struct {
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
 // --codex-auth/--codex-auth=X, --output/--output=X, --jira/--jira=X, --retry/--retry=X, --base/--base=X, --head/--head=X,
-// --task/--task=X, the hidden --story-task/--story-task=X, the repeatable
+// --task/--task=X, the hidden --story-task/--story-task=X and --listener-task/--listener-task=X, the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -468,6 +476,17 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 			if cli.storyTaskFile = v; cli.storyTaskFile == "" {
 				return cliArgs{}, fmt.Errorf("--story-task requires a file")
+			}
+		case arg == "--listener-task" || strings.HasPrefix(arg, "--listener-task="):
+			if cli.listenerTaskFile != "" {
+				return cliArgs{}, fmt.Errorf("--listener-task given twice")
+			}
+			v, err := value(&i, "--listener-task")
+			if err != nil {
+				return cliArgs{}, err
+			}
+			if cli.listenerTaskFile = v; cli.listenerTaskFile == "" {
+				return cliArgs{}, fmt.Errorf("--listener-task requires a file")
 			}
 		case arg == "--stage" || strings.HasPrefix(arg, "--stage="):
 			v, err := value(&i, "--stage")
@@ -1118,8 +1137,10 @@ func runsReport(stdout io.Writer, dir string) error {
 
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty. With storyTaskFile (the
-// hidden run --story-task) the task is the one that file describes (specs/story/SPEC.md §11).
-func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+// hidden run --story-task) the task is the one that file describes (specs/story/SPEC.md §11); with
+// listenerTaskFile (the hidden run --listener-task) it is the Jira ticket the listener rendered into
+// that file, and the run calls Jira not at all (specs/jira-listener/SPEC.md §7.2).
+func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, listenerTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -1136,6 +1157,18 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 		}
 		storyIn = &in
 		text = in.Text
+	}
+	var listenerIn *listenerTask
+	if listenerTaskFile != "" {
+		in, err := readListenerTask(listenerTaskFile)
+		if err != nil {
+			return err
+		}
+		listenerIn = &in
+		text = in.Description
+		// Before any provider is constructed: the variables the listener names are credentials
+		// that no process of this run may inherit.
+		execution.ScrubCredentials(in.ScrubEnv...)
 	}
 
 	osExec := execution.NewOSProcessExecutor()
@@ -1215,6 +1248,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 		task.Acceptance = storyIn.Acceptance
 		task.Source = storyTaskSource(*storyIn)
 	}
+	if listenerIn != nil {
+		task.Source = listenerTaskSource(*listenerIn)
+	}
 	if jiraKey != "" {
 		// The one Jira request. A failure creates no run: there is nothing to resume
 		// without a task (specs/jira/SPEC.md J2).
@@ -1249,6 +1285,10 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile strin
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	run.Options.Isolation = cfg.Execution.IsolationMode()
+	if listenerIn != nil {
+		// The listener owns Jira: whatever jira.write says, this run writes nothing to the ticket.
+		run.Options.JiraWrite = domain.JiraWriteOptions{}
+	}
 	recordResultRun(ctx, store, run)
 	// Held until the run returns, so a resume cannot take the run over while it is alive
 	// (specs/resume/SPEC.md §11).

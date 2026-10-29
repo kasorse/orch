@@ -116,6 +116,33 @@ func TestValidateRun_StoryTaskRefusals(t *testing.T) {
 	}
 }
 
+// A Jira task the listener handed over (specs/jira-listener/SPEC.md §7.2) is a Jira task with
+// listener: true; no other kind of source may say so.
+func TestValidateRun_ListenerTask(t *testing.T) {
+	listener := func() *domain.Run {
+		run := &domain.Run{ID: "r", Status: domain.RunFailed}
+		run.Task = domain.Task{Description: "text", Source: &domain.TaskSource{
+			Kind: domain.TaskSourceJira, Key: "PAY-12", URL: "https://jira.example.com/browse/PAY-12",
+			FetchedAt: time.Now(), Listener: true,
+		}}
+		return run
+	}
+	if err := validateRun(listener(), "r"); err != nil {
+		t.Fatalf("a listener task is refused: %v", err)
+	}
+
+	run := listener()
+	run.Task.Source.Kind = domain.TaskSourceStory
+	if err := validateRun(run, "r"); err == nil {
+		t.Error("a story source with listener: true was accepted")
+	}
+	run = storyRun()
+	run.Task.Source.Listener = true
+	if err := validateRun(run, "r"); err == nil || !strings.Contains(err.Error(), "listener is only set on a Jira task") {
+		t.Errorf("validateRun() = %v, want a refusal of listener on a story task", err)
+	}
+}
+
 func TestValidateRun_WorktreeBranchOfAnOrdinaryRun(t *testing.T) {
 	run := &domain.Run{
 		ID: "r", Status: domain.RunFailed, Options: domain.RunOptions{Isolation: domain.IsolationWorktree},

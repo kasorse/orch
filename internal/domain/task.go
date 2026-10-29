@@ -43,6 +43,10 @@ type TaskSource struct {
 	FetchedAt    time.Time `json:"fetched_at"`
 	// Notes reports whether operator notes were appended to the rendered ticket.
 	Notes bool `json:"notes"`
+	// Listener is set on a Jira task the Jira listener rendered and handed over in a task file
+	// (run --listener-task, specs/jira-listener/SPEC.md §7.2): the run itself never called Jira,
+	// and writes nothing back to it.
+	Listener bool `json:"listener,omitempty"`
 
 	// Story, Task, Attempt and Jira identify a story task: the story's slug, the task's ID,
 	// the attempt (1 for the first, n for the retry on <ID>.<n>) and the task's Jira key,

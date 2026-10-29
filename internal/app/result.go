@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 
@@ -69,6 +70,7 @@ type runResult struct {
 	Status           string    `json:"status"`
 	ExitCode         int       `json:"exit_code"`
 	FailureReason    string    `json:"failure_reason"`
+	FailureKind      string    `json:"failure_kind"`
 	Error            string    `json:"error"`
 	Workflow         []string  `json:"workflow"`
 	Commit           string    `json:"commit"`
@@ -95,7 +97,7 @@ type resultMR struct {
 // is the error line: status "error" and the message as main prints it.
 func buildResult(rec *resultRecorder, err error) runResult {
 	code := exitcode.FromError(err)
-	res := runResult{V: resultVersion, Status: "error", ExitCode: code, Workflow: []string{}}
+	res := runResult{V: resultVersion, Status: "error", ExitCode: code, FailureKind: failureKind(err), Workflow: []string{}}
 	if err != nil {
 		res.Error = err.Error()
 	}
@@ -145,6 +147,24 @@ func buildResult(rec *resultRecorder, err error) runResult {
 		}
 	}
 	return res
+}
+
+// failureKindAuth is the "failure_kind" of a failure that was a credential: a provider CLI that did
+// not use the run's credential or was refused it (apperr.FailureAuth), or a decision key that was
+// rejected (apperr.DecisionAuth). It is "" for everything else.
+const failureKindAuth = "auth"
+
+// failureKind is the "failure_kind" of the result line of a command that returned err.
+func failureKind(err error) string {
+	var providerErr *apperr.ProviderError
+	if errors.As(err, &providerErr) && providerErr.Kind == apperr.FailureAuth {
+		return failureKindAuth
+	}
+	var decisionErr *apperr.DecisionError
+	if errors.As(err, &decisionErr) && decisionErr.Kind == apperr.DecisionAuth {
+		return failureKindAuth
+	}
+	return ""
 }
 
 // writeResult writes the result line, once, as the last thing a --output json command does.

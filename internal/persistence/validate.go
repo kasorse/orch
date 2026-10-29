@@ -384,6 +384,8 @@ func validateStorySource(src domain.TaskSource) error {
 		return fmt.Errorf("base_branch %q is not a valid branch name", src.BaseBranch)
 	case src.Key != "" || src.RequestedKey != "" || src.URL != "" || !src.FetchedAt.IsZero() || src.Notes:
 		return fmt.Errorf("a story task has no Jira ticket fields (key, requested_key, url, fetched_at, notes)")
+	case src.Listener:
+		return fmt.Errorf("listener is only set on a Jira task")
 	}
 	return nil
 }

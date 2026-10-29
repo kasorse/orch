@@ -16,7 +16,7 @@ import (
 // merge request - goes to stderr.
 
 // outputJSONFields is the field set of the result line.
-var outputJSONFields = []string{"v", "run_id", "status", "exit_code", "failure_reason", "error", "workflow", "commit", "branch",
+var outputJSONFields = []string{"v", "run_id", "status", "exit_code", "failure_reason", "failure_kind", "error", "workflow", "commit", "branch",
 	"mr", "mr_skipped", "mr_error", "review_verdict", "tests_passed_final", "approval_required", "cost_usd", "cost_partial", "run_dir", "report"}
 
 // resultLine checks that stdout is exactly one line of JSON with the whole field set and the exit
