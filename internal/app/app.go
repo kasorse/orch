@@ -233,6 +233,14 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 			return err
 		}
 		return runMCPVerify(ctx, dir, stdin, stdout, stderr)
+	case "git-credential":
+		// Hidden, like mcp-verify: git starts it as the listener's credential helper
+		// (specs/jira-listener/SPEC.md §6.2), with the listener's --config.
+		action, err := gitCredentialArgs(rest[1:])
+		if err != nil {
+			return err
+		}
+		return runGitCredential(action, cli.configPath, os.Getenv, stdin, stdout)
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
