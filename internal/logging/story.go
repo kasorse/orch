@@ -349,14 +349,14 @@ func (r *ConsoleReporter) StoryEnd(rows []StoryEndRow) {
 	fmt.Fprintf(r.Out, "%s\n", next)
 }
 
-// StoryNotPushed prints the command that pushes the branches a story left in a service whose config
-// says delivery.push: false (specs/delivery-push §4).
+// StoryNotPushed prints the command that pushes the branches a story whose config says story.push:
+// false left in a service (specs/delivery-push §4).
 func (r *ConsoleReporter) StoryNotPushed(remote string, branches []string) {
 	words := make([]string, 0, len(branches))
 	for _, b := range branches {
 		words = append(words, shellWord(b))
 	}
-	line := "Not pushed (delivery.push: false): git push " + shellWord(remote) + " " + strings.Join(words, " ")
+	line := "Not pushed (story.push: false): git push " + shellWord(remote) + " " + strings.Join(words, " ")
 	if r.Pretty {
 		r.detail(line)
 		return
@@ -407,7 +407,7 @@ func shellWord(s string) string {
 	return s
 }
 
-// StoryLanded says that the base branch of a service that does not push now has the story's
+// StoryLanded says that the base branch of a service of a story that does not push now has the story's
 // result (specs/story-land §5).
 func (r *ConsoleReporter) StoryLanded(base, sha string, branches []string) {
 	r.storyLine(fmt.Sprintf("Landed on %s: %s (%s)", base, sha, strings.Join(branches, ", ")))

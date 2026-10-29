@@ -921,9 +921,9 @@ commit, the run says why, keeps the branch (and the worktree when there is no co
 the command to finish by hand and exits 6. A remote that is not GitLab fails at the push (push
 options). Before the worktree is created the run checks that the remote exists, a target is known
 and `security.secret_scan.mode` is not `off` (a push publishes the tree); the message names
-`--inplace` as the way out. `delivery: {push: false}` ends the run at the commit on its branch:
-no push, no merge request, no remote needed, exit 0, and the command to push it printed; a story
-of such a service stacks its tasks on the local branches and, once every task is done, lands the
+`--inplace` as the way out. A story whose config says `story: {push: false}` ends each task at the
+commit on its branch: no push, no merge request, no remote needed, exit 0, and the command to push
+it printed; the story stacks its tasks on the local branches and, once every task is done, lands the
 result on the branch it was started from (a fast-forward, or a merge Go makes; git refuses rather
 than overwrite your local changes, and the story then exits 6 until a later `story run` lands it),
 committing the story's README and As built there when the spec lives in that repository.

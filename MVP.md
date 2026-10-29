@@ -257,7 +257,7 @@ The exit code is part of the interface, for a CI job as much as for a person (§
 | 3 | a provider failed |
 | 4 | the workflow failed or a limit stopped it (a red test, `max_steps`, the budget, no progress, `task needs input`) |
 | 5 | cancelled by the operator |
-| 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict. A run with `delivery.push: false` that committed is 0 (§50.5) |
+| 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict. A story task of a story with `story.push: false` that committed is 0 (§50.5) |
 
 Support configuration file selection, for example:
 
@@ -4139,7 +4139,7 @@ rules, is §50.4.
 | Code change | `outcome.diff`: the run's net change, i.e. the working tree after the last implement against the restore point `pre_run_ref` — files (binary ones in parentheses), inserted and deleted lines. |
 | Approval | Only when `outcome.approval_required`: `Commit needs manual approval (policy.paths)`. |
 | Commit | The commit the operator approved at the end (§42), when there is one. |
-| Merge request | Only for a worktree run that reached the end chain (§50.5): the URL (`!12: <url>`), or `pushed, no merge request`, or the skip or the error (`mr.skipped`, `mr.error`; `skipped: push disabled (delivery.push: false)` for a run that does not push). |
+| Merge request | Only for a worktree run that reached the end chain (§50.5): the URL (`!12: <url>`), or `pushed, no merge request`, or the skip or the error (`mr.skipped`, `mr.error`; `skipped: push disabled (story.push: false)` for a story task that does not push). |
 
 ### Clarification
 
@@ -5045,8 +5045,8 @@ a timeout fails the run before any step (`worktree setup failed (exit <n>)`), ou
 ## 47.5 The end of the run
 
 A completed run with `implement` ends with the chain of §50.5: commit on the run's branch, the
-conflict check below, push, merge request, worktree removal (with `delivery.push: false`: no push
-and no merge request, §50.5). Every mode but `--mode auto` asks
+conflict check below, push, merge request, worktree removal (for a story task with `story.push: false`: no
+push and no merge request, §50.5). Every mode but `--mode auto` asks
 (`Commit to <branch>? [y]es / [N]o / [e]dit message`, §42.2, then the push and the merge request,
 §50.5); `--mode auto` commits without the question under the §42.6 rules (no commit when the
 question would show a warning, when there is no `summary_short`, or when the last implement
@@ -5123,6 +5123,7 @@ story:
   max_parallel: 1                 # 1..8; ready tasks of different services run at once; --parallel N overrides
   max_acceptance_chars: 300       # 50..2000; one acceptance item of a task file story run reads
   jira_issue_types: [Epic]        # run --jira on these refuses (§39.11); default none
+  push: false                     # default true; false: every task ends at its commit, the result lands on the base branch (§50.8)
 jira:
   create:                         # absent: story run creates nothing in Jira
     issue_type: Story
@@ -5739,8 +5740,8 @@ record, with the owner's decisions D1-D22 and the author's defaults A1-A24, is
 2. **No delivery without the commit.** The push and the merge request happen only after the run
    committed; they never relax the §42.6 rules.
 3. **Only `--mode auto` delivers without asking.** Every other mode asks before the commit, the
-   push and the merge request, and a no stops there. `delivery.push: false` ends every mode's
-   chain at the commit (§50.5).
+   push and the merge request, and a no stops there. `story.push: false` ends every mode's
+   chain of a story's tasks at the commit (§50.5).
 4. **Writes outside the machine happen once, after an intent, never retried blindly**: the push
    and every Jira write record an intent first (the §48.7 discipline).
 5. **The orchestrator holds no GitLab credentials.** The merge request is opened by the push
@@ -5854,7 +5855,8 @@ one, cost, active time and version.
 ## 50.5 The end of a worktree run
 
 A worktree run that completes with `implement` in its workflow ends with this chain. There is no
-flag; `--inplace` leaves it out, and `delivery.push: false` ends it after step 2 (below). Each step
+flag; `--inplace` leaves it out, and a story task of a story with `story.push: false` ends it after
+step 2 (below). Each step
 runs only after the one before it succeeded:
 
 1. **commit** on the run's branch, in the worktree (§42.2 message, §42.3 commit);
@@ -5882,13 +5884,15 @@ runs only after the one before it succeeded:
 * A workflow without `implement` runs in place and has no chain. A resume that completes the run
   runs the same chain (the mode is the resume's own `--mode`, the isolation `options.isolation`).
   A completed run is not resumable, so a failed push is finished by hand with the printed command.
-* **`delivery.push: false`** (`specs/delivery-push`), copied at run start into `options.push:
-  false` and read from there by a resume: after the commit and the conflict check nothing is asked
-  or pushed (no `ls-remote`, no Jira write-back), `mr.skipped: push disabled (delivery.push:
-  false)`, the worktree is removed, the branch stays, and the console prints `Push disabled
-  (delivery.push: false); the branch <branch> stays in this repository.` with `To publish it: git
-  push <remote> <branch>`. Exit code 0: the config declined the push, as a person's no does. The
-  commit question and the §42.6 rules are unchanged.
+* **`story.push: false`** (`specs/delivery-push`): the push is the story's to turn off, and only
+  the story's (a plain `run` always pushes; `delivery` has no `push` key). `story run` writes
+  `no_push: true` into each child's task input, and the child copies it at run start into
+  `options.push: false`, read from there by a resume: after the commit and the conflict check
+  nothing is asked or pushed (no `ls-remote`, no Jira write-back), `mr.skipped: push disabled
+  (story.push: false)`, the worktree is removed, the branch stays, and the console prints `Push
+  disabled (story.push: false); the branch <branch> stays in this repository.` with `To publish
+  it: git push <remote> <branch>`. Exit code 0: the config declined the push, as a person's no
+  does. The commit question and the §42.6 rules are unchanged.
 
 ## 50.6 The push, which opens the merge request
 
@@ -5940,10 +5944,9 @@ push.
 delivery:
   remote: origin          # default origin: pushed to
   target_branch: main     # optional: the target when HEAD is detached
-  push: false             # optional, default true: end the chain at the commit
 ```
 
-`push: false` (default `true`) ends the chain at the commit (§50.5).
+The push itself is turned off for a story only, by `story.push: false` (§48.1, §50.5, §50.8).
 
 Strict schema, every key optional, the section optional. No token, no URL. Checked once the
 workflow is known and approved (with `--stage`, before any call), before the worktree is created,
@@ -5951,8 +5954,9 @@ for a run that will be a worktree run: `git remote get-url <remote>` succeeds; a
 (the current branch, else `delivery.target_branch`); `security.secret_scan.mode` is not `off`
 (a push publishes the tree). A failure is a config error (exit 2) whose message names
 `--inplace`. Whether the remote is GitLab is not checked. `orchestrator validate` makes the first
-and third checks when the configured isolation is `worktree`. With `push: false` the remote and
-the target are not checked (nothing reaches them); the secret-scan check stays, since the branch is
+and third checks when the configured isolation is `worktree`. For a story task with `options.push:
+false` the remote and the target are not checked (nothing reaches them), nor is the remote by the
+`validate` that `story run` makes in each service (the hidden `--story-no-push`); the secret-scan check stays, since the branch is
 still meant to be published by a person.
 
 ## 50.8 `story run`
@@ -5966,12 +5970,12 @@ still meant to be published by a person.
   `story status` and the end table print it. A child that ends with exit 6 (no merge request) is
   `completed` without one: the story stops before the next task that depends on it and continues
   the independent ones. `story run --retry <ID>` works as before.
-* **A service with `delivery.push: false`** needs no remote; its children end at their commits
+* **A story with `story.push: false`** (the story home's config, for every service) needs no remote; its children end at their commits
   (exit 0, no `mr`); a task of it is stacked on its parent's local commit and never held for the
   parent's merge request (it opens none); its spec branch is merged into locally and never pushed (`spec_push`
   stays absent).
 * **The land** (`specs/story-land`). At the end of a completed story (and at every later `story
-  run` of it, derived from git) each such service gets the result on its base branch
+  run` of it, derived from git) each service gets the result on its base branch
   (`bases.<repo>.branch`): Go starts at the branch's current tip and merges the service's leaves
   (done tasks no task of the service starts from), in the story's order, as on the spec branch:
   already in, a fast-forward, or `merge-tree` + `commit-tree` (`Merge <branch> into <base>`, the
@@ -5983,7 +5987,7 @@ still meant to be published by a person.
   the story home is that checkout and on the base branch, the README and the task files `story
   run` changed are committed there (`git commit -- <paths>`, `Record the <slug> story: README and
   As built`). The console says `Landed on <base>: <sha> (<branches>)`, `Recorded the story on
-  <base>: <sha>`, then `Not pushed (delivery.push: false): git push <remote> <base>`. A land that
+  <base>: <sha>`, then `Not pushed (story.push: false): git push <remote> <base>`. A land that
   was refused prints `Not landed on <base>: <why>` with the hints and the same line with the
   tasks' branches (the spec branch first when a task was based on a merge there), and the story
   ends with exit 6, `status: completed`; the next `story run` tries again. A story started on a
@@ -6027,8 +6031,8 @@ A comment and a transition after a merge request: §39.12.
  "cost_usd":0.84,"cost_partial":false,"run_dir":".orchestrator/runs/<id>","report":"…/report.md"}
 ```
 
-  A run with `delivery.push: false` that committed has `"mr":null`, `"mr_skipped":"push disabled
-  (delivery.push: false)"`, its `branch` and `commit`, and exit code 0.
+  A story task with `options.push: false` that committed has `"mr":null`, `"mr_skipped":"push
+  disabled (story.push: false)"`, its `branch` and `commit`, and exit code 0.
   An error before a run exists is `{"v":1,"run_id":"","status":"error","exit_code":2,"error":"…"}`
   (the message as printed, already redacted). Fields that do not apply are empty or null, never
   absent; `v` changes only on an incompatible change. `failure_kind` is `auth` for a
@@ -6086,8 +6090,9 @@ All optional on load, strictly validated when present.
 | `branch_naming` | `{source, proposed?, rejected?, usage?, call?}`; `proposed` at most 255 printable bytes, `rejected` one line at most 500 bytes; absent for an inplace or review run |
 | `worktree.branch` | any name that passes §50.3's rules (a story task: those, or its fallback's story pattern); empty only on a run with `review_target` |
 | story task input `title` | one line, 1-200 runes, printable; required |
+| story task input `no_push` | a boolean, optional; `true` when the story says `story.push: false` |
 | `options.jira_write` | `{comment: bool, transition: string}`, copied from `jira.write` at run start |
-| `options.push` | `false` only, copied from `delivery.push: false` at run start; absent pushes |
+| `options.push` | `false` only, copied from the story task input's `no_push: true` (`story.push: false`) at run start; absent pushes |
 | `mr` | `{state: intent\|pushed\|created, remote, source, target, iid?, url?, skipped?, error?}`; `iid` and `url` only with `created`; `url` https on the remote's host, ending `/-/merge_requests/<iid>`; `skipped` and `error` one line, at most 500 bytes, redacted; `skipped` alone (no `state`) when the chain stopped before the push |
 | `jira_write` | `{comment: {state, id?}, transition: {name, state}}` (§39.12) |
 | `review_target` | `{base, head, merge_base}` 40 hex; `base_ref_name`, `head_ref_name` printable, at most 255 |

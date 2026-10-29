@@ -59,7 +59,7 @@ func skipDelivery(s *session) error {
 // Jira issue gets a comment and a transition (writeJira, specs/delivery/SPEC.md §10), and only
 // then. Nothing here changes the run's status; what did not happen is recorded in run.mr and
 // returned as a NeedsPersonError (exit code 6), unless a person said no. A run that recorded
-// delivery.push: false stops here before anything is asked or pushed (specs/delivery-push).
+// options.push: false (a story with story.push: false) stops here before anything is asked or pushed (specs/delivery-push).
 func deliver(ctx context.Context, s *session, sha string) error {
 	run, w := s.run, s.worktree
 	remote := s.cfg.Delivery.RemoteName()

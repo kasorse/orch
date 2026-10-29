@@ -268,8 +268,6 @@ execution:
 # delivery:
 #   remote: origin                   # default origin
 #   target_branch: main              # the target when HEAD is detached (a CI checkout)
-#   push: false                      # end at the commit: no push, no merge request (a remote that
-#                                    # is not GitLab, a local-only story); default true
 
 # What steps may do is fixed in code (MVP.md §38): no step has a shell, only implement
 # writes, and only inside the repository. These keys only tighten the guards around
@@ -395,3 +393,5 @@ security:
 #   max_parallel: 1                # 1..8; ready tasks story run runs at once, each its own run; tasks of one service run one at a time
 #   max_acceptance_chars: 300      # 50..2000; one acceptance item of a task file story run reads
 #   jira_issue_types: [Epic]       # run --jira on these refuses; default none
+#   push: false                    # every task ends at its commit, no push, no merge request (a remote
+#                                  # that is not GitLab); the result lands on the base branch; default true

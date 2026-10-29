@@ -403,7 +403,7 @@ func TestDeliver_NoMergeRequestInTheAnswer(t *testing.T) {
 	}
 }
 
-// delivery.push: false recorded in the run (specs/delivery-push §2): after the commit nothing is
+// push: false recorded in the run (specs/delivery-push §2): after the commit nothing is
 // asked or pushed, mr.skipped says why, the worktree is removed, and the exit is 0.
 func TestDeliver_PushDisabled(t *testing.T) {
 	for _, mode := range []domain.RunMode{domain.ModeAuto, domain.ModeAcceptEdits} {
@@ -424,7 +424,7 @@ func TestDeliver_PushDisabled(t *testing.T) {
 					t.Errorf("asked %q:\n%s", unwanted, out)
 				}
 			}
-			want := "Push disabled (delivery.push: false); the branch " + s.worktree.Branch + " stays in this repository.\nTo publish it: git push origin " + s.worktree.Branch + "\n"
+			want := "Push disabled (story.push: false); the branch " + s.worktree.Branch + " stays in this repository.\nTo publish it: git push origin " + s.worktree.Branch + "\n"
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("output lacks %q:\n%s", want, out)
 			}

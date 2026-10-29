@@ -17,8 +17,9 @@ every task is done, the result is merged into the branch automatically.
 
 ### 1. When
 
-At the end of a completed story (`finish`), for every service whose config says
-`delivery.push: false`, that has at least one done task with a commit, and whose base was a branch
+At the end of a completed story (`finish`), for every service of a story whose config says
+`story.push: false` (first each service's `delivery.push: false`, moved the same day:
+specs/delivery-push D2) that has at least one done task with a commit, and whose base was a branch
 (`story.json: bases.<repo>.branch`; a story started on a detached HEAD lands nothing and says so).
 A later `story run` of the completed story lands again: the land is derived from git, so a land
 that is already done changes nothing, and one that was refused is tried again.
@@ -68,7 +69,7 @@ repository's hooks run, as for `CommitAll`; nothing else the operator staged goe
 
 - Landed: `Landed on <base>: <short sha> (<branches>)`, then, when the story files were committed,
   `Recorded the story on <base>: <short sha>`, then
-  `Not pushed (delivery.push: false): git push <remote> <base>`.
+  `Not pushed (story.push: false): git push <remote> <base>`.
 - Nothing to land (`T == B`): `<base> already has the story's result`.
 - Not landed: `Not landed on <base>: <why>`, the hints (the manual merge, `story run <dir>` to try
   again), the previous `Not pushed …` line with the tasks' branches, and the story ends with exit
@@ -112,7 +113,7 @@ pushing the base branch; landing a story that is not completed.
 
 | | default |
 |---|---|
-| A1 | Only for a service with `delivery.push: false`; a service that pushes lands through its merge requests |
+| A1 | Only for a story that does not push; a story that pushes lands through its merge requests |
 | A2 | A fast-forward when the base branch did not move and the tasks are one chain; a merge commit made by Go otherwise |
 | A3 | The checked-out base branch moves by `git merge --ff-only` in the checkout; git's refusal is "not landed" |
 | A4 | The README and the As built sections are committed on the base branch when the story home is the service |

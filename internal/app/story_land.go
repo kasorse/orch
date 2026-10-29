@@ -16,30 +16,32 @@ import (
 	"orchestrator/internal/story"
 )
 
-// The land (specs/story-land): at the end of a completed story, a service whose config says
-// delivery.push: false gets the tasks' result on the branch the story was started from, and the
+// The land (specs/story-land): at the end of a completed story whose config says story.push:
+// false, every service gets the tasks' result on the branch the story was started from, and the
 // story's README and As built are committed there. Derived from git, so a later story run of the
 // completed story lands what an earlier one could not, and changes nothing otherwise.
 
-// landAll lands every service that does not push, then prints what is left to push: the base
-// branch once landed, else the tasks' branches. A land that was refused makes the story need a
-// person (exit 6); the record stays completed.
+// landAll lands every service of a story that does not push, then prints what is left to push:
+// the base branch once landed, else the tasks' branches. A land that was refused makes the story
+// need a person (exit 6); the record stays completed.
 func (r *storyRunner) landAll() error {
+	if !r.noPush {
+		return nil
+	}
+	services := map[string]bool{}
 	for _, id := range r.order {
-		if name := r.byID[id].Repo; !r.checked(name) {
-			if err := r.readDelivery(name); err != nil {
-				return err
-			}
-		}
+		services[r.byID[id].Repo] = true
 	}
 	var refused []string
-	for _, name := range slices.Sorted(maps.Keys(r.noPush)) {
-		if !r.noPush[name] {
-			continue
-		}
+	for _, name := range slices.Sorted(maps.Keys(services)) {
 		branches := r.unpushedBranches(name)
 		if len(branches) == 0 {
 			continue
+		}
+		if _, checked := r.remotes[name]; !checked {
+			if err := r.readDelivery(name); err != nil {
+				return err
+			}
 		}
 		landed, refusal, err := r.land(name)
 		if err != nil {
@@ -59,13 +61,8 @@ func (r *storyRunner) landAll() error {
 	return nil
 }
 
-func (r *storyRunner) checked(name string) bool {
-	_, ok := r.noPush[name]
-	return ok
-}
-
-// readDelivery reads the delivery settings of a service the checks skipped (every task of it was
-// done before this story run, checkServices) and takes the fingerprint its land compares.
+// readDelivery reads the remote of a service the checks skipped (every task of it was done before
+// this story run, checkServices) and takes the fingerprint its land compares.
 func (r *storyRunner) readDelivery(name string) error {
 	path := r.rec.Services[name]
 	svc, err := config.Load(filepath.Join(path, defaultConfigPath))
@@ -80,14 +77,17 @@ func (r *storyRunner) readDelivery(name string) error {
 	if err != nil {
 		return err
 	}
-	if r.noPush == nil {
-		r.noPush, r.remotes, r.fingerprints = map[string]bool{}, map[string]string{}, map[string]string{}
+	if r.remotes == nil {
+		r.remotes = map[string]string{}
 	}
-	r.noPush[name], r.remotes[name], r.fingerprints[name] = !svc.Delivery.PushEnabled(), svc.Delivery.RemoteName(), fingerprint
+	if r.fingerprints == nil {
+		r.fingerprints = map[string]string{}
+	}
+	r.remotes[name], r.fingerprints[name] = svc.Delivery.RemoteName(), fingerprint
 	return nil
 }
 
-// unpushedBranches are the branches a story left in a service that does not push (specs/
+// unpushedBranches are the branches a story that does not push left in a service (specs/
 // delivery-push §4): the spec branch first when a task of the service was based on a merge there,
 // then the tasks' branches in the story's order.
 func (r *storyRunner) unpushedBranches(name string) []string {

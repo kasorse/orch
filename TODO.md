@@ -936,16 +936,18 @@ shadow-вопрос `scope.story` в классификации, ничего н
 задачи Go сливает на ветке `story/<slug>/spec` (`merge-tree` + `commit-tree`), конфликт — статус
 `conflict` и ручное слияние. Push spec-ветки и merge request — W2 (`specs/delivery`, MVP.md §50.8).
 
-### [x] DP. `delivery.push: false`: run и story заканчиваются коммитом — P1 · S
-**Сделано (2026-10-29, DP01–DP03; MVP.md §50.5, §50.7, §50.8):** ключ копируется в
-`options.push`, после коммита нет push, MR и вопросов, exit 0, remote не нужен; `story run` строит
+### [x] DP. `story.push: false`: задачи story заканчиваются коммитом — P1 · S
+**Сделано (2026-10-29, DP01–DP03; MVP.md §50.5, §50.7, §50.8):** ключ сначала был
+`delivery.push` и действовал на любой run; в тот же день перенесён в `story.push` (конфиг дома story,
+для всех её сервисов) — выключать push имеет смысл только у story. Ребёнок получает его как `no_push`
+в task input и копирует в `options.push`, после коммита нет push, MR и вопросов, exit 0, remote не нужен; `story run` строит
 задачи на локальных ветках, spec-ветку не пушит и в конце печатает `git push` для оставленных веток.
 Спека: [`specs/delivery-push/`](specs/delivery-push/README.md). Повод: `origin` на GitHub отклоняет
 push с GitLab-опциями, и story `jira-listener` встала на JL01.
 
 ### [x] SL. Story без push сама вливает результат в базовую ветку — P1 · S
-**Сделано (2026-10-29, SL01; MVP.md §50.8):** в конце завершённой story сервис с
-`delivery.push: false` получает результат задач в ветке, от которой story стартовала:
+**Сделано (2026-10-29, SL01; MVP.md §50.8):** в конце завершённой story с
+`story.push: false` каждый сервис получает результат задач в ветке, от которой story стартовала:
 fast-forward или merge-коммит, сделанный Go (`merge-tree`/`commit-tree`); выписанную ветку двигает
 только `git merge --ff-only`; README и As built коммитятся туда же, если спека в этом репозитории;
 отказ git — exit 6, следующий `story run` пробует снова. Спека:

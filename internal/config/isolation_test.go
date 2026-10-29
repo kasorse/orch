@@ -90,19 +90,6 @@ func TestLoad_DeliveryDefaultsAndIsStrict(t *testing.T) {
 		t.Errorf("Delivery = %+v, want upstream and main", cfg.Delivery)
 	}
 
-	if !cfg.Delivery.PushEnabled() {
-		t.Error("PushEnabled = false without delivery.push")
-	}
-	for yaml, want := range map[string]bool{"delivery: {push: false}\n": false, "delivery: {push: true}\n": true} {
-		cfg, err = Load(writeTempConfig(t, validV2(yaml)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Delivery.PushEnabled() != want {
-			t.Errorf("%q: PushEnabled = %v, want %v", yaml, !want, want)
-		}
-	}
-
 	_, err = Load(writeTempConfig(t, validV2("delivery: {remtoe: origin}\n")))
 	if err == nil || !strings.Contains(err.Error(), "remtoe") {
 		t.Errorf("unknown key under delivery: got %v, want an unknown-key error", err)

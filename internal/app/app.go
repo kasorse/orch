@@ -119,6 +119,9 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	if len(cli.stages) > 0 && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--stage is only valid with run"}
 	}
+	if cli.storyNoPush && rest[0] != "validate" {
+		return &apperr.ConfigError{Msg: "--story-no-push is only valid with validate"}
+	}
 	if cli.allowRedTests && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
 	}
@@ -147,7 +150,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		fmt.Fprintf(stdout, "orchestrator version %s\n", Version)
 		return nil
 	case "validate":
-		return runValidate(ctx, cli.configPath, cli.claudeAuth, cli.codexAuth, stdout, stderr)
+		return runValidate(ctx, cli.configPath, cli.claudeAuth, cli.codexAuth, !cli.storyNoPush, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
 		if cli.jiraRef == "" && cli.storyTaskFile == "" && cli.listenerTaskFile == "" && len(rest) < 2 {
@@ -376,6 +379,9 @@ type cliArgs struct {
 	// listenerTaskFile is the hidden --listener-task's value: the task file the Jira listener wrote
 	// for its child run (specs/jira-listener/SPEC.md §7.2).
 	listenerTaskFile string
+	// storyNoPush is the hidden validate --story-no-push: story run checks a service of a story
+	// with story.push: false, which needs no remote (specs/delivery-push §3).
+	storyNoPush bool
 	// stages are the --stage values, parsed, in the order given (specs/stage-select/SPEC.md
 	// §4); empty means the decision layer chooses.
 	stages []domain.Stage
@@ -597,6 +603,8 @@ func parseArgs(args []string) (cliArgs, error) {
 			}
 		case arg == "--allow-red-tests":
 			cli.allowRedTests = true
+		case arg == "--story-no-push":
+			cli.storyNoPush = true
 		case arg == "--inplace" || arg == "--worktree":
 			mode := strings.TrimPrefix(arg, "--")
 			if cli.isolation != "" && cli.isolation != mode {
@@ -912,7 +920,7 @@ func noJiraDependencies(config.Config) config.DependencyOptions { return config.
 
 // runValidate checks the Jira variables whenever the section is present, so validate
 // answers "would run --jira work here?", and asks Jev whether it serves decision.model.
-func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag string, stdout, stderr io.Writer) error {
+func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag string, push bool, stdout, stderr io.Writer) error {
 	executor := execution.NewOSProcessExecutor()
 	reporter := logging.NewTerminalReporter(stdout)
 	registry := newRegistry(executor)
@@ -937,7 +945,7 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
 		}
 	}
-	if err := checkValidateDelivery(ctx, cfg, executor); err != nil {
+	if err := checkValidateDelivery(ctx, cfg, push, executor); err != nil {
 		return err
 	}
 	checked, err := checkJevModel(ctx, cfg, stderr)
@@ -1299,6 +1307,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, list
 	run.AllowRedTests = allowRedTests
 	run.Options = runOptions(cfg)
 	run.Options.Isolation = cfg.Execution.IsolationMode()
+	if storyIn != nil && storyIn.NoPush {
+		run.Options.Push = new(bool)
+	}
 	if listenerIn != nil {
 		// The listener owns Jira: whatever jira.write says, this run writes nothing to the ticket.
 		run.Options.JiraWrite = domain.JiraWriteOptions{}
@@ -1848,11 +1859,7 @@ func preRunTest(ctx context.Context, s *session) error {
 // runOptions are the config rules a new run follows from here on; a resume reads them back from
 // run.json and never from the config (specs/quality/SPEC.md §7.3).
 func runOptions(cfg config.Config) domain.RunOptions {
-	opts := domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules(), JiraWrite: jiraWriteOptions(cfg)}
-	if !cfg.Delivery.PushEnabled() {
-		opts.Push = new(bool)
-	}
-	return opts
+	return domain.RunOptions{ReviewFixMedium: cfg.Review.FixMedium, PathRules: cfg.PathRules(), JiraWrite: jiraWriteOptions(cfg)}
 }
 
 func limitsView(cfg config.Config) domain.LimitsView {

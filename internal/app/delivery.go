@@ -19,15 +19,16 @@ const inplaceHint = "run in place: run with --inplace, or set execution.isolatio
 // (specs/delivery/SPEC.md §8), before its worktree is created and before any step: the remote is
 // there, a target is known, and the secret scan is on. Each failure is a ConfigError naming
 // --inplace. enterWorktree runs it once the workflow is approved; a --stage run, whose workflow
-// the flags name, runs it before any call too (checkStagesDeliverable).
-func checkDeliverable(ctx context.Context, repo *repository.Repository, cfg config.Config, source *domain.TaskSource) error {
+// the flags name, runs it before any call too (checkStagesDeliverable). push is the run's
+// options.push.
+func checkDeliverable(ctx context.Context, repo *repository.Repository, cfg config.Config, source *domain.TaskSource, push bool) error {
 	var src *domain.TaskSource
 	if source != nil && source.Kind == domain.TaskSourceStory {
 		src = source
 	}
 	// Without a push there is no remote to reach and no merge request to target
 	// (specs/delivery-push §3); the branch is still meant to be published, so the scan stays.
-	if cfg.Delivery.PushEnabled() {
+	if push {
 		if err := checkDeliveryRemote(ctx, repo, cfg); err != nil {
 			return err
 		}
@@ -51,7 +52,8 @@ func checkStagesDeliverable(ctx context.Context, repo *repository.Repository, cf
 	if err != nil || !cfg.WorktreeRun(wf) {
 		return nil
 	}
-	return checkDeliverable(ctx, repo, cfg, source)
+	// A --stage run is never a story task, which alone may not push.
+	return checkDeliverable(ctx, repo, cfg, source, true)
 }
 
 // checkDeliveryRemote is check 1: git remote get-url <delivery.remote> succeeds.

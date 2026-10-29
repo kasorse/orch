@@ -46,7 +46,7 @@ func enterWorktree(ctx context.Context, s *session) error {
 		}
 		return nil
 	}
-	if err := checkDeliverable(ctx, s.repo, *s.cfg, run.Task.Source); err != nil {
+	if err := checkDeliverable(ctx, s.repo, *s.cfg, run.Task.Source, run.Options.Pushes()); err != nil {
 		return err
 	}
 	wt, err := openWorktree(ctx, s)

@@ -1,4 +1,4 @@
-# Delivery without a push: `delivery.push: false`
+# Delivery without a push: `story.push: false` (first `delivery.push`)
 
 ## Problem
 
@@ -11,7 +11,9 @@ options is rejected, the run exits 6, and `story run` blocks every task that dep
 review passing and still stopped the story.
 
 The owner (2026-10-29): add `delivery.push: false`, so that a run, and a story, end at the commit
-on the run's branch and stay local.
+on the run's branch and stay local. Later the same day (D2) the key moved to `story.push`: only a
+story turns the push off. The text below is the first design; the As built of the tasks and
+MVP.md §50.5, §50.7, §50.8 say where it is now.
 
 ## Approach
 
@@ -123,6 +125,8 @@ A `--push`/`--no-push` flag; GitHub pull requests; pushing without opening a mer
 | | decision |
 |---|---|
 | D1 | A config key `delivery.push: false` turns the push (and so the merge request) off |
+
+| D2 | (later the same day) The key is the story's: `story.push` in the story home's config, for every service of the story; `delivery` has no `push` key and a plain `run` always pushes |
 
 ### Author's defaults (accepted with "сделай сразу", 2026-10-29)
 

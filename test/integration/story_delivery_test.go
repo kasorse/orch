@@ -286,7 +286,7 @@ func TestStoryRun_ASpecBranchThatMovedOnTheRemoteStopsTheStory(t *testing.T) {
 	}
 }
 
-// A service whose config says delivery.push: false (specs/delivery-push §4) needs no remote: its
+// A story whose config says story.push: false (specs/delivery-push §4) needs no remote: its
 // tasks end at their commits, a dependent is stacked on its parent's local commit, nothing is
 // pushed (the spec branch neither), and the end names the command that pushes what is left.
 func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
@@ -295,7 +295,7 @@ func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
 			{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"},
 			{ID: "RF02", Repo: "billing", Title: "Round the refunded amount", DependsOn: []string{"RF01"}},
 		}
-		o.serviceYAML = "\ndelivery:\n  push: false\n"
+		o.noPush = true
 	})
 	gitRun(t, f.repos["billing"], "remote", "remove", "origin")
 
@@ -313,6 +313,10 @@ func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
 	if first.MR != nil || second.MR != nil || rec.Bases["billing"].SpecPush != nil {
 		t.Errorf("mr = %+v / %+v, spec_push = %+v; want none", first.MR, second.MR, rec.Bases["billing"].SpecPush)
 	}
+	// The child got the story's story.push: false through its task input (specs/delivery-push §4).
+	if run := f.runRecord(t, "billing", "RF02", 1); run.Options.Pushes() || run.MR == nil || run.MR.Skipped != domain.MRSkippedPushDisabled {
+		t.Errorf("RF02's run: options = %+v, mr = %+v; want push false and the MR skipped", run.Options, run.MR)
+	}
 	if refs, _ := gitOutput(f.remotes["billing"], "for-each-ref"); refs != "" {
 		t.Errorf("billing's remote received refs:\n%s", refs)
 	}
@@ -328,7 +332,7 @@ func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
 	}
 	base := rec.Bases["billing"].Branch
 	assertContains(t, "stdout", stdout, "Landed on "+base+": "+second.Commit[:12]+" ("+second.Branch+")\n")
-	assertContains(t, "stdout", stdout, "Not pushed (delivery.push: false): git push origin "+base+"\n")
+	assertContains(t, "stdout", stdout, "Not pushed (story.push: false): git push origin "+base+"\n")
 }
 
 // A land git refuses leaves the base branch as it was and the story needs a person; the next
@@ -337,7 +341,7 @@ func TestStoryRun_AServiceThatDoesNotPushStacksOnLocalBranches(t *testing.T) {
 func TestStoryRun_ALandThatWasRefusedIsTriedAgain(t *testing.T) {
 	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
 		o.tasks = []story.Task{{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"}}
-		o.serviceYAML = "\ndelivery:\n  push: false\n"
+		o.noPush = true
 	})
 	billing := f.repos["billing"]
 	before, _ := gitOutput(billing, "rev-parse", "HEAD")
@@ -359,7 +363,7 @@ func TestStoryRun_ALandThatWasRefusedIsTriedAgain(t *testing.T) {
 		t.Errorf("billing's HEAD moved to %s", head)
 	}
 	assertContains(t, "stdout", stdout, "Not landed on "+base+": git merge --ff-only refused")
-	assertContains(t, "stdout", stdout, "Not pushed (delivery.push: false): git push origin "+done.Branch+"\n")
+	assertContains(t, "stdout", stdout, "Not pushed (story.push: false): git push origin "+done.Branch+"\n")
 
 	// The operator moves to another branch, and the base branch is checked out in a worktree.
 	gitRun(t, billing, "switch", "-q", "-c", "mine")
@@ -391,7 +395,7 @@ func TestStoryRun_ALandThatWasRefusedIsTriedAgain(t *testing.T) {
 func TestStoryRun_TheLandCommitsTheStoryFilesInTheService(t *testing.T) {
 	f := newStoryRunFixture(t, func(o *storyRunFixtureOpts) {
 		o.tasks = []story.Task{{ID: "RF01", Repo: "billing", Title: "Store the refunded amount"}}
-		o.serviceYAML = "\ndelivery:\n  push: false\n"
+		o.noPush = true
 		o.homeService = "billing"
 	})
 	stdout, stderr, err := f.run(t)
@@ -430,8 +434,7 @@ func TestStoryRun_TurningThePushOffReleasesATaskHeldForAMergeRequest(t *testing.
 		t.Fatalf("the first story run: %v, status %s; want blocked on RF01's merge request", err, f.record(t).Status)
 	}
 
-	cfgPath := f.repos["billing"] + "/orchestrator.yaml"
-	if err := os.WriteFile(cfgPath, []byte(readFile(t, cfgPath)+"\ndelivery:\n  push: false\n"), 0o644); err != nil {
+	if err := os.WriteFile(f.cfg, []byte(strings.Replace(readFile(t, f.cfg), "  max_tasks: 12\n", "  max_tasks: 12\n  push: false\n", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	stdout, stderr, err := f.run(t)

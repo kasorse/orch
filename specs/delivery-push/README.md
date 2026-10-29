@@ -11,3 +11,9 @@ remote of this repository is GitHub, so a story would have stopped at DP01's pus
 
 Run it with `orchestrator story run <this directory>` and follow it with `orchestrator story status <this directory>`.
 This file is generated and rewritten whenever a status changes: edits are lost, the task files are the source.
+
+**Moved (2026-10-29, owner's D2):** the key is `story.push` in the story home's config, for every
+service of the story; the parent writes `no_push: true` into each child's task input, the child
+copies it into `options.push`, and `story run`'s `validate` of a service gets the hidden
+`--story-no-push`. `delivery.push` is no longer a key (a strict-schema error), and a plain `run`
+always pushes. Built by hand on `spec/jira-listener`.

@@ -560,17 +560,18 @@ type RunOptions struct {
 	// JiraWrite is a copy of jira.write (specs/delivery/SPEC.md §10): what the run writes to its
 	// task's Jira issue after a merge request. A resume reads it instead of the config.
 	JiraWrite JiraWriteOptions `json:"jira_write,omitzero"`
-	// Push is a copy of delivery.push, recorded only when false (specs/delivery-push): the run
-	// ends at its commit, with no push and no merge request. Read it through Pushes.
+	// Push is false for a story task whose story says story.push: false (specs/delivery-push),
+	// recorded only then: the run ends at its commit, with no push and no merge request. Read it
+	// through Pushes.
 	Push *bool `json:"push,omitempty"`
 }
 
-// Pushes reports whether the run pushes its branch: true unless delivery.push: false was
-// recorded at run start.
+// Pushes reports whether the run pushes its branch: true unless push: false was recorded at run
+// start.
 func (o RunOptions) Pushes() bool { return o.Push == nil || *o.Push }
 
 // MRSkippedPushDisabled is run.mr.skipped for a run that does not push (specs/delivery-push).
-const MRSkippedPushDisabled = "push disabled (delivery.push: false)"
+const MRSkippedPushDisabled = "push disabled (story.push: false)"
 
 // IsolationMode is the run's isolation, inplace when none was recorded.
 func (o RunOptions) IsolationMode() string {

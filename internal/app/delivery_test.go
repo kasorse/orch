@@ -92,32 +92,21 @@ func TestEnterWorktree_WithoutImplementNeedsNoRemote(t *testing.T) {
 	}
 }
 
-// Without a push (specs/delivery-push §3) a worktree run needs no remote and no target branch;
+// Without a push (a story task of a story with story.push: false, specs/delivery-push §3) a worktree run needs no remote and no target branch;
 // the secret scan stays required.
 func TestEnterWorktree_PushDisabledNeedsNoRemote(t *testing.T) {
 	s, dir, _ := worktreeSession(t, true, implementTest)
 	gitIn(t, dir, "remote", "remove", "origin")
 	gitIn(t, dir, "checkout", "-q", "--detach")
-	s.cfg.Delivery.Push = new(bool)
+	s.run.Options.Push = new(bool)
 	if err := enterWorktree(context.Background(), s); err != nil {
 		t.Fatalf("enterWorktree = %v, want a worktree", err)
 	}
 
 	s, _, _ = worktreeSession(t, true, implementTest)
-	s.cfg.Delivery.Push = new(bool)
+	s.run.Options.Push = new(bool)
 	s.cfg.Security.SecretScan.Mode = config.SecretScanOff
 	if err := enterWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "security.secret_scan.mode is off") {
 		t.Errorf("secret scan off without a push: got %v, want the refusal", err)
-	}
-}
-
-func TestRunOptions_Push(t *testing.T) {
-	var cfg config.Config
-	if got := runOptions(cfg).Push; got != nil {
-		t.Errorf("Push = %v without delivery.push, want nil: nothing recorded", *got)
-	}
-	cfg.Delivery.Push = new(bool)
-	if opts := runOptions(cfg); opts.Push == nil || *opts.Push || opts.Pushes() {
-		t.Errorf("Push = %v, want false recorded", opts.Push)
 	}
 }

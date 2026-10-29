@@ -90,6 +90,24 @@ func TestStoryConfig_MaxAcceptanceChars(t *testing.T) {
 	}
 }
 
+// story.push: false ends every task of a story at its commit (specs/delivery-push); absent, or
+// without a story section, the tasks push.
+func TestStoryConfig_Push(t *testing.T) {
+	var none *StoryConfig
+	if !none.PushEnabled() {
+		t.Error("PushEnabled = false without a story section")
+	}
+	for yaml, want := range map[string]bool{"": true, "  push: false\n": false, "  push: true\n": true} {
+		cfg, err := loadStoryConfig(t, "story:\n  roots: [..]\n"+yaml)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Story.PushEnabled() != want {
+			t.Errorf("%q: PushEnabled = %v, want %v", yaml, !want, want)
+		}
+	}
+}
+
 func TestStoryConfig_AbsentIsNil(t *testing.T) {
 	cfg, err := loadStoryConfig(t, "")
 	if err != nil {
