@@ -133,11 +133,11 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	if cli.isolation != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--" + cli.isolation + " is only valid with run"}
 	}
-	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
-		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, validate and story run"}
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, review, validate, story run and jira listen"}
 	}
-	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && !storyRunCmd {
-		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, validate and story run"}
+	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, review, validate, story run and jira listen"}
 	}
 	if cli.listenerTaskFile != "" {
 		if err := checkListenerTaskFlags(cli, rest); err != nil {
@@ -246,7 +246,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err != nil {
 			return err
 		}
-		return listen(ctx, listenOptions{configPath: cli.configPath, once: once, verbose: cli.verbose}, stderr)
+		return listen(ctx, listenOptions{configPath: cli.configPath, once: once, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth, verbose: cli.verbose}, stderr)
 	case "git-credential":
 		// Hidden, like mcp-verify: git starts it as the listener's credential helper
 		// (specs/jira-listener/SPEC.md §6.2), with the listener's --config.

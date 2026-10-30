@@ -180,7 +180,7 @@ func TestRun_JiraOnlyWithRun(t *testing.T) {
 	}
 }
 
-// --claude-auth belongs to run, resume, validate and story run: a usage error elsewhere (corner case 13).
+// --claude-auth belongs to run, resume, review, validate, story run and jira listen: a usage error elsewhere (corner case 13).
 func TestRun_ClaudeAuthOnlyWithRunResumeValidate(t *testing.T) {
 	for _, command := range [][]string{{"version"}, {"decisions", "report"}, {"runs", "report"}, {"story", "plan", "x"}, {"story", "status", "d"}} {
 		t.Run(strings.Join(command, " "), func(t *testing.T) {
@@ -188,7 +188,7 @@ func TestRun_ClaudeAuthOnlyWithRunResumeValidate(t *testing.T) {
 			args := append([]string{"--config", "/nonexistent.yaml", "--claude-auth", "api"}, command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume, validate and story run" {
+			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume, review, validate, story run and jira listen" {
 				t.Fatalf("got %v, want the --claude-auth usage error", err)
 			}
 		})

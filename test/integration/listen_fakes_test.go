@@ -506,6 +506,11 @@ func (e *listenEnv) runs() []listenerRun {
 	return out
 }
 
+type listenerRunAuth struct {
+	Requested string `json:"requested"`
+	DecidedBy string `json:"decided_by"`
+}
+
 type listenerRun struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
@@ -519,4 +524,6 @@ type listenerRun struct {
 		IID   int    `json:"iid"`
 		URL   string `json:"url"`
 	} `json:"mr"`
+	ClaudeAuth *listenerRunAuth `json:"claude_auth"`
+	CodexAuth  *listenerRunAuth `json:"codex_auth"`
 }

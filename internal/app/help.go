@@ -71,6 +71,8 @@ story run:
 
 jira listen:
   --once                       poll once, run what was found, and exit
+  --claude-auth auto|api|login checked at start and passed to every run it starts
+  --codex-auth auto|api|login  the same for codex
 
 runs report:
   --dir <path>                 read every run.json under this directory (default .orchestrator/runs)

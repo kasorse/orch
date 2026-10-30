@@ -1187,6 +1187,7 @@ ordinary worktree run in its service's checkout (MVP.md §51, design record
 ```bash
 orchestrator jira listen --config orchestrator.yaml        # poll until SIGTERM
 orchestrator jira listen --config orchestrator.yaml --once # one poll and its ticket, then exit
+orchestrator jira listen --claude-auth login               # every child run uses the CLI's login
 ```
 
 A ticket names its service with a label `service:billing` (or a component of that name) and, when

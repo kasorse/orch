@@ -43,8 +43,12 @@ const (
 type listenOptions struct {
 	configPath string
 	// once runs one poll and the ticket it dispatches, then returns (tests, cron).
-	once    bool
-	verbose bool
+	once bool
+	// claudeAuth and codexAuth are --claude-auth and --codex-auth, checked here and passed to
+	// every child; empty if not given.
+	claudeAuth string
+	codexAuth  string
+	verbose    bool
 }
 
 // jiraListenArgs checks the command line of `jira listen`: only --once, and none of the flags that
@@ -85,7 +89,7 @@ func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
 	osExec := execution.NewOSProcessExecutor()
 	registry := newRegistry(osExec)
 
-	cfg, _, _, _, _, err := loadAndValidateConfig(opts.configPath, "", "", registry, osExec, reporter,
+	cfg, _, _, _, _, err := loadAndValidateConfig(opts.configPath, opts.claudeAuth, opts.codexAuth, registry, osExec, reporter,
 		func(config.Config) config.DependencyOptions { return config.DependencyOptions{Listener: true} })
 	if err != nil {
 		return err
@@ -132,7 +136,7 @@ func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
 
 	r := &listenRunner{
 		ctx: ctx, bg: context.WithoutCancel(ctx), cfg: cfg, lc: cfg.Listener,
-		configPath: configPath, wd: wd, exe: exe, once: opts.once, stderr: stderr, osExec: osExec,
+		configPath: configPath, wd: wd, exe: exe, once: opts.once, claudeAuth: opts.claudeAuth, codexAuth: opts.codexAuth, stderr: stderr, osExec: osExec,
 		servicesDir: servicesDir, stateFile: filepath.Join(stateDir, "state.json"), tasksDir: filepath.Join(stateDir, "tasks"),
 		scrub: scrub, now: time.Now, sleep: sleepContext,
 	}
@@ -219,6 +223,8 @@ type listenRunner struct {
 	wd          string
 	exe         string
 	once        bool
+	claudeAuth  string
+	codexAuth   string
 	stderr      io.Writer
 	osExec      execution.ProcessExecutor
 	servicesDir string
@@ -579,6 +585,12 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 		return err
 	}
 	r.logf("%s running in %s", key, service)
+	if r.claudeAuth != "" {
+		args = append(args, "--claude-auth", r.claudeAuth)
+	}
+	if r.codexAuth != "" {
+		args = append(args, "--codex-auth", r.codexAuth)
+	}
 	return r.execute(key, res.Dir, append([]string{"run", "--listener-task", file, "--mode", "auto", "--output", "json"}, args...))
 }
 

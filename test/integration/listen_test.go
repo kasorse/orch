@@ -121,6 +121,27 @@ func TestListen_ClearTicketBecomesAMergeRequest(t *testing.T) {
 	}
 }
 
+// --claude-auth and --codex-auth on the listener reach the child: its run records both modes as
+// the flags'.
+func TestListen_AuthFlagsArePassedToTheChild(t *testing.T) {
+	env := newListenEnv(t, listenOptions{pPre: 0.85})
+	env.jira.add("PAY-12", "Add() subtracts", listenTask, "service:billing")
+
+	var stderr syncBuffer
+	if err := env.startListener(context.Background(), &stderr, "--once", "--claude-auth", "login", "--codex-auth", "login")(); err != nil {
+		t.Fatalf("the listener returned %v\nstderr:\n%s", err, stderr.String())
+	}
+	runs := env.runs()
+	if len(runs) != 1 {
+		t.Fatalf("runs = %+v, want one\nstderr:\n%s", runs, stderr.String())
+	}
+	for name, a := range map[string]*listenerRunAuth{"claude_auth": runs[0].ClaudeAuth, "codex_auth": runs[0].CodexAuth} {
+		if a == nil || a.Requested != "login" || a.DecidedBy != "flag" {
+			t.Errorf("%s = %+v, want login, decided by the flag", name, a)
+		}
+	}
+}
+
 // An unclear ticket gets the numbered open points and blocked; after an answer in a comment and
 // the status back in the queue, the next run's task holds the discussion.
 func TestListen_UnclearTicketIsBlockedWithItsQuestionsAndAnswered(t *testing.T) {

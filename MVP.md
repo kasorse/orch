@@ -4871,7 +4871,8 @@ flags. Every message names the variable, never the value. With the org's `allowe
 `ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_DEFAULT_*_MODEL` must be on the list, like a
 route's model.
 
-`--claude-auth auto|api|login` is valid with `run`, `resume` and `validate` in any position,
+`--claude-auth auto|api|login` is valid with `run`, `resume`, `review`, `validate`, `story run`
+(passed to each child) and `jira listen` (resolved at its start, passed to each child) in any position,
 `--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
 
 ## 46.3 The child's environment
@@ -4952,7 +4953,7 @@ Codex workflow calls use `codex exec` with one credential mode per process. `api
 key from `providers.codex.api_key_env` (default `OPENAI_API_KEY`) and passes it to the child
 as `CODEX_API_KEY`. `login` removes API key environment variables and uses the Codex CLI's
 saved ChatGPT subscription login. `auto` selects `api` when the configured key is non-empty,
-otherwise `login`; `--codex-auth` overrides the config. The resolved mode and key variable
+otherwise `login`; `--codex-auth` (valid where `--claude-auth` is, §46.2) overrides the config. The resolved mode and key variable
 name are recorded in `run.json` and each resume, never the key.
 
 Codex receives the prompt on stdin. Read and edit calls use `--sandbox read-only` and
@@ -6170,12 +6171,14 @@ bounded.
 ## 51.1 CLI (SPEC §1)
 
 ```bash
-orchestrator jira listen [--config orchestrator.yaml] [--once]
+orchestrator jira listen [--config orchestrator.yaml] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--once]
 ```
 
 Runs in the current directory (the container's working directory, a volume); no git repository
 is needed there. `--once` runs one poll and the ticket it dispatches, then exits (tests, cron).
 It cannot be combined with `--mode`, `--stage`, `--jira`, `--output`, task text or `--inplace`.
+`--claude-auth` and `--codex-auth` are resolved in the listener's fail-fast chain and passed to
+every child run, so they outrank each service's `providers.claude.auth` and `providers.codex.auth`.
 Exit: 0 after SIGTERM/SIGINT with nothing left half-written; 2 for a configuration, credential or
 `FailureAuth` stop (§51.10); 1 for an unexpected error. Logs go to stderr, one line per event
 (`listen: PAY-12 claimed`, `listen: PAY-12 → Ready to Review (!12)`). At start: the fail-fast
