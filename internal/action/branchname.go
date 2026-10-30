@@ -28,17 +28,20 @@ const (
 	maxBranchTaskRunes        = 200
 )
 
-const branchNameIntro = `Propose the git branch name for the following software engineering task, following only what the ` +
-	`repository's own instructions say about branch names. You have no tools and cannot read the code: all you know of the ` +
+const branchNameIntro = `Propose the git branch name and the merge request title pattern for the following software ` +
+	`engineering task, following only what the repository's own instructions say about branch names and merge request titles. You have no tools and cannot read the code: all you know of the ` +
 	`repository is its instruction files, given after the task. Respond with a single JSON object, no markdown fences, no ` +
 	`prose before or after it, matching exactly this shape:`
 
-const branchNameShape = `{"branch": "..."}`
+const branchNameShape = `{"branch": "...", "title": "..."}`
 
 const branchNameRules = `"branch" is the complete branch name: letters, digits and the characters . _ - / only, no spaces, ` +
 	`at most 100 bytes, without a remote name such as origin/. Apply the instructions' rule to the task, the Jira key, the ` +
-	`run ID and the date given below. When the instructions set no rule for branch names, answer {"branch": ""}: never ` +
-	`invent a rule of your own.`
+	`run ID and the date given below. When the instructions set no rule for branch names, "branch" is "": never ` +
+	`invent a rule of your own. "title" is the instructions' rule for merge request titles as a pattern: {key} ` +
+	`stands for the Jira key and {summary} for the one-line summary of the change, written later; everything else is ` +
+	`literal text, one line, at most 200 bytes ("{key}: {summary}" for a rule whose example is "PAY-12: Use + in Add"). ` +
+	`When the instructions set no rule for merge request titles, "title" is "".`
 
 // BranchFile is one instruction file as the call is given it.
 type BranchFile struct {
@@ -75,12 +78,12 @@ func cutAtLine(text string, limit int) string {
 	return cutRunes(text, limit)
 }
 
-// MentionsBranch is the gate of the call: whether any of files contains "branch" or "ветк", in any
-// letter case. Without it nothing is called.
+// MentionsBranch is the gate of the call: whether any of files contains "branch", "ветк" or "merge
+// request", in any letter case. Without it nothing is called.
 func MentionsBranch(files []BranchFile) bool {
 	for _, f := range files {
 		lower := strings.ToLower(f.Text)
-		if strings.Contains(lower, "branch") || strings.Contains(lower, "ветк") {
+		if strings.Contains(lower, "branch") || strings.Contains(lower, "ветк") || strings.Contains(lower, "merge request") {
 			return true
 		}
 	}
@@ -139,10 +142,11 @@ func BuildBranchNamePrompt(in BranchNameInput) string {
 
 // BranchNameResult is what a branch-name call gave, as far as it got: the prompt as sent, the raw
 // output (also when it is refused, for the run's logs), the usage (nil when the CLI reported none
-// or the call did not run) and the name the answer proposed, "" for the answer that the
-// instructions set no rule.
+// or the call did not run), the name the answer proposed, "" for the answer that the
+// instructions set no rule, and likewise the merge request title pattern.
 type BranchNameResult struct {
 	Name   string
+	Title  string
 	Prompt string
 	Output string
 	Usage  *domain.Usage
@@ -152,7 +156,7 @@ type BranchNameResult struct {
 // domain.AuthorityNone, passed explicitly like the translator's and never through AuthorityFor, so
 // the model has no tools. Its logs are logs/branch-name.*. Any failure, a credential problem
 // included, is the caller's to judge; an answer that holds no JSON object or no "branch" is an
-// *apperr.InvalidResponseError naming the field. The name is not checked here.
+// *apperr.InvalidResponseError naming the field. Neither the name nor the title is checked here.
 func BranchName(ctx context.Context, call PlanningCall, in BranchNameInput) (BranchNameResult, error) {
 	res := BranchNameResult{Prompt: BuildBranchNamePrompt(in)}
 	kind := planningKind{action: "branch-name", log: "branch-name", timeout: "worktree.branch.from_instructions.timeout"}
@@ -161,21 +165,22 @@ func BranchName(ctx context.Context, call PlanningCall, in BranchNameInput) (Bra
 	if err != nil {
 		return res, err
 	}
-	res.Name, err = ParseBranchName(res.Output)
+	res.Name, res.Title, err = ParseBranchName(res.Output)
 	return res, err
 }
 
 type branchNameWire struct {
 	Branch *string `json:"branch"`
+	Title  string  `json:"title"`
 }
 
-// ParseBranchName decodes the call's output strictly: a JSON object whose only key is "branch",
-// a string. Anything else, prose without JSON included, is an *apperr.InvalidResponseError. The
-// name is trimmed; "" means the instructions set no rule.
-func ParseBranchName(output string) (string, error) {
+// ParseBranchName decodes the call's output strictly: a JSON object with the string "branch" and,
+// optionally, the string "title". Anything else, prose without JSON included, is an
+// *apperr.InvalidResponseError. Both are trimmed; "" means the instructions set no rule.
+func ParseBranchName(output string) (branch, title string, err error) {
 	obj := extractJSONObject(output)
 	if obj == "" {
-		return "", branchNameInvalid("", nil, "the answer holds no JSON object")
+		return "", "", branchNameInvalid("", nil, "the answer holds no JSON object")
 	}
 	var wire branchNameWire
 	dec := json.NewDecoder(strings.NewReader(obj))
@@ -185,14 +190,14 @@ func ParseBranchName(output string) (string, error) {
 			if unquoted, uerr := strconv.Unquote(name); uerr == nil {
 				name = unquoted
 			}
-			return "", branchNameInvalid(name, err, "not a field of the answer")
+			return "", "", branchNameInvalid(name, err, "not a field of the answer")
 		}
-		return "", branchNameInvalid("branch", err, "%s", err.Error())
+		return "", "", branchNameInvalid("branch", err, "%s", err.Error())
 	}
 	if wire.Branch == nil {
-		return "", branchNameInvalid("branch", nil, "is missing")
+		return "", "", branchNameInvalid("branch", nil, "is missing")
 	}
-	return strings.TrimSpace(*wire.Branch), nil
+	return strings.TrimSpace(*wire.Branch), strings.TrimSpace(wire.Title), nil
 }
 
 func branchNameInvalid(field string, err error, format string, args ...any) error {

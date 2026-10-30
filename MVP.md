@@ -5797,16 +5797,21 @@ worktree:
 
 **The instructions call** is made only when `from_instructions` is set, the run is a worktree run,
 the workflow has `implement`, and at least one of the three files at the repository root of
-`base_ref` (read with `git show <base_ref>:<file>`, not from the working tree) contains `branch`
-or `ветк` (case-insensitive); otherwise nothing is called. One cold, tool-less call: authority
+`base_ref` (read with `git show <base_ref>:<file>`, not from the working tree) contains `branch`,
+`ветк` or `merge request` (case-insensitive); otherwise nothing is called. One cold, tool-less call: authority
 `none`, the prompt on stdin, the three files together at most 32 KiB (each cut at a line) fenced
 with `action.fence`; the input is those files, the task's first line (at most 200 runes, through
 `action.taskBlock`), the Jira key, the run ID and today's date; the answer is strictly
-`{"branch": "<name>"}`, or `{"branch": ""}` when the instructions set no rule. Any failure, an
+`{"branch": "<name>", "title": "<pattern>"}`, each `""` when the instructions set no rule (`title`
+may be absent). `title` is the instructions' merge request title rule as a pattern with `{key}`
+and `{summary}` (`{key}: {summary}` for a rule whose example is `PAY-12: Use + in Add`); Go keeps
+it only when it is one printable line of at most 200 bytes with `{summary}`, no other placeholder
+and no `@`, else prints `Warning: merge request title from the instructions not used: <why>`; the
+branch is judged on its own. Any failure, an
 empty answer or a name that fails the checks prints `Warning: branch name from the instructions
 not used: <why>` and falls through to the template; `FailureAuth` stays fatal (§46.5). Recorded:
-`run.json: branch_naming {source: instructions|template|default, proposed?, rejected?, usage?,
-call?}` and `logs/branch-name.{stdout,stderr}.log`; its cost counts in `outcome.usage` and in
+`run.json: branch_naming {source: instructions|template|default, proposed?, title?, rejected?,
+usage?, call?}` and `logs/branch-name.{stdout,stderr}.log`; its cost counts in `outcome.usage` and in
 `decision_overhead`.
 
 **The template** is rendered by Go:
@@ -5916,9 +5921,10 @@ options. A story child pushes without `-u` (a sibling's guard compares that shar
   is saved before the push; the push is never repeated by this run.
 * **target**: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
   `delivery.target_branch`.
-* **title**: the commit header; for a task with a Jira key `<KEY>: <summary>` (the commit
-  type and the key the header leads with dropped, `PAY-12: Use + in Add`); at most 255 bytes cut
-  at a rune. **description**: `report.md`
+* **title**: the summary of the commit header (without the commit type and the key it leads
+  with) in the instructions' pattern, `branch_naming.title` (§50.3; a pattern with `{key}` needs a
+  key); without one, `<KEY>: <summary>` for a task with a Jira key (`PAY-12: Use + in Add`), else
+  the commit header; at most 255 bytes cut at a rune. **description**: `report.md`
   rendered after the commit, every line break written as the two characters `\n` (CR dropped):
   git refuses a push option with LF or NUL, GitLab turns a literal `\n` back into a line break.
   The whole description option is at most 64 000 bytes after encoding; a longer report is rendered
@@ -6094,7 +6100,7 @@ All optional on load, strictly validated when present.
 | field | rule |
 |---|---|
 | `options.isolation` | a run started without `--inplace` and without `isolation: inplace` records `worktree` |
-| `branch_naming` | `{source, proposed?, rejected?, usage?, call?}`; `proposed` at most 255 printable bytes, `rejected` one line at most 500 bytes; absent for an inplace or review run |
+| `branch_naming` | `{source, proposed?, title?, rejected?, usage?, call?}`; `proposed` at most 255 printable bytes, `title` a pattern the §50.3 checks accepted, `rejected` one line at most 500 bytes; absent for an inplace or review run |
 | `worktree.branch` | any name that passes §50.3's rules (a story task: those, or its fallback's story pattern); empty only on a run with `review_target` |
 | story task input `title` | one line, 1-200 runes, printable; required |
 | story task input `no_push` | a boolean, optional; `true` when the story says `story.push: false` |

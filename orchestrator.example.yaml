@@ -256,6 +256,7 @@ execution:
 #   # The branch of a worktree run is named when the worktree is created: by the repository's
 #   # instructions (CLAUDE.md, AGENTS.md, CONTRIBUTING.md) when from_instructions is set, else by
 #   # this template, else orchestrator/<run-id> (MVP.md §50.3). Placeholders: {id} {key} {slug} {date}.
+#   # The same call reads the instructions' merge request title rule (MVP.md §50.6).
 #   branch:
 #     template: "feature/{key}-{slug}"
 #     from_instructions:             # absent: the instructions are not read

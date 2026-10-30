@@ -49,14 +49,15 @@ func TestBuildBranchNamePrompt_FilesStayInTheirFences(t *testing.T) {
 }
 
 func TestParseBranchName(t *testing.T) {
-	for _, tc := range []struct{ output, want string }{
-		{`{"branch": "feature/PAY-12-x"}`, "feature/PAY-12-x"},
-		{"Here:\n```json\n{\"branch\": \"  fix/x \"}\n```", "fix/x"},
-		{`{"branch": ""}`, ""},
+	for _, tc := range []struct{ output, want, title string }{
+		{`{"branch": "feature/PAY-12-x"}`, "feature/PAY-12-x", ""},
+		{"Here:\n```json\n{\"branch\": \"  fix/x \"}\n```", "fix/x", ""},
+		{`{"branch": ""}`, "", ""},
+		{`{"branch": "PAY-12-x", "title": " {key}: {summary} "}`, "PAY-12-x", "{key}: {summary}"},
 	} {
-		got, err := ParseBranchName(tc.output)
-		if err != nil || got != tc.want {
-			t.Errorf("ParseBranchName(%q) = %q, %v, want %q", tc.output, got, err, tc.want)
+		got, title, err := ParseBranchName(tc.output)
+		if err != nil || got != tc.want || title != tc.title {
+			t.Errorf("ParseBranchName(%q) = %q, %q, %v, want %q, %q", tc.output, got, title, err, tc.want, tc.title)
 		}
 	}
 	for _, tc := range []struct{ name, output, field string }{
@@ -67,7 +68,7 @@ func TestParseBranchName(t *testing.T) {
 		{"null", `{"branch": null}`, "branch"},
 		{"empty object", `{}`, "branch"},
 	} {
-		_, err := ParseBranchName(tc.output)
+		_, _, err := ParseBranchName(tc.output)
 		var ierr *apperr.InvalidResponseError
 		if !errors.As(err, &ierr) || ierr.Call != "branch-name" || ierr.Field != tc.field {
 			t.Errorf("%s: ParseBranchName(%q) = %v, want an InvalidResponseError on field %q", tc.name, tc.output, err, tc.field)
@@ -83,6 +84,7 @@ func TestMentionsBranch(t *testing.T) {
 		{"Name your Branch after the ticket", true},
 		{"Названия ветки: feature/*", true},
 		{"ВЕТКА называется так", true},
+		{"A merge request is titled PAY-1: summary", true},
 		{"nothing about naming", false},
 		{"", false},
 	} {

@@ -467,3 +467,25 @@ func TestVerifyRunWorktree_TemplatedBranch(t *testing.T) {
 		assertRefused(t, err, apperr.RunCorrupt, "worktree.branch")
 	}
 }
+
+// The call's title pattern is kept in branch_naming.title when Go accepts it, and dropped with a
+// warning when it does not; the branch is named either way.
+func TestOpenWorktree_TitleFromTheInstructions(t *testing.T) {
+	for _, tc := range []struct{ title, want, warning string }{
+		{"{key}: {summary}", "{key}: {summary}", ""},
+		{"{summary} cc @all", "", "Warning: merge request title from the instructions not used: it has an @"},
+		{"{ticket}: {summary}", "", "Warning: merge request title from the instructions not used: it has a placeholder other than {key} and {summary}"},
+	} {
+		client := &branchClient{output: `{"branch": "feature/fix-it", "title": "` + tc.title + `"}`}
+		s, _, out := namingSession(t, map[string]string{"CLAUDE.md": branchRule}, client)
+		if _, err := openWorktree(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		if bn := s.run.BranchNaming; bn == nil || bn.Title != tc.want || s.run.Worktree.Branch != "feature/fix-it" {
+			t.Errorf("%q: branch_naming = %+v", tc.title, bn)
+		}
+		if tc.warning != "" && !strings.Contains(out.String(), tc.warning) {
+			t.Errorf("%q: no warning %q in\n%s", tc.title, tc.warning, out)
+		}
+	}
+}

@@ -89,6 +89,13 @@ func nameBranch(ctx context.Context, s *session, in branchInput) (string, *domai
 				Task: in.Task, Key: in.Key, RunID: s.run.ID, Date: branchToday().Format("2006-01-02"), Files: files,
 			})
 			naming.Usage = res.Usage
+			if res.Title != "" {
+				if err := domain.CheckTitleTemplate(res.Title); err != nil {
+					fmt.Fprintf(s.reporter.PausingWriter(), "Warning: merge request title from the instructions not used: %s\n", err)
+				} else {
+					naming.Title = res.Title
+				}
+			}
 			naming.Call = &domain.CallReport{PromptBytes: len(res.Prompt)}
 			var providerErr *apperr.ProviderError
 			switch {

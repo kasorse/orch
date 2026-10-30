@@ -445,19 +445,23 @@ func TestDeliver_PushDisabled(t *testing.T) {
 	}
 }
 
-// A task with a Jira key gets "<KEY>: <summary>" as the merge request's title, whatever type the
-// commit header led with; without a key the title is the commit subject.
+// The merge request's title is the commit's summary in the instructions' pattern, else
+// "<KEY>: <summary>" for a task with a Jira key, whatever type the commit header led with; else
+// the commit subject.
 func TestMergeRequestTitle(t *testing.T) {
-	for _, c := range []struct{ subject, key, want string }{
-		{"fix: PMC-2924 Run nightly price import", "PMC-2924", "PMC-2924: Run nightly price import"},
-		{"PMC-2924: Run nightly price import", "PMC-2924", "PMC-2924: Run nightly price import"},
-		{"feat: Add a thing", "PAY-1", "PAY-1: Add a thing"},
-		{"Typed by hand: yes", "PAY-1", "PAY-1: Typed by hand: yes"},
-		{"PAY-1", "PAY-1", "PAY-1"},
-		{"fix: Add main", "", "fix: Add main"},
+	for _, c := range []struct{ subject, key, pattern, want string }{
+		{"fix: PMC-2924 Run nightly price import", "PMC-2924", "", "PMC-2924: Run nightly price import"},
+		{"PMC-2924: Run nightly price import", "PMC-2924", "", "PMC-2924: Run nightly price import"},
+		{"feat: Add a thing", "PAY-1", "", "PAY-1: Add a thing"},
+		{"Typed by hand: yes", "PAY-1", "", "PAY-1: Typed by hand: yes"},
+		{"PAY-1", "PAY-1", "", "PAY-1"},
+		{"fix: Add main", "", "", "fix: Add main"},
+		{"fix: PAY-1 Add a thing", "PAY-1", "[{key}] {summary}", "[PAY-1] Add a thing"},
+		{"fix: Add main", "", "{summary} (bot)", "Add main (bot)"},
+		{"fix: Add main", "", "{key}: {summary}", "fix: Add main"},
 	} {
-		if got := mergeRequestTitle(c.subject, c.key); got != c.want {
-			t.Errorf("mergeRequestTitle(%q, %q) = %q, want %q", c.subject, c.key, got, c.want)
+		if got := mergeRequestTitle(c.subject, c.key, c.pattern); got != c.want {
+			t.Errorf("mergeRequestTitle(%q, %q, %q) = %q, want %q", c.subject, c.key, c.pattern, got, c.want)
 		}
 	}
 }

@@ -200,7 +200,11 @@ func mergeRequestOptions(ctx context.Context, s *session, sha, target string) []
 	if err != nil || strings.TrimSpace(subject) == "" {
 		subject = s.worktree.Branch
 	}
-	title := cutBytes(pushOptionText(mergeRequestTitle(strings.Join(strings.Fields(subject), " "), ticketKey(s.run.Task.Source))), maxMRTitleBytes)
+	pattern := ""
+	if n := s.run.BranchNaming; n != nil {
+		pattern = n.Title
+	}
+	title := cutBytes(pushOptionText(mergeRequestTitle(strings.Join(strings.Fields(subject), " "), ticketKey(s.run.Task.Source), pattern)), maxMRTitleBytes)
 	return []string{
 		"merge_request.create",
 		"merge_request.target=" + target,
@@ -227,24 +231,29 @@ func mergeRequestTemplate(ctx context.Context, s *session) string {
 	return strings.TrimSpace(text)
 }
 
-// mergeRequestTitle is the commit subject as "<KEY>: <summary>" for a task with a Jira key: the
-// commit type and the key the header leads with ("fix: PAY-12 summary") are dropped and the key
-// is put back first. Without a key the subject is the title.
-func mergeRequestTitle(subject, key string) string {
-	if key == "" {
-		return subject
-	}
-	rest := subject
-	if t, r, ok := strings.Cut(rest, ": "); ok {
+// mergeRequestTitle is the merge request's title from the commit subject: its summary (the
+// subject without the commit type and the key it leads with, "fix: PAY-12 summary") rendered into
+// pattern, the instructions' title rule (branch_naming.title), else "<KEY>: <summary>" for a task
+// with a Jira key, else the subject. A pattern with {key} needs a key.
+func mergeRequestTitle(subject, key, pattern string) string {
+	summary := subject
+	if t, r, ok := strings.Cut(summary, ": "); ok {
 		if _, valid := domain.ValidCommitType(t); valid {
-			rest = r
+			summary = r
 		}
 	}
-	rest = strings.TrimLeft(strings.TrimPrefix(rest, key), ": ")
-	if rest == "" {
-		return key
+	if key != "" {
+		summary = strings.TrimLeft(strings.TrimPrefix(summary, key), ": ")
 	}
-	return key + ": " + rest
+	switch {
+	case summary == "":
+		return firstNonEmpty(key, subject)
+	case pattern != "" && (key != "" || !strings.Contains(pattern, "{key}")):
+		return domain.RenderTitleTemplate(pattern, key, summary)
+	case key != "":
+		return key + ": " + summary
+	}
+	return subject
 }
 
 // mergeRequestDescription is report.md as the value of the description option: the report

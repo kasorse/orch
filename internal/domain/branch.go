@@ -37,6 +37,9 @@ type BranchNaming struct {
 	Source string `json:"source"`
 	// Proposed is the name the instructions call answered, also when it was not used.
 	Proposed string `json:"proposed,omitempty"`
+	// Title is the merge request title pattern the instructions call answered, kept only when
+	// CheckTitleTemplate accepted it; the merge request's title is rendered from it.
+	Title string `json:"title,omitempty"`
 	// Rejected is why a source before Source gave no name, on one line.
 	Rejected string `json:"rejected,omitempty"`
 	// Usage is what the instructions call cost, when the CLI reported it; the outcome counts it.
@@ -64,6 +67,11 @@ func (b BranchNaming) Validate() error {
 	if len(b.Rejected) > maxRejectedBytes || strings.ContainsAny(b.Rejected, "\r\n") {
 		return fmt.Errorf("rejected is not one line of at most %d bytes", maxRejectedBytes)
 	}
+	if b.Title != "" {
+		if err := CheckTitleTemplate(b.Title); err != nil {
+			return fmt.Errorf("title: %w", err)
+		}
+	}
 	if b.Source == BranchSourceInstructions && b.Proposed == "" {
 		return fmt.Errorf("source instructions without a proposed name")
 	}
@@ -78,6 +86,31 @@ func (b BranchNaming) Validate() error {
 		}
 	}
 	return nil
+}
+
+// MaxTitleTemplateBytes bounds a merge request title pattern.
+const MaxTitleTemplateBytes = 200
+
+// CheckTitleTemplate says why t cannot be a merge request title pattern, or returns nil: one line
+// of printable text of at most MaxTitleTemplateBytes, with {summary}, no placeholder but {key} and
+// {summary}, and no @, so the literal text mentions nobody.
+func CheckTitleTemplate(t string) error {
+	switch {
+	case len(t) > MaxTitleTemplateBytes || strings.IndexFunc(t, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0:
+		return fmt.Errorf("it is not one line of printable text of at most %d bytes", MaxTitleTemplateBytes)
+	case !strings.Contains(t, "{summary}"):
+		return fmt.Errorf("it has no {summary}")
+	case strings.ContainsAny(strings.NewReplacer("{key}", "", "{summary}", "").Replace(t), "{}"):
+		return fmt.Errorf("it has a placeholder other than {key} and {summary}")
+	case strings.Contains(t, "@"):
+		return fmt.Errorf("it has an @")
+	}
+	return nil
+}
+
+// RenderTitleTemplate is the title pattern t with {key} and {summary} filled in.
+func RenderTitleTemplate(t, key, summary string) string {
+	return strings.NewReplacer("{key}", key, "{summary}", summary).Replace(t)
 }
 
 // CheckBranchName says why name cannot be the branch of a worktree run, or returns nil. It is
