@@ -916,9 +916,10 @@ Merge request !12: https://gitlab.example.com/group/app/-/merge_requests/12
 
 The commit message is written by Go: a Conventional Commit type the model proposed from a closed
 list, the Jira key, the `summary_short`, and the `Orchestrator-Run` and `Orchestrator-Decision`
-trailers. `report.md` in the run directory (task, why these stages, what changed, tests, review,
-what needs attention) is the merge request description; it escapes everything a model or a
-ticket wrote. The push is not repeated and never forced, and a branch that already exists on the
+trailers. `report.md` in the run directory (status, passed stages, tests, review, what needs
+attention) is the merge request description, titled `<KEY>: <summary>` for a Jira task, followed
+by the project's `.gitlab/merge_request_templates/Default.md` from the base commit (its
+`/assign_reviewer` line sets the reviewers); it escapes everything a model or a ticket wrote. The push is not repeated and never forced, and a branch that already exists on the
 remote is never pushed to. If the push or the merge request fails, or `--mode auto` did not
 commit, the run says why, keeps the branch (and the worktree when there is no commit), prints
 the command to finish by hand and exits 6. A remote that is not GitLab fails at the push (push

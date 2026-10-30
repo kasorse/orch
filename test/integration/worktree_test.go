@@ -577,7 +577,7 @@ func TestWorktree_AutoPushesAndOpensTheMergeRequest(t *testing.T) {
 		t.Fatalf("the remote received %q", options)
 	}
 	description := strings.ReplaceAll(strings.TrimPrefix(options[3], "merge_request.description="), `\n`, "\n")
-	assertContains(t, "the description", description, "### Task\n\n> fix Add in fixture.go\n", "### What changed", "Run `"+run.ID+"`", "commit `"+run.Commit[:7]+"`")
+	assertContains(t, "the description", description, "**Passed stages:** development, testing", "Run `"+run.ID+"`", "commit `"+run.Commit[:7]+"`")
 	assertNotContains(t, "the description", description, "merge request [")
 
 	assertContains(t, "stdout", stdout, "Merge request !1: "+url+"\n")

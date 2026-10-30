@@ -35,10 +35,7 @@ func TestMdText(t *testing.T) {
 	}
 }
 
-func TestMdCellAndCode(t *testing.T) {
-	if got, want := mdCell("a | b\nc @d"), `a \| b c \@d`; got != want {
-		t.Errorf("mdCell = %q, want %q", got, want)
-	}
+func TestMdCode(t *testing.T) {
 	if got, want := mdCode("a`b|c"), "`a'b\\|c`"; got != want {
 		t.Errorf("mdCode = %q, want %q", got, want)
 	}

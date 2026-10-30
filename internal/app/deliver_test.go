@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -104,7 +105,7 @@ func TestMergeRequestDescription_FitsOneOption(t *testing.T) {
 	}
 	s.run.Task.Description = "fix it\n" + strings.Repeat("a long line of the task\n", 30)
 
-	full := mergeRequestDescription(*s.run, nil, maxPushOptionBytes)
+	full := mergeRequestDescription(*s.run, nil, "", maxPushOptionBytes)
 	if len(descriptionOption)+len(full) > maxPushOptionBytes || strings.ContainsAny(full, "\n\x00") || !strings.HasPrefix(full, `## fix it\n\n`) ||
 		strings.Contains(full, "…(cut)") {
 		t.Errorf("description is %d bytes: %q", len(full), full)
@@ -115,12 +116,12 @@ func TestMergeRequestDescription_FitsOneOption(t *testing.T) {
 
 	// The report is rendered again with a shorter task quote, then cut at a line.
 	for _, limit := range []int{len(descriptionOption) + len(full) - 1, len(descriptionOption) + len(full)/2, len(descriptionOption) + 150} {
-		got := mergeRequestDescription(*s.run, nil, limit)
+		got := mergeRequestDescription(*s.run, nil, "", limit)
 		if len(descriptionOption)+len(got) > limit || strings.ContainsAny(got, "\n\x00") || !strings.HasPrefix(got, `## fix it\n`) {
 			t.Errorf("limit %d: description is %d bytes: %q", limit, len(descriptionOption)+len(got), got)
 		}
 	}
-	if got := mergeRequestDescription(*s.run, nil, len(descriptionOption)+150); !strings.HasSuffix(got, `\n…(cut)\n`) {
+	if got := mergeRequestDescription(*s.run, nil, "", len(descriptionOption)+150); !strings.HasSuffix(got, `\n…(cut)\n`) {
 		t.Errorf("description %q is not cut with a mark", got)
 	}
 }
@@ -441,5 +442,50 @@ func TestDeliver_PushDisabled(t *testing.T) {
 				t.Errorf("the branch %s = %s, want %s", s.worktree.Branch, got, sha)
 			}
 		})
+	}
+}
+
+// A task with a Jira key gets "<KEY>: <summary>" as the merge request's title, whatever type the
+// commit header led with; without a key the title is the commit subject.
+func TestMergeRequestTitle(t *testing.T) {
+	for _, c := range []struct{ subject, key, want string }{
+		{"fix: PMC-2924 Run nightly price import", "PMC-2924", "PMC-2924: Run nightly price import"},
+		{"PMC-2924: Run nightly price import", "PMC-2924", "PMC-2924: Run nightly price import"},
+		{"feat: Add a thing", "PAY-1", "PAY-1: Add a thing"},
+		{"Typed by hand: yes", "PAY-1", "PAY-1: Typed by hand: yes"},
+		{"PAY-1", "PAY-1", "PAY-1"},
+		{"fix: Add main", "", "fix: Add main"},
+	} {
+		if got := mergeRequestTitle(c.subject, c.key); got != c.want {
+			t.Errorf("mergeRequestTitle(%q, %q) = %q, want %q", c.subject, c.key, got, c.want)
+		}
+	}
+}
+
+// The project's merge request template, as the base commit holds it, follows report.md in the
+// description: GitLab runs its /assign_reviewer line when it opens the merge request.
+func TestDeliver_DescriptionEndsWithTheTemplate(t *testing.T) {
+	const template = "/assign_reviewer @alice @bob"
+	s, dir, out := finishedWorktreeRun(t, domain.ModeAuto, nil, func(dir string) {
+		if err := os.MkdirAll(filepath.Join(dir, ".gitlab", "merge_request_templates"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(mrTemplatePath)), []byte(template+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitIn(t, dir, "add", ".gitlab")
+		gitIn(t, dir, "commit", "-qm", "the template")
+	})
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if sha == "" {
+		t.Fatalf("no commit:\n%s", out)
+	}
+	if err := finishWorktree(ctx, s, sha); err != nil {
+		t.Fatalf("finishWorktree = %v\n%s", err, out)
+	}
+	got := fakeexec.GitLabPushOptions(t, remoteDir(t, dir))
+	if len(got) != 4 || !strings.HasSuffix(got[3], `\n\n`+template+`\n`) {
+		t.Errorf("the description does not end with the template: %q", got)
 	}
 }

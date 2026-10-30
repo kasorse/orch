@@ -54,11 +54,6 @@ func isWordRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
-// mdCell is s as one Markdown table cell: one line, escaped, with no column separator.
-func mdCell(s string) string {
-	return strings.ReplaceAll(mdText(oneLine(s)), "|", `\|`)
-}
-
 // mdCode is s as an inline code span. A code span has no escapes, so a backtick in s, which
 // would end it, becomes an apostrophe, and a | stays inside a table cell.
 func mdCode(s string) string {

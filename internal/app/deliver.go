@@ -25,6 +25,12 @@ const (
 	maxMRRecordBytes = 500
 
 	descriptionOption = "merge_request.description="
+
+	// mrTemplatePath is the project's merge request template, GitLab's default one: what it holds
+	// (the /assign_reviewer line) follows report.md in the description, as the UI would put it there.
+	mrTemplatePath = ".gitlab/merge_request_templates/Default.md"
+	// maxMRTemplateBytes bounds the template; a longer one is left out with a warning.
+	maxMRTemplateBytes = 8_000
 )
 
 // commitStop is why offerCommit made no commit: a person said no, or something kept it from
@@ -185,33 +191,76 @@ func needsPerson(why string) error {
 }
 
 // mergeRequestOptions are the push options that open the merge request (specs/delivery/SPEC.md
-// §7.3): the commit header as the title and report.md as the description, rendered after the
-// commit, with line breaks written as \n. The report is rendered again with less in it until
-// the whole description option fits maxPushOptionBytes.
+// §7.3): the commit header as the title (mergeRequestTitle) and report.md as the description,
+// rendered after the commit and followed by the project's template (mergeRequestTemplate), with
+// line breaks written as \n. The report is rendered again with less in it until the whole
+// description option fits maxPushOptionBytes.
 func mergeRequestOptions(ctx context.Context, s *session, sha, target string) []string {
 	subject, err := s.operator.CommitSubject(ctx, sha)
 	if err != nil || strings.TrimSpace(subject) == "" {
 		subject = s.worktree.Branch
 	}
-	title := cutBytes(pushOptionText(strings.Join(strings.Fields(subject), " ")), maxMRTitleBytes)
+	title := cutBytes(pushOptionText(mergeRequestTitle(strings.Join(strings.Fields(subject), " "), ticketKey(s.run.Task.Source))), maxMRTitleBytes)
 	return []string{
 		"merge_request.create",
 		"merge_request.target=" + target,
 		"merge_request.title=" + title,
-		descriptionOption + mergeRequestDescription(*s.run, loadTrace(s.store, s.run.ID), maxPushOptionBytes),
+		descriptionOption + mergeRequestDescription(*s.run, loadTrace(s.store, s.run.ID), mergeRequestTemplate(ctx, s), maxPushOptionBytes),
 	}
 }
 
+// mergeRequestTemplate is the project's template as the worktree's base commit holds it (never
+// what the run changed), "" without one. The project wrote it, so it goes in as it is: its quick
+// actions, such as /assign_reviewer, are what it is for.
+func mergeRequestTemplate(ctx context.Context, s *session) string {
+	text, ok, err := s.operator.ShowFile(ctx, s.worktree.BaseRef, mrTemplatePath)
+	switch {
+	case err != nil:
+		fmt.Fprintf(s.reporter.PausingWriter(), "Warning: the merge request template is left out: %v\n", err)
+		return ""
+	case !ok:
+		return ""
+	case len(text) > maxMRTemplateBytes:
+		fmt.Fprintf(s.reporter.PausingWriter(), "Warning: the merge request template is left out: %s is over %d bytes\n", mrTemplatePath, maxMRTemplateBytes)
+		return ""
+	}
+	return strings.TrimSpace(text)
+}
+
+// mergeRequestTitle is the commit subject as "<KEY>: <summary>" for a task with a Jira key: the
+// commit type and the key the header leads with ("fix: PAY-12 summary") are dropped and the key
+// is put back first. Without a key the subject is the title.
+func mergeRequestTitle(subject, key string) string {
+	if key == "" {
+		return subject
+	}
+	rest := subject
+	if t, r, ok := strings.Cut(rest, ": "); ok {
+		if _, valid := domain.ValidCommitType(t); valid {
+			rest = r
+		}
+	}
+	rest = strings.TrimLeft(strings.TrimPrefix(rest, key), ": ")
+	if rest == "" {
+		return key
+	}
+	return key + ": " + rest
+}
+
 // mergeRequestDescription is report.md as the value of the description option: the report
-// rendered for run as it is now, with line breaks encoded (pushOptionText), and so short that
-// the whole option, "merge_request.description=" included, is at most maxOption bytes. When the
+// rendered for run as it is now, followed by template when there is one, with line breaks encoded
+// (pushOptionText), and so short that the whole option, "merge_request.description=" included,
+// is at most maxOption bytes; only the report is shortened. When the
 // report is longer it is rendered again with smaller lists, then a shorter task quote, and as a
 // last resort cut at a line with "…(cut)" (report.RunReportFit).
-func mergeRequestDescription(run domain.Run, trace *domain.DecisionTrace, maxOption int) string {
+func mergeRequestDescription(run domain.Run, trace *domain.DecisionTrace, template string, maxOption int) string {
+	if template != "" {
+		template = "\n" + template + "\n"
+	}
 	text := report.RunReportFit(run, trace, func(text string) bool {
-		return len(descriptionOption)+len(pushOptionText(text)) <= maxOption
+		return len(descriptionOption)+len(pushOptionText(text+template)) <= maxOption
 	})
-	return pushOptionText(text)
+	return pushOptionText(text + template)
 }
 
 // pushOptionText is s as the text of a push option: git refuses an option with a line feed or a

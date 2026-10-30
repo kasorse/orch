@@ -12,33 +12,25 @@ import (
 // 1 MiB, and a merge request description should be read.
 const maxReportBytes = 60_000
 
-// reportLimits are how much of each list report.md shows and how many lines of the task it
-// quotes.
+// reportLimits are how much of each list report.md shows.
 type reportLimits struct {
-	files, issues, findings, failedTests, rules, taskLines int
+	issues, findings, rules int
 }
 
-// reportCuts are the limits RunReport tries in turn until the report fits: the lists shrink
-// first, then the task quote (A8: 30 task lines, 50 files, 30 issues).
+// reportCuts are the limits RunReport tries in turn until the report fits (A8: 30 issues).
 var reportCuts = []reportLimits{
-	{files: 50, issues: 30, findings: 20, failedTests: 10, rules: 20, taskLines: 30},
-	{files: 10, issues: 10, findings: 10, failedTests: 5, rules: 10, taskLines: 30},
-	{files: 0, issues: 0, findings: 3, failedTests: 0, rules: 3, taskLines: 30},
-	{files: 0, issues: 0, findings: 3, failedTests: 0, rules: 3, taskLines: 10},
-	{files: 0, issues: 0, findings: 3, failedTests: 0, rules: 3, taskLines: 3},
-	{files: 0, issues: 0, findings: 3, failedTests: 0, rules: 3, taskLines: 0},
+	{issues: 30, findings: 20, rules: 20},
+	{issues: 10, findings: 10, rules: 10},
+	{issues: 0, findings: 3, rules: 3},
 }
 
-// maxQuotedLine bounds one quoted line of the task, in runes.
-const maxQuotedLine = 1000
-
-// RunReport renders report.md: one run's report for the reviewer of its change - what the
-// task was, why these stages, what changed, whether the tests and the review passed and what
-// needs a person's eye (specs/delivery/SPEC.md §5). It reads only the run's own record and
+// RunReport renders report.md: one run's report for the reviewer of its change - the stages
+// that passed, whether the tests and the review passed and what needs a person's eye; the task
+// is in its ticket and the change in the merge request (specs/delivery/SPEC.md §5). It reads only the run's own record and
 // decision.json (trace, nil when there is none) and makes no call; the same record always
 // renders the same text. Everything the task, the ticket or a model wrote is escaped
 // (mdText), so the text can go into a merge request as it is. The result is at most
-// maxReportBytes: lists are cut first, then the task quote.
+// maxReportBytes: lists are cut first.
 func RunReport(run domain.Run, trace *domain.DecisionTrace) string {
 	out := domain.ComputeOutcome(run, trace)
 	if run.Outcome != nil {
@@ -46,7 +38,7 @@ func RunReport(run domain.Run, trace *domain.DecisionTrace) string {
 	}
 	var text string
 	for _, lim := range reportCuts {
-		if text = renderReport(run, trace, out, lim); len(text) <= maxReportBytes {
+		if text = renderReport(run, out, lim); len(text) <= maxReportBytes {
 			return text
 		}
 	}
@@ -55,8 +47,8 @@ func RunReport(run domain.Run, trace *domain.DecisionTrace) string {
 
 // RunReportFit is RunReport for a text that must also satisfy fits, such as a merge request
 // description that has to fit one push option once its line breaks are encoded (specs/delivery/
-// SPEC.md §7.3). The report is rendered again with the next smaller lists, then a shorter task
-// quote (the same cut order as RunReport), until the text fits; when even the smallest does not,
+// SPEC.md §7.3). The report is rendered again with the next smaller lists (the same cut order
+// as RunReport), until the text fits; when even the smallest does not,
 // it is cut at a line with a closing mark. report.md on disk stays RunReport's version.
 func RunReportFit(run domain.Run, trace *domain.DecisionTrace, fits func(string) bool) string {
 	out := domain.ComputeOutcome(run, trace)
@@ -65,7 +57,7 @@ func RunReportFit(run domain.Run, trace *domain.DecisionTrace, fits func(string)
 	}
 	var text string
 	for _, lim := range reportCuts {
-		if text = renderReport(run, trace, out, lim); len(text) <= maxReportBytes && fits(text) {
+		if text = renderReport(run, out, lim); len(text) <= maxReportBytes && fits(text) {
 			return text
 		}
 	}
@@ -88,20 +80,17 @@ func cutAtLine(s string, max int) string {
 	return s + mark
 }
 
-func renderReport(run domain.Run, trace *domain.DecisionTrace, out domain.Outcome, lim reportLimits) string {
+func renderReport(run domain.Run, out domain.Outcome, lim reportLimits) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## %s\n\n", mdText(reportTitle(run)))
 	b.WriteString(statusLine(run, out) + "\n")
-	writeTaskSection(&b, run, lim)
-	if run.ReviewTarget != nil {
-		// A review run's stages are fixed, and what it reviewed is the refs, not a change it made
-		// (specs/delivery/SPEC.md §5).
-		writeReviewedSection(&b, run)
-	} else {
-		writeStagesSection(&b, run, trace)
-		writeChangedSection(&b, run, lim)
+	if src := sourceLine(run.Task.Source); src != "" {
+		b.WriteString("\nSource: " + src + "\n")
 	}
-	writeTestsSection(&b, run, lim)
+	if run.ReviewTarget != nil {
+		// What a review run reviewed is the refs, not a change it made (specs/delivery/SPEC.md §5).
+		writeReviewedSection(&b, run)
+	}
 	writeReviewSection(&b, run, lim)
 	writeAttentionSection(&b, run, lim)
 	writeFooter(&b, run, out)
@@ -136,6 +125,9 @@ func statusLine(run domain.Run, out domain.Outcome) string {
 		status += ": " + failureLine(out.FailureReason)
 	}
 	parts := []string{"**Status:** " + mdText(status)}
+	if stages := passedStages(run); len(stages) > 0 {
+		parts = append(parts, "**Passed stages:** "+stageNames(stages))
+	}
 	if out.ReviewVerdict != "" {
 		review := string(out.ReviewVerdict)
 		if e := lastExecution(run, domain.ActionReview); e != nil && e.ReviewResult != nil {
@@ -158,6 +150,26 @@ func statusLine(run domain.Run, out domain.Outcome) string {
 	return strings.Join(parts, " · ")
 }
 
+// passedStages are the workflow's stages, in its order, whose last step completed: tests that
+// passed, a review whose verdict is pass.
+func passedStages(run domain.Run) []domain.Stage {
+	if run.Workflow == nil {
+		return nil
+	}
+	var stages []domain.Stage
+	for _, st := range run.Workflow.Steps {
+		e := lastExecution(run, st.Action)
+		switch {
+		case e == nil || e.Status != domain.StepCompleted:
+		case e.TestResult != nil && !e.TestResult.Success:
+		case e.ReviewResult != nil && e.ReviewResult.Decide() != domain.ReviewPass:
+		default:
+			stages = append(stages, st.Stage)
+		}
+	}
+	return stages
+}
+
 var severityOrder = []domain.Severity{domain.SeverityCritical, domain.SeverityHigh, domain.SeverityMedium, domain.SeverityLow}
 
 // severityCounts is "1 high, 2 low", most severe first; "" for no issue.
@@ -175,34 +187,6 @@ func severityCounts(issues []domain.ReviewIssue) string {
 		}
 	}
 	return strings.Join(parts, ", ")
-}
-
-func writeTaskSection(b *strings.Builder, run domain.Run, lim reportLimits) {
-	b.WriteString("\n### Task\n\n")
-	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(run.Task.Description, "\r", "")), "\n")
-	shown := min(len(lines), lim.taskLines)
-	for _, l := range lines[:shown] {
-		b.WriteString(strings.TrimRight("> "+mdText(cutRunes(strings.TrimRight(l, " \t"), maxQuotedLine)), " ") + "\n")
-	}
-	switch {
-	case lim.taskLines == 0 && len(lines) > 0 && strings.Join(lines, "") != "":
-		b.WriteString("> …(task text left out: the report would be too long)\n")
-	case shown < len(lines):
-		fmt.Fprintf(b, "> …(%s)\n", plural(len(lines)-shown, "more line"))
-	}
-	if n := len(run.Task.Acceptance); n > 0 {
-		b.WriteString("\nAcceptance criteria:\n")
-		for i, c := range run.Task.Acceptance {
-			if i == 10 {
-				fmt.Fprintf(b, "- and %d more\n", n-i)
-				break
-			}
-			b.WriteString("- " + mdText(cutRunes(oneLine(c), 300)) + "\n")
-		}
-	}
-	if src := sourceLine(run.Task.Source); src != "" {
-		b.WriteString("\nSource: " + src + "\n")
-	}
 }
 
 // sourceLine says where the task came from; "" for a task typed on the command line.
@@ -237,66 +221,11 @@ func linkable(url string) bool {
 	})
 }
 
-func writeStagesSection(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace) {
-	d := run.Decision
-	if d == nil {
-		return
-	}
-	b.WriteString("\n### Why these stages\n\n")
-	b.WriteString(decisionSummary(*d, trace) + "\n")
-	if len(d.Stages.Stages) == 0 {
-		return
-	}
-	b.WriteString("\n| stage | on | why |\n|---|---|---|\n")
-	for _, st := range d.Stages.Stages {
-		on := "—"
-		switch {
-		case st.Enabled && st.Explored:
-			on = "✓ (explored)"
-		case st.Enabled:
-			on = "✓"
-		}
-		fmt.Fprintf(b, "| %s | %s | %s |\n", mdCell(string(st.Stage)), on, mdCell(st.Reason))
-	}
-}
-
-// decisionSummary is the complexity, its size and cuts, and who decided.
-func decisionSummary(d domain.Decision, trace *domain.DecisionTrace) string {
-	if d.Source == domain.DecisionSourceManual {
-		return "stages chosen by the operator (`run --stage`)"
-	}
-	var parts []string
-	if c := d.Complexity; c.Selected != "" {
-		s := "complexity **" + mdText(string(c.Selected)) + "**"
-		var detail []string
-		if src, ok := c.Sources[c.Primary]; ok {
-			sz := src.Decision.Size()
-			if src.Size != nil {
-				sz = *src.Size
-			}
-			if len(src.Decision.Probabilities) > 0 || src.Size != nil {
-				detail = append(detail, fmt.Sprintf("size %.2f", sz))
-			}
-		}
-		if c.Cuts != nil {
-			detail = append(detail, fmt.Sprintf("cuts %.2f / %.2f", c.Cuts.Medium, c.Cuts.Complex))
-		}
-		if len(detail) > 0 {
-			s += " (" + strings.Join(detail, "; ") + ")"
-		}
-		parts = append(parts, s)
-	}
-	by := "decided by " + mdText(string(d.Source))
-	if trace != nil {
-		if m := firstNonEmpty(trace.Model, trace.Provider); m != "" && d.Source != domain.DecisionSourceUser {
-			by += " (" + mdText(m) + ")"
-		}
-	}
-	parts = append(parts, by)
-	if d.Edit != nil {
-		parts = append(parts, "edited by the operator")
-	}
-	return strings.Join(parts, " · ")
+// writeReviewedSection says what a review run reviewed: base...head, and the commits they name.
+func writeReviewedSection(b *strings.Builder, run domain.Run) {
+	t := run.ReviewTarget
+	b.WriteString("\n### Reviewed\n\n")
+	fmt.Fprintf(b, "%s · merge base %s · head %s\n", mdCode(t.BaseRefName+"..."+t.HeadRefName), mdCode(shortCommit(t.MergeBase)), mdCode(shortCommit(t.Head)))
 }
 
 func firstNonEmpty(ss ...string) string {
@@ -306,155 +235,6 @@ func firstNonEmpty(ss ...string) string {
 		}
 	}
 	return ""
-}
-
-func writeChangedSection(b *strings.Builder, run domain.Run, lim reportLimits) {
-	var diff *domain.StepDiff
-	for i := range run.Executions {
-		if d := run.Executions[i].Diff; d != nil && d.Run != nil {
-			diff = d
-		}
-	}
-	if diff == nil {
-		return
-	}
-	b.WriteString("\n### What changed\n\n")
-	line := diffLine(*diff.Run)
-	if base := changeBase(run); base != "" {
-		line += " against " + mdCode(base)
-	}
-	b.WriteString(line + "\n")
-	if len(diff.RunFiles) == 0 {
-		return
-	}
-	shown := min(len(diff.RunFiles), lim.files)
-	if shown == 0 {
-		b.WriteString("\n(the file list is left out: the report would be too long)\n")
-		return
-	}
-	b.WriteString("\n| file | + | − |\n|---|---|---|\n")
-	for _, f := range diff.RunFiles[:shown] {
-		if f.Binary {
-			fmt.Fprintf(b, "| %s | binary | |\n", mdCode(f.Path))
-			continue
-		}
-		fmt.Fprintf(b, "| %s | %d | %d |\n", mdCode(f.Path), f.Insertions, f.Deletions)
-	}
-	if more := diff.Run.Files - shown; more > 0 {
-		fmt.Fprintf(b, "\nand %d more\n", more)
-	}
-}
-
-// writeReviewedSection says what a review run reviewed: base...head, and the commits they name.
-func writeReviewedSection(b *strings.Builder, run domain.Run) {
-	t := run.ReviewTarget
-	b.WriteString("\n### Reviewed\n\n")
-	fmt.Fprintf(b, "%s · merge base %s · head %s\n", mdCode(t.BaseRefName+"..."+t.HeadRefName), mdCode(shortCommit(t.MergeBase)), mdCode(shortCommit(t.Head)))
-}
-
-// changeBase is what the run's change is counted against: the base of its worktree, else its
-// restore point.
-func changeBase(run domain.Run) string {
-	if w := run.Worktree; w != nil && w.BaseRef != "" {
-		if w.BaseBranch != "" {
-			return w.BaseBranch + "@" + shortCommit(w.BaseRef)
-		}
-		return shortCommit(w.BaseRef)
-	}
-	if run.PreRunRef != "" {
-		return "the restore point " + shortCommit(run.PreRunRef)
-	}
-	return ""
-}
-
-func writeTestsSection(b *strings.Builder, run domain.Run, lim reportLimits) {
-	last := lastExecution(run, domain.ActionTest)
-	if last == nil {
-		return
-	}
-	b.WriteString("\n### Tests and checks\n\n")
-	b.WriteString("last test step: " + testLine(*last) + "\n")
-	if t := last.TestResult; t != nil && !t.Success && len(t.FailedTests) > 0 && lim.failedTests > 0 {
-		b.WriteString("\nFailing tests: " + nameList(t.FailedTests, lim.failedTests) + "\n")
-	}
-	if run.FixIterations > 0 {
-		line := fmt.Sprintf("\nFix iterations: %d", run.FixIterations)
-		if first := firstExecution(run, domain.ActionTest); first != nil && first.TestResult != nil && !first.TestResult.Success {
-			line += " (the first test step failed: " + firstFailure(*first.TestResult) + ")"
-		}
-		b.WriteString(line + "\n")
-	}
-}
-
-func firstExecution(run domain.Run, action domain.ActionType) *domain.StepExecution {
-	for i := range run.Executions {
-		if run.Executions[i].Action == action {
-			return &run.Executions[i]
-		}
-	}
-	return nil
-}
-
-// testLine is how one test step came out, with its command and checks.
-func testLine(e domain.StepExecution) string {
-	t := e.TestResult
-	if t == nil {
-		return mdText(string(e.Status))
-	}
-	cmd := ""
-	if t.Command != "" {
-		cmd = mdCode(t.Command)
-	}
-	var s string
-	switch {
-	case t.Success:
-		s = "passed"
-		if cmd != "" {
-			s += " (" + cmd + ")"
-		}
-		if len(t.Checks) > 0 {
-			names := make([]string, len(t.Checks))
-			for i, c := range t.Checks {
-				names[i] = mdText(c.Name)
-			}
-			s += ", checks " + strings.Join(names, ", ") + " passed"
-		}
-	case t.FailedCheck != "":
-		s = fmt.Sprintf("failed at check %s (exit %d)", mdCode(t.FailedCheck), t.ExitCode)
-		if cmd != "" {
-			s = fmt.Sprintf("failed at check %s (%s, exit %d)", mdCode(t.FailedCheck), cmd, t.ExitCode)
-		}
-		if passed := passedChecks(t.Checks); len(passed) > 0 {
-			s += ", checks " + strings.Join(passed, ", ") + " passed"
-		}
-	default:
-		s = fmt.Sprintf("failed (exit %d)", t.ExitCode)
-		if cmd != "" {
-			s = fmt.Sprintf("failed (%s, exit %d)", cmd, t.ExitCode)
-		}
-	}
-	return s
-}
-
-func passedChecks(checks []domain.CheckResult) []string {
-	var names []string
-	for _, c := range checks {
-		if c.Success {
-			names = append(names, mdText(c.Name))
-		}
-	}
-	return names
-}
-
-// firstFailure is what the first failed test step failed on: its failing tests, else its check.
-func firstFailure(t domain.TestResult) string {
-	if len(t.FailedTests) > 0 {
-		return nameList(t.FailedTests, 3)
-	}
-	if t.FailedCheck != "" {
-		return "check " + mdCode(t.FailedCheck)
-	}
-	return fmt.Sprintf("exit %d", t.ExitCode)
 }
 
 // nameList is at most max names as code, then "and N more".
@@ -567,10 +347,6 @@ func writeFooter(b *strings.Builder, run domain.Run, out domain.Outcome) {
 			link = fmt.Sprintf("[!%d](%s)", mr.IID, mr.URL)
 		}
 		parts = append(parts, "merge request "+link)
-	}
-	// A review run changes nothing, so it has nothing to restore.
-	if run.PreRunRef != "" && run.ReviewTarget == nil {
-		parts = append(parts, "restore point "+mdCode(shortCommit(run.PreRunRef)))
 	}
 	c := money(out.Usage.CostUSD, true)
 	if out.Usage.PartialCalls > 0 {

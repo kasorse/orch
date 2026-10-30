@@ -5836,26 +5836,21 @@ name against these character and format rules and against `git worktree list` (�
 Written next to `summary.md` whenever a run reaches a terminal status, by Go from `run.json` and
 `decision.json`, never read back, never a resume input; failing to write it fails nothing. It is
 the merge request description (§50.6) and the note of a review in the CI example (§50.10).
-Sections, in order, each left out when empty: the title (the commit header) and a status line
-(status, review verdict, tests, checks); **Task** (a block quote of the first 30 lines, and the
-source URL); **Why these stages** (complexity, the decider, one row per stage with its reason);
-**What changed** (files, insertions, deletions against `base@sha`, at most 50 rows); **Tests and
-checks** (the last test step, fix iterations); **Review** (verdict, criteria met, at most 30
-issues, most severe first); **Needs attention** (path rules requiring approval, secret findings:
-never a value); a footer with the run ID, branch, restore point, the merge request when there is
-one, cost, active time and version.
-
-* The file list comes from `executions[].diff.run_files` (§50.12), up to 200 entries of the
-  run's net change from the same `git diff --numstat` that gives `diff.run`; the report reads the
-  last implement's list.
+Sections, in order, each left out when empty: the title (the task's first line, led by the Jira
+key) and a status line (status, the passed stages - the workflow's stages whose last step
+completed, tests passing and a review passing - review verdict, tests, checks); the source link;
+**Review** (verdict, criteria met, at most 30 issues, most severe first); **Needs attention**
+(path rules requiring approval, secret findings: never a value); a footer with the run ID,
+branch, commit, the merge request when there is one, cost and active time. The task is in its
+ticket and the change in the merge request, so the report repeats neither, nor the decision's
+reasons (`decision.json`, `summary.md`) or the restore point (`run.json: pre_run_ref`).
 * **Untrusted text is neutralized.** Task text, ticket text and every model-written string are
   escaped before they reach Markdown: raw HTML, link and image brackets, and the GitLab references
   that notify or link (`@user`, `#123`, `!123`, `~label`, `%milestone`) are backslash-escaped, and
   a line that starts with `/` is indented by one space. A model cannot put a link, an image, a
   mention or a quick action into a merge request.
-* Bounded at 60 000 bytes: lists are cut first, then the task quote.
-* A review run has "Reviewed" (`base...head`) in place of "What changed" and no "Why these
-  stages".
+* Bounded at 60 000 bytes: lists are cut first.
+* A review run adds "Reviewed" (`base...head`) after the status line.
 
 ## 50.5 The end of a worktree run
 
@@ -5921,12 +5916,19 @@ options. A story child pushes without `-u` (a sibling's guard compares that shar
   is saved before the push; the push is never repeated by this run.
 * **target**: the run's `worktree.base_branch`; when it is empty (detached HEAD, a CI checkout),
   `delivery.target_branch`.
-* **title**: the commit header, at most 255 bytes cut at a rune. **description**: `report.md`
+* **title**: the commit header; for a task with a Jira key `<KEY>: <summary>` (the commit
+  type and the key the header leads with dropped, `PAY-12: Use + in Add`); at most 255 bytes cut
+  at a rune. **description**: `report.md`
   rendered after the commit, every line break written as the two characters `\n` (CR dropped):
   git refuses a push option with LF or NUL, GitLab turns a literal `\n` back into a line break.
   The whole description option is at most 64 000 bytes after encoding; a longer report is rendered
-  again with smaller lists, then a shorter task quote, last of all cut at a line with `…(cut)`.
+  again with smaller lists, last of all cut at a line with `…(cut)`.
   `report.md` on disk stays the 60 000-byte version.
+* **The project's template.** `.gitlab/merge_request_templates/Default.md` (GitLab's default
+  template), as the worktree's base commit holds it, follows the report in the description as it
+  is, so its quick actions (`/assign_reviewer @…`) run when GitLab opens the merge request: the
+  reviewers are the project's, not the orchestrator's. Only the report is shortened to fit; a
+  template over 8 000 bytes is left out with a warning.
 * **The result.** GitLab answers on the push's stderr (`remote: View merge request for
   <branch>:` and the URL on the next line). Go takes the first line after that marker that is
   exactly `https://<host>/<path>/-/merge_requests/<n>`, `<host>` being the remote's host. The "To

@@ -1,7 +1,6 @@
 package report
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +29,8 @@ func reportRun() domain.Run {
 				{Stage: domain.StageReview, Enabled: false, Reason: "0.10 < 0.81"},
 			}},
 		},
+		Workflow: &domain.Workflow{Steps: []domain.Step{{Action: domain.ActionImplement, Stage: domain.StageDevelopment},
+			{Action: domain.ActionTest, Stage: domain.StageTesting}, {Action: domain.ActionReview, Stage: domain.StageReview}}},
 		Executions: []domain.StepExecution{
 			{Index: 0, Action: domain.ActionImplement, Status: domain.StepCompleted, StartedAt: t0, FinishedAt: t0.Add(time.Minute),
 				Usage: &domain.Usage{CostUSD: 0.5},
@@ -79,40 +80,9 @@ func TestRunReport_Completed(t *testing.T) {
 	want := strings.Join([]string{
 		"## PAY-12: Add returns the difference",
 		"",
-		"**Status:** completed · **Review:** pass (1 medium, 2 low) · **Tests:** passed · **Checks:** vet ✓ lint ✓",
-		"",
-		"### Task",
-		"",
-		"> PAY-12: Add returns the difference",
-		"> It must add.",
+		"**Status:** completed · **Passed stages:** development, testing, review · **Review:** pass (1 medium, 2 low) · **Tests:** passed · **Checks:** vet ✓ lint ✓",
 		"",
 		"Source: [PAY-12](https://jira.example.com/browse/PAY-12)",
-		"",
-		"### Why these stages",
-		"",
-		"complexity **medium** (size 0.84; cuts 0.60 / 1.30) · decided by llm (haiku)",
-		"",
-		"| stage | on | why |",
-		"|---|---|---|",
-		"| research | ✓ | 0.91 ≥ 0.81 |",
-		"| development | ✓ | forced \\| by medium |",
-		"| review | — | 0.10 \\< 0.81 |",
-		"",
-		"### What changed",
-		"",
-		"3 files, +42 −7 (1 binary) against `main@1a2b3c4`",
-		"",
-		"| file | + | − |",
-		"|---|---|---|",
-		"| `calc/add.go` | 3 | 1 |",
-		"| `calc/add_test.go` | 39 | 6 |",
-		"| `docs/logo.png` | binary | |",
-		"",
-		"### Tests and checks",
-		"",
-		"last test step: passed (`go test ./...`), checks vet, lint passed",
-		"",
-		"Fix iterations: 1 (the first test step failed: `TestAdd`)",
 		"",
 		"### Review",
 		"",
@@ -123,7 +93,7 @@ func TestRunReport_Completed(t *testing.T) {
 		"- low · Name is odd",
 		"",
 		"---",
-		"Run `20261023-101500-ab12cd` · branch `orchestrator/20261023-101500-ab12cd` · commit `f350cf6` · restore point `1a2b3c4` · cost $0.8400 · 5m 0s active",
+		"Run `20261023-101500-ab12cd` · branch `orchestrator/20261023-101500-ab12cd` · commit `f350cf6` · cost $0.8400 · 5m 0s active",
 		"",
 	}, "\n")
 	if got != want {
@@ -144,13 +114,11 @@ func TestRunReport_FailedOnTests(t *testing.T) {
 	run.Executions[1].TestResult.FailedTests = nil
 	got := RunReport(run, nil)
 	mustContain(t, got,
-		"**Status:** failed: max fix iterations reached",
+		"**Status:** failed: max fix iterations reached · **Passed stages:** development ·",
 		"**Tests:** failed",
 		"**Checks:** vet ✓ lint ✗",
-		"last test step: failed at check `lint` (`go test ./...`, exit 2), checks vet passed",
-		"Fix iterations: 1 (the first test step failed: check `lint`)",
 	)
-	mustNotContain(t, got, "### Review", "second line", "commit `")
+	mustNotContain(t, got, "### Review", "second line", "commit `", "testing")
 }
 
 func TestRunReport_PathRulesAndSecret(t *testing.T) {
@@ -179,16 +147,16 @@ func TestRunReport_StageRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Decision = &d
+	run.Workflow = &domain.Workflow{Steps: run.Workflow.Steps[1:]}
 	run.Worktree, run.Task.Source, run.Executions = nil, nil, run.Executions[3:]
 	run.Executions[0].Index, run.Executions[1].Index = 0, 1
 	run.FixIterations = 0
 	got := RunReport(run, &domain.DecisionTrace{Source: domain.DecisionSourceManual})
-	mustContain(t, got, "stages chosen by the operator (`run --stage`)", "| testing | ✓ |", "| review | ✓ |", "### Review")
-	mustNotContain(t, got, "complexity", "decided by", "### What changed", "Source:", "branch `", "Fix iterations")
+	mustContain(t, got, "**Passed stages:** testing, review", "### Review")
+	mustNotContain(t, got, "Source:", "branch `")
 }
 
-// A review run has "Reviewed" in place of "What changed" and no "Why these stages", no branch
-// and no restore point (specs/delivery/SPEC.md §5).
+// A review run says what it reviewed, and has no branch (specs/delivery/SPEC.md §5).
 func TestRunReport_ReviewRun(t *testing.T) {
 	run := reportRun()
 	d, err := domain.ManualDecision([]domain.Stage{domain.StageTesting, domain.StageReview})
@@ -215,25 +183,14 @@ func TestRunReport_ReviewRun(t *testing.T) {
 		"verdict **pass**",
 		"Run `20261023-101500-ab12cd` · cost",
 	)
-	mustNotContain(t, got, "### Why these stages", "### What changed", "branch `", "restore point", "commit `")
+	mustNotContain(t, got, "branch `", "commit `")
 }
 
 func TestRunReport_ByteBound(t *testing.T) {
 	run := reportRun()
-	var task []string
-	for i := 0; i < 100; i++ {
-		task = append(task, fmt.Sprintf("line %d %s", i, strings.Repeat("x", 900)))
-	}
-	run.Task.Description = strings.Join(task, "\n")
-	files := make([]domain.FileStat, domain.MaxRunFiles)
-	for i := range files {
-		files[i] = domain.FileStat{Path: fmt.Sprintf("dir/%03d/%s.go", i, strings.Repeat("p", 400)), Insertions: i, Deletions: 1}
-	}
-	run.Executions[2].Diff.RunFiles = files
-	run.Executions[2].Diff.Run.Files = len(files)
 	var issues []domain.ReviewIssue
-	for i := 0; i < 100; i++ {
-		issues = append(issues, domain.ReviewIssue{Severity: domain.SeverityLow, File: "a.go", Description: strings.Repeat("y", 600)})
+	for i := 0; i < 200; i++ {
+		issues = append(issues, domain.ReviewIssue{Severity: domain.SeverityLow, File: strings.Repeat("f", 200), Description: strings.Repeat("y", 500)})
 	}
 	run.Executions[4].ReviewResult.Issues = issues
 
@@ -241,35 +198,25 @@ func TestRunReport_ByteBound(t *testing.T) {
 	if len(got) > maxReportBytes {
 		t.Fatalf("report is %d bytes, at most %d", len(got), maxReportBytes)
 	}
-	mustContain(t, got, "## PAY-12", "### Review", "---\nRun `20261023-101500-ab12cd`", "more lines)")
-	if strings.Count(got, "dir/") >= len(files) {
-		t.Error("the file list was not cut")
-	}
+	mustContain(t, got, "## PAY-12", "### Review", "---\nRun `20261023-101500-ab12cd`", "- and 170 more")
 
 	// Even a report whose fixed parts are too long is cut to the bound at a line.
-	run.Executions[1].TestResult.Command = strings.Repeat("c", 70_000)
-	run.Executions[3].TestResult.Command = strings.Repeat("c", 70_000)
+	run.Executions[3].TestResult.Checks = []domain.CheckResult{{Name: strings.Repeat("c", 70_000), Success: true}}
 	got = RunReport(run, nil)
 	if len(got) > maxReportBytes || !strings.HasSuffix(got, "\n…(cut)\n") {
 		t.Errorf("report is %d bytes, ends %q", len(got), got[max(0, len(got)-20):])
 	}
 }
 
-// RunReportFit renders again, smaller, until the text satisfies fits: the lists shrink, then the
-// task quote, and a text that still does not fit is cut at a line.
+// RunReportFit renders again, smaller, until the text satisfies fits: the lists shrink, and a
+// text that still does not fit is cut at a line.
 func TestRunReportFit(t *testing.T) {
 	run := reportRun()
-	var task []string
+	var issues []domain.ReviewIssue
 	for i := 0; i < 30; i++ {
-		task = append(task, fmt.Sprintf("line %d %s", i, strings.Repeat("x", 900)))
+		issues = append(issues, domain.ReviewIssue{Severity: domain.SeverityLow, File: "a.go", Description: strings.Repeat("y", 400)})
 	}
-	run.Task.Description = strings.Join(task, "\n")
-	files := make([]domain.FileStat, domain.MaxRunFiles)
-	for i := range files {
-		files[i] = domain.FileStat{Path: fmt.Sprintf("dir/%03d/%s.go", i, strings.Repeat("p", 100)), Insertions: i, Deletions: 1}
-	}
-	run.Executions[2].Diff.RunFiles = files
-	run.Executions[2].Diff.Run.Files = len(files)
+	run.Executions[4].ReviewResult.Issues = issues
 
 	full := RunReport(run, nil)
 	if got := RunReportFit(run, nil, func(string) bool { return true }); got != full {
@@ -278,15 +225,15 @@ func TestRunReportFit(t *testing.T) {
 
 	limit := len(full) - 1
 	got := RunReportFit(run, nil, func(s string) bool { return len(s) <= limit })
-	if len(got) > limit || strings.Count(got, "dir/") >= len(files) || !strings.Contains(got, "---\nRun `20261023-101500-ab12cd`") {
-		t.Errorf("a report that must fit %d bytes is %d bytes, %d files, footer kept: %v", limit, len(got), strings.Count(got, "dir/"),
+	if len(got) > limit || strings.Count(got, "a.go") >= len(issues) || !strings.Contains(got, "---\nRun `20261023-101500-ab12cd`") {
+		t.Errorf("a report that must fit %d bytes is %d bytes, %d issues, footer kept: %v", limit, len(got), strings.Count(got, "a.go"),
 			strings.Contains(got, "---\nRun `"))
 	}
 
-	// Not even the smallest rendering fits 600 bytes: it is cut at a line.
-	got = RunReportFit(run, nil, func(s string) bool { return len(s) <= 600 })
-	if len(got) > 600 || !strings.HasSuffix(got, "\n…(cut)\n") || !strings.HasPrefix(got, "## PAY-12") {
-		t.Errorf("a report that must fit 600 bytes is %d bytes, ends %q", len(got), got[max(0, len(got)-20):])
+	// Not even the smallest rendering fits 200 bytes: it is cut at a line.
+	got = RunReportFit(run, nil, func(s string) bool { return len(s) <= 200 })
+	if len(got) > 200 || !strings.HasSuffix(got, "\n…(cut)\n") || !strings.HasPrefix(got, "## PAY-12") {
+		t.Errorf("a report that must fit 200 bytes is %d bytes, ends %q", len(got), got[max(0, len(got)-20):])
 	}
 }
 
@@ -297,15 +244,15 @@ func TestRunReport_FooterNamesTheMergeRequest(t *testing.T) {
 	mustNotContain(t, RunReport(run, nil), "merge request")
 	run.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: run.Worktree.Branch, Target: "main", IID: 12,
 		URL: "https://gitlab.example.com/g/p/-/merge_requests/12"}
-	mustContain(t, RunReport(run, nil), " · merge request [!12](https://gitlab.example.com/g/p/-/merge_requests/12) · restore point")
+	mustContain(t, RunReport(run, nil), " · merge request [!12](https://gitlab.example.com/g/p/-/merge_requests/12) · cost")
 }
 
 func TestRunReport_Escapes(t *testing.T) {
 	run := reportRun()
-	run.Task.Description = "<img src=x> [link](http://x)\n/merge\n```\n@all #1 !2 ~bug %m1"
+	run.Task.Description = "<img src=x> [link](http://x) @all #1 !2 ~bug %m1\n/merge"
 	run.Executions[4].ReviewResult.Issues = []domain.ReviewIssue{{Severity: domain.SeverityLow, File: "a`b.go", Description: "![i](x) @all\n/close"}}
 	got := RunReport(run, nil)
-	mustContain(t, got, `> \<img src=x\> \[link\](http://x)`, "\n>  /merge\n", "> \\`\\`\\`\n", `> \@all \#1 \!2 \~bug \%m1`, "`a'b.go`", `\!\[i\](x) \@all /close`)
+	mustContain(t, got, `## PAY-12: \<img src=x\> \[link\](http://x) \@all \#1 \!2 \~bug \%m1`, "`a'b.go`", `\!\[i\](x) \@all /close`)
 	for _, line := range strings.Split(got, "\n") {
 		if strings.HasPrefix(line, "/") || strings.HasPrefix(line, "```") {
 			t.Errorf("line %q survives as Markdown", line)

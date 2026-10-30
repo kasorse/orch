@@ -145,7 +145,7 @@ func TestDelivery64_AutoCommitsPushesAndOpensTheMergeRequest(t *testing.T) {
 		t.Fatalf("the remote received %q", options)
 	}
 	description := strings.ReplaceAll(strings.TrimPrefix(options[3], "merge_request.description="), `\n`, "\n")
-	assertContains(t, "the description", description, "### Task\n\n> fix Add in fixture.go\n", "Run `"+run.ID+"`", "commit `"+run.Commit[:7]+"`")
+	assertContains(t, "the description", description, "**Passed stages:**", "Run `"+run.ID+"`", "commit `"+run.Commit[:7]+"`")
 
 	const url = "https://" + fakeexec.GitLabHost + "/group/project/-/merge_requests/1"
 	if mr := run.MR; mr == nil || mr.State != "created" || mr.IID != 1 || mr.URL != url || mr.Source != w.Branch || mr.Target != target {

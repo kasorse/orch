@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"orchestrator/internal/apperr"
@@ -11,13 +12,15 @@ import (
 
 // ShowFile returns the content of the file rel (slash-separated, relative to the repository's
 // root) as the commit ref records it, by git show <ref>:<rel>: never the working tree. ref must be
-// a full commit SHA and rel a plain path; anything else is refused without running git. A file the
+// a full commit SHA and rel a plain path (no empty, "." or ".." segment); anything else is refused
+// without running git. A file the
 // commit does not hold is not an error: ok is false.
 func (r *Repository) ShowFile(ctx context.Context, ref, rel string) (content string, ok bool, err error) {
 	if !isFullSHA(ref) {
 		return "", false, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a full commit SHA", ref)}
 	}
-	if rel == "" || strings.HasPrefix(rel, "-") || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, ".") ||
+	segments := strings.Split(rel, "/")
+	if strings.HasPrefix(rel, "-") || slices.Contains(segments, "") || slices.Contains(segments, ".") || slices.Contains(segments, "..") ||
 		strings.ContainsAny(rel, ":\x00\n") {
 		return "", false, &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a plain repository path", rel)}
 	}
