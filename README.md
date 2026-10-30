@@ -693,6 +693,7 @@ separate TODO item.
 ## Usage
 
 ```
+orchestrator help                    # also --help or -h: the commands, run modes and every flag
 orchestrator [--config path] version
 orchestrator [--config path] [--claude-auth m] [--codex-auth m] validate
 orchestrator [--config path] [--claude-auth m] [--codex-auth m] run [--verbose|-v] "<task description>"
@@ -710,6 +711,8 @@ orchestrator decisions report
 orchestrator decisions calibrate [--runs <dir>] [--min-runs N] [--size-target S/M/C] [--simple-max-hard F]
 ```
 
+- `help`, `--help`, `-h` — prints the commands, the run modes and every flag with what it does,
+  and runs nothing (`-h` anywhere on the line, even after a command).
 - `version` — prints the build version.
 - `validate` — loads and validates the config, including checking that every referenced
   provider CLI is actually resolvable on `PATH`, that the Jev API key is set and, when the

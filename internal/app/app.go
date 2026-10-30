@@ -52,7 +52,8 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--output json] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|jira listen [--once]|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]>`
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|jira listen [--once]|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]|help>` +
+	"\n(orchestrator --help lists the commands, the run modes and every flag)"
 
 // Run parses args and dispatches to the requested subcommand. It never calls
 // os.Exit - main.go is the sole exit point, mapping the returned error via
@@ -64,6 +65,10 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	cli, err := parseArgs(args)
 	if err != nil {
 		return &apperr.ConfigError{Msg: err.Error()}
+	}
+	if cli.help || (len(cli.rest) > 0 && cli.rest[0] == "help") {
+		fmt.Fprint(stdout, helpText)
+		return nil
 	}
 	if cli.output == "" {
 		return dispatch(ctx, cli, stdin, stdout, stderr)
@@ -379,6 +384,8 @@ type cliArgs struct {
 	// listenerTaskFile is the hidden --listener-task's value: the task file the Jira listener wrote
 	// for its child run (specs/jira-listener/SPEC.md §7.2).
 	listenerTaskFile string
+	// help is --help or -h anywhere: print helpText and run nothing.
+	help bool
 	// storyNoPush is the hidden validate --story-no-push: story run checks a service of a story
 	// with story.push: false, which needs no remote (specs/delivery-push §3).
 	storyNoPush bool
@@ -613,6 +620,8 @@ func parseArgs(args []string) (cliArgs, error) {
 			cli.isolation = mode
 		case arg == "--verbose" || arg == "-v":
 			cli.verbose = true
+		case arg == "--help" || arg == "-h":
+			cli.help = true
 		default:
 			cli.rest = append(cli.rest, arg)
 		}

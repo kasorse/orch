@@ -259,6 +259,10 @@ The exit code is part of the interface, for a CI job as much as for a person (§
 | 5 | cancelled by the operator |
 | 6 | completed, but needs a person: a worktree run with `implement` ended without a merge request that nobody declined (`--mode auto` did not commit, or the push or the merge request failed in any mode, §50.6), or `orchestrator review` gave a failing verdict. A story task of a story with `story.push: false` that committed is 0 (§50.5) |
 
+`orchestrator help`, and `--help` or `-h` anywhere on the line, print the commands, the run modes
+and every flag an operator types, each with one line on what it does, on stdout with exit 0, before
+any config is read; the hidden flags and commands the orchestrator starts itself are not listed.
+
 Support configuration file selection, for example:
 
 ```bash

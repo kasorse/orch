@@ -414,3 +414,30 @@ func TestRun_RunStoryDirIsRefused(t *testing.T) {
 		t.Fatalf("got %v, want a hint to story run", err)
 	}
 }
+
+// help, --help and -h print the help on stdout and run nothing, before any config is read; the
+// help names every run mode and every flag an operator types.
+func TestRun_Help(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"--help"}, {"-h"}, {"run", "--help"}, {"--config", "/nonexistent.yaml", "story", "run", "-h"}} {
+		var stdout, stderr bytes.Buffer
+		if err := Run(context.Background(), args, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Errorf("%v: err = %v, want the help", args, err)
+		}
+		if stdout.String() != helpText {
+			t.Errorf("%v: stdout is not the help:\n%s", args, stdout.String())
+		}
+	}
+	for _, mode := range []domain.RunMode{domain.ModePlan, domain.ModeManual, domain.ModeAcceptEdits, domain.ModeAuto} {
+		if !strings.Contains(helpText, "\n  "+string(mode)+" ") {
+			t.Errorf("the help does not describe the mode %s", mode)
+		}
+	}
+	for _, flag := range []string{"--config", "--mode", "--claude-auth", "--codex-auth", "--output", "--verbose", "-v", "--help", "-h",
+		"--stage", "--jira", "--inplace", "--worktree", "--allow-red-tests", "--base", "--head", "--task", "--repo", "--retry",
+		"--parallel", "--once", "--dir", "--older-than", "--unreadable", "--dry-run", "--runs", "--min-runs", "--size-target",
+		"--simple-max-hard"} {
+		if !strings.Contains(helpText, flag+" ") && !strings.Contains(helpText, flag+",") {
+			t.Errorf("the help does not name %s", flag)
+		}
+	}
+}
