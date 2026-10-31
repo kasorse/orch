@@ -236,11 +236,14 @@ func TestPrepare_ExistingDirectories(t *testing.T) {
 		{"edited", func(t *testing.T, c *serviceCheckout, dir string) {
 			ckWrite(t, filepath.Join(dir, "a.txt"), "edited\n")
 		}, checkoutDirty},
-		{"another branch", func(t *testing.T, c *serviceCheckout, dir string) {
+		{"another branch, dirty", func(t *testing.T, c *serviceCheckout, dir string) {
 			ckGit(t, dir, "checkout", "-q", "-b", "feature")
-		}, checkoutOffDefault},
-		{"detached", func(t *testing.T, c *serviceCheckout, dir string) {
-			ckGit(t, dir, "checkout", "-q", "--detach")
+			ckWrite(t, filepath.Join(dir, "scratch.txt"), "x")
+		}, checkoutDirty},
+		{"the default branch is held by another worktree", func(t *testing.T, c *serviceCheckout, dir string) {
+			def := ckGit(t, dir, "symbolic-ref", "--short", "HEAD")
+			ckGit(t, dir, "checkout", "-q", "-b", "feature")
+			ckGit(t, dir, "worktree", "add", "-q", filepath.Join(t.TempDir(), "wt"), def)
 		}, checkoutOffDefault},
 		{"diverged", func(t *testing.T, c *serviceCheckout, dir string) {
 			ckWrite(t, filepath.Join(dir, "own.txt"), "own\n")
@@ -318,6 +321,35 @@ func TestPrepare_FastForwardsABehindCheckout(t *testing.T) {
 	}
 	if head, origin := ckGit(t, dir, "rev-parse", "HEAD"), ckGit(t, work, "rev-parse", "HEAD"); head != origin {
 		t.Errorf("HEAD = %s, origin = %s", head, origin)
+	}
+}
+
+func TestPrepare_SwitchesACleanCheckoutToTheDefaultBranch(t *testing.T) {
+	root, work := ckRemote(t)
+	c := ckCheckout(t, root)
+	ctx := context.Background()
+	if _, err := c.prepare(ctx, "svc", "g/p"); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(c.servicesDir, "svc")
+	def := ckGit(t, dir, "symbolic-ref", "--short", "HEAD")
+
+	for _, leave := range [][]string{{"checkout", "-q", "-b", "feature"}, {"checkout", "-q", "--detach", def}} {
+		ckGit(t, dir, leave...)
+		ckPush(t, work, "new.txt", strings.Join(leave, " ")+"\n")
+		res, err := c.prepare(ctx, "svc", "g/p")
+		if err != nil {
+			t.Fatalf("%v: %v", leave, err)
+		}
+		if res.Default != def {
+			t.Errorf("%v: default = %q, want %q", leave, res.Default, def)
+		}
+		if got := ckGit(t, dir, "symbolic-ref", "--short", "HEAD"); got != def {
+			t.Errorf("%v: on %q, want %q", leave, got, def)
+		}
+		if head, origin := ckGit(t, dir, "rev-parse", "HEAD"), ckGit(t, work, "rev-parse", "HEAD"); head != origin {
+			t.Errorf("%v: HEAD = %s, origin = %s", leave, head, origin)
+		}
 	}
 }
 

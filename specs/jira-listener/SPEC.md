@@ -195,9 +195,10 @@ the names the task input lists (§7.2) with `ScrubCredentials`, and `test.comman
 
 #### 6.3 Fresh base
 
-Before each run: `git fetch origin`, the default branch from `origin/HEAD`, the checkout must be
-on it and clean (`git status --porcelain` after the fingerprint, §38.3), then `git merge
---ff-only origin/<default>`. Not on it, dirty, or diverged → comment ("the service checkout is
+Before each run: the default branch from `origin/HEAD`, the checkout must be clean (`git status
+--porcelain` after the fingerprint, §38.3); a clean checkout on another branch or a detached HEAD
+is switched to it (`git switch <default>`), then `git fetch origin` and `git merge --ff-only
+origin/<default>`. Dirty, a switch git refuses, or diverged → comment ("the service checkout is
 not on a clean <default>") + failed: the listener owns the services directory, nobody works in
 it by hand (D16). The run's worktree is then based on the fresh head (MVP.md §47).
 

@@ -6255,9 +6255,9 @@ otherwise `blocked`.
   from `gitlab.token_env`, only for exactly that protocol and host. Provider CLIs never see the
   token (`ScrubCredentials`), and `test.command` has `TestEnv`'s allowlist. The child's
   environment has no Jira variables.
-* **A fresh base**: before each run `git fetch origin`, the default branch from `origin/HEAD`,
-  the checkout must be on it and clean, then `git merge --ff-only origin/<default>`. Otherwise
-  a comment ("the service checkout is not on a clean <default>") and `failed`: the listener
+* **A fresh base**: before each run the default branch from `origin/HEAD`, the checkout must be
+  clean; a clean checkout off it is switched to it (`git switch`), then `git fetch origin` and
+  `git merge --ff-only origin/<default>`. Dirty, a refused switch or diverged: a comment ("the service checkout is not on a clean <default>") and `failed`: the listener
   owns the services directory, nobody works in it by hand (D16).
 * **The service's configuration**: `<service>/orchestrator.yaml` when it exists (its test
   command, checks, protected paths, routes, limits and instruction files apply, D7); otherwise

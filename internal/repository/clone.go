@@ -117,6 +117,16 @@ func (r *Repository) FetchFastForward(ctx context.Context, branch string) error 
 	return err
 }
 
+// Switch checks out branch: git switch --quiet <branch>. A local branch that does not exist is
+// created from origin/<branch> (git's guess). The caller has checked that the tree is clean.
+func (r *Repository) Switch(ctx context.Context, branch string) error {
+	if !safeBranchName(branch) {
+		return &apperr.RepositoryError{Msg: fmt.Sprintf("%q is not a branch name", branch)}
+	}
+	_, err := r.git(ctx, "switch", "--quiet", branch)
+	return err
+}
+
 // remoteError is the error of a git command that talked to a remote and failed.
 func remoteError(what, stderr string) error {
 	err := &apperr.RepositoryError{Msg: what + " failed: " + boundedMessage(stderr)}

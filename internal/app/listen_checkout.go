@@ -149,7 +149,7 @@ func (c *serviceCheckout) serviceDirs() ([]string, error) {
 // prepare resolves the service's directory (SPEC §5) and makes the checkout in it ready (§6): it
 // exists, is a git work tree's top level, and for a ticket that names a project is that project;
 // or it does not exist, the project is under an allowed group, and it is cloned. Then the
-// checkout must be clean, on the default branch, and it is fast-forwarded to the remote's.
+// checkout must be clean, it is switched to the default branch, and fast-forwarded to the remote's.
 // A failure of the checkout is a *checkoutError; a cancelled ctx is returned as it is.
 func (c *serviceCheckout) prepare(ctx context.Context, service, project string) (checkoutResult, error) {
 	if !listener.ValidService(service) {
@@ -272,8 +272,8 @@ func (c *serviceCheckout) remoteFailure(ctx context.Context, err error, kind che
 	return checkoutFail(kind, err, format, args...)
 }
 
-// freshBase is SPEC §6.3 on dir: it must be on the default branch and clean, and (with fetch) is
-// brought up to origin's. The git fingerprint is taken before git runs anything the repository's
+// freshBase is SPEC §6.3 on dir: it must be clean, is switched to the default branch, and (with
+// fetch) is brought up to origin's. The git fingerprint is taken before git runs anything the repository's
 // config can name, and must be the same after.
 func (c *serviceCheckout) freshBase(ctx context.Context, dir string, fetch bool) (checkoutResult, error) {
 	repo := &repository.Repository{Dir: dir, Executor: c.executor, Env: c.env}
@@ -293,19 +293,25 @@ func (c *serviceCheckout) freshBase(ctx context.Context, dir string, fetch bool)
 		return checkoutResult{}, err
 	}
 	const notClean = "the service checkout %s is not on a clean %s"
-	if branch != def {
-		on := "it is on " + branch
-		if branch == "" {
-			on = "HEAD is detached"
-		}
-		return checkoutResult{}, checkoutFail(checkoutOffDefault, nil, notClean+": %s", filepath.Base(dir), def, on)
-	}
 	dirty, err := repo.IsDirty(ctx)
 	if err != nil {
 		return checkoutResult{}, err
 	}
 	if dirty {
 		return checkoutResult{}, checkoutFail(checkoutDirty, nil, notClean+": it has uncommitted changes", filepath.Base(dir), def)
+	}
+	// A clean checkout off the default branch is switched to it: a branch keeps its commits, a detached HEAD the reflog.
+	if branch != def {
+		if err := repo.Switch(ctx, def); err != nil {
+			if ctx.Err() != nil {
+				return checkoutResult{}, ctx.Err()
+			}
+			on := "it is on " + branch
+			if branch == "" {
+				on = "HEAD is detached"
+			}
+			return checkoutResult{}, checkoutFail(checkoutOffDefault, err, notClean+": %s, and switching to %s failed", filepath.Base(dir), def, on, def)
+		}
 	}
 	if fetch {
 		fetchCtx, cancel := context.WithTimeout(ctx, c.cloneTimeout)
