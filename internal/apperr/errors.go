@@ -138,7 +138,10 @@ func (e *ProviderError) Error() string {
 	if e.Executable != "" {
 		fmt.Fprintf(&b, "command: %s\n", commandLine(e.Executable, e.Args))
 	}
-	if e.PromptBytes > 0 {
+	switch {
+	case e.PromptBytes > 0 && e.Endpoint != "":
+		fmt.Fprintf(&b, "prompt: %d bytes\n", e.PromptBytes)
+	case e.PromptBytes > 0:
 		fmt.Fprintf(&b, "prompt: %d bytes on stdin\n", e.PromptBytes)
 	}
 	if e.WorkingDir != "" {

@@ -18,8 +18,50 @@ type request struct {
 	System       []textBlock   `json:"system,omitempty"`
 	Messages     []message     `json:"messages"`
 	OutputConfig *outputConfig `json:"output_config,omitempty"`
-	Tools        []serverTool  `json:"tools,omitempty"`
+	Tools        []any         `json:"tools,omitempty"`
 	Stream       bool          `json:"stream"`
+}
+
+// clientTool is a tool the client runs (internal/provider/tools). No strict flag: a gateway to
+// Bedrock may not take it, and the input is decoded strictly in Go anyway.
+type clientTool struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
+type cacheControl struct {
+	Type string `json:"type"`
+}
+
+// cacheable is a user block that can carry the request's cache breakpoint.
+type cacheable interface{ mark(on bool) }
+
+// userText is the user's text block; toolResult answers one tool_use block.
+type userText struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+type toolResult struct {
+	Type         string        `json:"type"`
+	ToolUseID    string        `json:"tool_use_id"`
+	Content      string        `json:"content"`
+	IsError      bool          `json:"is_error,omitempty"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+var ephemeral = &cacheControl{Type: "ephemeral"}
+
+func (b *userText) mark(on bool)   { b.CacheControl = markOf(on) }
+func (b *toolResult) mark(on bool) { b.CacheControl = markOf(on) }
+
+func markOf(on bool) *cacheControl {
+	if on {
+		return ephemeral
+	}
+	return nil
 }
 
 // serverTool is a tool the API runs itself (web search, web fetch).

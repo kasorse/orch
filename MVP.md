@@ -3337,10 +3337,17 @@ human sees and confirms between steps.
   they support `none` (a request with no tools) and claude also `web`: the server's own
   `web_search` and `web_fetch` (10 uses each, `pause_turn` resumed up to 4 times) when
   `providers.claude.web_tools` is on - the default without a `base_url` - and otherwise no tool
-  at all, with a system text that says so (a gateway to Bedrock has no server web tools). A
-  `read` or `edit` route of such a provider, and codex's `web`, are refused by
-  `ValidateAuthorities` until the tool loop exists. `call.web_tools` records the web tools a
-  call offered. In place of the version check, `GET {base_url}/v1/models` must list every model the
+  at all, with a system text that says so (a gateway to Bedrock has no server web tools). claude
+  supports `read` too: the call is a loop the client runs (at most 500 responses), offering
+  `read_file`, `grep` and `glob` from `internal/provider/tools`, which confine every path to the
+  working directory in Go - no absolute path, no `..`, no symlink out, the deny list on every
+  segment, nothing under `.git` - and never run a command or open a connection. A refused or
+  unknown tool call goes back as an `is_error` result; every call of a response is answered in one
+  message. The loop marks at most three prompt-cache breakpoints per request (the first user
+  message, the previous and the last), only on calls with tools. MCP servers are not started yet
+  (they are recorded in `call.mcp_failed`). `edit`, and codex's `read` and `web`, are refused by
+  `ValidateAuthorities` until their tools exist. `call.web_tools` records the web tools a call
+  offered; `call.tools` counts the tools by the CLI's names (Read, Grep, Glob, WebSearch). In place of the version check, `GET {base_url}/v1/models` must list every model the
   config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.

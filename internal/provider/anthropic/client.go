@@ -3,10 +3,10 @@
 // provider.Client; the wire is unexported.
 //
 // Every request streams, carries no anthropic-beta header (a gateway to Bedrock may refuse
-// one) and no sampling parameter, and leaves thinking to the model's default. This task's
-// client runs calls without repository tools only: Supports is true for AuthorityNone and
-// AuthorityWeb, so config.ValidateAuthorities refuses read and edit routes until the tool loop
-// exists.
+// one) and no sampling parameter, and leaves thinking to the model's default. A call with
+// repository tools is a loop the client runs itself (SPEC §5): the model asks for a tool, the
+// client runs it from internal/provider/tools inside the working directory and sends the result
+// back. Supports is true for none, web and read; edit waits for its tools (AT10).
 package anthropic
 
 import (
@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/httpapi"
+	"orchestrator/internal/provider/tools"
 )
 
 const (
@@ -51,6 +53,14 @@ const (
 		"access: answer from what you know, say where your knowledge may be out of date, and answer " +
 		"exactly in the form the request asks for."
 )
+
+// systemRead is the fixed system text of a call with the read tools.
+const systemRead = "You work for an automated orchestrator on one repository, through your tools read_file, " +
+	"grep and glob; every path is relative to the repository root. You cannot run commands, change files " +
+	"or reach the network. Answer exactly in the form the request asks for."
+
+// maxTurns is the backstop of SPEC §5: execution.timeout bounds a call, this bounds its responses.
+const maxTurns = 500
 
 // Client is the claude provider over HTTP. Until SetKey it refuses every call.
 type Client struct {
@@ -96,10 +106,10 @@ func (c *Client) Endpoint() (httpapi.Endpoint, error) {
 	return ep, err
 }
 
-// Supports is true for AuthorityNone and AuthorityWeb: neither gets a repository tool, and web
-// gets only the server's web tools, or none (SPEC §5.1, §6). Read and edit wait for the tool loop.
+// Supports is true for none, web and read (SPEC §5.1): none and web get no repository tool, web
+// only the server's web tools or none (§6), read the confined read tools. Edit waits for its tools.
 func (c *Client) Supports(a domain.Authority) bool {
-	return a == domain.AuthorityNone || a == domain.AuthorityWeb
+	return a == domain.AuthorityNone || a == domain.AuthorityWeb || a == domain.AuthorityRead
 }
 
 // ReportsCost reports whether a call to model gets a cost: a price in providers.claude.prices
@@ -116,7 +126,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		return provider.Result{}, &apperr.AuthorityError{
 			Provider:  string(provider.Claude),
 			Authority: string(req.Authority),
-			Reason:    "The claude API transport runs calls without repository tools only so far (specs/api-transport/SPEC.md §10); route this action to transport: cli.",
+			Reason:    "The claude API transport has no edit tools yet (specs/api-transport/SPEC.md §10); route this action to transport: cli.",
 		}
 	}
 	ep, prices, err := c.endpoint()
@@ -126,6 +136,13 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	r := buildRequest(req, c.webTools)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + messagesPath}
 	obs := observe(req)
+	toolset, err := repositoryTools(req, &r)
+	if err != nil {
+		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
+	}
+	// Until the adapter speaks MCP (AT11), a configured server is reported as one that did not
+	// start: the call runs without its tools, which the call report says.
+	mcpFailed := mcpServerNames(req.Extensions.MCPConfig)
 
 	start := time.Now()
 	var usage domain.Usage
@@ -141,18 +158,23 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		if len(tools) > 0 {
 			rep.Tools = tools
 		}
+		rep.MCPFailed = mcpFailed
 		return provider.Result{Output: strings.Join(texts, ""), Duration: time.Since(start), Usage: &u, Call: rep}
 	}
 
-	for pauses := 0; ; pauses++ {
-		body, err := json.Marshal(r)
+	pauses := 0
+	for n := 0; ; n++ {
+		if n == maxTurns {
+			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("the call reached %d model turns", maxTurns), time.Since(start), nil)
+		}
+		body, err := marshal(r, toolset != nil)
 		if err != nil {
 			return provider.Result{}, fmt.Errorf("claude API request: %w", err)
 		}
 		resp, err := ep.Do(ctx, http.MethodPost, messagesPath, body)
 		if err != nil {
 			res := result()
-			if pauses == 0 {
+			if n == 0 {
 				res.Usage = nil
 			}
 			return res, call.fromHTTP(err, time.Since(start))
@@ -213,7 +235,23 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			if pauses == maxPauses {
 				return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("the server paused the turn %d times in a row", maxPauses+1), time.Since(start), nil)
 			}
+			pauses++
 			r.Messages = append(r.Messages, message{Role: "assistant", Content: blocksOf(t.blocks)})
+			continue
+		case "tool_use":
+			if toolset == nil {
+				return result(), call.failure(apperr.FailureAPI, "the model asked for a tool the call did not offer", time.Since(start), nil)
+			}
+			results := runTools(ctx, t.blocks, toolset, req, tools)
+			if ctx.Err() != nil {
+				usage.Partial = true
+				return result(), call.failure(httpapi.Kind(ctx.Err()), ctx.Err().Error(), time.Since(start), ctx.Err())
+			}
+			if len(results) == 0 {
+				return result(), call.failure(apperr.FailureAPI, "stop_reason tool_use without a tool_use block", time.Since(start), nil)
+			}
+			pauses = 0
+			r.Messages = append(r.Messages, message{Role: "assistant", Content: blocksOf(t.blocks)}, message{Role: "user", Content: results})
 			continue
 		case "max_tokens":
 			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("the answer was cut at max_tokens (%d)", maxTokens), time.Since(start), nil)
@@ -224,7 +262,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			}
 			return result(), call.failure(apperr.FailureAPI, detail, time.Since(start), nil)
 		default:
-			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("unexpected stop_reason %q for a call without repository tools", t.stopReason), time.Since(start), nil)
+			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("unexpected stop_reason %q", t.stopReason), time.Since(start), nil)
 		}
 	}
 }
@@ -273,16 +311,131 @@ func observe(req provider.Request) observer {
 	return obs
 }
 
-// toolName is the name a call report and the console use for a server tool, as the claude CLI
-// names its own (WebSearch, WebFetch).
+// toolName is the name a call report and the console use for a tool, as the claude CLI names
+// its own (WebSearch, WebFetch, Read, Grep, Glob).
 func toolName(name string) string {
 	switch name {
 	case "web_search":
 		return "WebSearch"
 	case "web_fetch":
 		return "WebFetch"
+	case "read_file":
+		return "Read"
+	case "grep":
+		return "Grep"
+	case "glob":
+		return "Glob"
 	}
 	return name
+}
+
+// repositoryTools gives a read call the confined read tools (SPEC §5.1): their definitions go
+// into the request, sorted by name, and the set runs the model's calls. Other calls get none.
+func repositoryTools(req provider.Request, r *request) (map[string]tools.Tool, error) {
+	if req.Authority != domain.AuthorityRead {
+		return nil, nil
+	}
+	if req.WorkingDir == "" {
+		return nil, errors.New("a call with repository tools needs a working directory")
+	}
+	root, err := tools.NewRoot(req.WorkingDir, req.DenyRead)
+	if err != nil {
+		return nil, fmt.Errorf("the working directory cannot be used: %w", err)
+	}
+	set := map[string]tools.Tool{}
+	for _, t := range tools.ReadTools(root) {
+		set[t.Name] = t
+		r.Tools = append(r.Tools, clientTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
+	}
+	r.System = []textBlock{{Type: "text", Text: systemRead}}
+	return set, nil
+}
+
+// runTools runs the tool_use blocks of one response in order and returns their results, every
+// call answered, a refused or unknown one as is_error (SPEC §4.1). counts gets each call by its
+// CLI name; Activity and Stream are told what runs.
+func runTools(ctx context.Context, blocks []map[string]any, set map[string]tools.Tool, req provider.Request, counts map[string]int) []any {
+	var results []any
+	for _, b := range blocks {
+		if b["type"] != "tool_use" {
+			continue
+		}
+		id, name := str(b["id"]), str(b["name"])
+		input, _ := b["input"].(map[string]any)
+		what := toolName(name)
+		if arg := str(input["path"]) + str(input["pattern"]); arg != "" {
+			what += " " + arg
+		}
+		if req.Activity != nil {
+			req.Activity(what)
+		}
+		if req.Stream != nil {
+			_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
+		}
+		counts[toolName(name)]++
+		out, isErr := "", false
+		if tool, ok := set[name]; !ok {
+			out, isErr = fmt.Sprintf("there is no tool %q", name), true
+		} else if raw, err := json.Marshal(input); err != nil {
+			out, isErr = "invalid input", true
+		} else if text, err := tool.Run(ctx, raw); err != nil {
+			out, isErr = err.Error(), true
+		} else {
+			out = text
+		}
+		results = append(results, &toolResult{Type: "tool_result", ToolUseID: id, Content: out, IsError: isErr})
+	}
+	return results
+}
+
+// mcpServerNames are the servers an MCP config document names, sorted; nil for none.
+func mcpServerNames(doc string) []string {
+	if doc == "" {
+		return nil
+	}
+	var cfg struct {
+		Servers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if json.Unmarshal([]byte(doc), &cfg) != nil {
+		return []string{"mcp-config"}
+	}
+	names := make([]string, 0, len(cfg.Servers))
+	for name := range cfg.Servers {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// marshal renders the request. With cache, the last block of the first user message, of the
+// previous user message and of the last one carry an ephemeral cache_control for this request
+// only (SPEC §4.1): the cache looks back 20 blocks, and one turn of parallel tool results can
+// pass that. The marks are removed again, so the history never holds more than three.
+func marshal(r request, cache bool) ([]byte, error) {
+	if !cache {
+		return json.Marshal(r)
+	}
+	var marked []cacheable
+	users := 0
+	for i := len(r.Messages) - 1; i >= 0; i-- {
+		m := r.Messages[i]
+		if m.Role != "user" || len(m.Content) == 0 {
+			continue
+		}
+		if users < 2 || i == 0 {
+			if c, ok := m.Content[len(m.Content)-1].(cacheable); ok {
+				c.mark(true)
+				marked = append(marked, c)
+			}
+		}
+		users++
+	}
+	defer func() {
+		for _, c := range marked {
+			c.mark(false)
+		}
+	}()
+	return json.Marshal(r)
 }
 
 func blocksOf(blocks []map[string]any) []any {
@@ -294,10 +447,12 @@ func blocksOf(blocks []map[string]any) []any {
 }
 
 // offeredWebTools names the web tools a request offered, for call.web_tools (SPEC §6).
-func offeredWebTools(tools []serverTool) []string {
+func offeredWebTools(tools []any) []string {
 	var names []string
 	for _, t := range tools {
-		names = append(names, toolName(t.Name))
+		if st, ok := t.(serverTool); ok {
+			names = append(names, toolName(st.Name))
+		}
 	}
 	return names
 }
@@ -307,16 +462,16 @@ func buildRequest(req provider.Request, webTools bool) request {
 	r := request{
 		Model:     req.Model,
 		MaxTokens: maxTokens,
-		Messages:  []message{{Role: "user", Content: []any{textBlock{Type: "text", Text: req.Prompt}}}},
+		Messages:  []message{{Role: "user", Content: []any{&userText{Type: "text", Text: req.Prompt}}}},
 		Stream:    true,
 	}
 	if req.Authority == domain.AuthorityWeb {
 		system = systemWebOff
 		if webTools {
 			system = systemWeb
-			r.Tools = []serverTool{
-				{Type: "web_fetch_20260209", Name: "web_fetch", MaxUses: webToolUses},
-				{Type: "web_search_20260209", Name: "web_search", MaxUses: webToolUses},
+			r.Tools = []any{
+				serverTool{Type: "web_fetch_20260209", Name: "web_fetch", MaxUses: webToolUses},
+				serverTool{Type: "web_search_20260209", Name: "web_search", MaxUses: webToolUses},
 			}
 		}
 	}

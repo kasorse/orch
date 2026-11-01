@@ -18,7 +18,8 @@ import (
 // tools - the translator and the LLM decision provider - go to the provider's HTTP API (a fake
 // server here), the steps to the claude CLI (the fake), and the fail-fast chain checks the
 // routed models with GET /v1/models instead of a --version. claude's API client runs research
-// (web) but no repository tool yet, so its full run puts the steps on the codex CLI.
+// (web) and the read steps (investigate, review) with its own read tools, but no edit yet, so its
+// full run puts implement on the codex CLI.
 
 // fakeAPI answers GET /v1/models with served and a POST to path with the response of the
 // prompt's ACTION line, as stream renders it. It records the ACTION and the credential header
@@ -225,8 +226,8 @@ func TestScenario70_APITransport_UnservedModelStopsBeforeTheRun(t *testing.T) {
 	}
 }
 
-// claude over the API with its steps on the codex CLI: the translator, the decision provider
-// and research (not in this workflow) are claude's, over HTTP.
+// claude over the API with implement on the codex CLI: the translator, the decision provider,
+// investigate, review and research (not in this workflow) are claude's, over HTTP.
 func TestScenario70_APITransport_ClaudeDecisionCallsOverHTTP(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	clearAuthEnv(t)
@@ -234,9 +235,13 @@ func TestScenario70_APITransport_ClaudeDecisionCallsOverHTTP(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "")
 	invocationsLog, _ := decisionEnv(t, repoDir)
 	t.Setenv("FAKE_CLI_VERSION", "codex-cli 0.50.0") // the fake codex answers --version as claude would
-	api := startMessagesAPI(t, []string{"fake"}, apiDecisionResponses)
+	responses := map[string]string{"investigate": investigateResponse, "review": reviewPassResponse}
+	for k, v := range apiDecisionResponses {
+		responses[k] = v
+	}
+	api := startMessagesAPI(t, []string{"fake"}, responses)
 	opts := defaultConfigOptions()
-	opts.providers = providerSet{Research: "claude", Investigate: "codex", Implement: "codex", Review: "codex",
+	opts.providers = providerSet{Research: "claude", Investigate: "claude", Implement: "codex", Review: "claude",
 		Translation: "claude", Decision: "claude"}
 	opts.extraYAML = fmt.Sprintf("providers:\n  claude:\n    transport: api\n    base_url: %s\n", api.srv.URL)
 	cfg := writeConfig(t, t.TempDir(), opts)
@@ -246,24 +251,24 @@ func TestScenario70_APITransport_ClaudeDecisionCallsOverHTTP(t *testing.T) {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	actions, keys := api.calls()
-	if !equalStrings(actions, []string{"translate", "decide-context", "decide-classify"}) {
-		t.Errorf("API calls = %v, want translate, decide-context, decide-classify", actions)
+	if !equalStrings(actions, []string{"translate", "decide-context", "decide-classify", "investigate", "review"}) {
+		t.Errorf("API calls = %v, want translate, decide-context, decide-classify, investigate, review", actions)
 	}
 	for _, k := range keys {
 		if k != authKey() {
 			t.Errorf("a call carried x-api-key %q, want the configured key", k)
 		}
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
-		t.Errorf("CLI invocations = %v, want only the steps", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
+		t.Errorf("CLI invocations = %v, want only implement", got)
 	}
 	if !strings.Contains(stdout, "claude calls go to the Messages API at "+strings.TrimPrefix(api.srv.URL, "http://")) {
 		t.Errorf("want the endpoint on the console, got:\n%s", stdout)
 	}
 }
 
-// Until the tool loop exists (AT07, AT10), a step routed to claude over the API is refused by
-// ValidateAuthorities before any call; research (web) is not.
+// Until the edit tools exist (AT10), implement routed to claude over the API is refused by
+// ValidateAuthorities before any call; research (web) and the read steps are not.
 func TestScenario70_APITransport_ToolStepRefused(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	clearAuthEnv(t)
@@ -279,10 +284,10 @@ func TestScenario70_APITransport_ToolStepRefused(t *testing.T) {
 	if err == nil {
 		t.Fatalf("want the authority check to refuse the run\nstdout:\n%s", stdout)
 	}
-	if strings.Contains(err.Error(), `"web" authority`) {
-		t.Errorf("research must be accepted now: %v", err)
+	if strings.Contains(err.Error(), `"web" authority`) || strings.Contains(err.Error(), `"read" authority`) {
+		t.Errorf("research and the read steps must be accepted now: %v", err)
 	}
-	for _, want := range []string{`"read" authority required by "investigate"`, `"edit" authority required by "implement"`} {
+	for _, want := range []string{`"edit" authority required by "implement"`} {
 		if !strings.Contains(err.Error()+stdout+stderr, want) {
 			t.Errorf("want %s, got: %v\nstdout:\n%s\nstderr:\n%s", want, err, stdout, stderr)
 		}
