@@ -24,8 +24,10 @@ import (
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/httpapi"
+	"orchestrator/internal/provider/mcp"
 	"orchestrator/internal/provider/tools"
 )
 
@@ -103,6 +105,10 @@ func (c *Client) ReportsCost(model string) bool {
 	return ok
 }
 
+// SupportsMCP is true: the client starts the servers of Extensions.MCPConfig itself (SPEC §5.3),
+// so action gives an implement the verify server. It makes *Client a provider.MCPSupporter.
+func (c *Client) SupportsMCP() bool { return true }
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	if !c.Supports(req.Authority) {
 		return provider.Result{}, &apperr.AuthorityError{
@@ -121,9 +127,16 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	if err != nil {
 		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
 	}
-	// Until the adapter speaks MCP (AT11), a configured server is reported as one that did not
-	// start: the call runs without its tools, which the call report says.
-	mcpFailed := tools.MCPServerNames(req.Extensions.MCPConfig)
+	// The call's MCP servers (SPEC §5.3): only their allowlisted tools are offered, as function
+	// tools without strict (their schemas are the servers' own), and a server that does not start
+	// is reported, the call going on without it.
+	session := mcp.Start(ctx, req.Extensions.MCPConfig, req.Extensions.MCPTools, req.WorkingDir, execution.ScrubbedEnv())
+	defer session.Close()
+	mcpFailed := session.Failed
+	for _, t := range session.Tools {
+		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: &notStrict})
+	}
+	offersTools := set != nil || len(session.Tools) > 0
 
 	start := time.Now()
 	var usage *domain.Usage
@@ -241,7 +254,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			}
 			return result(), nil
 		}
-		if set == nil {
+		if !offersTools {
 			return result(), call.failure(apperr.FailureAPI, "the model called a tool the call did not offer", time.Since(start), nil)
 		}
 		// The response's items go back unchanged (reasoning items carry their encrypted content),
@@ -266,7 +279,16 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 				r.Input = append(r.Input, applyPatch(set, oc))
 				continue
 			}
-			out, isErr := set.Call(ctx, oc.Name, json.RawMessage(oc.Arguments))
+			var out string
+			var isErr bool
+			switch {
+			case session.Has(oc.Name):
+				out, isErr = session.Call(ctx, oc.Name, json.RawMessage(oc.Arguments))
+			case set != nil:
+				out, isErr = set.Call(ctx, oc.Name, json.RawMessage(oc.Arguments))
+			default:
+				out, isErr = fmt.Sprintf("there is no tool %q", oc.Name), true
+			}
 			if isErr {
 				out = "error: " + out
 			}
@@ -277,6 +299,9 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		}
 	}
 }
+
+// strict and notStrict are functionTool.Strict's two values.
+var strict, notStrict = true, false
 
 // maxTurns is the backstop of SPEC §5: execution.timeout bounds a call, this bounds its responses.
 const maxTurns = 500
@@ -357,7 +382,10 @@ func onText(req provider.Request) func(string) {
 // with a message the model can act on.
 func applyPatch(set *tools.Set, oc outputCall) applyPatchOutput {
 	out := applyPatchOutput{Type: "apply_patch_call_output", CallID: oc.CallID, Status: "completed"}
-	root := set.Root()
+	var root *tools.Root
+	if set != nil {
+		root = set.Root()
+	}
 	if root == nil {
 		out.Status, out.Output = "failed", "apply_patch is not offered to this call"
 		return out
@@ -386,7 +414,7 @@ func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
 	}
 	read := tools.ReadTools(root)
 	for _, t := range read {
-		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: true})
+		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: &strict})
 	}
 	r.Instructions = instructionsRead
 	set := tools.NewSet(read)

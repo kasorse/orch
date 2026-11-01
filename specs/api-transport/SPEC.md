@@ -90,7 +90,8 @@ The org layer (`/etc/orchestrator/org.yaml`) has no providers section and gets n
 internal/provider/httpapi     shared: SSE reader, retries, redaction, no redirects, cost, the model check
 internal/provider/anthropic   the Messages API wire (unexported types), the claude Client for transport api
 internal/provider/openai      the Responses API wire (unexported types), the codex Client for transport api
-internal/provider/tools       the Go tools and their confinement (§5), the MCP stdio client, skills
+internal/provider/tools       the Go tools and their confinement (§5), skills
+internal/provider/mcp         the MCP stdio client (§5.3): it runs commands, so it is not in tools
 ```
 
 Each new package imports only `domain`, `apperr`, `provider` (the interfaces), `projectctx`

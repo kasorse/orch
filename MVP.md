@@ -3348,8 +3348,14 @@ human sees and confirms between steps.
   `prompt_cache_key` (from the provider, model and authority, nothing per run), and with
   `store: false` resends every item of each response unchanged - its reasoning with
   `reasoning.encrypted_content` - so each request begins with the whole previous one. Only calls
-  with tools get any of this. MCP servers are not started yet (they are recorded in
-  `call.mcp_failed`). codex supports `web` too, with the server's `web_search` under the same
+  with tools get any of this. The client starts the stdio MCP servers of the call's
+  `--mcp-config` document itself (`internal/provider/mcp`: argv only, the working directory as
+  cwd, `execution.ScrubbedEnv()` plus the server's own `env`), offers only the tools
+  `Extensions.MCPTools` allowlists, under their `mcp__<server>__<tool>` names, and stops every
+  server when the call ends; so the orchestrator's own `orch` verify server reaches an implement
+  over the API transport as it does over the CLI (both clients are `provider.MCPSupporter`). A
+  server that does not start or answer, and a URL server (no HTTP transport for MCP), is in
+  `call.mcp_failed` and the call goes on without it. codex supports `web` too, with the server's `web_search` under the same
   `providers.codex.web_tools` rule, so research can run on codex for the first time (the codex
   CLI never could). Both support `edit`: claude gets Anthropic's text editor
   (`text_editor_20250728`: view, create, str_replace with exactly one match, insert; `undo_edit`

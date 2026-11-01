@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"slices"
 )
 
 // Set is the tools one call offers, by name, and the root apply_patch writes in when the call
@@ -113,24 +112,4 @@ func Label(name string, input json.RawMessage) string {
 		}
 	}
 	return label
-}
-
-// MCPServerNames are the servers an MCP config document ({"mcpServers": {...}}) names, sorted;
-// nil for none, and a single "mcp-config" for a document that is not one.
-func MCPServerNames(doc string) []string {
-	if doc == "" {
-		return nil
-	}
-	var cfg struct {
-		Servers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if json.Unmarshal([]byte(doc), &cfg) != nil {
-		return []string{"mcp-config"}
-	}
-	names := make([]string, 0, len(cfg.Servers))
-	for name := range cfg.Servers {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
 }

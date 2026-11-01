@@ -23,8 +23,10 @@ import (
 
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
+	"orchestrator/internal/execution"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/httpapi"
+	"orchestrator/internal/provider/mcp"
 	"orchestrator/internal/provider/tools"
 )
 
@@ -132,6 +134,10 @@ func (c *Client) ReportsCost(model string) bool {
 	return ok
 }
 
+// SupportsMCP is true: the client starts the servers of Extensions.MCPConfig itself (SPEC §5.3),
+// so action gives an implement the verify server. It makes *Client a provider.MCPSupporter.
+func (c *Client) SupportsMCP() bool { return true }
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	if !c.Supports(req.Authority) {
 		return provider.Result{}, &apperr.AuthorityError{
@@ -151,9 +157,15 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	if err != nil {
 		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
 	}
-	// Until the adapter speaks MCP (AT11), a configured server is reported as one that did not
-	// start: the call runs without its tools, which the call report says.
-	mcpFailed := tools.MCPServerNames(req.Extensions.MCPConfig)
+	// The call's MCP servers (SPEC §5.3): only their allowlisted tools are offered, and a server
+	// that does not start is reported, the call going on without it.
+	session := mcp.Start(ctx, req.Extensions.MCPConfig, req.Extensions.MCPTools, req.WorkingDir, execution.ScrubbedEnv())
+	defer session.Close()
+	mcpFailed := session.Failed
+	for _, t := range session.Tools {
+		r.Tools = append(r.Tools, clientTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
+	}
+	offersTools := toolset != nil || len(session.Tools) > 0
 
 	start := time.Now()
 	var usage domain.Usage
@@ -178,7 +190,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		if n == maxTurns {
 			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("the call reached %d model turns", maxTurns), time.Since(start), nil)
 		}
-		body, err := marshal(r, toolset != nil)
+		body, err := marshal(r, offersTools)
 		if err != nil {
 			return provider.Result{}, fmt.Errorf("claude API request: %w", err)
 		}
@@ -250,10 +262,10 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			r.Messages = append(r.Messages, message{Role: "assistant", Content: blocksOf(t.blocks)})
 			continue
 		case "tool_use":
-			if toolset == nil {
+			if !offersTools {
 				return result(), call.failure(apperr.FailureAPI, "the model asked for a tool the call did not offer", time.Since(start), nil)
 			}
-			results := runTools(ctx, t.blocks, toolset, req, tools)
+			results := runTools(ctx, t.blocks, toolset, session, req, tools)
 			if ctx.Err() != nil {
 				usage.Partial = true
 				return result(), call.failure(httpapi.Kind(ctx.Err()), ctx.Err().Error(), time.Since(start), ctx.Err())
@@ -369,7 +381,7 @@ func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
 // runTools runs the tool_use blocks of one response in order and returns their results, every
 // call answered, a refused or unknown one as is_error (SPEC §4.1). counts gets each call by its
 // CLI name; Activity and Stream are told what runs.
-func runTools(ctx context.Context, blocks []map[string]any, set *tools.Set, req provider.Request, counts map[string]int) []any {
+func runTools(ctx context.Context, blocks []map[string]any, set *tools.Set, session *mcp.Session, req provider.Request, counts map[string]int) []any {
 	var results []any
 	for _, b := range blocks {
 		if b["type"] != "tool_use" {
@@ -385,7 +397,16 @@ func runTools(ctx context.Context, blocks []map[string]any, set *tools.Set, req 
 			_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
 		}
 		counts[tools.Display(name, input)]++
-		out, isErr := set.Call(ctx, name, input)
+		var out string
+		var isErr bool
+		switch {
+		case session.Has(name):
+			out, isErr = session.Call(ctx, name, input)
+		case set != nil:
+			out, isErr = set.Call(ctx, name, input)
+		default:
+			out, isErr = fmt.Sprintf("there is no tool %q", name), true
+		}
 		results = append(results, &toolResult{Type: "tool_result", ToolUseID: str(b["id"]), Content: out, IsError: isErr})
 	}
 	return results

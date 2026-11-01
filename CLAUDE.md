@@ -77,7 +77,9 @@ by a test); `app` swaps them into the registry after `Validate`, so routing is u
 repository tools are `internal/provider/tools` (`Root` confines every path to the working
 directory: no absolute path, no `..`, no symlink out, the deny list on every segment, nothing
 under `.git`, no write under `.claude` or through a symlink); it imports only `projectctx` and
-the standard library, never `os/exec` or `net` (enforced by a test). Jev's
+the standard library, never `os/exec` or `net` (enforced by a test). Their MCP client is
+`internal/provider/mcp` (stdio servers of the call's `--mcp-config`, standard library only):
+`orch` reaches an implement over the API transport through it, unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
 are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).

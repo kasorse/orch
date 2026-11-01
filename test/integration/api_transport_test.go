@@ -30,9 +30,10 @@ type fakeAPI struct {
 	actions   []string
 	keys      []string
 	responses map[string]string
-	// first, when it has the action, is the raw stream of the action's first request (one
-	// message, no tool result yet): a tool call, so the client's loop runs.
-	first map[string]string
+	// turns, when it has the action, are the raw streams of the action's first responses, by
+	// turn (the Messages API's request with 1, 3, 5... messages): tool calls, so the client's loop
+	// runs; after them the action gets its response.
+	turns map[string][]string
 }
 
 func startFakeAPI(t *testing.T, served []string, responses map[string]string, path, keyHeader string, prompt func([]byte) (string, int), stream func(w io.Writer, model, text string)) *fakeAPI {
@@ -64,10 +65,10 @@ func startFakeAPI(t *testing.T, served []string, responses map[string]string, pa
 			f.mu.Unlock()
 			w.Header().Set("Content-Type", "text/event-stream")
 			f.mu.Lock()
-			first, isFirst := f.first[action]
+			turns := f.turns[action]
 			f.mu.Unlock()
-			if isFirst && messages == 1 {
-				fmt.Fprint(w, first)
+			if turn := (messages - 1) / 2; turn < len(turns) {
+				fmt.Fprint(w, turns[turn])
 				return
 			}
 			answer, ok := f.responses[action]
@@ -286,9 +287,14 @@ func TestScenario70_APITransport_ClaudeDecisionCallsOverHTTP(t *testing.T) {
 // to path.
 func editorCall(path, fileText string) string {
 	input, _ := json.Marshal(map[string]string{"command": "create", "path": path, "file_text": fileText})
-	partial, _ := json.Marshal(string(input))
+	return toolUseStream("str_replace_based_edit_tool", string(input))
+}
+
+// toolUseStream is a Messages API stream whose one response calls tool with input.
+func toolUseStream(tool, input string) string {
+	partial, _ := json.Marshal(input)
 	return "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"model\":\"fake\",\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}\n\n" +
-		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"str_replace_based_edit_tool\",\"input\":{}}}\n\n" +
+		fmt.Sprintf("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":%q,\"input\":{}}}\n\n", tool) +
 		fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%s}}\n\n", partial) +
 		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
 		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":20}}\n\n" +
@@ -309,7 +315,7 @@ func TestScenario70_APITransport_WholeRunOverHTTP(t *testing.T) {
 		responses[k] = v
 	}
 	api := startMessagesAPI(t, []string{"fake"}, responses)
-	api.first = map[string]string{"implement": editorCall("fixture.go", fakeexec.FixedFixtureSource)}
+	api.turns = map[string][]string{"implement": {editorCall("fixture.go", fakeexec.FixedFixtureSource)}}
 	opts := defaultConfigOptions()
 	opts.providers.Decision = "claude"
 	opts.extraYAML = fmt.Sprintf("providers:\n  claude:\n    transport: api\n    base_url: %s\n", api.srv.URL)
@@ -337,4 +343,37 @@ func TestScenario70_APITransport_WholeRunOverHTTP(t *testing.T) {
 	if !strings.Contains(string(raw), `"Write": 1`) && !strings.Contains(string(raw), `"Write":1`) {
 		t.Errorf("run.json does not count the editor's write:\n%s", raw)
 	}
+}
+
+// The verify server over the API transport (SPEC §5.3): the client starts the orchestrator's own
+// MCP server for implement, the model's mcp__orch__run_tests reaches it, and the call is recorded
+// in verify_calls as with the CLI.
+func TestScenario70_APITransport_VerifyOverMCP(t *testing.T) {
+	repoDir := fakeexec.InitGitFixture(t)
+	clearAuthEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", authKey())
+	api := startMessagesAPI(t, []string{"fake"}, map[string]string{"implement": implementResponse})
+	api.turns = map[string][]string{"implement": {
+		editorCall("fixture.go", fakeexec.FixedFixtureSource),
+		toolUseStream("mcp__orch__run_tests", `{}`),
+	}}
+	v := newVerifyRun(t, repoDir, "", func(o *configOptions) {
+		o.extraYAML = fmt.Sprintf("providers:\n  claude:\n    transport: api\n    base_url: %s\n", api.srv.URL)
+	})
+	t.Setenv("FAKE_IMPLEMENT_FIX_ON_CALL", "")
+
+	stdout, stderr, err := runOrchestrator(t, repoDir, v.cfg, append(implementAndTest, "fix Add in fixture.go")...)
+	mustSucceed(t, stdout, stderr, err)
+	run := loadQL(t, repoDir)
+	if run.Status != "completed" {
+		t.Fatalf("status = %s\nstdout:\n%s", run.Status, stdout)
+	}
+	got := run.Executions[0].VerifyCalls
+	if len(got) != 1 || got[0] != (qlVerifyCall{Tool: "run_tests", ExitCode: 0, Success: true}) {
+		t.Errorf("verify_calls = %+v, want one green run_tests", got)
+	}
+	if actions, _ := api.calls(); !equalStrings(actions, []string{"implement", "implement", "implement"}) {
+		t.Errorf("API calls = %v", actions)
+	}
+	assertContains(t, "the step's verify log", runDirFile(t, repoDir, "logs/000-implement.verify-1.stdout.log"), "ok")
 }

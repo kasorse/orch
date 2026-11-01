@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **in progress** (2026-11-01): AT01–AT10 done (10 of 14): a whole run can go over HTTP. Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; investigate and review since AT07/AT08, implement since AT10. The owner's
+Status: **in progress** (2026-11-01): AT01–AT11 done (11 of 14): a whole run can go over HTTP, verify included. Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; investigate and review since AT07/AT08, implement since AT10. The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |
@@ -42,7 +42,7 @@ as they are.
 | [x] | [AT08](tasks/TASK-AT08-openai-loop.md) | OpenAI tool loop, encrypted reasoning, authority `read` | M | AT04, AT06 | 2 |
 | [x] | [AT09](tasks/TASK-AT09-web.md) | authority `web`: server web tools, `web_tools` | S | AT07, AT08 | 2 |
 | [x] | [AT10](tasks/TASK-AT10-edit.md) | authority `edit`: the text editor tool, `apply_patch` (V4A) | L | AT07, AT08 | 3 |
-| [ ] | [AT11](tasks/TASK-AT11-mcp.md) | MCP stdio client: `orch` verify and `extensions.mcp` | M | AT07, AT08 | 3 |
+| [x] | [AT11](tasks/TASK-AT11-mcp.md) | MCP stdio client: `orch` verify and `extensions.mcp` | M | AT07, AT08 | 3 |
 | [ ] | [AT12](tasks/TASK-AT12-skills.md) | skills under `user_settings`: discovery and the `skill` tool | M | AT07, AT08 | 3 |
 | [ ] | [AT13](tasks/TASK-AT13-live.md) | live checks: first-party endpoints and the gateway (operator) | S | AT09–AT12 | 3 |
 | [ ] | [AT14](tasks/TASK-AT14-documentation.md) | MVP.md §52, the summary sections | S | all | 3 |

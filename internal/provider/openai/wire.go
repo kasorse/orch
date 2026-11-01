@@ -30,7 +30,8 @@ type functionTool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
-	Strict      bool           `json:"strict"`
+	// Strict is always sent: the Responses API takes an absent strict as true.
+	Strict *bool `json:"strict"`
 }
 
 // webSearchTool is the server's web search (SPEC §5.1, web).
