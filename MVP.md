@@ -1874,6 +1874,13 @@ been persisted (see §21) - it points at the exact file to read for output longe
 the message's 4000-byte tail. A call that produced no output (e.g. killed by a timeout
 before it printed anything) leaves no log file, so the line is omitted.
 
+A call over the API transport (`providers.<p>.transport: api`, specs/api-transport) has no
+command: its `ProviderError` names `endpoint: POST <base_url>/v1/messages` (never a key or a
+query) instead of `command:` and `exit code:`, adds `http status: N` when the API answered with
+an error status (a CLI error that reported one shows the line too), and uses the kind `api` ("the
+provider's HTTP API refused or failed the request") for a refusal, a cut answer, an error in the
+stream or an error status that is neither `auth` nor `rate_limit`.
+
 A timeout names the limit that actually fired: `actions.<name>.timeout` or
 `decision.timeout` when that per-call limit was tighter than what was left of the run,
 otherwise `execution.timeout`.

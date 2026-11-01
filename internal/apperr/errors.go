@@ -54,6 +54,7 @@ const (
 	FailureCancelled FailureKind = "cancelled"  // SIGINT/SIGTERM
 	FailureAuth      FailureKind = "auth"       // the CLI did not use the run's credential, or it was refused
 	FailureRateLimit FailureKind = "rate_limit" // the subscription's usage limit refused the call
+	FailureAPI       FailureKind = "api"        // the HTTP API refused or failed the request (transport: api)
 )
 
 var failureDescriptions = map[FailureKind]string{
@@ -63,6 +64,7 @@ var failureDescriptions = map[FailureKind]string{
 	FailureCancelled: "cancelled (interrupted)",
 	FailureAuth:      "auth (the CLI did not use the run's credential, or the credential was refused)",
 	FailureRateLimit: "rate_limit (the account's usage limit was reached)",
+	FailureAPI:       "api (the provider's HTTP API refused or failed the request)",
 }
 
 // ProviderError carries the actionable context spelled out in the spec: provider,
@@ -71,10 +73,13 @@ var failureDescriptions = map[FailureKind]string{
 // argument redacted by the caller (the provider adapter, which alone knows argv shape);
 // this package only renders whatever it is given.
 type ProviderError struct {
-	Provider   string
-	Action     string
-	Model      string
-	Kind       FailureKind
+	Provider string
+	Action   string
+	Model    string
+	Kind     FailureKind
+	// Endpoint is the request of an API-transport call ("POST https://api.anthropic.com/v1/
+	// messages"), never with a key or a query; such a call has no Executable or exit code.
+	Endpoint   string
 	Executable string
 	Args       []string
 	// PromptBytes is the size of a prompt the adapter passed on stdin; the message shows
@@ -127,6 +132,9 @@ func (e *ProviderError) Error() string {
 	if e.Detail != "" {
 		fmt.Fprintf(&b, "detail: %s\n", e.Detail)
 	}
+	if e.Endpoint != "" {
+		fmt.Fprintf(&b, "endpoint: %s\n", e.Endpoint)
+	}
 	if e.Executable != "" {
 		fmt.Fprintf(&b, "command: %s\n", commandLine(e.Executable, e.Args))
 	}
@@ -136,7 +144,12 @@ func (e *ProviderError) Error() string {
 	if e.WorkingDir != "" {
 		fmt.Fprintf(&b, "working dir: %s\n", e.WorkingDir)
 	}
-	fmt.Fprintf(&b, "exit code: %d\n", e.ExitCode)
+	if e.APIStatus != 0 {
+		fmt.Fprintf(&b, "http status: %d\n", e.APIStatus)
+	}
+	if e.Endpoint == "" {
+		fmt.Fprintf(&b, "exit code: %d\n", e.ExitCode)
+	}
 	if e.Duration > 0 {
 		fmt.Fprintf(&b, "duration: %s\n", e.Duration.Round(time.Millisecond*100))
 	}
