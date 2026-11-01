@@ -118,6 +118,16 @@ func ClaudeModelVar(name string) bool {
 		strings.HasPrefix(name, "ANTHROPIC_DEFAULT_") && strings.HasSuffix(name, "_MODEL")
 }
 
+// claudeModelAliases are the model names the claude CLI resolves itself; the HTTP API knows
+// only full IDs (specs/api-transport/SPEC.md §2 item 4).
+var claudeModelAliases = []string{"sonnet", "opus", "haiku", "fable", "opusplan", "default"}
+
+// ClaudeModelAlias reports whether model is a claude CLI alias, with or without "[1m]".
+func ClaudeModelAlias(model string) bool {
+	m := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(model)), "[1m]")
+	return slices.Contains(claudeModelAliases, m)
+}
+
 // Line is the console line that says which credential the run uses.
 func (a ClaudeAuth) Line() string {
 	auto := a.Requested == ClaudeAuthAuto

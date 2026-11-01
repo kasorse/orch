@@ -1103,11 +1103,11 @@ Codex подключён через `codex exec`: `providers.codex.auth` (`auto 
 процессу через `CODEX_API_KEY`; login режим использует сохранённую подписку Codex. API
 вызов остаётся отдельной задачей.
 
-### [ ] P13. Codex через API из Go — P3 · L
-Заменить вызов `codex exec` на прямой Responses API клиент. Сохранить тот же контракт
-провайдера, авторизацию `api/login`, потоковый вывод, лимиты, обработку ошибок и
-authority. Отдельно определить, где хранится OAuth состояние подписки и как Go-клиент
-будет выполнять инструменты в репозитории с теми же ограничениями.
+### [~] P13. Claude и Codex через HTTP API из Go — P3 · L
+Спека: `specs/api-transport/` (AT01–AT14, черновик 2026-11-01). `providers.<p>.transport: api`
+вызывает Messages API (claude) и Responses API (codex) напрямую, без CLI; `base_url` — шлюз
+LiteLLM (к Bedrock). Цикл инструментов в Go с ограничениями §38 (SPEC §5), MCP-клиент в
+адаптере, скиллы через инструмент `skill`. Login-режим остаётся только на CLI.
 
 ### [x] P11. Claude по API-ключу или по логину CLI — P1 · M
 Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из

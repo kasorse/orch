@@ -4871,6 +4871,19 @@ flags. Every message names the variable, never the value. With the org's `allowe
 `ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_DEFAULT_*_MODEL` must be on the list, like a
 route's model.
 
+`providers.claude.transport` and `providers.codex.transport` (`cli`, the default, or `api`;
+specs/api-transport) choose how the calls are made: the CLI, or the provider's HTTP API. `api`
+needs the `api` mode: a resolution that ends in `login` (`--claude-auth login`, or `auto` without
+a key) is a config error naming the transport. Under `api`, `base_url` (https, or plain http only
+for localhost; no userinfo, query or fragment; never a secret), `web_tools` (default true without
+`base_url`, false with it) and `prices` (USD per million tokens by full model ID: `input` and
+`output` required, `cache_read`/`cache_write` optional, finite and ≥ 0) are accepted; with `cli`
+each of them is an error, since the CLI would ignore it. Every claude route of a claude on `api`
+must name a full model ID (a CLI alias - `sonnet`, `opus`, `haiku`, `fable`, `opusplan`,
+`default`, with or without `[1m]` - is refused, naming the route), and `api_env`, which only
+configures the CLI, is refused. Nothing calls the API yet: the clients are later tasks of
+specs/api-transport.
+
 `--claude-auth auto|api|login` is valid with `run`, `resume`, `review`, `validate`, `story run`
 (passed to each child) and `jira listen` (resolved at its start, passed to each child) in any position,
 `--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
@@ -4958,12 +4971,12 @@ name are recorded in `run.json` and each resume, never the key.
 
 Codex receives the prompt on stdin. Read and edit calls use `--sandbox read-only` and
 `--sandbox workspace-write` with `--ask-for-approval never`; `none` and `web` are refused
-because `codex exec` exposes its shell tool in those modes. A direct Codex API client is
-planned separately in TODO P13.
+because `codex exec` exposes its shell tool in those modes. A direct API client for claude and
+codex (`transport: api`, §46.2) is specified in specs/api-transport (TODO P13).
 
 ## 46.8 Not covered
 
-* A direct Codex API client in Go (TODO P13): it needs a change to §30.
+* The direct API clients in Go (TODO P13, specs/api-transport): they need a change to §30.
 * Gateway, Bedrock, Vertex and Foundry as modes of their own: they work under `login`.
 * An HTTP preflight of the key, a mode per action, and an org-layer floor for the mode.
 * `bench/` runs `claude` for its baseline itself with the operator's environment as is
