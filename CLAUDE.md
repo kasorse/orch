@@ -73,7 +73,11 @@ API transport (`providers.<p>.transport: api`, specs/api-transport) the Messages
 isolated in `internal/provider/anthropic` and the Responses API's in `internal/provider/openai`
 (unexported types), over the provider-neutral `internal/provider/httpapi` (retries, SSE, the
 key's redaction, cost, `GET /v1/models`; standard library, `domain` and `apperr` only, enforced
-by a test); `app` swaps them into the registry after `Validate`, so routing is unchanged. Jev's
+by a test); `app` swaps them into the registry after `Validate`, so routing is unchanged. Their
+repository tools are `internal/provider/tools` (`Root` confines every path to the working
+directory: no absolute path, no `..`, no symlink out, the deny list on every segment, nothing
+under `.git`, no write under `.claude` or through a symlink); it imports only `projectctx` and
+the standard library, never `os/exec` or `net` (enforced by a test). Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
 are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
