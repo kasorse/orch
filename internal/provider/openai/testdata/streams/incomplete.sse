@@ -1,0 +1,6 @@
+event: response.created
+data: {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "in_progress", "output": []}}
+
+event: response.incomplete
+data: {"type": "response.incomplete", "sequence_number": 1, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "incomplete", "output": [{"type": "reasoning", "id": "rs_1", "summary": []}], "usage": {"input_tokens": 2000, "input_tokens_details": {"cached_tokens": 1500, "cache_write_tokens": 0}, "output_tokens": 300, "output_tokens_details": {"reasoning_tokens": 200}, "total_tokens": 2300}, "incomplete_details": {"reason": "max_output_tokens"}}}
+

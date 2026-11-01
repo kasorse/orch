@@ -1,0 +1,6 @@
+event: response.created
+data: {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "in_progress", "output": []}}
+
+event: response.completed
+data: {"type": "response.completed", "sequence_number": 1, "response": {"id": "x"}}
+
