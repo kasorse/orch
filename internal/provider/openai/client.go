@@ -42,20 +42,22 @@ const instructionsNone = "You answer one request from an automated orchestrator.
 
 // Client is the codex provider over HTTP. Until SetKey it refuses every call.
 type Client struct {
-	mu     sync.RWMutex
-	set    bool
-	ep     httpapi.Endpoint
-	prices map[string]httpapi.Price
+	mu       sync.RWMutex
+	set      bool
+	ep       httpapi.Endpoint
+	prices   map[string]httpapi.Price
+	webTools bool
 }
 
 // New returns the client of the endpoint (baseURL "" is DefaultBaseURL) with the operator's
 // prices (providers.codex.prices), so ReportsCost can answer in the fail-fast chain before the
-// key is read. Until SetKey it refuses every call.
-func New(baseURL string, prices map[string]httpapi.Price) *Client {
+// key is read, and whether web calls get the server's web search (providers.codex.web_tools).
+// Until SetKey it refuses every call.
+func New(baseURL string, webTools bool, prices map[string]httpapi.Price) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	return &Client{ep: httpapi.Endpoint{BaseURL: strings.TrimRight(baseURL, "/")}, prices: prices}
+	return &Client{ep: httpapi.Endpoint{BaseURL: strings.TrimRight(baseURL, "/")}, prices: prices, webTools: webTools}
 }
 
 // SetKey fixes the key of every later call. It is sent only as a bearer token and redacted from
@@ -82,10 +84,10 @@ func (c *Client) Endpoint() (httpapi.Endpoint, error) {
 	return ep, err
 }
 
-// Supports is true for none and read (SPEC §5.1): none gets no tools, read the confined read
-// tools. Web and edit wait for their tools.
+// Supports is true for none, web and read (SPEC §5.1): none gets no tools, web only the server's
+// web search or none (§6), read the confined read tools. Edit waits for its tools.
 func (c *Client) Supports(a domain.Authority) bool {
-	return a == domain.AuthorityNone || a == domain.AuthorityRead
+	return a == domain.AuthorityNone || a == domain.AuthorityWeb || a == domain.AuthorityRead
 }
 
 // ReportsCost reports whether a call to model gets a cost: a price in providers.codex.prices or
@@ -102,14 +104,14 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		return provider.Result{}, &apperr.AuthorityError{
 			Provider:  string(provider.Codex),
 			Authority: string(req.Authority),
-			Reason:    "The codex API transport has no web or edit tools yet (specs/api-transport/SPEC.md §10); route this action elsewhere.",
+			Reason:    "The codex API transport has no edit tools yet (specs/api-transport/SPEC.md §10); route this action elsewhere.",
 		}
 	}
 	ep, prices, err := c.endpoint()
 	if err != nil {
 		return provider.Result{}, err
 	}
-	r := buildRequest(req)
+	r := buildRequest(req, c.webTools)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + responsesPath}
 	set, err := repositoryTools(req, &r)
 	if err != nil {
@@ -132,6 +134,9 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			res.Usage, cost = &u, u.CostUSD
 		}
 		res.Call = &domain.CallReport{Models: []domain.ModelUse{{Model: model, CostUSD: cost}}, APIMS: time.Since(start).Milliseconds(), MCPFailed: mcpFailed}
+		if offersWebSearch(r.Tools) {
+			res.Call.WebTools = []string{"WebSearch"}
+		}
 		if len(counts) > 0 {
 			res.Call.Tools = counts
 		}
@@ -150,7 +155,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		if err != nil {
 			return result(), call.fromHTTP(err, time.Since(start))
 		}
-		s := &stream{}
+		s := &stream{onItem: onSearch(req)}
 		streamErr := readStream(resp.Body, s, onText(req))
 		resp.Body.Close()
 
@@ -177,9 +182,12 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 				}
 				usage.Add(u)
 			}
-			out, fc, err := parseOutput(f.Output)
+			out, fc, searches, err := parseOutput(f.Output)
 			if err != nil && streamErr == nil {
 				streamErr = fmt.Errorf("the response is not valid: %w", err)
+			}
+			if searches > 0 {
+				counts["WebSearch"] += searches
 			}
 			if out != "" {
 				texts = append(texts, out)
@@ -266,6 +274,51 @@ const instructionsRead = "You work for an automated orchestrator on one reposito
 	"grep and glob; every path is relative to the repository root. You cannot run commands, change files " +
 	"or reach the network. Answer exactly in the form the request asks for."
 
+// instructionsWeb and instructionsWebOff are the fixed instructions of a web call with and
+// without the server's web search (providers.codex.web_tools, SPEC §6).
+const (
+	instructionsWeb = "You answer one request from an automated orchestrator. You can search the web with " +
+		"your tool; you have no access to any repository or file. Answer exactly in the form the request asks for."
+	instructionsWebOff = "You answer one request from an automated orchestrator. You have no tools and no web " +
+		"access: answer from what you know, say where your knowledge may be out of date, and answer " +
+		"exactly in the form the request asks for."
+)
+
+// onSearch tells Activity and Stream what a finished web search looked for.
+func onSearch(req provider.Request) func(json.RawMessage) {
+	if req.Stream == nil && req.Activity == nil {
+		return nil
+	}
+	return func(raw json.RawMessage) {
+		var item struct {
+			Type   string `json:"type"`
+			Action struct {
+				Query string `json:"query"`
+				URL   string `json:"url"`
+			} `json:"action"`
+		}
+		if json.Unmarshal(raw, &item) != nil || item.Type != "web_search_call" {
+			return
+		}
+		what := strings.TrimSpace("WebSearch " + item.Action.Query + item.Action.URL)
+		if req.Activity != nil {
+			req.Activity(what)
+		}
+		if req.Stream != nil {
+			_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
+		}
+	}
+}
+
+func offersWebSearch(tools []any) bool {
+	for _, t := range tools {
+		if _, ok := t.(webSearchTool); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // onText tells Activity once per response that the model writes, and streams the text.
 func onText(req provider.Request) func(string) {
 	if req.Stream == nil && req.Activity == nil {
@@ -309,12 +362,19 @@ func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
 	return tools.NewSet(read), nil
 }
 
-func buildRequest(req provider.Request) request {
+func buildRequest(req provider.Request, webTools bool) request {
 	r := request{
 		Model:        req.Model,
 		Instructions: instructionsNone,
 		Input:        []any{inputMessage{Role: "user", Content: []inputText{{Type: "input_text", Text: req.Prompt}}}},
 		Stream:       true,
+	}
+	if req.Authority == domain.AuthorityWeb {
+		r.Instructions = instructionsWebOff
+		if webTools {
+			r.Instructions = instructionsWeb
+			r.Tools = []any{webSearchTool{Type: "web_search"}}
+		}
 	}
 	if req.Effort != "" {
 		r.Reasoning = &reasoning{Effort: req.Effort}

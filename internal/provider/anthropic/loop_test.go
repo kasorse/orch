@@ -177,3 +177,22 @@ func TestLoop_NoCacheWithoutTools(t *testing.T) {
 		t.Errorf("a call without tools carries a cache breakpoint: %s", f.bodies[0])
 	}
 }
+
+// No call gets both repository access and the network (SPEC §5.1): only web carries web tools.
+func TestWebToolsOnlyOnWeb(t *testing.T) {
+	for _, a := range []domain.Authority{domain.AuthorityNone, domain.AuthorityRead, domain.AuthorityWeb} {
+		f := newFake(t, answer{stream: stream("end_turn", 0, "ok")})
+		req := readRequest(t)
+		req.Authority = a
+		if _, err := client(f, nil).Execute(context.Background(), req); err != nil {
+			t.Fatalf("%s: %v", a, err)
+		}
+		web := bytes.Contains(f.bodies[0], []byte(`"web_search"`)) || bytes.Contains(f.bodies[0], []byte(`"web_fetch"`))
+		if web != (a == domain.AuthorityWeb) {
+			t.Errorf("%s: carries web tools = %v", a, web)
+		}
+		if a == domain.AuthorityWeb && bytes.Contains(f.bodies[0], []byte(`"read_file"`)) {
+			t.Errorf("a web call carries a repository tool")
+		}
+	}
+}

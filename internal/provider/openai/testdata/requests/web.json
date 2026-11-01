@@ -1,0 +1,22 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You answer one request from an automated orchestrator. You can search the web with your tool; you have no access to any repository or file. Answer exactly in the form the request asks for.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "ACTION: research\nWhat is new in Go 1.26?"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "web_search"
+    }
+  ],
+  "store": false,
+  "stream": true
+}

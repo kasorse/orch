@@ -141,8 +141,8 @@ var apiDecisionResponses = map[string]string{
 // codexKey is a stand-in OpenAI key, assembled at run time.
 func codexKey() string { return strings.Join([]string{"at05", "stand-in", "key"}, "-") }
 
-// apiTransportRun prepares a run whose translator, decision provider and read steps (investigate,
-// review) are codex over the API at api; implement and research stay on the claude CLI.
+// apiTransportRun prepares a run whose translator, decision provider, research and read steps
+// (investigate, review) are codex over the API at api; implement stays on the claude CLI.
 func apiTransportRun(t *testing.T, repoDir string, api *fakeAPI, mutate ...func(*configOptions)) (cfg, invocationsLog string) {
 	t.Helper()
 	clearAuthEnv(t)
@@ -151,7 +151,7 @@ func apiTransportRun(t *testing.T, repoDir string, api *fakeAPI, mutate ...func(
 	invocationsLog, _ = decisionEnv(t, repoDir)
 	opts := defaultConfigOptions()
 	opts.providers.Translation, opts.providers.Decision = "codex", "codex"
-	opts.providers.Investigate, opts.providers.Review = "codex", "codex"
+	opts.providers.Investigate, opts.providers.Review, opts.providers.Research = "codex", "codex", "codex"
 	opts.extraYAML = fmt.Sprintf("providers:\n  codex:\n    transport: api\n    base_url: %s\n", api.srv.URL)
 	for _, m := range mutate {
 		m(&opts)

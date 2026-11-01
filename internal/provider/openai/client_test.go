@@ -76,7 +76,7 @@ func newFake(t *testing.T, answers ...answer) *fake {
 }
 
 func client(f *fake, prefix string, prices map[string]httpapi.Price) *Client {
-	c := New(f.srv.URL+prefix, prices)
+	c := New(f.srv.URL+prefix, true, prices)
 	c.SetKey(testKey)
 	c.ep.Backoff = time.Millisecond
 	return c
@@ -239,7 +239,7 @@ func TestExecute_OperatorPrice(t *testing.T) {
 }
 
 func TestExecute_Refusals(t *testing.T) {
-	for _, a := range []domain.Authority{domain.AuthorityEdit, domain.AuthorityWeb, ""} {
+	for _, a := range []domain.Authority{domain.AuthorityEdit, ""} {
 		req := noneRequest()
 		req.Authority = a
 		_, err := client(newFake(t, answer{stream: "plain.sse"}), "", nil).Execute(context.Background(), req)
@@ -249,10 +249,10 @@ func TestExecute_Refusals(t *testing.T) {
 		}
 	}
 	var ce *apperr.ConfigError
-	if _, err := New("", nil).Execute(context.Background(), noneRequest()); !errors.As(err, &ce) {
+	if _, err := New("", true, nil).Execute(context.Background(), noneRequest()); !errors.As(err, &ce) {
 		t.Errorf("without SetKey: want a ConfigError, got %v", err)
 	}
-	c := New("", nil)
+	c := New("", true, nil)
 	c.SetKey(testKey)
 	if ep, _ := c.Endpoint(); ep.BaseURL != DefaultBaseURL {
 		t.Errorf("BaseURL = %q", ep.BaseURL)

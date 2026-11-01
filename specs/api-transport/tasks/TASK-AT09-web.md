@@ -43,3 +43,14 @@ on research (AT05 As built). Built in `internal/provider/anthropic`:
 - A `web_search_tool_result` holding an error object is carried as it came, not a failure.
 - Older models (before Opus/Sonnet 4.6) need the basic tool variants; they are not chosen
   automatically: such a route gets a 400 from the API. Left for codex: OpenAI's `web_search`.
+
+## As built, codex (2026-11-01)
+
+- `openai.New(baseURL, webTools, prices)`; `Supports(web)`. With web tools the request offers
+  `{"type": "web_search"}` and `instructionsWeb`; without, no tools and `instructionsWebOff`.
+- The server runs its searches inside the one response, so there is no pause to resume: the loop
+  of AT08 ends at the response without function calls. `web_search_call` items count as `WebSearch`
+  in `call.tools`; each finished one (`response.output_item.done`) is reported live as
+  `WebSearch <query>`. `call.web_tools` is `["WebSearch"]` when it was offered.
+- Both packages have a test over none, read and web: only web carries a web tool, and web carries
+  no repository tool. The codex integration scenario routes research to codex over HTTP.

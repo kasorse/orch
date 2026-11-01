@@ -976,7 +976,7 @@ func registerAPIClients(registry *provider.Registry, cfg config.Config) {
 		registry.Register(provider.Claude, anthropic.New(c.BaseURL, c.WebToolsOn(), apiPrices(c.Prices)))
 	}
 	if c := cfg.Providers.Codex; c.UsesAPI() {
-		registry.Register(provider.Codex, openai.New(c.BaseURL, apiPrices(c.Prices)))
+		registry.Register(provider.Codex, openai.New(c.BaseURL, c.WebToolsOn(), apiPrices(c.Prices)))
 	}
 }
 

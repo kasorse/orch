@@ -32,6 +32,11 @@ type functionTool struct {
 	Strict      bool           `json:"strict"`
 }
 
+// webSearchTool is the server's web search (SPEC §5.1, web).
+type webSearchTool struct {
+	Type string `json:"type"`
+}
+
 // functionCall is a function_call output item; functionCallOutput answers it.
 type functionCall struct {
 	CallID    string `json:"call_id"`
@@ -104,6 +109,8 @@ func (u wireUsage) domain() domain.Usage {
 // stream is what a call learns from its events: the terminal response, the model of
 // response.created (for a call cut off before the end) and an error event.
 type stream struct {
+	// onItem, when set, is told every finished output item (response.output_item.done).
+	onItem   func(json.RawMessage)
 	created  *response
 	final    *response
 	errEvent *struct {
@@ -140,6 +147,16 @@ func (s *stream) apply(data []byte, onText func(string)) error {
 		if onText != nil {
 			onText(*ev.Delta)
 		}
+	case "response.output_item.done":
+		var ev struct {
+			Item json.RawMessage `json:"item"`
+		}
+		if err := json.Unmarshal(data, &ev); err != nil || len(ev.Item) == 0 {
+			return fmt.Errorf("%s without an item", head.Type)
+		}
+		if s.onItem != nil {
+			s.onItem(ev.Item)
+		}
 	case "response.completed", "response.incomplete", "response.failed":
 		var ev struct {
 			Response *response `json:"response"`
@@ -165,10 +182,11 @@ func (s *stream) apply(data []byte, onText func(string)) error {
 }
 
 // parseOutput reads a response's items: the answer (the output_text parts of the message items,
-// joined) and the function calls, in order.
-func parseOutput(output []json.RawMessage) (string, []functionCall, error) {
+// joined), the function calls in order, and how many web searches the server ran.
+func parseOutput(output []json.RawMessage) (string, []functionCall, int, error) {
 	var out string
 	var calls []functionCall
+	searches := 0
 	for i, raw := range output {
 		var item struct {
 			Type    string `json:"type"`
@@ -179,7 +197,7 @@ func parseOutput(output []json.RawMessage) (string, []functionCall, error) {
 			functionCall
 		}
 		if err := json.Unmarshal(raw, &item); err != nil {
-			return "", nil, fmt.Errorf("output[%d] is not an item: %w", i, err)
+			return "", nil, 0, fmt.Errorf("output[%d] is not an item: %w", i, err)
 		}
 		switch item.Type {
 		case "message":
@@ -190,10 +208,12 @@ func parseOutput(output []json.RawMessage) (string, []functionCall, error) {
 			}
 		case "function_call":
 			if item.CallID == "" || item.Name == "" {
-				return "", nil, fmt.Errorf("output[%d] is a function_call without a call_id or a name", i)
+				return "", nil, 0, fmt.Errorf("output[%d] is a function_call without a call_id or a name", i)
 			}
 			calls = append(calls, item.functionCall)
+		case "web_search_call":
+			searches++
 		}
 	}
-	return out, calls, nil
+	return out, calls, searches, nil
 }

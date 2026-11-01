@@ -3349,8 +3349,10 @@ human sees and confirms between steps.
   `store: false` resends every item of each response unchanged - its reasoning with
   `reasoning.encrypted_content` - so each request begins with the whole previous one. Only calls
   with tools get any of this. MCP servers are not started yet (they are recorded in
-  `call.mcp_failed`). `edit`, and codex's `web`, are refused by `ValidateAuthorities` until their
-  tools exist. `call.web_tools` records the web tools a call
+  `call.mcp_failed`). codex supports `web` too, with the server's `web_search` under the same
+  `providers.codex.web_tools` rule, so research can run on codex for the first time (the codex
+  CLI never could). `edit` is refused by `ValidateAuthorities` until its tools exist. A `read`
+  call never carries a web tool, a `web` call never a repository tool. `call.web_tools` records the web tools a call
   offered; `call.tools` counts the tools by the CLI's names (Read, Grep, Glob, WebSearch). In place of the version check, `GET {base_url}/v1/models` must list every model the
   config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
