@@ -35,14 +35,14 @@ func (r *Registry) Supports(providerID string, a domain.Authority) bool {
 	return ok && client.Supports(a)
 }
 
-// ReportsCost reports whether the client registered for providerID reports a call's cost. An
-// unregistered provider, or one that is not a CostReporter, reports none. It makes *Registry a
-// config.CostChecker.
-func (r *Registry) ReportsCost(providerID string) bool {
+// ReportsCost reports whether the client registered for providerID reports the cost of a call to
+// model. An unregistered provider, or one that is not a CostReporter, reports none. It makes
+// *Registry a config.CostChecker.
+func (r *Registry) ReportsCost(providerID, model string) bool {
 	client, ok := r.clients[ID(providerID)]
 	if !ok {
 		return false
 	}
 	reporter, ok := client.(CostReporter)
-	return ok && reporter.ReportsCost()
+	return ok && reporter.ReportsCost(model)
 }

@@ -82,8 +82,8 @@ func newFake(t *testing.T, answers ...answer) *fake {
 }
 
 func client(f *fake, prices map[string]httpapi.Price) *Client {
-	c := New()
-	c.SetAuth(testKey, f.srv.URL+"/", prices)
+	c := New(f.srv.URL+"/", prices)
+	c.SetKey(testKey)
 	c.ep.Backoff = time.Millisecond
 	return c
 }
@@ -260,16 +260,16 @@ func TestExecute_Refusals(t *testing.T) {
 			t.Errorf("authority %q: want an AuthorityError, got %v", a, err)
 		}
 	}
-	_, err := New().Execute(context.Background(), noneRequest())
+	_, err := New("", nil).Execute(context.Background(), noneRequest())
 	var ce *apperr.ConfigError
 	if !errors.As(err, &ce) {
-		t.Errorf("without SetAuth: want a ConfigError, got %v", err)
+		t.Errorf("without SetKey: want a ConfigError, got %v", err)
 	}
 }
 
-func TestSetAuth_DefaultBaseURL(t *testing.T) {
-	c := New()
-	c.SetAuth(testKey, "", nil)
+func TestNew_DefaultBaseURL(t *testing.T) {
+	c := New("", nil)
+	c.SetKey(testKey)
 	if ep, _ := c.Endpoint(); ep.BaseURL != DefaultBaseURL {
 		t.Errorf("BaseURL = %q", ep.BaseURL)
 	}

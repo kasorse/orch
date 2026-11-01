@@ -76,8 +76,8 @@ func newFake(t *testing.T, answers ...answer) *fake {
 }
 
 func client(f *fake, prefix string, prices map[string]httpapi.Price) *Client {
-	c := New()
-	c.SetAuth(testKey, f.srv.URL+prefix, prices)
+	c := New(f.srv.URL+prefix, prices)
+	c.SetKey(testKey)
 	c.ep.Backoff = time.Millisecond
 	return c
 }
@@ -249,11 +249,11 @@ func TestExecute_Refusals(t *testing.T) {
 		}
 	}
 	var ce *apperr.ConfigError
-	if _, err := New().Execute(context.Background(), noneRequest()); !errors.As(err, &ce) {
-		t.Errorf("without SetAuth: want a ConfigError, got %v", err)
+	if _, err := New("", nil).Execute(context.Background(), noneRequest()); !errors.As(err, &ce) {
+		t.Errorf("without SetKey: want a ConfigError, got %v", err)
 	}
-	c := New()
-	c.SetAuth(testKey, "", nil)
+	c := New("", nil)
+	c.SetKey(testKey)
 	if ep, _ := c.Endpoint(); ep.BaseURL != DefaultBaseURL {
 		t.Errorf("BaseURL = %q", ep.BaseURL)
 	}

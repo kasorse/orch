@@ -16,7 +16,7 @@ func TestRegistry_ReportsCost(t *testing.T) {
 	registry.Register(provider.Gemini, gemini.New(nil))
 
 	for id, want := range map[string]bool{"claude": true, "codex": false, "gemini": false, "unregistered": false} {
-		if got := registry.ReportsCost(id); got != want {
+		if got := registry.ReportsCost(id, "any-model"); got != want {
 			t.Errorf("ReportsCost(%q) = %v, want %v", id, got, want)
 		}
 	}

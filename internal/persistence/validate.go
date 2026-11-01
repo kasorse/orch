@@ -411,7 +411,7 @@ func validateJiraSource(src domain.TaskSource) error {
 }
 
 // validateProviderCLI checks a recorded provider CLI map: known providers, printable
-// versions of at most 64 bytes.
+// versions of at most 64 bytes, and for the API transport an endpoint that is a bare host.
 func validateProviderCLI(m map[string]domain.ProviderCLI) error {
 	for id, cli := range m {
 		if !slices.Contains(provider.SupportedProviders(), provider.ID(id)) {
@@ -424,6 +424,21 @@ func validateProviderCLI(m map[string]domain.ProviderCLI) error {
 			if !unicode.IsPrint(r) {
 				return fmt.Errorf("%s: version has a non-printable character", id)
 			}
+		}
+		switch cli.Transport {
+		case "":
+			if cli.Endpoint != "" {
+				return fmt.Errorf("%s: an endpoint without transport api", id)
+			}
+		case domain.TransportAPI:
+			if cli.Version != "" {
+				return fmt.Errorf("%s: transport api has no CLI version", id)
+			}
+			if u, err := url.Parse("https://" + cli.Endpoint); err != nil || cli.Endpoint == "" || len(cli.Endpoint) > 255 || u.Host != cli.Endpoint {
+				return fmt.Errorf("%s: endpoint %q is not a host", id, cli.Endpoint)
+			}
+		default:
+			return fmt.Errorf("%s: unknown transport %q", id, cli.Transport)
 		}
 	}
 	return nil

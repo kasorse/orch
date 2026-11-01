@@ -182,11 +182,19 @@ func (o OrgConfigRef) Validate() error {
 }
 
 // ProviderCLI is one provider CLI as the version check found it: the version string the
-// CLI reported and whether it lies in the range its permission flags were verified on.
+// CLI reported and whether it lies in the range its permission flags were verified on. A
+// provider on the API transport (specs/api-transport/SPEC.md §9) has no CLI: Transport is
+// "api", Endpoint the host its calls go to (never a path or a query), Version empty and
+// Verified true, since the boundary is the orchestrator's own code.
 type ProviderCLI struct {
-	Version  string `json:"version"`
-	Verified bool   `json:"verified"`
+	Version   string `json:"version"`
+	Verified  bool   `json:"verified"`
+	Transport string `json:"transport,omitempty"`
+	Endpoint  string `json:"endpoint,omitempty"`
 }
+
+// TransportAPI is ProviderCLI.Transport for a provider on the API transport.
+const TransportAPI = "api"
 
 type Run struct {
 	ID   string `json:"id"`

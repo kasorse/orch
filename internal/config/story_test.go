@@ -168,7 +168,7 @@ func TestValidate_StoryValid(t *testing.T) {
 
 type costStub map[string]bool
 
-func (c costStub) ReportsCost(p string) bool { return c[p] }
+func (c costStub) ReportsCost(p, _ string) bool { return c[p] }
 
 func TestStoryBudgetProblems(t *testing.T) {
 	cfg := validConfig()

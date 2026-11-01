@@ -34,9 +34,12 @@ import (
 	"orchestrator/internal/persistence"
 	"orchestrator/internal/policy"
 	"orchestrator/internal/provider"
+	"orchestrator/internal/provider/anthropic"
 	"orchestrator/internal/provider/claude"
 	"orchestrator/internal/provider/codex"
 	"orchestrator/internal/provider/gemini"
+	"orchestrator/internal/provider/httpapi"
+	"orchestrator/internal/provider/openai"
 	"orchestrator/internal/report"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/story"
@@ -658,6 +661,9 @@ func loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag string, reg
 	execution.ScrubCredentials(cfg.CredentialEnvNames()...)
 	// What the test command may inherit beyond the default allowlist (test.env_pass).
 	execution.AllowTestEnv(cfg.Test.EnvPass...)
+	// A provider on the API transport gets its HTTP client before anything asks the registry
+	// (specs/api-transport/SPEC.md §3): the cost check below already needs its prices.
+	registerAPIClients(registry, cfg)
 	opts := depOpts(cfg)
 	opts.Cost = registry
 	if err := config.ValidateDependencies(cfg, config.ExecDependencyChecker{}, opts); err != nil {
@@ -685,8 +691,14 @@ func loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag string, reg
 	if err != nil {
 		return fail(err)
 	}
-	envLine, envNotices := claudeEnvReport(&auth, apiEnv, ignored, os.LookupEnv)
-	notices = append(notices, envNotices...)
+	var envLine string
+	if cfg.Providers.Claude.UsesAPI() {
+		notices = append(notices, "claude calls go to the Messages API at "+apiHost(cfg.Providers.Claude.BaseURL, anthropic.DefaultBaseURL)+" (transport: api)")
+	} else {
+		var envNotices []string
+		envLine, envNotices = claudeEnvReport(&auth, apiEnv, ignored, os.LookupEnv)
+		notices = append(notices, envNotices...)
+	}
 	if codexConfigured {
 		if err := applyCodexAuth(registry, codexAuth, os.LookupEnv); err != nil {
 			return fail(err)
@@ -731,6 +743,15 @@ func applyCodexAuth(registry *provider.Registry, auth domain.CodexAuth, lookup f
 	if err != nil {
 		return nil
 	}
+	if api, ok := client.(*openai.Client); ok {
+		// ResolveCodexAuth refused every mode but api for transport: api.
+		key, err := apiKey(auth.KeyEnv, "codex", lookup)
+		if err != nil {
+			return err
+		}
+		api.SetKey(key)
+		return nil
+	}
 	adapter, ok := client.(*codex.Client)
 	if !ok {
 		return nil
@@ -756,6 +777,15 @@ func applyCodexAuth(registry *provider.Registry, auth domain.CodexAuth, lookup f
 func applyClaudeAuth(registry *provider.Registry, auth domain.ClaudeAuth, apiEnv map[string]string, lookup func(string) (string, bool)) ([]string, error) {
 	client, err := registry.Resolve(string(provider.Claude))
 	if err != nil {
+		return nil, nil
+	}
+	if api, ok := client.(*anthropic.Client); ok {
+		// ResolveClaudeAuth refused every mode but api for transport: api.
+		key, err := apiKey(auth.KeyEnv, "claude", lookup)
+		if err != nil {
+			return nil, err
+		}
+		api.SetKey(key)
 		return nil, nil
 	}
 	adapter, ok := client.(*claude.Client)
@@ -879,6 +909,14 @@ func checkProviderCLIs(ctx context.Context, cfg config.Config, registry *provide
 		if err != nil {
 			continue
 		}
+		if api, ok := client.(apiClient); ok {
+			cli, err := checkAPIModels(ctx, cfg, id, api)
+			if err != nil {
+				return nil, err
+			}
+			found[id] = cli
+			continue
+		}
 		verifier, ok := client.(provider.VersionVerifier)
 		if !ok {
 			continue
@@ -900,6 +938,84 @@ func checkProviderCLIs(ctx context.Context, cfg config.Config, registry *provide
 		found[id] = domain.ProviderCLI{Version: version, Verified: verified}
 	}
 	return found, nil
+}
+
+// apiClient is a provider client on the API transport (provider/anthropic, provider/openai).
+type apiClient interface {
+	Endpoint() (httpapi.Endpoint, error)
+}
+
+// modelCheckTimeout bounds the model check of one API provider, its retries included.
+const modelCheckTimeout = 30 * time.Second
+
+// checkAPIModels asks the endpoint of an API provider whether it serves every model the config
+// routes to it (specs/api-transport/SPEC.md §9): GET /v1/models, before any run exists. It is
+// what the version check is for a CLI, and the record says which host the calls go to.
+func checkAPIModels(ctx context.Context, cfg config.Config, id string, api apiClient) (domain.ProviderCLI, error) {
+	ep, err := api.Endpoint()
+	if err != nil {
+		return domain.ProviderCLI{}, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, modelCheckTimeout)
+	defer cancel()
+	if err := httpapi.CheckModels(ctx, ep, id, config.RoutedModels(cfg, id)); err != nil {
+		var ce *apperr.ConfigError
+		if errors.As(err, &ce) {
+			return domain.ProviderCLI{}, err
+		}
+		return domain.ProviderCLI{}, apperr.NewDependencyError(fmt.Sprintf("%s (transport: api): the model check failed: %v", id, err), err)
+	}
+	return domain.ProviderCLI{Verified: true, Transport: domain.TransportAPI, Endpoint: urlHost(ep.BaseURL)}, nil
+}
+
+// registerAPIClients replaces the CLI client of every provider on transport: api with its HTTP
+// client, given its endpoint and the operator's prices; the key comes later, from
+// applyClaudeAuth and applyCodexAuth.
+func registerAPIClients(registry *provider.Registry, cfg config.Config) {
+	if c := cfg.Providers.Claude; c.UsesAPI() {
+		registry.Register(provider.Claude, anthropic.New(c.BaseURL, apiPrices(c.Prices)))
+	}
+	if c := cfg.Providers.Codex; c.UsesAPI() {
+		registry.Register(provider.Codex, openai.New(c.BaseURL, apiPrices(c.Prices)))
+	}
+}
+
+// apiPrices turns providers.<p>.prices into httpapi prices: the cache rates default to 0.1× and
+// 1.25× input (specs/api-transport/SPEC.md §2 item 6). An override has no long-context tier.
+func apiPrices(prices map[string]config.ModelPrice) map[string]httpapi.Price {
+	if len(prices) == 0 {
+		return nil
+	}
+	out := make(map[string]httpapi.Price, len(prices))
+	for model, p := range prices {
+		price := httpapi.Price{Input: *p.Input, Output: *p.Output, CacheRead: 0.1 * *p.Input, CacheWrite: 1.25 * *p.Input}
+		if p.CacheRead != nil {
+			price.CacheRead = *p.CacheRead
+		}
+		if p.CacheWrite != nil {
+			price.CacheWrite = *p.CacheWrite
+		}
+		out[model] = price
+	}
+	return out
+}
+
+// apiKey reads the key of an API provider from the variable the config names.
+func apiKey(env, id string, lookup func(string) (string, bool)) (string, error) {
+	raw, _ := lookup(env)
+	key := strings.TrimSpace(raw)
+	if key == "" {
+		return "", apperr.NewConfigError(fmt.Sprintf("%s transport api: $%s is not set or empty", id, env), nil)
+	}
+	return key, nil
+}
+
+// apiHost is the host of an API provider's base_url, or of its default endpoint.
+func apiHost(baseURL, def string) string {
+	if baseURL == "" {
+		baseURL = def
+	}
+	return urlHost(baseURL)
 }
 
 // providerCLIRange is the verified range the provider's adapter declares, "" if none.
@@ -950,7 +1066,11 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 			strings.Join(cfg.GitLab.AllowedGroups, ", ")))
 	}
 	for _, id := range config.ProvidersInUse(cfg) {
-		if cli, ok := clis[id]; ok {
+		cli, ok := clis[id]
+		switch {
+		case ok && cli.Transport == domain.TransportAPI:
+			reporter.ConfigSection(fmt.Sprintf("%s: transport api, %s serves every routed model", id, cli.Endpoint))
+		case ok:
 			reporter.ProviderCLIVersion(id, cli.Version, providerCLIRange(registry, id), cli.Verified)
 		}
 	}

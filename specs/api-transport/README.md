@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **in progress** (2026-11-01): AT01–AT04 done (4 of 14). The owner's
+Status: **in progress** (2026-11-01): AT01–AT05 done (5 of 14). Phase 1 works for codex; claude waits for the web authority (AT05 As built). The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |
@@ -36,7 +36,7 @@ as they are.
 | [x] | [AT02](tasks/TASK-AT02-httpapi.md) | `httpapi`: SSE, retries, redaction, cost table, the model check | M | AT01 | 1 |
 | [x] | [AT03](tasks/TASK-AT03-anthropic-none.md) | Anthropic Messages client, authority `none` | M | AT02 | 1 |
 | [x] | [AT04](tasks/TASK-AT04-openai-none.md) | OpenAI Responses client, authority `none` | M | AT02 | 1 |
-| [ ] | [AT05](tasks/TASK-AT05-wiring.md) | wiring: registry by transport, fail-fast, `provider_cli`, cost by model | M | AT03, AT04 | 1 |
+| [x] | [AT05](tasks/TASK-AT05-wiring.md) | wiring: registry by transport, fail-fast, `provider_cli`, cost by model | M | AT03, AT04 | 1 |
 | [ ] | [AT06](tasks/TASK-AT06-tools-read.md) | `tools`: confinement, `read_file`, `grep`, `glob` | M | AT01 | 2 |
 | [ ] | [AT07](tasks/TASK-AT07-anthropic-loop.md) | Anthropic tool loop, caching breakpoints, authority `read` | M | AT03, AT06 | 2 |
 | [ ] | [AT08](tasks/TASK-AT08-openai-loop.md) | OpenAI tool loop, encrypted reasoning, authority `read` | M | AT04, AT06 | 2 |

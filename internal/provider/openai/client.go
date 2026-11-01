@@ -36,7 +36,7 @@ const (
 const instructionsNone = "You answer one request from an automated orchestrator. You have no tools: " +
 	"answer from the request alone, exactly in the form the request asks for."
 
-// Client is the codex provider over HTTP. Until SetAuth it refuses every call.
+// Client is the codex provider over HTTP. Until SetKey it refuses every call.
 type Client struct {
 	mu     sync.RWMutex
 	set    bool
@@ -44,23 +44,23 @@ type Client struct {
 	prices map[string]httpapi.Price
 }
 
-func New() *Client { return &Client{} }
-
-// SetAuth fixes the key, the endpoint (baseURL "" is DefaultBaseURL) and the operator's prices
-// (providers.codex.prices) of every later call. The key is sent only as a bearer token and
-// redacted from every error.
-func (c *Client) SetAuth(key, baseURL string, prices map[string]httpapi.Price) {
+// New returns the client of the endpoint (baseURL "" is DefaultBaseURL) with the operator's
+// prices (providers.codex.prices), so ReportsCost can answer in the fail-fast chain before the
+// key is read. Until SetKey it refuses every call.
+func New(baseURL string, prices map[string]httpapi.Price) *Client {
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
+	return &Client{ep: httpapi.Endpoint{BaseURL: strings.TrimRight(baseURL, "/")}, prices: prices}
+}
+
+// SetKey fixes the key of every later call. It is sent only as a bearer token and redacted from
+// every error.
+func (c *Client) SetKey(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.set, c.prices = true, prices
-	c.ep = httpapi.Endpoint{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		Header:  http.Header{"Authorization": {"Bearer " + key}},
-		Key:     key,
-	}
+	c.set = true
+	c.ep.Header, c.ep.Key = http.Header{"Authorization": {"Bearer " + key}}, key
 }
 
 func (c *Client) endpoint() (httpapi.Endpoint, map[string]httpapi.Price, error) {

@@ -3331,6 +3331,14 @@ human sees and confirms between steps.
   tool calls and structured rate-limit errors. `none` and `web` remain unsupported because
   Codex exec always exposes its coding tools. Gemini support remains disabled until its
   flags are verified.
+* A provider on the API transport (`providers.<p>.transport: api`, specs/api-transport) runs
+  no CLI: `internal/provider/anthropic` and `internal/provider/openai` send the request
+  themselves, and an authority is what the request offers the model, enforced in Go. So far
+  they support `none` only (a request with no tools), so a `read`, `edit` or `web` route of
+  such a provider is refused by `ValidateAuthorities`; with the default routes that includes
+  `research`, so claude on the API transport waits for the web authority (specs/api-transport
+  AT09). In place of the version check, `GET {base_url}/v1/models` must list every model the
+  config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
 * There is no bypass: the codebase never passes a permission-skipping mode.
@@ -4888,8 +4896,16 @@ for localhost; no userinfo, query or fragment; never a secret), `web_tools` (def
 each of them is an error, since the CLI would ignore it. Every claude route of a claude on `api`
 must name a full model ID (a CLI alias - `sonnet`, `opus`, `haiku`, `fable`, `opusplan`,
 `default`, with or without `[1m]` - is refused, naming the route), and `api_env`, which only
-configures the CLI, is refused. Nothing calls the API yet: the clients are later tasks of
-specs/api-transport.
+configures the CLI, is refused. Under `api` no executable is required for the provider, its
+HTTP client replaces the CLI adapter in the registry right after `Validate`, the key is read
+from `api_key_env` once (`applyClaudeAuth`/`applyCodexAuth`) and sent only as the provider's
+credential header, the console says where the calls go instead of the `api_env` line, and
+`run.json: provider_cli.<p>` (each `resumes[]` entry too) is `{version: "", verified: true,
+transport: "api", endpoint: <host>}` - the host only, validated as one on load. A resume
+re-resolves the transport from the current config, like the mode. With `limits.max_cost_usd`
+(or `story.max_cost_usd`), every model a counted route of an API provider names - base,
+`by_complexity`, escalations, extra reviewers, clarify, branch naming - needs a price
+(`providers.<p>.prices` or the built-in table), or the budget is refused naming the route.
 
 `--claude-auth auto|api|login` is valid with `run`, `resume`, `review`, `validate`, `story run`
 (passed to each child) and `jira listen` (resolved at its start, passed to each child) in any position,

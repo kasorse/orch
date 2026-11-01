@@ -63,6 +63,29 @@ func (t TransportConfig) WebToolsOn() bool {
 	return t.BaseURL == ""
 }
 
+// UsesAPI reports whether the provider id is on transport: api. Only claude and codex have one.
+func (p ProvidersConfig) UsesAPI(id string) bool {
+	switch id {
+	case string(provider.Claude):
+		return p.Claude.UsesAPI()
+	case string(provider.Codex):
+		return p.Codex.UsesAPI()
+	}
+	return false
+}
+
+// RoutedModels lists the distinct models the config routes to provider id, in route order:
+// what the API transport's model check asks the endpoint for (SPEC §9).
+func RoutedModels(cfg Config, id string) []string {
+	var models []string
+	for _, r := range modelRoutes(cfg) {
+		if m := strings.TrimSpace(r.Model); r.Provider == id && m != "" && !slices.Contains(models, m) {
+			models = append(models, m)
+		}
+	}
+	return models
+}
+
 // transportProblems validates the transport keys of providers.<name> (SPEC §2 items 1, 3, 4, 6).
 func transportProblems(cfg Config, name string, t TransportConfig) []string {
 	key := "providers." + name

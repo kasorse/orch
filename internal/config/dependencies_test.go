@@ -74,7 +74,7 @@ func TestValidateDependencies_ProviderUsedByMultipleActions(t *testing.T) {
 // onlyClaudeReportsCost is a CostChecker like the registry with the real adapters.
 type onlyClaudeReportsCost struct{}
 
-func (onlyClaudeReportsCost) ReportsCost(providerID string) bool { return providerID == "claude" }
+func (onlyClaudeReportsCost) ReportsCost(providerID, _ string) bool { return providerID == "claude" }
 
 func TestValidateDependencies_BudgetRefusedForAProviderWithoutCost(t *testing.T) {
 	t.Setenv("JEV_API_KEY", "test-key")

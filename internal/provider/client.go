@@ -101,10 +101,11 @@ type Client interface {
 	Supports(a domain.Authority) bool
 }
 
-// CostReporter is implemented by adapters whose CLI reports a call's cost in USD. A budget
-// (limits.max_cost_usd) is refused for a route whose adapter does not implement it.
+// CostReporter is implemented by adapters that report a call's cost in USD: a CLI that reports
+// it, or an API client with a price for the model (specs/api-transport/SPEC.md §7). A budget
+// (limits.max_cost_usd) is refused for a route whose adapter does not report the cost of its model.
 type CostReporter interface {
-	ReportsCost() bool
+	ReportsCost(model string) bool
 }
 
 // MCPSupporter is implemented by adapters that pass Extensions.MCPConfig to their CLI. A call

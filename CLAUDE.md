@@ -34,6 +34,8 @@ the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.
 design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
 `FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
+the API transport (`providers.<p>.transport: api`: claude and codex over their HTTP APIs, no
+CLI): MVP.md §46.2 and §38.2 so far, with its design record in `specs/api-transport/`;
 the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
 Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`;
 delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
@@ -66,7 +68,12 @@ Responsibilities are strictly separated:
 
 Orchestrator/workflow code must never contain AI-provider-specific behavior. Per-provider CLI
 argv quirks — including how an authority becomes permission flags — are isolated in each
-provider's `buildArgs` function (`internal/provider/{claude,codex,gemini}/client.go`). Jev's
+provider's `buildArgs` function (`internal/provider/{claude,codex,gemini}/client.go`). On the
+API transport (`providers.<p>.transport: api`, specs/api-transport) the Messages API's wire is
+isolated in `internal/provider/anthropic` and the Responses API's in `internal/provider/openai`
+(unexported types), over the provider-neutral `internal/provider/httpapi` (retries, SSE, the
+key's redaction, cost, `GET /v1/models`; standard library, `domain` and `apperr` only, enforced
+by a test); `app` swaps them into the registry after `Validate`, so routing is unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
 are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
