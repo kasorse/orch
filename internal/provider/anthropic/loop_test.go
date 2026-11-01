@@ -196,3 +196,37 @@ func TestWebToolsOnlyOnWeb(t *testing.T) {
 		}
 	}
 }
+
+func TestLoop_Edit(t *testing.T) {
+	f := newFake(t,
+		answer{stream: stream("tool_use", 0,
+			toolCall{"e1", "str_replace_based_edit_tool", `{"command":"str_replace","path":"a.go","old_str":"func Add() {}","new_str":"func Add() int { return 1 }"}`},
+			toolCall{"e2", "str_replace_based_edit_tool", `{"command":"create","path":".git/hooks/pre-commit","file_text":"#!/bin/sh\nexit 0\n"}`},
+			toolCall{"e3", "str_replace_based_edit_tool", `{"command":"view","path":"a.go"}`})},
+		answer{stream: stream("end_turn", 0, `{"summary_short": "Add returns 1"}`)},
+	)
+	req := readRequest(t)
+	req.Authority = domain.AuthorityEdit
+	res, err := client(f, nil).Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(req.WorkingDir, "a.go")); !strings.Contains(string(got), "func Add() int { return 1 }") {
+		t.Errorf("a.go = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(req.WorkingDir, ".git/hooks/pre-commit")); err == nil {
+		t.Error("the editor wrote a git hook")
+	}
+	if c := res.Call.Tools; c["Edit"] != 1 || c["Write"] != 1 || c["Read"] != 1 {
+		t.Errorf("Tools = %v", c)
+	}
+	second := parse(t, f.bodies[1]).Messages[2].Content
+	if second[1]["is_error"] != true || !strings.Contains(second[1]["content"].(string), ".git is not accessible") {
+		t.Errorf("the hook write's result = %v", second[1])
+	}
+	tools := string(parse(t, f.bodies[0]).Tools)
+	if !strings.Contains(tools, `{"type":"text_editor_20250728","name":"str_replace_based_edit_tool"}`) || strings.Contains(tools, `"read_file"`) || !strings.Contains(tools, `"grep"`) {
+		t.Errorf("edit tools = %s", tools)
+	}
+	golden(t, "edit", f.bodies[0])
+}

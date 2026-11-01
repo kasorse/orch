@@ -30,6 +30,12 @@ type clientTool struct {
 	InputSchema map[string]any `json:"input_schema"`
 }
 
+// editorTool declares Anthropic's text editor; its schema is the model's own.
+type editorTool struct {
+	Type string `json:"type"`
+	Name string `json:"name"`
+}
+
 type cacheControl struct {
 	Type string `json:"type"`
 }

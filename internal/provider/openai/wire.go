@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"orchestrator/internal/domain"
+	"orchestrator/internal/provider/tools"
 )
 
 // The Responses API's wire (specs/api-transport/SPEC.md §4.2). Unexported: nothing outside this
@@ -35,6 +36,24 @@ type functionTool struct {
 // webSearchTool is the server's web search (SPEC §5.1, web).
 type webSearchTool struct {
 	Type string `json:"type"`
+}
+
+// patchTool is OpenAI's apply_patch; applyPatchOutput answers an apply_patch_call.
+type patchTool struct {
+	Type string `json:"type"`
+}
+
+type applyPatchOutput struct {
+	Type   string `json:"type"`
+	CallID string `json:"call_id"`
+	Status string `json:"status"`
+	Output string `json:"output,omitempty"`
+}
+
+// outputCall is a call a response asks for: a function_call, or an apply_patch_call (Patch set).
+type outputCall struct {
+	functionCall
+	Patch *tools.PatchOp
 }
 
 // functionCall is a function_call output item; functionCallOutput answers it.
@@ -182,10 +201,10 @@ func (s *stream) apply(data []byte, onText func(string)) error {
 }
 
 // parseOutput reads a response's items: the answer (the output_text parts of the message items,
-// joined), the function calls in order, and how many web searches the server ran.
-func parseOutput(output []json.RawMessage) (string, []functionCall, int, error) {
+// joined), the function and apply_patch calls in order, and how many web searches the server ran.
+func parseOutput(output []json.RawMessage) (string, []outputCall, int, error) {
 	var out string
-	var calls []functionCall
+	var calls []outputCall
 	searches := 0
 	for i, raw := range output {
 		var item struct {
@@ -195,6 +214,7 @@ func parseOutput(output []json.RawMessage) (string, []functionCall, int, error) 
 				Text string `json:"text"`
 			} `json:"content"`
 			functionCall
+			Operation *tools.PatchOp `json:"operation"`
 		}
 		if err := json.Unmarshal(raw, &item); err != nil {
 			return "", nil, 0, fmt.Errorf("output[%d] is not an item: %w", i, err)
@@ -210,7 +230,12 @@ func parseOutput(output []json.RawMessage) (string, []functionCall, int, error) 
 			if item.CallID == "" || item.Name == "" {
 				return "", nil, 0, fmt.Errorf("output[%d] is a function_call without a call_id or a name", i)
 			}
-			calls = append(calls, item.functionCall)
+			calls = append(calls, outputCall{functionCall: item.functionCall})
+		case "apply_patch_call":
+			if item.CallID == "" || item.Operation == nil || item.Operation.Path == "" {
+				return "", nil, 0, fmt.Errorf("output[%d] is an apply_patch_call without a call_id or an operation", i)
+			}
+			calls = append(calls, outputCall{functionCall: functionCall{CallID: item.CallID, Name: "apply_patch"}, Patch: item.Operation})
 		case "web_search_call":
 			searches++
 		}

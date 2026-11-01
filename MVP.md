@@ -3351,8 +3351,15 @@ human sees and confirms between steps.
   with tools get any of this. MCP servers are not started yet (they are recorded in
   `call.mcp_failed`). codex supports `web` too, with the server's `web_search` under the same
   `providers.codex.web_tools` rule, so research can run on codex for the first time (the codex
-  CLI never could). `edit` is refused by `ValidateAuthorities` until its tools exist. A `read`
-  call never carries a web tool, a `web` call never a repository tool. `call.web_tools` records the web tools a call
+  CLI never could). Both support `edit`: claude gets Anthropic's text editor
+  (`text_editor_20250728`: view, create, str_replace with exactly one match, insert; `undo_edit`
+  refused) with grep and glob, codex gets `apply_patch` (create_file, update_file with a V4A diff,
+  delete_file, each all or nothing; a hunk that does not match fails the operation and changes
+  nothing) with read_file, grep and glob. Writes go through the same `Root`: nothing under `.git`
+  or `.claude`, no deny-listed path, no write through a symlink, no file over 1 MiB. The guard,
+  the secret scan and the protected paths still run around every `implement` and `test`
+  unchanged (§38.3). A `read` call never carries a web tool, a `web` call never a repository
+  tool. `call.web_tools` records the web tools a call
   offered; `call.tools` counts the tools by the CLI's names (Read, Grep, Glob, WebSearch). In place of the version check, `GET {base_url}/v1/models` must list every model the
   config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);

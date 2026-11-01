@@ -239,7 +239,7 @@ func TestExecute_OperatorPrice(t *testing.T) {
 }
 
 func TestExecute_Refusals(t *testing.T) {
-	for _, a := range []domain.Authority{domain.AuthorityEdit, ""} {
+	for _, a := range []domain.Authority{"admin", ""} {
 		req := noneRequest()
 		req.Authority = a
 		_, err := client(newFake(t, answer{stream: "plain.sse"}), "", nil).Execute(context.Background(), req)

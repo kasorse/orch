@@ -84,10 +84,14 @@ func (c *Client) Endpoint() (httpapi.Endpoint, error) {
 	return ep, err
 }
 
-// Supports is true for none, web and read (SPEC §5.1): none gets no tools, web only the server's
-// web search or none (§6), read the confined read tools. Edit waits for its tools.
+// Supports is true for every authority (SPEC §5.1): none gets no tools, web only the server's
+// web search or none (§6), read the confined read tools, edit them with apply_patch.
 func (c *Client) Supports(a domain.Authority) bool {
-	return a == domain.AuthorityNone || a == domain.AuthorityWeb || a == domain.AuthorityRead
+	switch a {
+	case domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit:
+		return true
+	}
+	return false
 }
 
 // ReportsCost reports whether a call to model gets a cost: a price in providers.codex.prices or
@@ -104,7 +108,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		return provider.Result{}, &apperr.AuthorityError{
 			Provider:  string(provider.Codex),
 			Authority: string(req.Authority),
-			Reason:    "The codex API transport has no edit tools yet (specs/api-transport/SPEC.md §10); route this action elsewhere.",
+			Reason:    "The request does not carry one of the defined authorities; every call site must set one (specs/permissions/SPEC.md §5).",
 		}
 	}
 	ep, prices, err := c.endpoint()
@@ -162,7 +166,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		if s.created != nil && s.created.Model != "" {
 			model = s.created.Model
 		}
-		var calls []functionCall
+		var calls []outputCall
 		if f := s.final; f != nil {
 			if f.Model != "" {
 				model = f.Model
@@ -238,27 +242,35 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 			return result(), nil
 		}
 		if set == nil {
-			return result(), call.failure(apperr.FailureAPI, "the model called a function the call did not offer", time.Since(start), nil)
+			return result(), call.failure(apperr.FailureAPI, "the model called a tool the call did not offer", time.Since(start), nil)
 		}
 		// The response's items go back unchanged (reasoning items carry their encrypted content),
 		// then one output per call (SPEC §4.2).
 		for _, item := range s.final.Output {
 			r.Input = append(r.Input, item)
 		}
-		for _, fc := range calls {
-			what := tools.Label(fc.Name, json.RawMessage(fc.Arguments))
+		for _, oc := range calls {
+			display, what := tools.Display(oc.Name, json.RawMessage(oc.Arguments)), tools.Label(oc.Name, json.RawMessage(oc.Arguments))
+			if oc.Patch != nil {
+				display = tools.PatchDisplay(*oc.Patch)
+				what = display + " " + oc.Patch.Path
+			}
 			if req.Activity != nil {
 				req.Activity(what)
 			}
 			if req.Stream != nil {
 				_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
 			}
-			counts[tools.DisplayName(fc.Name)]++
-			out, isErr := set.Call(ctx, fc.Name, json.RawMessage(fc.Arguments))
+			counts[display]++
+			if oc.Patch != nil {
+				r.Input = append(r.Input, applyPatch(set, oc))
+				continue
+			}
+			out, isErr := set.Call(ctx, oc.Name, json.RawMessage(oc.Arguments))
 			if isErr {
 				out = "error: " + out
 			}
-			r.Input = append(r.Input, functionCallOutput{Type: "function_call_output", CallID: fc.CallID, Output: out})
+			r.Input = append(r.Input, functionCallOutput{Type: "function_call_output", CallID: oc.CallID, Output: out})
 		}
 		if ctx.Err() != nil {
 			return result(), call.failure(httpapi.Kind(ctx.Err()), ctx.Err().Error(), time.Since(start), ctx.Err())
@@ -268,6 +280,11 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 
 // maxTurns is the backstop of SPEC §5: execution.timeout bounds a call, this bounds its responses.
 const maxTurns = 500
+
+// instructionsEdit is the fixed instructions of a call with the edit tools.
+const instructionsEdit = "You work for an automated orchestrator on one repository, through your tools: read_file, " +
+	"grep and glob to read, apply_patch to create, change and delete files; every path is relative to the " +
+	"repository root. You cannot run commands or reach the network. Answer exactly in the form the request asks for."
 
 // instructionsRead is the fixed instructions of a call with the read tools.
 const instructionsRead = "You work for an automated orchestrator on one repository, through your tools read_file, " +
@@ -336,10 +353,28 @@ func onText(req provider.Request) func(string) {
 	}
 }
 
+// applyPatch runs one apply_patch operation and renders its output item: completed, or failed
+// with a message the model can act on.
+func applyPatch(set *tools.Set, oc outputCall) applyPatchOutput {
+	out := applyPatchOutput{Type: "apply_patch_call_output", CallID: oc.CallID, Status: "completed"}
+	root := set.Root()
+	if root == nil {
+		out.Status, out.Output = "failed", "apply_patch is not offered to this call"
+		return out
+	}
+	msg, err := root.ApplyPatch(*oc.Patch)
+	if err != nil {
+		out.Status, msg = "failed", err.Error()
+	}
+	out.Output = msg
+	return out
+}
+
 // repositoryTools gives a read call the confined read tools as strict function tools, sorted by
-// name, with the reasoning replay and the cache key a loop needs (SPEC §4.2). Other calls get none.
-func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
-	if req.Authority != domain.AuthorityRead {
+// name, and an edit call apply_patch besides, with the reasoning replay and the cache key a loop
+// needs (SPEC §4.2). Other calls get none.
+func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
+	if req.Authority != domain.AuthorityRead && req.Authority != domain.AuthorityEdit {
 		return nil, nil
 	}
 	if req.WorkingDir == "" {
@@ -354,12 +389,18 @@ func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
 		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: true})
 	}
 	r.Instructions = instructionsRead
+	set := tools.NewSet(read)
+	if req.Authority == domain.AuthorityEdit {
+		r.Tools = append(r.Tools, patchTool{Type: "apply_patch"})
+		r.Instructions = instructionsEdit
+		set = set.WithRoot(root)
+	}
 	r.Include = []string{"reasoning.encrypted_content"}
 	parallel := true
 	r.ParallelToolCalls = &parallel
 	sum := sha256.Sum256([]byte("codex\x00" + req.Model + "\x00" + string(req.Authority)))
 	r.PromptCacheKey = hex.EncodeToString(sum[:16])
-	return tools.NewSet(read), nil
+	return set, nil
 }
 
 func buildRequest(req provider.Request, webTools bool) request {

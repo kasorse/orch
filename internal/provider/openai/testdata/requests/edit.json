@@ -1,0 +1,116 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You work for an automated orchestrator on one repository, through your tools: read_file, grep and glob to read, apply_patch to create, change and delete files; every path is relative to the repository root. You cannot run commands or reach the network. Answer exactly in the form the request asks for.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "ACTION: investigate\nWhere is Add?"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "glob",
+      "description": "List repository files whose path matches a glob: * and ? within a path segment, ** for any number of directories, e.g. internal/**/*_test.go. Paths are relative to the repository root, sorted.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "description": "Glob over paths relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "name": "grep",
+      "description": "Search file contents with an RE2 regular expression. Returns path:line:text for each matching line. path narrows the search to a directory or a file (null for the whole repository); glob filters file names, e.g. *.go (null for all files). Binary and large files are skipped.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "glob": {
+            "description": "File-name glob, e.g. *.go",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Directory or file relative to the repository root",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "description": "RE2 regular expression",
+            "type": "string"
+          }
+        },
+        "required": [
+          "glob",
+          "path",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "name": "read_file",
+      "description": "Read a text file of the repository. Lines come numbered (number, tab, text). path is relative to the repository root. offset is the first line to read (1-based, null for 1); limit is how many lines (null for 2000).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Number of lines",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "description": "First line, 1-based",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "File path relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "path"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "type": "apply_patch"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "b99cd25ee82cc48551ba6822901f1f4b",
+  "store": false,
+  "stream": true
+}

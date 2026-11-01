@@ -211,7 +211,11 @@ and review), without it, as the last read-only step, it writes the answer.
   `internal/provider/<name>/buildArgs`; an adapter declares `Supports` only for authorities a
   live check (`go test -tags security ./test/security/...`) has verified, and refuses
   anything else — a silent downgrade is the one unacceptable failure. Never pass
-  `bypassPermissions` or any equivalent.
+  `bypassPermissions` or any equivalent. On the API transport (`providers.<p>.transport: api`)
+  there is no CLI: the authority is the tool set the client offers (none: no tools; web: the
+  server's web tools or none; read: `read_file`/`grep`/`glob`; edit: those with Anthropic's text
+  editor or OpenAI's `apply_patch`), every tool runs in `internal/provider/tools` and confines its
+  path in Go, and no tool runs a command or opens a connection.
 - **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
   `implement` runs in a worktree by default (`execution.isolation: worktree`; `run --inplace` or
   `isolation: inplace` opts out, `run --worktree` overrides an `inplace` config) and runs every step, guard,

@@ -30,9 +30,12 @@ type fakeAPI struct {
 	actions   []string
 	keys      []string
 	responses map[string]string
+	// first, when it has the action, is the raw stream of the action's first request (one
+	// message, no tool result yet): a tool call, so the client's loop runs.
+	first map[string]string
 }
 
-func startFakeAPI(t *testing.T, served []string, responses map[string]string, path, keyHeader string, prompt func([]byte) string, stream func(w io.Writer, model, text string)) *fakeAPI {
+func startFakeAPI(t *testing.T, served []string, responses map[string]string, path, keyHeader string, prompt func([]byte) (string, int), stream func(w io.Writer, model, text string)) *fakeAPI {
 	t.Helper()
 	f := &fakeAPI{responses: responses}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +51,7 @@ func startFakeAPI(t *testing.T, served []string, responses map[string]string, pa
 			var head struct {
 				Model string `json:"model"`
 			}
-			text := prompt(raw)
+			text, messages := prompt(raw)
 			if json.Unmarshal(raw, &head) != nil || text == "" {
 				t.Errorf("fake API: a request it cannot read: %s", raw)
 				http.Error(w, "bad request", http.StatusBadRequest)
@@ -59,11 +62,18 @@ func startFakeAPI(t *testing.T, served []string, responses map[string]string, pa
 			f.mu.Lock()
 			f.actions, f.keys = append(f.actions, action), append(f.keys, r.Header.Get(keyHeader))
 			f.mu.Unlock()
+			w.Header().Set("Content-Type", "text/event-stream")
+			f.mu.Lock()
+			first, isFirst := f.first[action]
+			f.mu.Unlock()
+			if isFirst && messages == 1 {
+				fmt.Fprint(w, first)
+				return
+			}
 			answer, ok := f.responses[action]
 			if !ok {
 				t.Errorf("fake API: no response for action %q", action)
 			}
-			w.Header().Set("Content-Type", "text/event-stream")
 			stream(w, head.Model, answer)
 		default:
 			http.NotFound(w, r)
@@ -81,7 +91,7 @@ func (f *fakeAPI) calls() (actions, keys []string) {
 
 // startResponsesAPI is a fake OpenAI Responses API.
 func startResponsesAPI(t *testing.T, served []string, responses map[string]string) *fakeAPI {
-	return startFakeAPI(t, served, responses, "/v1/responses", "Authorization", func(raw []byte) string {
+	return startFakeAPI(t, served, responses, "/v1/responses", "Authorization", func(raw []byte) (string, int) {
 		var body struct {
 			Input []struct {
 				Content []struct {
@@ -90,9 +100,9 @@ func startResponsesAPI(t *testing.T, served []string, responses map[string]strin
 			} `json:"input"`
 		}
 		if json.Unmarshal(raw, &body) != nil || len(body.Input) == 0 || len(body.Input[0].Content) == 0 {
-			return ""
+			return "", 0
 		}
-		return body.Input[0].Content[0].Text
+		return body.Input[0].Content[0].Text, len(body.Input)
 	}, func(w io.Writer, model, text string) {
 		out, _ := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{
 			"id": "resp", "model": model, "status": "completed",
@@ -105,7 +115,7 @@ func startResponsesAPI(t *testing.T, served []string, responses map[string]strin
 
 // startMessagesAPI is a fake Anthropic Messages API.
 func startMessagesAPI(t *testing.T, served []string, responses map[string]string) *fakeAPI {
-	return startFakeAPI(t, served, responses, "/v1/messages", "X-Api-Key", func(raw []byte) string {
+	return startFakeAPI(t, served, responses, "/v1/messages", "X-Api-Key", func(raw []byte) (string, int) {
 		var body struct {
 			Messages []struct {
 				Content []struct {
@@ -114,9 +124,9 @@ func startMessagesAPI(t *testing.T, served []string, responses map[string]string
 			} `json:"messages"`
 		}
 		if json.Unmarshal(raw, &body) != nil || len(body.Messages) == 0 || len(body.Messages[0].Content) == 0 {
-			return ""
+			return "", 0
 		}
-		return body.Messages[0].Content[0].Text
+		return body.Messages[0].Content[0].Text, len(body.Messages)
 	}, func(w io.Writer, model, text string) {
 		quoted, _ := json.Marshal(text)
 		fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"model\":%q,\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}\n\n", model)
@@ -272,32 +282,59 @@ func TestScenario70_APITransport_ClaudeDecisionCallsOverHTTP(t *testing.T) {
 	}
 }
 
-// Until the edit tools exist (AT10), implement routed to claude over the API is refused by
-// ValidateAuthorities before any call; research (web) and the read steps are not.
-func TestScenario70_APITransport_ToolStepRefused(t *testing.T) {
+// editorCall is a Messages API stream whose one response asks the text editor to write file_text
+// to path.
+func editorCall(path, fileText string) string {
+	input, _ := json.Marshal(map[string]string{"command": "create", "path": path, "file_text": fileText})
+	partial, _ := json.Marshal(string(input))
+	return "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"model\":\"fake\",\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}\n\n" +
+		"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"str_replace_based_edit_tool\",\"input\":{}}}\n\n" +
+		fmt.Sprintf("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":%s}}\n\n", partial) +
+		"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":20}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+}
+
+// Every call of the run over HTTP: claude on the API transport for every route, implement's fix
+// written by the client's own text editor, the tests and the review on the result. No CLI runs.
+func TestScenario70_APITransport_WholeRunOverHTTP(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	clearAuthEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", authKey())
-	decisionEnv(t, repoDir)
-	api := startMessagesAPI(t, []string{"fake"}, apiDecisionResponses)
+	t.Setenv("JEV_API_KEY", "")
+	invocationsLog, _ := decisionEnv(t, repoDir)
+	t.Setenv("FAKE_IMPLEMENT_FIX_ON_CALL", "") // the fake CLI must not be the one that fixes it
+	responses := map[string]string{"investigate": investigateResponse, "implement": implementResponse, "review": reviewPassResponse}
+	for k, v := range apiDecisionResponses {
+		responses[k] = v
+	}
+	api := startMessagesAPI(t, []string{"fake"}, responses)
+	api.first = map[string]string{"implement": editorCall("fixture.go", fakeexec.FixedFixtureSource)}
 	opts := defaultConfigOptions()
 	opts.providers.Decision = "claude"
 	opts.extraYAML = fmt.Sprintf("providers:\n  claude:\n    transport: api\n    base_url: %s\n", api.srv.URL)
 	cfg := writeConfig(t, t.TempDir(), opts)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", authRequest)
-	if err == nil {
-		t.Fatalf("want the authority check to refuse the run\nstdout:\n%s", stdout)
+	if err != nil {
+		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if strings.Contains(err.Error(), `"web" authority`) || strings.Contains(err.Error(), `"read" authority`) {
-		t.Errorf("research and the read steps must be accepted now: %v", err)
+	actions, _ := api.calls()
+	want := []string{"translate", "decide-context", "decide-classify", "investigate", "implement", "implement", "review"}
+	if !equalStrings(actions, want) {
+		t.Errorf("API calls = %v, want %v", actions, want)
 	}
-	for _, want := range []string{`"edit" authority required by "implement"`} {
-		if !strings.Contains(err.Error()+stdout+stderr, want) {
-			t.Errorf("want %s, got: %v\nstdout:\n%s\nstderr:\n%s", want, err, stdout, stderr)
-		}
+	if got := invocations(t, invocationsLog); len(got) != 0 {
+		t.Errorf("CLI invocations = %v, want none", got)
 	}
-	if actions, _ := api.calls(); len(actions) != 0 {
-		t.Errorf("API calls = %v, want none", actions)
+	if !strings.Contains(stdout, "Run completed successfully.") {
+		t.Errorf("want a completed run, got:\n%s", stdout)
+	}
+	raw, err := os.ReadFile(runJSONPath(t, repoDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"Write": 1`) && !strings.Contains(string(raw), `"Write":1`) {
+		t.Errorf("run.json does not count the editor's write:\n%s", raw)
 	}
 }

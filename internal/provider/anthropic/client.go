@@ -6,7 +6,7 @@
 // one) and no sampling parameter, and leaves thinking to the model's default. A call with
 // repository tools is a loop the client runs itself (SPEC §5): the model asks for a tool, the
 // client runs it from internal/provider/tools inside the working directory and sends the result
-// back. Supports is true for none, web and read; edit waits for its tools (AT10).
+// back. Supports is true for every authority: none, web, read and edit.
 package anthropic
 
 import (
@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -57,6 +58,12 @@ const (
 const systemRead = "You work for an automated orchestrator on one repository, through your tools read_file, " +
 	"grep and glob; every path is relative to the repository root. You cannot run commands, change files " +
 	"or reach the network. Answer exactly in the form the request asks for."
+
+// systemEdit is the fixed system text of a call with the edit tools.
+const systemEdit = "You work for an automated orchestrator on one repository, through your tools: " +
+	"str_replace_based_edit_tool to view, create and edit files, grep and glob to search; every path is " +
+	"relative to the repository root. You cannot run commands or reach the network. Answer exactly in the " +
+	"form the request asks for."
 
 // maxTurns is the backstop of SPEC §5: execution.timeout bounds a call, this bounds its responses.
 const maxTurns = 500
@@ -105,10 +112,15 @@ func (c *Client) Endpoint() (httpapi.Endpoint, error) {
 	return ep, err
 }
 
-// Supports is true for none, web and read (SPEC §5.1): none and web get no repository tool, web
-// only the server's web tools or none (§6), read the confined read tools. Edit waits for its tools.
+// Supports is true for every authority (SPEC §5.1): none and web get no repository tool, web
+// only the server's web tools or none (§6), read the confined read tools, edit the text editor
+// with grep and glob.
 func (c *Client) Supports(a domain.Authority) bool {
-	return a == domain.AuthorityNone || a == domain.AuthorityWeb || a == domain.AuthorityRead
+	switch a {
+	case domain.AuthorityNone, domain.AuthorityWeb, domain.AuthorityRead, domain.AuthorityEdit:
+		return true
+	}
+	return false
 }
 
 // ReportsCost reports whether a call to model gets a cost: a price in providers.claude.prices
@@ -125,7 +137,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		return provider.Result{}, &apperr.AuthorityError{
 			Provider:  string(provider.Claude),
 			Authority: string(req.Authority),
-			Reason:    "The claude API transport has no edit tools yet (specs/api-transport/SPEC.md §10); route this action to transport: cli.",
+			Reason:    "The request does not carry one of the defined authorities; every call site must set one (specs/permissions/SPEC.md §5).",
 		}
 	}
 	ep, prices, err := c.endpoint()
@@ -322,10 +334,11 @@ func toolName(name string) string {
 	return tools.DisplayName(name)
 }
 
-// repositoryTools gives a read call the confined read tools (SPEC §5.1): their definitions go
-// into the request, sorted by name, and the set runs the model's calls. Other calls get none.
-func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
-	if req.Authority != domain.AuthorityRead {
+// repositoryTools gives a read call the confined read tools and an edit call the text editor with
+// grep and glob (SPEC §5.1): their definitions go into the request, sorted by name, and the set
+// runs the model's calls. Other calls get none.
+func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
+	if req.Authority != domain.AuthorityRead && req.Authority != domain.AuthorityEdit {
 		return nil, nil
 	}
 	if req.WorkingDir == "" {
@@ -335,18 +348,28 @@ func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the working directory cannot be used: %w", err)
 	}
-	read := tools.ReadTools(root)
-	for _, t := range read {
+	offered := tools.ReadTools(root)
+	r.System = []textBlock{{Type: "text", Text: systemRead}}
+	if req.Authority == domain.AuthorityEdit {
+		// The editor's view reads files, so read_file is not offered beside it.
+		offered = slices.DeleteFunc(offered, func(t tools.Tool) bool { return t.Name == "read_file" })
+		offered = append(offered, tools.EditorTool(root))
+		r.System = []textBlock{{Type: "text", Text: systemEdit}}
+	}
+	for _, t := range offered {
+		if t.Name == tools.EditorName {
+			r.Tools = append(r.Tools, editorTool{Type: "text_editor_20250728", Name: tools.EditorName})
+			continue
+		}
 		r.Tools = append(r.Tools, clientTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
 	}
-	r.System = []textBlock{{Type: "text", Text: systemRead}}
-	return tools.NewSet(read), nil
+	return tools.NewSet(offered), nil
 }
 
 // runTools runs the tool_use blocks of one response in order and returns their results, every
 // call answered, a refused or unknown one as is_error (SPEC §4.1). counts gets each call by its
 // CLI name; Activity and Stream are told what runs.
-func runTools(ctx context.Context, blocks []map[string]any, set tools.Set, req provider.Request, counts map[string]int) []any {
+func runTools(ctx context.Context, blocks []map[string]any, set *tools.Set, req provider.Request, counts map[string]int) []any {
 	var results []any
 	for _, b := range blocks {
 		if b["type"] != "tool_use" {
@@ -361,7 +384,7 @@ func runTools(ctx context.Context, blocks []map[string]any, set tools.Set, req p
 		if req.Stream != nil {
 			_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
 		}
-		counts[tools.DisplayName(name)]++
+		counts[tools.Display(name, input)]++
 		out, isErr := set.Call(ctx, name, input)
 		results = append(results, &toolResult{Type: "tool_result", ToolUseID: str(b["id"]), Content: out, IsError: isErr})
 	}

@@ -177,3 +177,59 @@ func TestLoop_NoneHasNoLoopFields(t *testing.T) {
 		}
 	}
 }
+
+func TestLoop_ApplyPatch(t *testing.T) {
+	patch := func(id, op, path, diff string) map[string]any {
+		return map[string]any{"type": "apply_patch_call", "id": "apc_" + id, "call_id": id, "status": "completed",
+			"operation": map[string]any{"type": op, "path": path, "diff": diff}}
+	}
+	first := map[string]any{"type": "response.completed", "response": map[string]any{
+		"id": "r1", "model": "gpt-5.5", "status": "completed",
+		"output": []any{
+			patch("p1", "update_file", "a.go", "-func Add() {}\n+func Add() int { return 1 }\n"),
+			patch("p2", "create_file", ".git/hooks/pre-commit", "+#!/bin/sh\n+exit 0"),
+			patch("p3", "create_file", "b.go", "+package a"),
+		},
+		"usage": map[string]any{"input_tokens": 100, "output_tokens": 10},
+	}}
+	raw, _ := json.Marshal(first)
+	f := newFake(t, answer{stream: fmt.Sprintf("event: response.completed\ndata: %s\n\n", raw)}, answer{stream: completed(1, "done")})
+	req := readRequest(t)
+	req.Authority = domain.AuthorityEdit
+	res, err := client(f, "", nil).Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(req.WorkingDir, "a.go")); string(got) != "package a\n\nfunc Add() int { return 1 }\n" {
+		t.Errorf("a.go = %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(req.WorkingDir, "b.go")); string(got) != "package a\n" {
+		t.Errorf("b.go = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(req.WorkingDir, ".git/hooks/pre-commit")); err == nil {
+		t.Error("apply_patch wrote a git hook")
+	}
+	if c := res.Call.Tools; c["Edit"] != 1 || c["Write"] != 2 {
+		t.Errorf("Tools = %v", c)
+	}
+	var second struct {
+		Input []map[string]any `json:"input"`
+		Tools []map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(f.bodies[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	outs := second.Input[len(second.Input)-3:]
+	for i, want := range []string{"completed", "failed", "completed"} {
+		if outs[i]["type"] != "apply_patch_call_output" || outs[i]["status"] != want {
+			t.Errorf("output %d = %v, want %s", i, outs[i], want)
+		}
+	}
+	if !strings.Contains(outs[1]["output"].(string), ".git is not accessible") {
+		t.Errorf("the failed output = %v", outs[1])
+	}
+	if !bytes.Contains(f.bodies[0], []byte(`{"type":"apply_patch"}`)) || !bytes.Contains(f.bodies[0], []byte(`"read_file"`)) {
+		t.Errorf("edit tools = %s", f.bodies[0])
+	}
+	golden(t, "edit", f.bodies[0])
+}
