@@ -4,12 +4,15 @@
 //
 // Every request streams with store: false, so OpenAI keeps nothing of the conversation, and
 // uses nothing a LiteLLM gateway does not proxy on /v1/responses (no previous_response_id,
-// conversations or background mode). This task's client runs calls without tools only:
-// Supports is true for AuthorityNone alone.
+// conversations or background mode). A call with repository tools is a loop the client runs
+// itself (SPEC §5): the model calls a function, the client runs it from internal/provider/tools
+// inside the working directory and sends the output back with the response's own items.
 package openai
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +26,7 @@ import (
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
 	"orchestrator/internal/provider/httpapi"
+	"orchestrator/internal/provider/tools"
 )
 
 const (
@@ -78,8 +82,11 @@ func (c *Client) Endpoint() (httpapi.Endpoint, error) {
 	return ep, err
 }
 
-// Supports is true for AuthorityNone only (SPEC §10, phase 1).
-func (c *Client) Supports(a domain.Authority) bool { return a == domain.AuthorityNone }
+// Supports is true for none and read (SPEC §5.1): none gets no tools, read the confined read
+// tools. Web and edit wait for their tools.
+func (c *Client) Supports(a domain.Authority) bool {
+	return a == domain.AuthorityNone || a == domain.AuthorityRead
+}
 
 // ReportsCost reports whether a call to model gets a cost: a price in providers.codex.prices or
 // the built-in table.
@@ -95,113 +102,211 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 		return provider.Result{}, &apperr.AuthorityError{
 			Provider:  string(provider.Codex),
 			Authority: string(req.Authority),
-			Reason:    "The codex API transport runs calls without tools only so far (specs/api-transport/SPEC.md §10); route this action to transport: cli.",
+			Reason:    "The codex API transport has no web or edit tools yet (specs/api-transport/SPEC.md §10); route this action elsewhere.",
 		}
 	}
 	ep, prices, err := c.endpoint()
 	if err != nil {
 		return provider.Result{}, err
 	}
-	body, err := json.Marshal(buildRequest(req))
-	if err != nil {
-		return provider.Result{}, fmt.Errorf("codex API request: %w", err)
-	}
+	r := buildRequest(req)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + responsesPath}
+	set, err := repositoryTools(req, &r)
+	if err != nil {
+		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
+	}
+	// Until the adapter speaks MCP (AT11), a configured server is reported as one that did not
+	// start: the call runs without its tools, which the call report says.
+	mcpFailed := tools.MCPServerNames(req.Extensions.MCPConfig)
 
 	start := time.Now()
-	resp, err := ep.Do(ctx, http.MethodPost, responsesPath, body)
-	if err != nil {
-		return provider.Result{Duration: time.Since(start)}, call.fromHTTP(err, time.Since(start))
-	}
-	defer resp.Body.Close()
-
-	s := &stream{}
-	var onText func(string)
-	if req.Stream != nil || req.Activity != nil {
-		writing := false
-		onText = func(t string) {
-			if !writing && req.Activity != nil {
-				req.Activity("Writing")
-			}
-			writing = true
-			if req.Stream != nil {
-				_, _ = io.WriteString(req.Stream, t)
-			}
-		}
-	}
-	streamErr := readStream(resp.Body, s, onText)
-	dur := time.Since(start)
-
-	result := provider.Result{Duration: dur}
+	var usage *domain.Usage
+	var texts []string
 	model := req.Model
-	if s.created != nil && s.created.Model != "" {
-		model = s.created.Model
-	}
-	if f := s.final; f != nil {
-		if f.Model != "" {
-			model = f.Model
+	counts := map[string]int{}
+	result := func() provider.Result {
+		res := provider.Result{Output: strings.Join(texts, ""), Duration: time.Since(start), Usage: usage}
+		var cost float64
+		if usage != nil {
+			u := *usage
+			res.Usage, cost = &u, u.CostUSD
 		}
-		if f.Usage != nil {
-			u := f.Usage.domain()
-			u.Turns = 1
-			cost, priced := httpapi.GatewayCost(resp.Header)
-			if !priced {
-				if p, ok := httpapi.Lookup(prices, req.Model); ok {
-					cost = p.Cost(u)
+		res.Call = &domain.CallReport{Models: []domain.ModelUse{{Model: model, CostUSD: cost}}, APIMS: time.Since(start).Milliseconds(), MCPFailed: mcpFailed}
+		if len(counts) > 0 {
+			res.Call.Tools = counts
+		}
+		return res
+	}
+
+	for n := 0; ; n++ {
+		if n == maxTurns {
+			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("the call reached %d model turns", maxTurns), time.Since(start), nil)
+		}
+		body, err := json.Marshal(r)
+		if err != nil {
+			return provider.Result{}, fmt.Errorf("codex API request: %w", err)
+		}
+		resp, err := ep.Do(ctx, http.MethodPost, responsesPath, body)
+		if err != nil {
+			return result(), call.fromHTTP(err, time.Since(start))
+		}
+		s := &stream{}
+		streamErr := readStream(resp.Body, s, onText(req))
+		resp.Body.Close()
+
+		if s.created != nil && s.created.Model != "" {
+			model = s.created.Model
+		}
+		var calls []functionCall
+		if f := s.final; f != nil {
+			if f.Model != "" {
+				model = f.Model
+			}
+			if f.Usage != nil {
+				u := f.Usage.domain()
+				u.Turns = 1
+				cost, priced := httpapi.GatewayCost(resp.Header)
+				if !priced {
+					if p, ok := httpapi.Lookup(prices, req.Model); ok {
+						cost = p.Cost(u)
+					}
+				}
+				u.CostUSD = cost
+				if usage == nil {
+					usage = &domain.Usage{}
+				}
+				usage.Add(u)
+			}
+			out, fc, err := parseOutput(f.Output)
+			if err != nil && streamErr == nil {
+				streamErr = fmt.Errorf("the response is not valid: %w", err)
+			}
+			if out != "" {
+				texts = append(texts, out)
+			}
+			calls = fc
+		}
+
+		switch {
+		case streamErr != nil:
+			if ctx.Err() != nil {
+				streamErr = ctx.Err()
+			}
+			// Responses reports usage only at the end of a response: the one cut off adds none.
+			return result(), call.failure(httpapi.Kind(streamErr), ep.Redact(streamErr.Error()), time.Since(start), streamErr)
+		case s.errEvent != nil && s.final == nil:
+			return result(), call.failure(apperr.FailureAPI, ep.Redact(fmt.Sprintf("the API sent an error in the stream: %s: %s", s.errEvent.Code, s.errEvent.Message)), time.Since(start), nil)
+		case s.final == nil:
+			return result(), call.failure(apperr.FailureAPI, "the stream ended before the response completed", time.Since(start), nil)
+		}
+		switch f := s.final; f.Status {
+		case "completed":
+		case "incomplete":
+			reason := "unknown"
+			if f.IncompleteDetails != nil && f.IncompleteDetails.Reason != "" {
+				reason = f.IncompleteDetails.Reason
+			}
+			return result(), call.failure(apperr.FailureAPI, "the response is incomplete: "+reason, time.Since(start), nil)
+		case "failed":
+			detail := "the response failed"
+			if e := f.Error; e != nil {
+				detail = ep.Redact(fmt.Sprintf("the response failed: %s: %s", e.Code, e.Message))
+			}
+			kind := apperr.FailureAPI
+			if e := f.Error; e != nil && e.Code == "rate_limit_exceeded" {
+				kind = apperr.FailureRateLimit
+			}
+			return result(), call.failure(kind, detail, time.Since(start), nil)
+		default:
+			return result(), call.failure(apperr.FailureAPI, fmt.Sprintf("unexpected response status %q", f.Status), time.Since(start), nil)
+		}
+
+		if len(calls) == 0 {
+			if req.Stream != nil {
+				if out := strings.Join(texts, ""); out != "" && !strings.HasSuffix(out, "\n") {
+					_, _ = io.WriteString(req.Stream, "\n")
 				}
 			}
-			u.CostUSD = cost
-			result.Usage = &u
+			return result(), nil
 		}
-		out, err := text(f.Output)
-		if err != nil && streamErr == nil {
-			streamErr = fmt.Errorf("the response is not valid: %w", err)
+		if set == nil {
+			return result(), call.failure(apperr.FailureAPI, "the model called a function the call did not offer", time.Since(start), nil)
 		}
-		result.Output = out
-	}
-	var cost float64
-	if result.Usage != nil {
-		cost = result.Usage.CostUSD
-	}
-	result.Call = &domain.CallReport{Models: []domain.ModelUse{{Model: model, CostUSD: cost}}, APIMS: dur.Milliseconds()}
-	if req.Stream != nil && result.Output != "" && !strings.HasSuffix(result.Output, "\n") {
-		_, _ = io.WriteString(req.Stream, "\n")
-	}
-
-	switch {
-	case streamErr != nil:
+		// The response's items go back unchanged (reasoning items carry their encrypted content),
+		// then one output per call (SPEC §4.2).
+		for _, item := range s.final.Output {
+			r.Input = append(r.Input, item)
+		}
+		for _, fc := range calls {
+			what := tools.Label(fc.Name, json.RawMessage(fc.Arguments))
+			if req.Activity != nil {
+				req.Activity(what)
+			}
+			if req.Stream != nil {
+				_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
+			}
+			counts[tools.DisplayName(fc.Name)]++
+			out, isErr := set.Call(ctx, fc.Name, json.RawMessage(fc.Arguments))
+			if isErr {
+				out = "error: " + out
+			}
+			r.Input = append(r.Input, functionCallOutput{Type: "function_call_output", CallID: fc.CallID, Output: out})
+		}
 		if ctx.Err() != nil {
-			streamErr = ctx.Err()
+			return result(), call.failure(httpapi.Kind(ctx.Err()), ctx.Err().Error(), time.Since(start), ctx.Err())
 		}
-		// Responses reports usage only at the end: a call cut off has none to give.
-		return result, call.failure(httpapi.Kind(streamErr), ep.Redact(streamErr.Error()), dur, streamErr)
-	case s.errEvent != nil && s.final == nil:
-		return result, call.failure(apperr.FailureAPI, ep.Redact(fmt.Sprintf("the API sent an error in the stream: %s: %s", s.errEvent.Code, s.errEvent.Message)), dur, nil)
-	case s.final == nil:
-		return result, call.failure(apperr.FailureAPI, "the stream ended before the response completed", dur, nil)
 	}
-	switch f := s.final; f.Status {
-	case "completed":
-		return result, nil
-	case "incomplete":
-		reason := "unknown"
-		if f.IncompleteDetails != nil && f.IncompleteDetails.Reason != "" {
-			reason = f.IncompleteDetails.Reason
-		}
-		return result, call.failure(apperr.FailureAPI, "the response is incomplete: "+reason, dur, nil)
-	case "failed":
-		detail := "the response failed"
-		if e := f.Error; e != nil {
-			detail = ep.Redact(fmt.Sprintf("the response failed: %s: %s", e.Code, e.Message))
-		}
-		kind := apperr.FailureAPI
-		if e := f.Error; e != nil && e.Code == "rate_limit_exceeded" {
-			kind = apperr.FailureRateLimit
-		}
-		return result, call.failure(kind, detail, dur, nil)
-	default:
-		return result, call.failure(apperr.FailureAPI, fmt.Sprintf("unexpected response status %q", f.Status), dur, nil)
+}
+
+// maxTurns is the backstop of SPEC §5: execution.timeout bounds a call, this bounds its responses.
+const maxTurns = 500
+
+// instructionsRead is the fixed instructions of a call with the read tools.
+const instructionsRead = "You work for an automated orchestrator on one repository, through your tools read_file, " +
+	"grep and glob; every path is relative to the repository root. You cannot run commands, change files " +
+	"or reach the network. Answer exactly in the form the request asks for."
+
+// onText tells Activity once per response that the model writes, and streams the text.
+func onText(req provider.Request) func(string) {
+	if req.Stream == nil && req.Activity == nil {
+		return nil
 	}
+	writing := false
+	return func(t string) {
+		if !writing && req.Activity != nil {
+			req.Activity("Writing")
+		}
+		writing = true
+		if req.Stream != nil {
+			_, _ = io.WriteString(req.Stream, t)
+		}
+	}
+}
+
+// repositoryTools gives a read call the confined read tools as strict function tools, sorted by
+// name, with the reasoning replay and the cache key a loop needs (SPEC §4.2). Other calls get none.
+func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
+	if req.Authority != domain.AuthorityRead {
+		return nil, nil
+	}
+	if req.WorkingDir == "" {
+		return nil, errors.New("a call with repository tools needs a working directory")
+	}
+	root, err := tools.NewRoot(req.WorkingDir, req.DenyRead)
+	if err != nil {
+		return nil, fmt.Errorf("the working directory cannot be used: %w", err)
+	}
+	read := tools.ReadTools(root)
+	for _, t := range read {
+		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: true})
+	}
+	r.Instructions = instructionsRead
+	r.Include = []string{"reasoning.encrypted_content"}
+	parallel := true
+	r.ParallelToolCalls = &parallel
+	sum := sha256.Sum256([]byte("codex\x00" + req.Model + "\x00" + string(req.Authority)))
+	r.PromptCacheKey = hex.EncodeToString(sum[:16])
+	return tools.NewSet(read), nil
 }
 
 func buildRequest(req provider.Request) request {

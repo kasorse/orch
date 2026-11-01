@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -142,7 +141,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	}
 	// Until the adapter speaks MCP (AT11), a configured server is reported as one that did not
 	// start: the call runs without its tools, which the call report says.
-	mcpFailed := mcpServerNames(req.Extensions.MCPConfig)
+	mcpFailed := tools.MCPServerNames(req.Extensions.MCPConfig)
 
 	start := time.Now()
 	var usage domain.Usage
@@ -319,19 +318,13 @@ func toolName(name string) string {
 		return "WebSearch"
 	case "web_fetch":
 		return "WebFetch"
-	case "read_file":
-		return "Read"
-	case "grep":
-		return "Grep"
-	case "glob":
-		return "Glob"
 	}
-	return name
+	return tools.DisplayName(name)
 }
 
 // repositoryTools gives a read call the confined read tools (SPEC §5.1): their definitions go
 // into the request, sorted by name, and the set runs the model's calls. Other calls get none.
-func repositoryTools(req provider.Request, r *request) (map[string]tools.Tool, error) {
+func repositoryTools(req provider.Request, r *request) (tools.Set, error) {
 	if req.Authority != domain.AuthorityRead {
 		return nil, nil
 	}
@@ -342,69 +335,37 @@ func repositoryTools(req provider.Request, r *request) (map[string]tools.Tool, e
 	if err != nil {
 		return nil, fmt.Errorf("the working directory cannot be used: %w", err)
 	}
-	set := map[string]tools.Tool{}
-	for _, t := range tools.ReadTools(root) {
-		set[t.Name] = t
+	read := tools.ReadTools(root)
+	for _, t := range read {
 		r.Tools = append(r.Tools, clientTool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
 	}
 	r.System = []textBlock{{Type: "text", Text: systemRead}}
-	return set, nil
+	return tools.NewSet(read), nil
 }
 
 // runTools runs the tool_use blocks of one response in order and returns their results, every
 // call answered, a refused or unknown one as is_error (SPEC §4.1). counts gets each call by its
 // CLI name; Activity and Stream are told what runs.
-func runTools(ctx context.Context, blocks []map[string]any, set map[string]tools.Tool, req provider.Request, counts map[string]int) []any {
+func runTools(ctx context.Context, blocks []map[string]any, set tools.Set, req provider.Request, counts map[string]int) []any {
 	var results []any
 	for _, b := range blocks {
 		if b["type"] != "tool_use" {
 			continue
 		}
-		id, name := str(b["id"]), str(b["name"])
-		input, _ := b["input"].(map[string]any)
-		what := toolName(name)
-		if arg := str(input["path"]) + str(input["pattern"]); arg != "" {
-			what += " " + arg
-		}
+		name := str(b["name"])
+		input, _ := json.Marshal(b["input"])
+		what := tools.Label(name, input)
 		if req.Activity != nil {
 			req.Activity(what)
 		}
 		if req.Stream != nil {
 			_, _ = io.WriteString(req.Stream, "→ "+what+"\n")
 		}
-		counts[toolName(name)]++
-		out, isErr := "", false
-		if tool, ok := set[name]; !ok {
-			out, isErr = fmt.Sprintf("there is no tool %q", name), true
-		} else if raw, err := json.Marshal(input); err != nil {
-			out, isErr = "invalid input", true
-		} else if text, err := tool.Run(ctx, raw); err != nil {
-			out, isErr = err.Error(), true
-		} else {
-			out = text
-		}
-		results = append(results, &toolResult{Type: "tool_result", ToolUseID: id, Content: out, IsError: isErr})
+		counts[tools.DisplayName(name)]++
+		out, isErr := set.Call(ctx, name, input)
+		results = append(results, &toolResult{Type: "tool_result", ToolUseID: str(b["id"]), Content: out, IsError: isErr})
 	}
 	return results
-}
-
-// mcpServerNames are the servers an MCP config document names, sorted; nil for none.
-func mcpServerNames(doc string) []string {
-	if doc == "" {
-		return nil
-	}
-	var cfg struct {
-		Servers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if json.Unmarshal([]byte(doc), &cfg) != nil {
-		return []string{"mcp-config"}
-	}
-	names := make([]string, 0, len(cfg.Servers))
-	for name := range cfg.Servers {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
 }
 
 // marshal renders the request. With cache, the last block of the first user message, of the

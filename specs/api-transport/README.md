@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **in progress** (2026-11-01): AT01–AT07 done (7 of 14). Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; investigate and review too since AT07; implement waits for AT10. The owner's
+Status: **in progress** (2026-11-01): AT01–AT08 done (8 of 14). Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; investigate and review too since AT07 (codex since AT08); implement waits for AT10. The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |
@@ -39,7 +39,7 @@ as they are.
 | [x] | [AT05](tasks/TASK-AT05-wiring.md) | wiring: registry by transport, fail-fast, `provider_cli`, cost by model | M | AT03, AT04 | 1 |
 | [x] | [AT06](tasks/TASK-AT06-tools-read.md) | `tools`: confinement, `read_file`, `grep`, `glob` | M | AT01 | 2 |
 | [x] | [AT07](tasks/TASK-AT07-anthropic-loop.md) | Anthropic tool loop, caching breakpoints, authority `read` | M | AT03, AT06 | 2 |
-| [ ] | [AT08](tasks/TASK-AT08-openai-loop.md) | OpenAI tool loop, encrypted reasoning, authority `read` | M | AT04, AT06 | 2 |
+| [x] | [AT08](tasks/TASK-AT08-openai-loop.md) | OpenAI tool loop, encrypted reasoning, authority `read` | M | AT04, AT06 | 2 |
 | [~] | [AT09](tasks/TASK-AT09-web.md) | authority `web`: server web tools, `web_tools` (claude done) | S | AT07, AT08 | 2 |
 | [ ] | [AT10](tasks/TASK-AT10-edit.md) | authority `edit`: the text editor tool, `apply_patch` (V4A) | L | AT07, AT08 | 3 |
 | [ ] | [AT11](tasks/TASK-AT11-mcp.md) | MCP stdio client: `orch` verify and `extensions.mcp` | M | AT07, AT08 | 3 |

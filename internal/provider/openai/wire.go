@@ -11,12 +11,38 @@ import (
 // package knows the request or the stream.
 
 type request struct {
-	Model        string     `json:"model"`
-	Instructions string     `json:"instructions"`
-	Input        []any      `json:"input"`
-	Reasoning    *reasoning `json:"reasoning,omitempty"`
-	Store        bool       `json:"store"`
-	Stream       bool       `json:"stream"`
+	Model             string     `json:"model"`
+	Instructions      string     `json:"instructions"`
+	Input             []any      `json:"input"`
+	Tools             []any      `json:"tools,omitempty"`
+	ParallelToolCalls *bool      `json:"parallel_tool_calls,omitempty"`
+	Include           []string   `json:"include,omitempty"`
+	PromptCacheKey    string     `json:"prompt_cache_key,omitempty"`
+	Reasoning         *reasoning `json:"reasoning,omitempty"`
+	Store             bool       `json:"store"`
+	Stream            bool       `json:"stream"`
+}
+
+// functionTool is a tool the client runs (internal/provider/tools), with strict schemas.
+type functionTool struct {
+	Type        string         `json:"type"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Strict      bool           `json:"strict"`
+}
+
+// functionCall is a function_call output item; functionCallOutput answers it.
+type functionCall struct {
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type functionCallOutput struct {
+	Type   string `json:"type"`
+	CallID string `json:"call_id"`
+	Output string `json:"output"`
 }
 
 type reasoning struct {
@@ -138,9 +164,11 @@ func (s *stream) apply(data []byte, onText func(string)) error {
 	return nil
 }
 
-// text is the answer: the output_text parts of the message items, joined.
-func text(output []json.RawMessage) (string, error) {
+// parseOutput reads a response's items: the answer (the output_text parts of the message items,
+// joined) and the function calls, in order.
+func parseOutput(output []json.RawMessage) (string, []functionCall, error) {
 	var out string
+	var calls []functionCall
 	for i, raw := range output {
 		var item struct {
 			Type    string `json:"type"`
@@ -148,18 +176,24 @@ func text(output []json.RawMessage) (string, error) {
 				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
+			functionCall
 		}
 		if err := json.Unmarshal(raw, &item); err != nil {
-			return "", fmt.Errorf("output[%d] is not an item: %w", i, err)
+			return "", nil, fmt.Errorf("output[%d] is not an item: %w", i, err)
 		}
-		if item.Type != "message" {
-			continue
-		}
-		for _, c := range item.Content {
-			if c.Type == "output_text" {
-				out += c.Text
+		switch item.Type {
+		case "message":
+			for _, c := range item.Content {
+				if c.Type == "output_text" {
+					out += c.Text
+				}
 			}
+		case "function_call":
+			if item.CallID == "" || item.Name == "" {
+				return "", nil, fmt.Errorf("output[%d] is a function_call without a call_id or a name", i)
+			}
+			calls = append(calls, item.functionCall)
 		}
 	}
-	return out, nil
+	return out, calls, nil
 }

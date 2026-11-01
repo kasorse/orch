@@ -141,8 +141,8 @@ var apiDecisionResponses = map[string]string{
 // codexKey is a stand-in OpenAI key, assembled at run time.
 func codexKey() string { return strings.Join([]string{"at05", "stand-in", "key"}, "-") }
 
-// apiTransportRun prepares a run whose translator and decision provider are codex over the API
-// at api; the steps stay on the claude CLI.
+// apiTransportRun prepares a run whose translator, decision provider and read steps (investigate,
+// review) are codex over the API at api; implement and research stay on the claude CLI.
 func apiTransportRun(t *testing.T, repoDir string, api *fakeAPI, mutate ...func(*configOptions)) (cfg, invocationsLog string) {
 	t.Helper()
 	clearAuthEnv(t)
@@ -151,6 +151,7 @@ func apiTransportRun(t *testing.T, repoDir string, api *fakeAPI, mutate ...func(
 	invocationsLog, _ = decisionEnv(t, repoDir)
 	opts := defaultConfigOptions()
 	opts.providers.Translation, opts.providers.Decision = "codex", "codex"
+	opts.providers.Investigate, opts.providers.Review = "codex", "codex"
 	opts.extraYAML = fmt.Sprintf("providers:\n  codex:\n    transport: api\n    base_url: %s\n", api.srv.URL)
 	for _, m := range mutate {
 		m(&opts)
@@ -160,7 +161,11 @@ func apiTransportRun(t *testing.T, repoDir string, api *fakeAPI, mutate ...func(
 
 func TestScenario70_APITransport_DecisionCallsOverHTTP(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
-	api := startResponsesAPI(t, []string{"other", "fake"}, apiDecisionResponses)
+	responses := map[string]string{"investigate": investigateResponse, "review": reviewPassResponse}
+	for k, v := range apiDecisionResponses {
+		responses[k] = v
+	}
+	api := startResponsesAPI(t, []string{"other", "fake"}, responses)
 	cfg, invocationsLog := apiTransportRun(t, repoDir, api)
 
 	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "run", authRequest)
@@ -168,16 +173,16 @@ func TestScenario70_APITransport_DecisionCallsOverHTTP(t *testing.T) {
 		t.Fatalf("run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 	actions, keys := api.calls()
-	if !equalStrings(actions, []string{"translate", "decide-context", "decide-classify"}) {
-		t.Errorf("API calls = %v, want translate, decide-context, decide-classify", actions)
+	if !equalStrings(actions, []string{"translate", "decide-context", "decide-classify", "investigate", "review"}) {
+		t.Errorf("API calls = %v, want translate, decide-context, decide-classify, investigate, review", actions)
 	}
 	for _, k := range keys {
 		if k != "Bearer "+codexKey() {
 			t.Errorf("a call carried Authorization %q, want the configured key", k)
 		}
 	}
-	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"investigate", "implement", "review"}) {
-		t.Errorf("CLI invocations = %v, want only the steps", got)
+	if got := invocations(t, invocationsLog); !equalStrings(got, []string{"implement"}) {
+		t.Errorf("CLI invocations = %v, want only implement", got)
 	}
 	if !strings.Contains(stdout, "Run completed successfully.") {
 		t.Errorf("want a completed run, got:\n%s", stdout)
