@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **in progress** (2026-11-01): AT01–AT05 done (5 of 14). Phase 1 works for codex; claude waits for the web authority (AT05 As built). The owner's
+Status: **in progress** (2026-11-01): AT01–AT05 done (5 of 14). Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; its steps wait for AT07/AT10. The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |
@@ -40,7 +40,7 @@ as they are.
 | [ ] | [AT06](tasks/TASK-AT06-tools-read.md) | `tools`: confinement, `read_file`, `grep`, `glob` | M | AT01 | 2 |
 | [ ] | [AT07](tasks/TASK-AT07-anthropic-loop.md) | Anthropic tool loop, caching breakpoints, authority `read` | M | AT03, AT06 | 2 |
 | [ ] | [AT08](tasks/TASK-AT08-openai-loop.md) | OpenAI tool loop, encrypted reasoning, authority `read` | M | AT04, AT06 | 2 |
-| [ ] | [AT09](tasks/TASK-AT09-web.md) | authority `web`: server web tools, `web_tools` | S | AT07, AT08 | 2 |
+| [~] | [AT09](tasks/TASK-AT09-web.md) | authority `web`: server web tools, `web_tools` (claude done) | S | AT07, AT08 | 2 |
 | [ ] | [AT10](tasks/TASK-AT10-edit.md) | authority `edit`: the text editor tool, `apply_patch` (V4A) | L | AT07, AT08 | 3 |
 | [ ] | [AT11](tasks/TASK-AT11-mcp.md) | MCP stdio client: `orch` verify and `extensions.mcp` | M | AT07, AT08 | 3 |
 | [ ] | [AT12](tasks/TASK-AT12-skills.md) | skills under `user_settings`: discovery and the `skill` tool | M | AT07, AT08 | 3 |

@@ -82,7 +82,7 @@ func newFake(t *testing.T, answers ...answer) *fake {
 }
 
 func client(f *fake, prices map[string]httpapi.Price) *Client {
-	c := New(f.srv.URL+"/", prices)
+	c := New(f.srv.URL+"/", true, prices)
 	c.SetKey(testKey)
 	c.ep.Backoff = time.Millisecond
 	return c
@@ -251,7 +251,7 @@ func TestExecute_CancelledMidStream(t *testing.T) {
 }
 
 func TestExecute_Refusals(t *testing.T) {
-	for _, a := range []domain.Authority{domain.AuthorityRead, domain.AuthorityEdit, domain.AuthorityWeb, ""} {
+	for _, a := range []domain.Authority{domain.AuthorityRead, domain.AuthorityEdit, ""} {
 		req := noneRequest()
 		req.Authority = a
 		_, err := client(newFake(t, answer{stream: "plain.sse"}), nil).Execute(context.Background(), req)
@@ -260,7 +260,7 @@ func TestExecute_Refusals(t *testing.T) {
 			t.Errorf("authority %q: want an AuthorityError, got %v", a, err)
 		}
 	}
-	_, err := New("", nil).Execute(context.Background(), noneRequest())
+	_, err := New("", true, nil).Execute(context.Background(), noneRequest())
 	var ce *apperr.ConfigError
 	if !errors.As(err, &ce) {
 		t.Errorf("without SetKey: want a ConfigError, got %v", err)
@@ -268,9 +268,105 @@ func TestExecute_Refusals(t *testing.T) {
 }
 
 func TestNew_DefaultBaseURL(t *testing.T) {
-	c := New("", nil)
+	c := New("", true, nil)
 	c.SetKey(testKey)
 	if ep, _ := c.Endpoint(); ep.BaseURL != DefaultBaseURL {
 		t.Errorf("BaseURL = %q", ep.BaseURL)
 	}
+}
+
+func webRequest() provider.Request {
+	req := noneRequest()
+	req.Prompt, req.Authority = "ACTION: research\nWhat is new in Go 1.26?", domain.AuthorityWeb
+	return req
+}
+
+func TestExecute_WebWithServerTools(t *testing.T) {
+	f := newFake(t, answer{stream: "web.sse"})
+	var activity []string
+	var live bytes.Buffer
+	req := webRequest()
+	req.Activity = func(s string) { activity = append(activity, s) }
+	req.Stream = &live
+	res, err := client(f, nil).Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Output != "Searching. Go 1.26 adds X." {
+		t.Errorf("Output = %q", res.Output)
+	}
+	if c := res.Call; c.Tools["WebSearch"] != 1 || strings.Join(c.WebTools, ",") != "WebFetch,WebSearch" {
+		t.Errorf("Tools %v, WebTools %v", c.Tools, c.WebTools)
+	}
+	if !slicesContain(activity, "WebSearch go 1.26 release notes") || !strings.Contains(live.String(), "→ WebSearch go 1.26 release notes\n") {
+		t.Errorf("activity %q, live %q", activity, live.String())
+	}
+	golden(t, "web", f.bodies[0])
+}
+
+func TestExecute_WebWithoutTools(t *testing.T) {
+	f := newFake(t, answer{stream: "plain.sse"})
+	c := New(f.srv.URL, false, nil)
+	c.SetKey(testKey)
+	res, err := c.Execute(context.Background(), webRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Call.WebTools != nil || res.Call.Tools != nil {
+		t.Errorf("WebTools %v, Tools %v: a call without web tools offers none", res.Call.WebTools, res.Call.Tools)
+	}
+	golden(t, "web-off", f.bodies[0])
+}
+
+// pause_turn: the conversation goes back as it is, the assistant's blocks unchanged, and the
+// usage of both responses adds up.
+func TestExecute_PauseTurn(t *testing.T) {
+	f := newFake(t, answer{stream: "pause.sse"}, answer{stream: "after_pause.sse"})
+	res, err := client(f, nil).Execute(context.Background(), webRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.calls.Load() != 2 || res.Output != "Go 1.26 adds X." {
+		t.Fatalf("calls %d, Output %q", f.calls.Load(), res.Output)
+	}
+	if u := res.Usage; u.Turns != 2 || u.InputTokens != 6000 || u.OutputTokens != 150 {
+		t.Errorf("Usage = %+v", u)
+	}
+	var second struct {
+		Messages []struct {
+			Role    string           `json:"role"`
+			Content []map[string]any `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(f.bodies[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Messages) != 2 || second.Messages[1].Role != "assistant" || len(second.Messages[1].Content) != 2 ||
+		second.Messages[1].Content[0]["type"] != "server_tool_use" || second.Messages[1].Content[1]["type"] != "web_search_tool_result" {
+		t.Fatalf("the second request does not carry the paused turn: %s", f.bodies[1])
+	}
+	if input, _ := second.Messages[1].Content[0]["input"].(map[string]any); input["query"] != "go 1.26 release notes" {
+		t.Errorf("the tool's input was not sent back: %v", second.Messages[1].Content[0])
+	}
+	if !bytes.HasPrefix(f.bodies[1], f.bodies[0][:bytes.Index(f.bodies[0], []byte(`"messages"`))]) {
+		t.Error("the second request's prefix before messages changed")
+	}
+}
+
+func TestExecute_PauseLimit(t *testing.T) {
+	f := newFake(t, answer{stream: "pause.sse"})
+	_, err := client(f, nil).Execute(context.Background(), webRequest())
+	var pe *apperr.ProviderError
+	if !errors.As(err, &pe) || !strings.Contains(pe.Detail, "paused the turn 5 times") || f.calls.Load() != maxPauses+1 {
+		t.Fatalf("calls %d, err %v", f.calls.Load(), err)
+	}
+}
+
+func slicesContain(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

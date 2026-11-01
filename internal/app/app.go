@@ -973,7 +973,7 @@ func checkAPIModels(ctx context.Context, cfg config.Config, id string, api apiCl
 // applyClaudeAuth and applyCodexAuth.
 func registerAPIClients(registry *provider.Registry, cfg config.Config) {
 	if c := cfg.Providers.Claude; c.UsesAPI() {
-		registry.Register(provider.Claude, anthropic.New(c.BaseURL, apiPrices(c.Prices)))
+		registry.Register(provider.Claude, anthropic.New(c.BaseURL, c.WebToolsOn(), apiPrices(c.Prices)))
 	}
 	if c := cfg.Providers.Codex; c.UsesAPI() {
 		registry.Register(provider.Codex, openai.New(c.BaseURL, apiPrices(c.Prices)))

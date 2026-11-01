@@ -18,7 +18,15 @@ type request struct {
 	System       []textBlock   `json:"system,omitempty"`
 	Messages     []message     `json:"messages"`
 	OutputConfig *outputConfig `json:"output_config,omitempty"`
+	Tools        []serverTool  `json:"tools,omitempty"`
 	Stream       bool          `json:"stream"`
+}
+
+// serverTool is a tool the API runs itself (web search, web fetch).
+type serverTool struct {
+	Type    string `json:"type"`
+	Name    string `json:"name"`
+	MaxUses int    `json:"max_uses,omitempty"`
 }
 
 type textBlock struct {
@@ -75,9 +83,11 @@ type turn struct {
 	}
 }
 
-// onBlock is told the type of each block as it starts, onText each text delta.
+// observer is told the type of each block as it starts (onBlock), each block once it is
+// complete (onDone) and each text delta (onText).
 type observer struct {
 	onBlock func(blockType string)
+	onDone  func(block map[string]any)
 	onText  func(string)
 }
 
@@ -187,6 +197,9 @@ func (t *turn) apply(name string, data []byte, obs observer) error {
 			}
 			t.blocks[*ev.Index]["input"] = input
 			delete(t.partialJSON, *ev.Index)
+		}
+		if obs.onDone != nil {
+			obs.onDone(t.blocks[*ev.Index])
 		}
 	case "message_delta":
 		var ev struct {

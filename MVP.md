@@ -3334,10 +3334,13 @@ human sees and confirms between steps.
 * A provider on the API transport (`providers.<p>.transport: api`, specs/api-transport) runs
   no CLI: `internal/provider/anthropic` and `internal/provider/openai` send the request
   themselves, and an authority is what the request offers the model, enforced in Go. So far
-  they support `none` only (a request with no tools), so a `read`, `edit` or `web` route of
-  such a provider is refused by `ValidateAuthorities`; with the default routes that includes
-  `research`, so claude on the API transport waits for the web authority (specs/api-transport
-  AT09). In place of the version check, `GET {base_url}/v1/models` must list every model the
+  they support `none` (a request with no tools) and claude also `web`: the server's own
+  `web_search` and `web_fetch` (10 uses each, `pause_turn` resumed up to 4 times) when
+  `providers.claude.web_tools` is on - the default without a `base_url` - and otherwise no tool
+  at all, with a system text that says so (a gateway to Bedrock has no server web tools). A
+  `read` or `edit` route of such a provider, and codex's `web`, are refused by
+  `ValidateAuthorities` until the tool loop exists. `call.web_tools` records the web tools a
+  call offered. In place of the version check, `GET {base_url}/v1/models` must list every model the
   config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
