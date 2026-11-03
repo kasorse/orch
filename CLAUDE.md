@@ -35,7 +35,7 @@ design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
 `FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
 the API transport (`providers.<p>.transport: api`: claude and codex over their HTTP APIs, no
-CLI): MVP.md §46.2 and §38.2 so far, with its design record in `specs/api-transport/`;
+CLI): MVP.md §52 (with §30, §31.1, §38.2, §46.2), with its design record in `specs/api-transport/`;
 the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
 Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`;
 delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
@@ -461,8 +461,10 @@ fallback: stacked on the same-repository task it
 
 ## Out of scope (MVP.md §30)
 
-No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
-decision API, reading one Jira issue for `run --jira` and the listener's Jira calls), no model benchmarking in the core
+No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps beyond claude's and codex's own under
+`transport: api` (MVP.md §52; LiteLLM only as an endpoint behind `base_url`; the other HTTP
+integrations are the Jev decision API, reading one Jira issue for `run --jira` and the listener's
+Jira calls), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST

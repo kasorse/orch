@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **in progress** (2026-11-03): AT01–AT12 done (12 of 14): a whole run can go over HTTP, verify and the operator's skills included. Phase 1 works for both: AT09's claude half (web) was built early, so claude's translator, clarify, decision and research run over HTTP; investigate and review since AT07/AT08, implement since AT10. The owner's
+Status: **implemented, live check pending** (2026-11-03): AT01–AT12 and AT14 done (13 of 14); MVP.md §52 describes the transport as built. A whole run can go over HTTP for claude and codex, verify, MCP servers and the operator's skills included. Left: AT13, the live checks against the real endpoints and the gateway (`go test -tags security`), the operator's gate; the four `bench/` tests outside the sandbox are run once before the branch merges. The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |
@@ -45,4 +45,4 @@ as they are.
 | [x] | [AT11](tasks/TASK-AT11-mcp.md) | MCP stdio client: `orch` verify and `extensions.mcp` | M | AT07, AT08 | 3 |
 | [x] | [AT12](tasks/TASK-AT12-skills.md) | skills under `user_settings`: discovery and the `skill` tool | M | AT07, AT08 | 3 |
 | [ ] | [AT13](tasks/TASK-AT13-live.md) | live checks: first-party endpoints and the gateway (operator) | S | AT09–AT12 | 3 |
-| [ ] | [AT14](tasks/TASK-AT14-documentation.md) | MVP.md §52, the summary sections | S | all | 3 |
+| [x] | [AT14](tasks/TASK-AT14-documentation.md) | MVP.md §52, the summary sections | S | all | 3 |

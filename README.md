@@ -697,8 +697,46 @@ providers:
 
 `--codex-auth` overrides `providers.codex.auth`. The key is read from the environment,
 never from YAML or argv, and the resolved mode is recorded without the key. Codex read and
-edit actions use its `read-only` and `workspace-write` sandboxes. A direct API client is a
-separate TODO item.
+edit actions use its `read-only` and `workspace-write` sandboxes. To call the Responses API
+directly instead, see the next section.
+
+## Claude and Codex over their HTTP APIs (`transport: api`)
+
+With an API key the orchestrator can call the Anthropic Messages API (claude) and the OpenAI
+Responses API (codex) itself instead of starting the CLI. Nothing else changes: routing, the
+decision, the guard, the tests and delivery work as before.
+
+```yaml
+providers:
+  claude:
+    auth: api
+    api_key_env: ANTHROPIC_API_KEY
+    transport: api
+    base_url: https://ai-gateway.example.internal   # your LiteLLM gateway (Bedrock); default api.anthropic.com
+    prices:                                         # needed for a gateway's model names with max_cost_usd
+      bedrock/eu.anthropic.claude-opus-5-5: {input: 4.4, output: 22}
+  codex:
+    auth: api
+    api_key_env: OPENAI_API_KEY
+    transport: api                                  # api.openai.com, or a base_url later
+actions:
+  implement: {provider: claude, model: bedrock/eu.anthropic.claude-opus-5-5}
+```
+
+- Routes need full model IDs (`claude-opus-5-5`, or the gateway's name); the aliases `opus`,
+  `sonnet` and the like are refused. `validate` and `run` ask `GET /v1/models` that every routed
+  model is served before anything runs. No CLI needs to be installed for such a provider.
+- Each step is a tool loop the orchestrator runs: `investigate` and `review` get `read_file`,
+  `grep` and `glob`, `implement` adds the text editor (claude) or `apply_patch` (codex),
+  `research` gets the server's web search (and claude's web fetch) when `web_tools` is on - the
+  default without `base_url`, since a gateway to Bedrock has none. Every path is confined in Go to
+  the repository, without the deny-listed files, `.git` or writes to `.claude`; no step can run a
+  command. Your MCP servers and the verify tools work as with the CLI; `user_settings` offers your
+  skills (see "Extensions").
+- Cost is the gateway's own figure when it sends one, else the tokens × the price (the built-in
+  table of first-party models, or your `prices`). The console names the endpoint
+  (`claude calls go to the Messages API at <host> (transport: api)`); `run.json` records the
+  transport and host, never the key. Details: MVP.md §52.
 
 ## Usage
 

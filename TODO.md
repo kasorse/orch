@@ -1104,10 +1104,12 @@ Codex подключён через `codex exec`: `providers.codex.auth` (`auto 
 вызов остаётся отдельной задачей.
 
 ### [~] P13. Claude и Codex через HTTP API из Go — P3 · L
-Спека: `specs/api-transport/` (AT01–AT14, черновик 2026-11-01). `providers.<p>.transport: api`
+Спека: `specs/api-transport/` (AT01–AT14), описано в MVP.md §52. `providers.<p>.transport: api`
 вызывает Messages API (claude) и Responses API (codex) напрямую, без CLI; `base_url` — шлюз
 LiteLLM (к Bedrock). Цикл инструментов в Go с ограничениями §38 (SPEC §5), MCP-клиент в
 адаптере, скиллы через инструмент `skill`. Login-режим остаётся только на CLI.
+Реализовано 2026-11-03 (AT01–AT12, AT14), `scripts/check.sh` зелёный. Открыто: AT13 — живые
+проверки с ключами (`go test -tags security`, оператор); после них P13 закрывается.
 
 ### [x] P11. Claude по API-ключу или по логину CLI — P1 · M
 Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из
@@ -1122,7 +1124,8 @@ CA09 (`providers.claude.api_env`, SPEC §17): переменные окруже�
 (шлюз, алиасы моделей Bedrock), в `login` удаляются. Специфицировано и реализовано 2026-10-15
 (MVP.md §46), `scripts/check.sh` зелёный.
 
-### [ ] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
+### [~] P12. Claude через Messages API из Go — ⚠ спека — P3 · L
+Поглощено P13 (`specs/api-transport/`, MVP.md §52): всё ниже сделано там, для claude и codex.
 Прямой HTTP-клиент к `api.anthropic.com` и свой цикл агента вместо `claude --print`. Нужна
 правка MVP.md §30. Инструменты Read/Grep/Glob/Edit/Write придётся реализовать на Go, а
 authority проверять в Go. Ещё нужны deny list, стоимость по `usage` и таблице цен, повторы
