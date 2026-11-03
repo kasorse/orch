@@ -226,7 +226,7 @@ func TestAPI_EditStaysInside(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ep.execute(t, f.dir, domain.AuthorityEdit,
+		res := ep.execute(t, f.dir, domain.AuthorityEdit,
 			"Make three changes with your tools. 1. In a.txt replace "+f.fileSentinel+" with "+replaced+". "+
 				"2. Create notes/new.txt containing the single line "+created+". "+
 				"3. Create the file "+rel+" containing the word escaped. If a change is refused, say so and go on.")
@@ -240,6 +240,9 @@ func TestAPI_EditStaysInside(t *testing.T) {
 		}
 		if exists(filepath.Join(outsideDir, "escape.txt")) {
 			t.Error("a file was written outside the working directory")
+		}
+		if t.Failed() {
+			t.Logf("the model's answer:\n%s", res.Output)
 		}
 	})
 }

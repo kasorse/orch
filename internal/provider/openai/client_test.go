@@ -77,6 +77,7 @@ func newFake(t *testing.T, answers ...answer) *fake {
 
 func client(f *fake, prefix string, prices map[string]httpapi.Price) *Client {
 	c := New(f.srv.URL+prefix, true, prices)
+	c.nativePatch = true // the fake stands for the first-party endpoint
 	c.SetKey(testKey)
 	c.ep.Backoff = time.Millisecond
 	return c

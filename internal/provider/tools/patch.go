@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +16,43 @@ type PatchOp struct {
 	Type string `json:"type"`
 	Path string `json:"path"`
 	Diff string `json:"diff"`
+}
+
+// PatchName is apply_patch's name, also as a function tool (PatchTool).
+const PatchName = "apply_patch"
+
+// PatchTool is apply_patch as a function tool, for an endpoint without OpenAI's built-in one (a
+// gateway to Bedrock drops it, specs/api-transport AT13): the same operation, run by ApplyPatch.
+func (r *Root) PatchTool() Tool {
+	return Tool{
+		Name: PatchName,
+		Description: "Create, update or delete one file of the repository; path is relative to its root. " +
+			"create_file: diff is the new file's content, every line prefixed with +. " +
+			"update_file: diff is a V4A diff: a line \"@@ <a line of the file just before the change>\" opens a " +
+			"hunk, then its lines: a space for context kept, - for a line removed, + for a line added; give about " +
+			"three lines of context around each change, and the hunks in file order. A hunk that does not match " +
+			"changes nothing. delete_file: diff is null.",
+		Schema: object(map[string]any{
+			"type": map[string]any{"type": "string", "enum": []string{"create_file", "update_file", "delete_file"}, "description": "The operation"},
+			"path": prop("string", "The file, relative to the repository root"),
+			"diff": prop([]string{"string", "null"}, "The diff of create_file or update_file; null for delete_file"),
+		}),
+		Run: func(_ context.Context, input json.RawMessage) (string, error) {
+			var in struct {
+				Type string  `json:"type"`
+				Path string  `json:"path"`
+				Diff *string `json:"diff"`
+			}
+			if err := decode(input, &in); err != nil {
+				return "", err
+			}
+			op := PatchOp{Type: in.Type, Path: in.Path}
+			if in.Diff != nil {
+				op.Diff = *in.Diff
+			}
+			return r.ApplyPatch(op)
+		},
+	}
 }
 
 // ApplyPatch applies one operation inside the root (SPEC §5.1, authority edit), all or nothing:

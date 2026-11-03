@@ -186,7 +186,10 @@ with `read`/`edit` never gets `web_search`/`web_fetch`.
 The text editor's `view`, `create`, `str_replace` and `insert` are honoured, `undo_edit` refused.
 `apply_patch` operations (`create_file`, `update_file`, `delete_file`, V4A diffs) are parsed and
 applied in Go; a hunk that does not match the file fails that operation with `status: failed` and a
-message the model can act on, and changes nothing.
+message the model can act on, and changes nothing. `apply_patch` is OpenAI's built-in tool on the
+first-party endpoint only; behind any other `base_url` it is a strict function tool of the same name
+and operation (`type`, `path`, `diff`), answered with a `function_call_output`: the LiteLLM gateway
+to Bedrock drops the built-in tool, so the model had no way to edit (AT13).
 
 ### 5.2 Live output and the call report
 
@@ -244,6 +247,8 @@ response carries a valid `x-litellm-response-cost` header (a finite number ≥ 0
 the price: `prices` from the config first, then the built-in table in `httpapi` (the first-party
 models of the providers' pricing pages, with the date they were taken). A model with neither leaves
 the cost 0 and `ReportsCost` false for that route, which is why §2 item 7 refuses a budget for it.
+LiteLLM sends no `x-litellm-response-cost` on a streamed response, as a header or a trailer (AT13,
+checked on both wires): every request streams, so a gateway route is priced from `prices` alone.
 `provider.CostReporter` becomes model-aware (`ReportsCost(model string) bool`) and
 `config.CostChecker` follows. A call cut off (timeout, cancel) reports the completed responses with
 `Partial: true`.

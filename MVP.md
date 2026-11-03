@@ -3365,7 +3365,8 @@ human sees and confirms between steps.
   (`text_editor_20250728`: view, create, str_replace with exactly one match, insert; `undo_edit`
   refused) with grep and glob, codex gets `apply_patch` (create_file, update_file with a V4A diff,
   delete_file, each all or nothing; a hunk that does not match fails the operation and changes
-  nothing) with read_file, grep and glob. Writes go through the same `Root`: nothing under `.git`
+  nothing) with read_file, grep and glob; OpenAI's built-in tool on `api.openai.com`, a function
+  tool of the same shape behind a gateway, which drops the built-in one. Writes go through the same `Root`: nothing under `.git`
   or `.claude`, no deny-listed path, no write through a symlink, no file over 1 MiB. The guard,
   the secret scan and the protected paths still run around every `implement` and `test`
   unchanged (§38.3). A `read` call never carries a web tool, a `web` call never a repository
@@ -6494,7 +6495,8 @@ from the current config, as it does the auth mode.
 * Usage is summed over a call's responses (cache reads and writes, reasoning tokens apart);
   the cost is the gateway's `x-litellm-response-cost` when a response carries one, else the
   tokens × the price (`prices`, then the built-in table in `httpapi`, dated, with the
-  long-context tiers). A call cut off keeps what it streamed, `usage.partial: true`.
+  long-context tiers). LiteLLM sends no such header on a streamed response, so a gateway's
+  model names are priced from `prices` only. A call cut off keeps what it streamed, `usage.partial: true`.
 
 ## 52.4 Tools: the authority in Go
 
@@ -6506,7 +6508,7 @@ and every tool runs in Go (§38.2; `specs/api-transport/SPEC.md` §5):
 | `none` | no tools | no tools |
 | `web` | `web_search`, `web_fetch` (server tools, 10 uses each) with `web_tools`, else none | `web_search` with `web_tools`, else none |
 | `read` | `read_file`, `grep`, `glob` | `read_file`, `grep`, `glob` |
-| `edit` | the text editor (`text_editor_20250728`, no `undo_edit`), `grep`, `glob` | `read_file`, `grep`, `glob`, `apply_patch` (V4A) |
+| `edit` | the text editor (`text_editor_20250728`, no `undo_edit`), `grep`, `glob` | `read_file`, `grep`, `glob`, `apply_patch` (V4A; built-in on `api.openai.com`, a function tool behind a gateway) |
 
 * The repository tools (`internal/provider/tools`) confine every path to the working directory
   through `Root`: no absolute path, no `..`, no symlink out, the deny list on every segment,

@@ -1,6 +1,6 @@
 # The API transport: claude and codex over HTTP
 
-Status: **implemented, live check pending** (2026-11-03): AT01–AT12 and AT14 done (13 of 14); MVP.md §52 describes the transport as built. A whole run can go over HTTP for claude and codex, verify, MCP servers and the operator's skills included. Left: AT13, the live checks against the real endpoints and the gateway (`go test -tags security`), the operator's gate; the four `bench/` tests outside the sandbox are run once before the branch merges. The owner's
+Status: **implemented, live check pending** (2026-11-03): AT01–AT12 and AT14 done (13 of 14); MVP.md §52 describes the transport as built. A whole run can go over HTTP for claude and codex, verify, MCP servers and the operator's skills included. Left: AT13, the live checks (`go test -tags security -run TestAPI`), the operator's gate: run on the LiteLLM gateway 2026-11-04 (codex `edit` fixed after it, to re-run), the first-party endpoints not yet (no key); the four `bench/` tests outside the sandbox are run once before the branch merges. The owner's
 answers are `SPEC.md` §0 (O1–O12).
 
 | document | role |

@@ -70,8 +70,13 @@ func DisplayName(name string) string {
 }
 
 // Display is the name of one call for the call report: DisplayName, and for the editor its
-// command's (Read for view, Write for create, Edit otherwise).
+// command's (Read for view, Write for create, Edit otherwise), for apply_patch its operation's.
 func Display(name string, input json.RawMessage) string {
+	if name == PatchName {
+		var op PatchOp
+		_ = json.Unmarshal(input, &op)
+		return PatchDisplay(op)
+	}
 	if name != EditorName {
 		return DisplayName(name)
 	}

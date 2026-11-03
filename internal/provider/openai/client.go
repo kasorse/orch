@@ -49,6 +49,9 @@ type Client struct {
 	ep       httpapi.Endpoint
 	prices   map[string]httpapi.Price
 	webTools bool
+	// nativePatch offers OpenAI's built-in apply_patch: on the first-party endpoint only. Elsewhere
+	// (a gateway) apply_patch is a function tool, since a gateway to Bedrock drops the built-in one.
+	nativePatch bool
 	// skills are the operator's (SPEC §5.4), offered to a read or edit call with user_settings.
 	skills []tools.Skill
 }
@@ -61,7 +64,8 @@ func New(baseURL string, webTools bool, prices map[string]httpapi.Price) *Client
 	if baseURL == "" {
 		baseURL = DefaultBaseURL
 	}
-	return &Client{ep: httpapi.Endpoint{BaseURL: strings.TrimRight(baseURL, "/")}, prices: prices, webTools: webTools}
+	baseURL = strings.TrimRight(baseURL, "/")
+	return &Client{ep: httpapi.Endpoint{BaseURL: baseURL}, prices: prices, webTools: webTools, nativePatch: baseURL == DefaultBaseURL}
 }
 
 // SetKey fixes the key of every later call. It is sent only as a bearer token and redacted from
@@ -143,7 +147,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	}
 	r := buildRequest(req, c.webTools)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + responsesPath}
-	set, err := repositoryTools(req, &r, c.skillsFor(req))
+	set, err := repositoryTools(req, &r, c.skillsFor(req), c.nativePatch)
 	if err != nil {
 		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
 	}
@@ -419,9 +423,10 @@ func applyPatch(set *tools.Set, oc outputCall) applyPatchOutput {
 }
 
 // repositoryTools gives a read call the confined read tools as strict function tools, sorted by
-// name (with user_settings the skill tool after them, §5.4), and an edit call apply_patch besides, with the reasoning replay and the cache key a loop
-// needs (SPEC §4.2). Other calls get none.
-func repositoryTools(req provider.Request, r *request, skills []tools.Skill) (*tools.Set, error) {
+// name (with user_settings the skill tool after them, §5.4), and an edit call apply_patch besides
+// (the built-in tool with nativePatch, else a strict function tool), with the reasoning replay and
+// the cache key a loop needs (SPEC §4.2). Other calls get none.
+func repositoryTools(req provider.Request, r *request, skills []tools.Skill, nativePatch bool) (*tools.Set, error) {
 	if req.Authority != domain.AuthorityRead && req.Authority != domain.AuthorityEdit {
 		return nil, nil
 	}
@@ -438,14 +443,19 @@ func repositoryTools(req provider.Request, r *request, skills []tools.Skill) (*t
 	if t, ok := tools.SkillTool(skills, req.DenyRead); ok {
 		read = append(read, t)
 	}
+	r.Instructions = instructionsRead
+	if req.Authority == domain.AuthorityEdit {
+		r.Instructions = instructionsEdit
+		if !nativePatch {
+			read = append(read, root.PatchTool())
+		}
+	}
 	for _, t := range read {
 		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: &strict})
 	}
-	r.Instructions = instructionsRead
 	set := tools.NewSet(read)
-	if req.Authority == domain.AuthorityEdit {
-		r.Tools = append(r.Tools, patchTool{Type: "apply_patch"})
-		r.Instructions = instructionsEdit
+	if req.Authority == domain.AuthorityEdit && nativePatch {
+		r.Tools = append(r.Tools, patchTool{Type: tools.PatchName})
 		set = set.WithRoot(root)
 	}
 	r.Include = []string{"reasoning.encrypted_content"}

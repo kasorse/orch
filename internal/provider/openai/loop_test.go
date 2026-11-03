@@ -261,3 +261,49 @@ func TestSkillToolOffered(t *testing.T) {
 		}
 	}
 }
+
+// Off the first-party endpoint apply_patch is a strict function tool (a gateway to Bedrock drops the
+// built-in one, AT13), run by the same ApplyPatch and answered with a function_call_output.
+func TestLoop_ApplyPatchAsFunction(t *testing.T) {
+	if !New("", true, nil).nativePatch || New("https://gateway.example/", true, nil).nativePatch {
+		t.Fatal("nativePatch must be on for the first-party endpoint only")
+	}
+	f := newFake(t,
+		answer{stream: completed(0,
+			call{id: "p1", name: "apply_patch", args: `{"type":"update_file","path":"a.go","diff":"-func Add() {}\n+func Add() int { return 1 }\n"}`},
+			call{id: "p2", name: "apply_patch", args: `{"type":"create_file","path":".git/hooks/pre-commit","diff":"+exit 0"}`})},
+		answer{stream: completed(1, "done")})
+	req := readRequest(t)
+	req.Authority = domain.AuthorityEdit
+	c := client(f, "", nil)
+	c.nativePatch = false
+	res, err := c.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(req.WorkingDir, "a.go")); string(got) != "package a\n\nfunc Add() int { return 1 }\n" {
+		t.Errorf("a.go = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(req.WorkingDir, ".git/hooks/pre-commit")); err == nil {
+		t.Error("apply_patch wrote a git hook")
+	}
+	if c := res.Call.Tools; c["Edit"] != 1 || c["Write"] != 1 {
+		t.Errorf("Tools = %v", c)
+	}
+	if bytes.Contains(f.bodies[0], []byte(`{"type":"apply_patch"}`)) || !bytes.Contains(f.bodies[0], []byte(`"name":"apply_patch"`)) {
+		t.Errorf("edit tools = %s", f.bodies[0])
+	}
+	var second struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(f.bodies[1], &second); err != nil {
+		t.Fatal(err)
+	}
+	outs := second.Input[len(second.Input)-2:]
+	if outs[0]["type"] != "function_call_output" || strings.HasPrefix(outs[0]["output"].(string), "error:") {
+		t.Errorf("the update's output = %v", outs[0])
+	}
+	if !strings.HasPrefix(outs[1]["output"].(string), "error:") || !strings.Contains(outs[1]["output"].(string), ".git is not accessible") {
+		t.Errorf("the hook's output = %v", outs[1])
+	}
+}

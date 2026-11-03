@@ -734,7 +734,9 @@ actions:
   command. Your MCP servers and the verify tools work as with the CLI; `user_settings` offers your
   skills (see "Extensions").
 - Cost is the gateway's own figure when it sends one, else the tokens × the price (the built-in
-  table of first-party models, or your `prices`). The console names the endpoint
+  table of first-party models, or your `prices`). LiteLLM sends none on a streamed response, so
+  write `prices` for the gateway's model names, or their cost is 0 (and `max_cost_usd` refuses
+  them). The console names the endpoint
   (`claude calls go to the Messages API at <host> (transport: api)`); `run.json` records the
   transport and host, never the key. Details: MVP.md §52.
 
