@@ -44,7 +44,7 @@ the task stays unticked until they are.
   OpenAI's built-in `{"type": "apply_patch"}`, and the model answered that it had no tool to edit
   with. Fixed by the owner's choice: the built-in tool on `api.openai.com` only, and behind any
   other `base_url` a strict function tool `apply_patch` of the same operation (`tools.Root.PatchTool`,
-  SPEC §5.1). To be re-run on the gateway.
+  SPEC §5.1). Re-run on the gateway 2026-11-04: passes.
 - `x-litellm-response-cost` does not come on a streamed response, as a header or a trailer, on
   either wire. SPEC §7, MVP.md §52.3 and the README now say a gateway route is priced from `prices`
   only.
