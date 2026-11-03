@@ -1,0 +1,81 @@
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 64000,
+  "system": [
+    {
+      "type": "text",
+      "text": "You work for an automated orchestrator on one repository, through your tools: str_replace_based_edit_tool to view, create and edit files, grep and glob to search; every path is relative to the repository root. You cannot run commands or reach the network. Answer exactly in the form the request asks for."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "ACTION: investigate\nWhere is Add?",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "glob",
+      "description": "List repository files whose path matches a glob: * and ? within a path segment, ** for any number of directories, e.g. internal/**/*_test.go. Paths are relative to the repository root, sorted.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "description": "Glob over paths relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Search file contents with an RE2 regular expression. Returns path:line:text for each matching line. path narrows the search to a directory or a file (null for the whole repository); glob filters file names, e.g. *.go (null for all files). Binary and large files are skipped.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "glob": {
+            "description": "File-name glob, e.g. *.go",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Directory or file relative to the repository root",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "description": "RE2 regular expression",
+            "type": "string"
+          }
+        },
+        "required": [
+          "glob",
+          "path",
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "type": "text_editor_20250728",
+      "name": "str_replace_based_edit_tool"
+    }
+  ],
+  "stream": true
+}

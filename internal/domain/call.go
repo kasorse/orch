@@ -33,6 +33,9 @@ type CallReport struct {
 	// ("ANTHROPIC_API_KEY", "none", ...); empty when the CLI reported none
 	// (specs/claude-auth/SPEC.md §8).
 	APIKeySource string `json:"api_key_source,omitempty"`
+	// WebTools names the web tools an API-transport web call offered the model (WebSearch,
+	// WebFetch); empty when it offered none (specs/api-transport/SPEC.md §6).
+	WebTools []string `json:"web_tools,omitempty"`
 	// ExtraCalls are the further calls of a review step with extra reviewers
 	// (actions.review.models), in call order; this report is the first call's. Empty for every
 	// other step.
@@ -83,7 +86,7 @@ func (c CallReport) Validate() error {
 			return fmt.Errorf("unknown prompt part %q", p)
 		}
 	}
-	if len(c.Models) > maxReportNames || len(c.Tools) > maxReportNames || len(c.MCPFailed) > maxReportNames {
+	if len(c.Models) > maxReportNames || len(c.Tools) > maxReportNames || len(c.MCPFailed) > maxReportNames || len(c.WebTools) > maxReportNames {
 		return fmt.Errorf("more than %d models, tools or MCP servers", maxReportNames)
 	}
 	if c.APIKeySource != "" {
@@ -100,6 +103,11 @@ func (c CallReport) Validate() error {
 		}
 		if x.APIMS < 0 || x.InputTokens < 0 || x.OutputTokens < 0 {
 			return fmt.Errorf("extra call %d: negative counter", i)
+		}
+	}
+	for _, name := range c.WebTools {
+		if err := reportName(name); err != nil {
+			return fmt.Errorf("web tool: %w", err)
 		}
 	}
 	for _, name := range c.MCPFailed {

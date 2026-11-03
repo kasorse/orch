@@ -113,7 +113,9 @@ func (e ExtensionsConfig) UserSettingsFor(action domain.ActionType) bool {
 // Enabled reports whether any extension is configured.
 func (e ExtensionsConfig) Enabled() bool { return len(e.MCP) > 0 || e.UserSettings }
 
-func validateExtensions(e ExtensionsConfig, providers map[string]string) []string {
+// usesAPI reports whether a provider runs over the API transport, where user_settings means the
+// orchestrator's skill tool (specs/api-transport/SPEC.md §5.4) for codex too.
+func validateExtensions(e ExtensionsConfig, providers map[string]string, usesAPI func(string) bool) []string {
 	var problems []string
 	names := make([]string, 0, len(e.MCP))
 	for n := range e.MCP {
@@ -170,8 +172,8 @@ func validateExtensions(e ExtensionsConfig, providers map[string]string) []strin
 	}
 	if e.UserSettings {
 		for _, a := range extensionActions {
-			if p := providers[a]; p == "codex" {
-				problems = append(problems, fmt.Sprintf("extensions.user_settings: action %s runs on codex; user settings are supported only with provider claude", a))
+			if p := providers[a]; p == "codex" && e.UserSettingsFor(domain.ActionType(a)) && !usesAPI(p) {
+				problems = append(problems, fmt.Sprintf("extensions.user_settings: action %s runs on the codex CLI; user settings are supported only with provider claude or providers.codex.transport: api", a))
 			}
 		}
 	}

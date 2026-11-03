@@ -1,0 +1,21 @@
+event: response.created
+data: {"type": "response.created", "sequence_number": 0, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "in_progress", "output": []}}
+
+event: response.in_progress
+data: {"type": "response.in_progress", "sequence_number": 1, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "in_progress", "output": []}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "sequence_number": 2, "output_index": 0, "item": {"type": "reasoning", "id": "rs_1", "summary": []}}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "sequence_number": 3, "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "{\"answer\": "}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "sequence_number": 4, "item_id": "msg_1", "output_index": 1, "content_index": 0, "delta": "42}"}
+
+event: response.future_event
+data: {"type": "response.future_event", "sequence_number": 5}
+
+event: response.completed
+data: {"type": "response.completed", "sequence_number": 6, "response": {"id": "resp_01", "object": "response", "model": "gpt-5.5-2026-09-01", "status": "completed", "output": [{"type": "reasoning", "id": "rs_1", "summary": []}, {"type": "message", "id": "msg_1", "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": "{\"answer\": 42}", "annotations": []}]}], "usage": {"input_tokens": 2000, "input_tokens_details": {"cached_tokens": 1500, "cache_write_tokens": 0}, "output_tokens": 300, "output_tokens_details": {"reasoning_tokens": 200}, "total_tokens": 2300}}}
+

@@ -151,7 +151,7 @@ func TestWorktreeBranch_FailFastChain(t *testing.T) {
 
 type costChecker map[string]bool
 
-func (c costChecker) ReportsCost(providerID string) bool { return c[providerID] }
+func (c costChecker) ReportsCost(providerID, _ string) bool { return c[providerID] }
 
 // A budget needs every call to report its cost, the branch-name call too.
 func TestWorktreeBranch_BudgetNeedsCostReporting(t *testing.T) {

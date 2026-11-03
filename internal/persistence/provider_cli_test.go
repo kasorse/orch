@@ -9,14 +9,25 @@ import (
 )
 
 func TestValidateProviderCLI(t *testing.T) {
-	ok := map[string]domain.ProviderCLI{"claude": {Version: "2.1.289 (Claude Code)", Verified: true}}
+	ok := map[string]domain.ProviderCLI{"claude": {Version: "2.1.289 (Claude Code)", Verified: true},
+		"codex": {Verified: true, Transport: domain.TransportAPI, Endpoint: "ai-gateway.example.internal:8443"}}
 	if err := validateProviderCLI(ok); err != nil {
 		t.Errorf("valid entry: %v", err)
 	}
+	api := func(endpoint string) domain.ProviderCLI {
+		return domain.ProviderCLI{Verified: true, Transport: domain.TransportAPI, Endpoint: endpoint}
+	}
 	for name, m := range map[string]map[string]domain.ProviderCLI{
-		"unknown provider": {"gpt": {Version: "1"}},
-		"too long":         {"claude": {Version: strings.Repeat("9", 65)}},
-		"unprintable":      {"claude": {Version: "2.1.289\x1b[31m"}},
+		"unknown provider":      {"gpt": {Version: "1"}},
+		"too long":              {"claude": {Version: strings.Repeat("9", 65)}},
+		"unprintable":           {"claude": {Version: "2.1.289\x1b[31m"}},
+		"unknown transport":     {"claude": {Transport: "grpc"}},
+		"endpoint without api":  {"claude": {Version: "2.1.289", Endpoint: "api.anthropic.com"}},
+		"api with a version":    {"claude": {Version: "2.1.289", Transport: domain.TransportAPI, Endpoint: "api.anthropic.com"}},
+		"api without endpoint":  {"claude": api("")},
+		"endpoint with a path":  {"claude": api("gw.example/v1")},
+		"endpoint with a query": {"claude": api("gw.example?key=x")},
+		"endpoint with a user":  {"claude": api("u@gw.example")},
 	} {
 		if err := validateProviderCLI(m); err == nil {
 			t.Errorf("%s: expected an error", name)

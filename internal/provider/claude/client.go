@@ -154,9 +154,9 @@ func (c *Client) Supports(a domain.Authority) bool {
 	return ok
 }
 
-// ReportsCost is true: claude's result event carries the call's cost in USD. It makes *Client
-// a provider.CostReporter.
-func (c *Client) ReportsCost() bool { return true }
+// ReportsCost is true for every model: claude's result event carries the call's cost in USD.
+// It makes *Client a provider.CostReporter.
+func (c *Client) ReportsCost(string) bool { return true }
 
 func (c *Client) SupportsMCP() bool { return true }
 

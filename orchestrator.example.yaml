@@ -54,9 +54,19 @@ clarify:
 #       AWS_REGION: eu-west-1
 #       ANTHROPIC_DEFAULT_OPUS_MODEL: bedrock/eu.anthropic.claude-opus-5-5
 #       ANTHROPIC_DEFAULT_SONNET_MODEL: bedrock/eu.anthropic.claude-sonnet-5-5
+#     # transport: api calls the Messages API directly instead of the claude CLI
+#     # (specs/api-transport): it needs the api auth mode, full model IDs in every claude route
+#     # (claude-sonnet-5-5, or the gateway's name; aliases like sonnet are refused) and no api_env.
+#     # transport: cli                 # cli (default) | api
+#     # base_url: https://ai-gateway.example.internal   # api only; default https://api.anthropic.com
+#     # web_tools: false               # api only; default true without base_url, false with it
+#     # prices:                        # api only; USD per million tokens, over the built-in table
+#     #   bedrock/eu.anthropic.claude-opus-5-5: {input: 4.4, output: 22, cache_read: 0.44, cache_write: 5.5}
 #   codex:
 #     auth: auto                     # auto | api | login
 #     api_key_env: OPENAI_API_KEY    # the variable that holds the key, never the key itself
+#     # transport: cli               # cli (default) | api: the Responses API instead of codex exec;
+#     #                              # base_url, web_tools and prices as for claude
 
 policy:
   context_depth:
@@ -313,7 +323,8 @@ security:
 #       args: ["{source}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
 #       actions: [investigate, implement, review]     # default: investigate, review
-#   user_settings: true                               # plugins, skills, hooks
+#   user_settings: true                               # plugins, skills, hooks; over the API
+#                                                     # transport: your skills, via a skill tool
 #   user_settings_actions: [implement, review]        # default: every model step
 
 # Optional: a review that passes but reports a medium issue sends the run back to implement

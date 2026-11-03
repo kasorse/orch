@@ -154,7 +154,7 @@ func Validate(cfg Config) error {
 	for _, pm := range cfg.actionProviderModels() {
 		providers[pm.Action] = pm.Provider
 	}
-	problems = append(problems, validateExtensions(cfg.Extensions, providers)...)
+	problems = append(problems, validateExtensions(cfg.Extensions, providers, cfg.Providers.UsesAPI)...)
 
 	if len(problems) == 0 {
 		return nil
@@ -375,12 +375,9 @@ func extraReviewerProblems(cfg Config) []string {
 }
 
 // allowedModelProblems checks every model the run can call against the org's allowed_models
-// (specs/governance/SPEC.md §6.2): each action's base model and by_complexity models, the
-// extra reviewers, the translator, the clarify step, the LLM decision provider and the model variables of
-// providers.claude.api_env. A route with no model is an
-// error, because the list cannot check the CLI's default. A by_complexity entry with no model
-// inherits the base, which is checked on its own; an empty extra reviewer is already refused
-// by extraReviewerProblems.
+// (specs/governance/SPEC.md §6.2): every route of modelRoutes and the model variables of
+// providers.claude.api_env. A route with no model is an error, because the list cannot check
+// the CLI's default.
 func allowedModelProblems(cfg Config) []string {
 	var problems []string
 	check := func(key, model string) {
@@ -391,46 +388,8 @@ func allowedModelProblems(cfg Config) []string {
 			problems = append(problems, fmt.Sprintf("%s: model %s is not in allowed_models (%s)", key, model, cfg.AllowedModelsFrom))
 		}
 	}
-	for _, a := range []struct {
-		name   string
-		action ActionConfig
-	}{
-		{"research", cfg.Actions.Research},
-		{"investigate", cfg.Actions.Investigate},
-		{"implement", cfg.Actions.Implement},
-		{"review", cfg.Actions.Review},
-	} {
-		key := "actions." + a.name
-		check(key, a.action.Model)
-		levels := make([]string, 0, len(a.action.ByComplexity))
-		for c := range a.action.ByComplexity {
-			levels = append(levels, string(c))
-		}
-		slices.Sort(levels)
-		for _, level := range levels {
-			entry := a.action.ByComplexity[domain.Complexity(level)]
-			if strings.TrimSpace(entry.Model) != "" {
-				check(key+".by_complexity."+level, entry.Model)
-			}
-			if entry.Escalate != nil && strings.TrimSpace(entry.Escalate.Model) != "" {
-				check(key+".by_complexity."+level+".escalate", entry.Escalate.Model)
-			}
-		}
-		for i, m := range a.action.Models {
-			if strings.TrimSpace(m) != "" {
-				check(fmt.Sprintf("%s.models[%d]", key, i), m)
-			}
-		}
-	}
-	check("translation", cfg.Translation.Model)
-	if cfg.Clarify.Active() {
-		check("clarify", cfg.Clarify.Model)
-	}
-	if fi := cfg.Worktree.Branch.FromInstructions; fi != nil {
-		check(branchFromInstructionsKey, fi.Model)
-	}
-	if !cfg.Decision.UsesJev() {
-		check("decision", cfg.Decision.Model)
+	for _, r := range modelRoutes(cfg) {
+		check(r.Key, r.Model)
 	}
 	// A model variable in providers.claude.api_env changes the model a route reaches in api
 	// mode (specs/claude-auth/SPEC.md §17.3, D8). An empty value is apiEnvProblems' to report.
@@ -441,6 +400,56 @@ func allowedModelProblems(cfg Config) []string {
 		}
 	}
 	return problems
+}
+
+// modelRoute is one model a run can call: the config key that names it and its provider.
+type modelRoute struct {
+	Key, Provider, Model string
+}
+
+// modelRoutes lists every model the config can call: each action's base model, its
+// by_complexity models and their escalations, the extra reviewers, the translator, the clarify
+// step, branch naming and the LLM decision provider. A by_complexity entry with no model
+// inherits the base, which is listed on its own; an empty extra reviewer is already refused by
+// extraReviewerProblems. The base model and the routes outside actions are listed even when
+// empty.
+func modelRoutes(cfg Config) []modelRoute {
+	var routes []modelRoute
+	for _, a := range []struct {
+		name   string
+		action ActionConfig
+	}{
+		{"research", cfg.Actions.Research},
+		{"investigate", cfg.Actions.Investigate},
+		{"implement", cfg.Actions.Implement},
+		{"review", cfg.Actions.Review},
+	} {
+		key, p := "actions."+a.name, a.action.Provider
+		routes = append(routes, modelRoute{key, p, a.action.Model})
+		levels := make([]string, 0, len(a.action.ByComplexity))
+		for c := range a.action.ByComplexity {
+			levels = append(levels, string(c))
+		}
+		slices.Sort(levels)
+		for _, level := range levels {
+			entry := a.action.ByComplexity[domain.Complexity(level)]
+			if strings.TrimSpace(entry.Model) != "" {
+				routes = append(routes, modelRoute{key + ".by_complexity." + level, p, entry.Model})
+			}
+			if entry.Escalate != nil && strings.TrimSpace(entry.Escalate.Model) != "" {
+				routes = append(routes, modelRoute{key + ".by_complexity." + level + ".escalate", p, entry.Escalate.Model})
+			}
+		}
+		for i, m := range a.action.Models {
+			if strings.TrimSpace(m) != "" {
+				routes = append(routes, modelRoute{fmt.Sprintf("%s.models[%d]", key, i), p, m})
+			}
+		}
+	}
+	for _, pm := range decisionProviderModels(cfg) {
+		routes = append(routes, modelRoute{pm.Action, pm.Provider, pm.Model})
+	}
+	return routes
 }
 
 func complexityNames() string {

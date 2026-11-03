@@ -1,0 +1,187 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You work for an automated orchestrator on one repository, through your tools read_file, grep and glob; every path is relative to the repository root. You cannot run commands, change files or reach the network. Answer exactly in the form the request asks for.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "ACTION: investigate\nWhere is Add?"
+        }
+      ]
+    },
+    {
+      "encrypted_content": "enc-0",
+      "id": "rs_0",
+      "summary": [],
+      "type": "reasoning"
+    },
+    {
+      "content": [
+        {
+          "text": "Looking.",
+          "type": "output_text"
+        }
+      ],
+      "role": "assistant",
+      "type": "message"
+    },
+    {
+      "arguments": "{\"path\":\"a.go\",\"offset\":null,\"limit\":null}",
+      "call_id": "c1",
+      "id": "fc_c1",
+      "name": "read_file",
+      "status": "completed",
+      "type": "function_call"
+    },
+    {
+      "arguments": "{\"path\":\".env\",\"offset\":null,\"limit\":null}",
+      "call_id": "c2",
+      "id": "fc_c2",
+      "name": "read_file",
+      "status": "completed",
+      "type": "function_call"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c1",
+      "output": "     1\tpackage a\n     2\t\n     3\tfunc Add() {}\n"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c2",
+      "output": "error: .env: the path is not accessible"
+    },
+    {
+      "encrypted_content": "enc-1",
+      "id": "rs_1",
+      "summary": [],
+      "type": "reasoning"
+    },
+    {
+      "arguments": "{\"pattern\":\"^func\",\"path\":null,\"glob\":null}",
+      "call_id": "c3",
+      "id": "fc_c3",
+      "name": "grep",
+      "status": "completed",
+      "type": "function_call"
+    },
+    {
+      "arguments": "{}",
+      "call_id": "c4",
+      "id": "fc_c4",
+      "name": "nope",
+      "status": "completed",
+      "type": "function_call"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c3",
+      "output": "a.go:3:func Add() {}\n"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "c4",
+      "output": "error: there is no tool \"nope\""
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "glob",
+      "description": "List repository files whose path matches a glob: * and ? within a path segment, ** for any number of directories, e.g. internal/**/*_test.go. Paths are relative to the repository root, sorted.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "description": "Glob over paths relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "name": "grep",
+      "description": "Search file contents with an RE2 regular expression. Returns path:line:text for each matching line. path narrows the search to a directory or a file (null for the whole repository); glob filters file names, e.g. *.go (null for all files). Binary and large files are skipped.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "glob": {
+            "description": "File-name glob, e.g. *.go",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Directory or file relative to the repository root",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "description": "RE2 regular expression",
+            "type": "string"
+          }
+        },
+        "required": [
+          "glob",
+          "path",
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    {
+      "type": "function",
+      "name": "read_file",
+      "description": "Read a text file of the repository. Lines come numbered (number, tab, text). path is relative to the repository root. offset is the first line to read (1-based, null for 1); limit is how many lines (null for 2000).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Number of lines",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "description": "First line, 1-based",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "File path relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "path"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    }
+  ],
+  "parallel_tool_calls": true,
+  "include": [
+    "reasoning.encrypted_content"
+  ],
+  "prompt_cache_key": "3ddd3220084c82c7a069d9dc22650d5f",
+  "store": false,
+  "stream": true
+}

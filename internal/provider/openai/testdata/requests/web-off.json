@@ -1,0 +1,17 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You answer one request from an automated orchestrator. You have no tools and no web access: answer from what you know, say where your knowledge may be out of date, and answer exactly in the form the request asks for.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "ACTION: research\nWhat is new in Go 1.26?"
+        }
+      ]
+    }
+  ],
+  "store": false,
+  "stream": true
+}

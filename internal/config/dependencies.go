@@ -57,9 +57,9 @@ type DependencyOptions struct {
 	getenv func(string) string
 }
 
-// CostChecker reports whether a provider reports the cost of its calls.
+// CostChecker reports whether a provider reports the cost of its calls to a model.
 type CostChecker interface {
-	ReportsCost(providerID string) bool
+	ReportsCost(providerID, model string) bool
 }
 
 // ValidateDependencies verifies, for every provider referenced by cfg - every action,
@@ -71,7 +71,13 @@ type CostChecker interface {
 // step (MVP.md §7).
 func ValidateDependencies(cfg Config, checker DependencyChecker, opts DependencyOptions) error {
 	problems := jevKeyProblems(cfg.Decision)
-	pms := append(cfg.actionProviderModels(), decisionProviderModels(cfg)...)
+	// A provider on the API transport runs no executable (specs/api-transport/SPEC.md §9).
+	var pms []namedProviderModel
+	for _, pm := range append(cfg.actionProviderModels(), decisionProviderModels(cfg)...) {
+		if !cfg.Providers.UsesAPI(pm.Provider) {
+			pms = append(pms, pm)
+		}
+	}
 	problems = append(problems, checkExecutablesPresent(pms, checker)...)
 	problems = append(problems, sandboxDependencyProblems(cfg.Test, checker)...)
 	problems = append(problems, budgetProblems(cfg, opts.Cost)...)
@@ -95,28 +101,53 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 	)
 }
 
-// budgetProblems refuses limits.max_cost_usd when an action's provider reports no cost: the
-// budget could then never be reached. by_complexity and review.models change the model, never
-// the provider, so the actions' own routes cover them.
+// budgetProblems refuses limits.max_cost_usd when a route the budget counts - an action's
+// models (base, by_complexity, escalations, extra reviewers), clarify and branch naming - goes
+// to a provider that reports no cost for its model: the budget could then never be reached. A
+// CLI reports it for every model; an API client only for a model it has a price for
+// (specs/api-transport/SPEC.md §7).
 func budgetProblems(cfg Config, checker CostChecker) []string {
 	if cfg.Limits.MaxCostUSD == nil {
 		return nil
 	}
+	return costProblems(cfg, checker, "limits.max_cost_usd", func(key string) bool {
+		return strings.HasPrefix(key, "actions.") || key == "clarify" || key == branchFromInstructionsKey
+	})
+}
+
+// costProblems reports each route counts selects whose provider reports no cost for its model:
+// for a CLI provider once per action (its answer does not depend on the model), for an API one
+// once per action and model. The clarify route counts only while clarify is on, as modelRoutes
+// lists it.
+func costProblems(cfg Config, checker CostChecker, budget string, counts func(key string) bool) []string {
 	var problems []string
-	for _, pm := range cfg.actionProviderModels() {
-		if pm.Provider == "" || (checker != nil && checker.ReportsCost(pm.Provider)) {
+	seen := map[[3]string]bool{}
+	for _, r := range modelRoutes(cfg) {
+		if r.Provider == "" || !counts(r.Key) {
 			continue
 		}
-		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (actions.%s) reports no cost",
-			pm.Provider, pm.Action))
-	}
-	// The clarify call is a decision-phase call that counts against the budget (specs/clarify).
-	if clarify := cfg.Clarify; clarify.Active() && clarify.Provider != "" && (checker == nil || !checker.ReportsCost(clarify.Provider)) {
-		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (clarify) reports no cost", clarify.Provider))
-	}
-	// So is the branch-name call (specs/delivery/SPEC.md §4.3).
-	if fi := cfg.Worktree.Branch.FromInstructions; fi != nil && fi.Provider != "" && (checker == nil || !checker.ReportsCost(fi.Provider)) {
-		problems = append(problems, fmt.Sprintf("limits.max_cost_usd cannot be enforced: %s (%s) reports no cost", fi.Provider, branchFromInstructionsKey))
+		root := r.Key
+		if parts := strings.SplitN(r.Key, ".", 3); parts[0] == "actions" && len(parts) > 1 {
+			root = parts[0] + "." + parts[1]
+		}
+		model := ""
+		if cfg.Providers.UsesAPI(r.Provider) {
+			model = r.Model
+		}
+		if id := [3]string{root, r.Provider, model}; seen[id] {
+			continue
+		} else {
+			seen[id] = true
+		}
+		if checker != nil && checker.ReportsCost(r.Provider, r.Model) {
+			continue
+		}
+		msg := fmt.Sprintf("%s cannot be enforced: %s (%s) reports no cost", budget, r.Provider, r.Key)
+		if cfg.Providers.UsesAPI(r.Provider) {
+			msg = fmt.Sprintf("%s cannot be enforced: %s (%s) has no price for model %s; add it to providers.%s.prices",
+				budget, r.Provider, r.Key, r.Model, r.Provider)
+		}
+		problems = append(problems, msg)
 	}
 	return problems
 }

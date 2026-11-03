@@ -1874,6 +1874,13 @@ been persisted (see §21) - it points at the exact file to read for output longe
 the message's 4000-byte tail. A call that produced no output (e.g. killed by a timeout
 before it printed anything) leaves no log file, so the line is omitted.
 
+A call over the API transport (`providers.<p>.transport: api`, specs/api-transport) has no
+command: its `ProviderError` names `endpoint: POST <base_url>/v1/messages` (never a key or a
+query) instead of `command:` and `exit code:`, adds `http status: N` when the API answered with
+an error status (a CLI error that reported one shows the line too), and uses the kind `api` ("the
+provider's HTTP API refused or failed the request") for a refusal, a cut answer, an error in the
+stream or an error status that is neither `auth` nor `rate_limit`.
+
 A timeout names the limit that actually fired: `actions.<name>.timeout` or
 `decision.timeout` when that per-call limit was tighter than what was left of the run,
 otherwise `execution.timeout`.
@@ -2635,10 +2642,10 @@ open points in `summary.md`, and a `resume` that refuses; a failed clarify call 
 Do not implement:
 
 ```text
-HTTP provider APIs (except the Jev decision API, reading Jira issues, and the Jira calls of
-  the listener, §2, §51)
+HTTP provider APIs (except the Jev decision API, reading Jira issues, the Jira calls of the
+  listener, §2, §51, and claude's and codex's own APIs under `transport: api`, §52)
 OpenRouter
-LiteLLM
+LiteLLM as a component (it is only an endpoint behind `providers.<p>.base_url`, §52)
 model benchmarking
 automatic model selection
 cost optimization
@@ -2705,6 +2712,10 @@ same provider, Go picks the entry once per step from `decision.complexity`, and 
 decision always gives the same models (§44.8). A run started with `--stage` has no complexity
 and uses the action's own model. Nothing picks a model from cost so far or a model's own
 answer, and there is no fallback.
+
+The transport is static too: `providers.<p>.transport` (`cli` or `api`, §52) is read from config
+for the whole process, a failing HTTP call never retries over the CLI or the other way round, and
+no server-side fallback (a beta feature) is ever asked for.
 
 The one model a failure changes is `actions.implement.escalate: true` (opt-in,
 `specs/decision-shape/SPEC.md` §8): an `implement` that fixes a failed test or review - the
@@ -3324,6 +3335,51 @@ human sees and confirms between steps.
   tool calls and structured rate-limit errors. `none` and `web` remain unsupported because
   Codex exec always exposes its coding tools. Gemini support remains disabled until its
   flags are verified.
+* A provider on the API transport (`providers.<p>.transport: api`, specs/api-transport) runs
+  no CLI: `internal/provider/anthropic` and `internal/provider/openai` send the request
+  themselves, and an authority is what the request offers the model, enforced in Go. So far
+  they support `none` (a request with no tools) and claude also `web`: the server's own
+  `web_search` and `web_fetch` (10 uses each, `pause_turn` resumed up to 4 times) when
+  `providers.claude.web_tools` is on - the default without a `base_url` - and otherwise no tool
+  at all, with a system text that says so (a gateway to Bedrock has no server web tools). Both
+  support `read`: the call is a loop the client runs (at most 500 responses), offering
+  `read_file`, `grep` and `glob` from `internal/provider/tools`, which confine every path to the
+  working directory in Go - no absolute path, no `..`, no symlink out, the deny list on every
+  segment, nothing under `.git` - and never run a command or open a connection. A refused or
+  unknown tool call goes back as an `is_error` result; every call of a response is answered in one
+  message (OpenAI: an `error: ` output). claude marks at most three prompt-cache breakpoints per
+  request (the first user message, the previous and the last); codex sends strict function tools,
+  `prompt_cache_key` (from the provider, model and authority, nothing per run), and with
+  `store: false` resends every item of each response unchanged - its reasoning with
+  `reasoning.encrypted_content` - so each request begins with the whole previous one. Only calls
+  with tools get any of this. The client starts the stdio MCP servers of the call's
+  `--mcp-config` document itself (`internal/provider/mcp`: argv only, the working directory as
+  cwd, `execution.ScrubbedEnv()` plus the server's own `env`), offers only the tools
+  `Extensions.MCPTools` allowlists, under their `mcp__<server>__<tool>` names, and stops every
+  server when the call ends; so the orchestrator's own `orch` verify server reaches an implement
+  over the API transport as it does over the CLI (both clients are `provider.MCPSupporter`). A
+  server that does not start or answer, and a URL server (no HTTP transport for MCP), is in
+  `call.mcp_failed` and the call goes on without it. codex supports `web` too, with the server's `web_search` under the same
+  `providers.codex.web_tools` rule, so research can run on codex for the first time (the codex
+  CLI never could). Both support `edit`: claude gets Anthropic's text editor
+  (`text_editor_20250728`: view, create, str_replace with exactly one match, insert; `undo_edit`
+  refused) with grep and glob, codex gets `apply_patch` (create_file, update_file with a V4A diff,
+  delete_file, each all or nothing; a hunk that does not match fails the operation and changes
+  nothing) with read_file, grep and glob; OpenAI's built-in tool on `api.openai.com`, a function
+  tool of the same shape behind a gateway, which drops the built-in one. Writes go through the same `Root`: nothing under `.git`
+  or `.claude`, no deny-listed path, no write through a symlink, no file over 1 MiB. The guard,
+  the secret scan and the protected paths still run around every `implement` and `test`
+  unchanged (§38.3). A `read` call never carries a web tool, a `web` call never a repository
+  tool. With `extensions.user_settings` for the action a `read` or `edit` call also gets the
+  `skill` tool (never a `none` or `web` call): `app` reads the operator's skills once, only when
+  such an action runs over the API transport (`tools.DiscoverSkills`: `~/.claude/skills/*/SKILL.md`
+  and the skills of the plugins `settings.json` enables, named `<plugin>:<skill>`, the front
+  matter's name and description), the tool's `name` is an enum of them and its result the
+  skill's `SKILL.md` or another file of its directory (`path`), read through a `Root` over that
+  directory with the call's deny list. A skill is instructions: no tool runs what it asks to
+  run. Hooks do not run over the API transport; the run says so once. `call.web_tools` records the web tools a call
+  offered; `call.tools` counts the tools by the CLI's names (Read, Grep, Glob, WebSearch). In place of the version check, `GET {base_url}/v1/models` must list every model the
+  config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);
   `Execute` refuses a missing or unsupported authority without spawning anything.
 * There is no bypass: the codebase never passes a permission-skipping mode.
@@ -4871,6 +4927,27 @@ flags. Every message names the variable, never the value. With the org's `allowe
 `ANTHROPIC_CUSTOM_MODEL_OPTION` and `ANTHROPIC_DEFAULT_*_MODEL` must be on the list, like a
 route's model.
 
+`providers.claude.transport` and `providers.codex.transport` (`cli`, the default, or `api`;
+specs/api-transport) choose how the calls are made: the CLI, or the provider's HTTP API. `api`
+needs the `api` mode: a resolution that ends in `login` (`--claude-auth login`, or `auto` without
+a key) is a config error naming the transport. Under `api`, `base_url` (https, or plain http only
+for localhost; no userinfo, query or fragment; never a secret), `web_tools` (default true without
+`base_url`, false with it) and `prices` (USD per million tokens by full model ID: `input` and
+`output` required, `cache_read`/`cache_write` optional, finite and ≥ 0) are accepted; with `cli`
+each of them is an error, since the CLI would ignore it. Every claude route of a claude on `api`
+must name a full model ID (a CLI alias - `sonnet`, `opus`, `haiku`, `fable`, `opusplan`,
+`default`, with or without `[1m]` - is refused, naming the route), and `api_env`, which only
+configures the CLI, is refused. Under `api` no executable is required for the provider, its
+HTTP client replaces the CLI adapter in the registry right after `Validate`, the key is read
+from `api_key_env` once (`applyClaudeAuth`/`applyCodexAuth`) and sent only as the provider's
+credential header, the console says where the calls go instead of the `api_env` line, and
+`run.json: provider_cli.<p>` (each `resumes[]` entry too) is `{version: "", verified: true,
+transport: "api", endpoint: <host>}` - the host only, validated as one on load. A resume
+re-resolves the transport from the current config, like the mode. With `limits.max_cost_usd`
+(or `story.max_cost_usd`), every model a counted route of an API provider names - base,
+`by_complexity`, escalations, extra reviewers, clarify, branch naming - needs a price
+(`providers.<p>.prices` or the built-in table), or the budget is refused naming the route.
+
 `--claude-auth auto|api|login` is valid with `run`, `resume`, `review`, `validate`, `story run`
 (passed to each child) and `jira listen` (resolved at its start, passed to each child) in any position,
 `--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
@@ -4958,12 +5035,12 @@ name are recorded in `run.json` and each resume, never the key.
 
 Codex receives the prompt on stdin. Read and edit calls use `--sandbox read-only` and
 `--sandbox workspace-write` with `--ask-for-approval never`; `none` and `web` are refused
-because `codex exec` exposes its shell tool in those modes. A direct Codex API client is
-planned separately in TODO P13.
+because `codex exec` exposes its shell tool in those modes. A direct API client for claude and
+codex (`transport: api`, §46.2) is specified in specs/api-transport (TODO P13).
 
 ## 46.8 Not covered
 
-* A direct Codex API client in Go (TODO P13): it needs a change to §30.
+* The direct API clients in Go (TODO P13, specs/api-transport): they need a change to §30.
 * Gateway, Bedrock, Vertex and Foundry as modes of their own: they work under `login`.
 * An HTTP preflight of the key, a mode per action, and an org-layer floor for the mode.
 * `bench/` runs `claude` for its baseline itself with the operator's environment as is
@@ -6344,3 +6421,121 @@ child, a clone that git says was refused for authentication.
   ticket to the bot; several tickets at once; a webhook instead of polling.
 * A service worked on by hand (D16); a retry command; a UI.
 * The live Jira and GitLab check is the operator's gate (no `-tags security` suite).
+
+---
+
+# 52. The API transport
+
+`providers.claude.transport: api` and `providers.codex.transport: api` replace the CLI with the
+provider's own HTTP API: claude calls the Anthropic Messages API, codex the OpenAI Responses API,
+from Go, with no process. The design record is `specs/api-transport/` (the owner's answers O1–O12
+in `SPEC.md` §0, what was built differently in each task's `## As built`). Routing, the decision,
+the workflow, the guard, the secret scan, resume and delivery do not change: `app` swaps the HTTP
+clients into the provider registry after `config.Validate`, and every caller sees a
+`provider.Client` as before.
+
+## 52.1 Configuration
+
+```yaml
+providers:
+  claude:
+    auth: api                       # transport api needs the api mode (a login is CLI-only)
+    api_key_env: ANTHROPIC_API_KEY
+    transport: api                  # cli (default) | api
+    base_url: https://ai-gateway.example.internal   # default https://api.anthropic.com
+    web_tools: false                # default true without base_url, false with it
+    prices:                         # USD per million tokens, over the built-in table
+      bedrock/eu.anthropic.claude-opus-5-5: {input: 4.4, output: 22}
+  codex:
+    auth: api
+    api_key_env: OPENAI_API_KEY
+    transport: api                  # base_url, web_tools, prices as for claude
+```
+
+* Every route of an api provider names a full model ID (the CLI aliases `sonnet`, `opus`,
+  `haiku`, `fable`, `opusplan`, `default` and `[1m]` are refused, naming the route).
+* `base_url` is `https://` (plain `http://` only for `localhost`), with no user, password,
+  query or fragment, and never a secret. A Bedrock deployment is reached through the operator's
+  LiteLLM gateway behind `base_url`: the orchestrator signs nothing (no SigV4). `api_env` is
+  refused with `transport: api`; `base_url`, `web_tools` and `prices` are refused with `cli`.
+* `prices` keys are model IDs; `cache_read` and `cache_write` default to 0.1× and 1.25×
+  `input`. `limits.max_cost_usd` with an api route whose model has no price is a config error
+  (`config.CostChecker`, model-aware).
+* `extensions.mcp` and `extensions.user_settings` apply as under the CLI (§52.4); over the API
+  `user_settings` works for codex too.
+
+## 52.2 Startup, persistence, resume
+
+The key variable must be set (`ValidateDependencies`, in place of the executable); the key is
+read in `app`, given to the client by `SetKey`, sent only as `x-api-key` or
+`Authorization: Bearer`, and redacted from every error. In place of the CLI version check one
+`GET {base_url}/v1/models` per api provider (paged) must list every routed model
+(`config.RoutedModels`) before any run exists; `validate` prints `<p>: transport api, <host>
+serves every routed model`. `run.json: provider_cli` records `{transport: api, endpoint}` (the
+host only) and no version, each `resumes[]` entry its own; `resume` resolves the transport again
+from the current config, as it does the auth mode.
+
+## 52.3 Requests
+
+* **Anthropic**: `POST {base_url}/v1/messages`, `anthropic-version: 2023-06-01` and never an
+  `anthropic-beta` header (a gateway to Bedrock may refuse one), `stream: true`, `max_tokens`
+  64000, the route's effort as `output_config.effort`, thinking left to the model. A call with
+  tools marks at most three ephemeral `cache_control` breakpoints (the first, the previous and
+  the last user message); a call without tools marks none. `pause_turn` is resumed up to 4 times
+  in a row; `max_tokens` and `refusal` fail the call.
+* **OpenAI**: `POST {base_url}/v1/responses`, `stream: true`, `store: false`. A call with tools
+  sends strict function tools, `parallel_tool_calls`, `include: [reasoning.encrypted_content]`
+  and a `prompt_cache_key` from the provider, model and authority, and resends every output item
+  of each response unchanged, so each request begins with the whole previous one.
+* Retries: 408, 429 (its `retry-after`, never past the step's deadline), 500, 502, 503, 504, 529,
+  `overloaded_error` and a connection error, with backoff; a stream broken after it started is
+  not retried. 401/403 and billing or quota errors are `FailureAuth`. No redirect is followed.
+  An HTTP failure is `FailureAPI` with `endpoint:` and `http status:` in place of an exit code
+  (§23).
+* Usage is summed over a call's responses (cache reads and writes, reasoning tokens apart);
+  the cost is the gateway's `x-litellm-response-cost` when a response carries one, else the
+  tokens × the price (`prices`, then the built-in table in `httpapi`, dated, with the
+  long-context tiers). LiteLLM sends no such header on a streamed response, so a gateway's
+  model names are priced from `prices` only. A call cut off keeps what it streamed, `usage.partial: true`.
+
+## 52.4 Tools: the authority in Go
+
+There is no CLI flag to enforce an authority, so the authority is the tool set the client offers,
+and every tool runs in Go (§38.2; `specs/api-transport/SPEC.md` §5):
+
+| authority | claude | codex |
+|---|---|---|
+| `none` | no tools | no tools |
+| `web` | `web_search`, `web_fetch` (server tools, 10 uses each) with `web_tools`, else none | `web_search` with `web_tools`, else none |
+| `read` | `read_file`, `grep`, `glob` | `read_file`, `grep`, `glob` |
+| `edit` | the text editor (`text_editor_20250728`, no `undo_edit`), `grep`, `glob` | `read_file`, `grep`, `glob`, `apply_patch` (V4A; built-in on `api.openai.com`, a function tool behind a gateway) |
+
+* The repository tools (`internal/provider/tools`) confine every path to the working directory
+  through `Root`: no absolute path, no `..`, no symlink out, the deny list on every segment,
+  nothing under `.git`, no write under `.claude` or through a symlink, files up to 1 MiB, results
+  cut at 64 KiB. The package imports neither `os/exec` nor `net`. No authority has a shell or a
+  code-execution tool, and a `read` call never has a web tool.
+* A tool call is answered in the same loop (at most 500 responses per call): a refused, invalid
+  or unknown call goes back to the model as an error result, never the call's failure.
+* MCP: the client starts the stdio servers of the call's `--mcp-config` document itself
+  (`internal/provider/mcp`: argv only, the working directory as cwd, `execution.ScrubbedEnv()`
+  plus the server's `env`), offers only the allowlisted tools and stops every server when the
+  call ends. The `orch` verify server reaches an implement unchanged (§44.3). A server that does
+  not start, and a URL server, is in `call.mcp_failed`.
+* Skills: with `user_settings` for the action, a `read` or `edit` call gets the `skill` tool
+  over the operator's skills (`~/.claude/skills/*/SKILL.md` and the enabled plugins' skills, read
+  once by `app`, and only when such an action runs over the API). The model asks for a skill; the
+  tool returns its text, or another file of its directory under the same confinement. Hooks do
+  not run over the API transport, and the run says so once.
+* The guard, the protected paths, the secret scan and the test step run around `implement` and
+  `test` exactly as for a CLI call (§38.3): the tools are a boundary for what the model can
+  reach, not a replacement for the checks of what it changed.
+
+## 52.5 Not covered
+
+Bedrock or Vertex without a gateway; Chat Completions; `anthropic-beta` features; the Batches,
+Files and Agent Skills APIs; Managed Agents; MCP servers over HTTP; a plugin's custom skill
+paths; hooks; LiteLLM as a part of the orchestrator (it is only an endpoint behind `base_url`);
+an automatic choice or fallback between the transports. The live checks against the real
+endpoints and the gateway (`go test -tags security`, specs/api-transport AT13) are the operator's
+gate.

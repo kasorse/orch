@@ -34,6 +34,8 @@ the benchmark (`bench/`, the `orchbench` command, `runs report`): `bench/README.
 design record in `specs/benchmark/`;
 the claude credential (API key or the CLI's login, `--claude-auth`, the `apiKeySource` check,
 `FailureAuth`): MVP.md §46, with its design record in `specs/claude-auth/`;
+the API transport (`providers.<p>.transport: api`: claude and codex over their HTTP APIs, no
+CLI): MVP.md §52 (with §30, §31.1, §38.2, §46.2), with its design record in `specs/api-transport/`;
 the story (`story plan`, `story run`, `story status`, `run --story-task`, the child issues in
 Jira, the scope question): MVP.md §48 and §39.11, with its design record in `specs/story/`;
 delivery - the commit type and trailer, the branch name, `report.md`, the push that opens the
@@ -66,7 +68,18 @@ Responsibilities are strictly separated:
 
 Orchestrator/workflow code must never contain AI-provider-specific behavior. Per-provider CLI
 argv quirks — including how an authority becomes permission flags — are isolated in each
-provider's `buildArgs` function (`internal/provider/{claude,codex,gemini}/client.go`). Jev's
+provider's `buildArgs` function (`internal/provider/{claude,codex,gemini}/client.go`). On the
+API transport (`providers.<p>.transport: api`, specs/api-transport) the Messages API's wire is
+isolated in `internal/provider/anthropic` and the Responses API's in `internal/provider/openai`
+(unexported types), over the provider-neutral `internal/provider/httpapi` (retries, SSE, the
+key's redaction, cost, `GET /v1/models`; standard library, `domain` and `apperr` only, enforced
+by a test); `app` swaps them into the registry after `Validate`, so routing is unchanged. Their
+repository tools are `internal/provider/tools` (`Root` confines every path to the working
+directory: no absolute path, no `..`, no symlink out, the deny list on every segment, nothing
+under `.git`, no write under `.claude` or through a symlink); it imports only `projectctx` and
+the standard library, never `os/exec` or `net` (enforced by a test). Their MCP client is
+`internal/provider/mcp` (stdio servers of the call's `--mcp-config`, standard library only):
+`orch` reaches an implement over the API transport through it, unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
 are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
@@ -200,7 +213,12 @@ and review), without it, as the last read-only step, it writes the answer.
   `internal/provider/<name>/buildArgs`; an adapter declares `Supports` only for authorities a
   live check (`go test -tags security ./test/security/...`) has verified, and refuses
   anything else — a silent downgrade is the one unacceptable failure. Never pass
-  `bypassPermissions` or any equivalent.
+  `bypassPermissions` or any equivalent. On the API transport (`providers.<p>.transport: api`)
+  there is no CLI: the authority is the tool set the client offers (none: no tools; web: the
+  server's web tools or none; read: `read_file`/`grep`/`glob`; edit: those with Anthropic's text
+  editor or OpenAI's `apply_patch`; with `user_settings`, read and edit also the `skill` tool over
+  the operator's skills, read once by `app`, never for an action without it), every tool runs in `internal/provider/tools` and confines its
+  path in Go, and no tool runs a command or opens a connection.
 - **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
   `implement` runs in a worktree by default (`execution.isolation: worktree`; `run --inplace` or
   `isolation: inplace` opts out, `run --worktree` overrides an `inplace` config) and runs every step, guard,
@@ -443,8 +461,10 @@ fallback: stacked on the same-repository task it
 
 ## Out of scope (MVP.md §30)
 
-No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps (the HTTP integrations are the Jev
-decision API, reading one Jira issue for `run --jira` and the listener's Jira calls), no model benchmarking in the core
+No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps beyond claude's and codex's own under
+`transport: api` (MVP.md §52; LiteLLM only as an endpoint behind `base_url`; the other HTTP
+integrations are the Jev decision API, reading one Jira issue for `run --jira` and the listener's
+Jira calls), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST

@@ -51,6 +51,7 @@ type ClaudeProviderConfig struct {
 	// APIEnv is set for the claude child in api mode and removed from its environment in login
 	// mode (specs/claude-auth/SPEC.md §17); never a secret, since the file is committed.
 	APIEnv map[string]string `yaml:"api_env"`
+	TransportConfig
 
 	// apiKeyLiteralSet records that a literal "api_key" was written, which Validate rejects:
 	// the key comes from the environment, never from a file that might end up committed.
@@ -62,21 +63,24 @@ type ClaudeProviderConfig struct {
 type CodexProviderConfig struct {
 	Auth      string `yaml:"auth"`
 	APIKeyEnv string `yaml:"api_key_env"`
+	TransportConfig
 
 	apiKeyLiteralSet bool
 }
 
 func (c *CodexProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Auth      string `yaml:"auth"`
-		APIKeyEnv string `yaml:"api_key_env"`
-		APIKey    string `yaml:"api_key"`
+		Auth            string `yaml:"auth"`
+		APIKeyEnv       string `yaml:"api_key_env"`
+		APIKey          string `yaml:"api_key"`
+		TransportConfig `yaml:",inline"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
 	c.Auth = raw.Auth
 	c.APIKeyEnv = raw.APIKeyEnv
+	c.TransportConfig = raw.TransportConfig
 	c.apiKeyLiteralSet = raw.APIKey != ""
 	return nil
 }
@@ -99,10 +103,11 @@ func (c CodexProviderConfig) KeyEnv() string {
 // its value as a Go field.
 func (c *ClaudeProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		Auth      string            `yaml:"auth"`
-		APIKeyEnv string            `yaml:"api_key_env"`
-		APIKey    string            `yaml:"api_key"`
-		APIEnv    map[string]string `yaml:"api_env"`
+		Auth            string            `yaml:"auth"`
+		APIKeyEnv       string            `yaml:"api_key_env"`
+		APIKey          string            `yaml:"api_key"`
+		APIEnv          map[string]string `yaml:"api_env"`
+		TransportConfig `yaml:",inline"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -110,6 +115,7 @@ func (c *ClaudeProviderConfig) UnmarshalYAML(unmarshal func(interface{}) error) 
 	c.Auth = raw.Auth
 	c.APIKeyEnv = raw.APIKeyEnv
 	c.APIEnv = raw.APIEnv
+	c.TransportConfig = raw.TransportConfig
 	c.apiKeyLiteralSet = raw.APIKey != ""
 	return nil
 }
@@ -153,6 +159,14 @@ func ParseCodexAuth(v string) (string, error) {
 // the environment. The notices are warnings and remarks for the console; no message ever holds
 // the key's value. The key itself is read again by app, only when the mode is api.
 func ResolveClaudeAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.ClaudeAuth, []string, error) {
+	res, notices, err := resolveClaudeAuth(cfg, flag, lookup)
+	if err == nil && cfg.Providers.Claude.UsesAPI() && res.Mode != domain.ClaudeAuthAPI {
+		return domain.ClaudeAuth{}, nil, transportAuthError("claude", res.DecidedBy, res.KeyEnv)
+	}
+	return res, notices, err
+}
+
+func resolveClaudeAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.ClaudeAuth, []string, error) {
 	c := cfg.Providers.Claude
 	res := domain.ClaudeAuth{Requested: c.EffectiveAuth(), DecidedBy: domain.ClaudeAuthByDefault, KeyEnv: c.KeyEnv()}
 	switch {
@@ -207,6 +221,14 @@ func ResolveClaudeAuth(cfg Config, flag string, lookup func(string) (string, boo
 // Auto uses the API key when the configured variable is non-empty and otherwise uses the
 // Codex CLI's own login state.
 func ResolveCodexAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.CodexAuth, []string, error) {
+	res, notices, err := resolveCodexAuth(cfg, flag, lookup)
+	if err == nil && cfg.Providers.Codex.UsesAPI() && res.Mode != CodexAuthAPI {
+		return domain.CodexAuth{}, nil, transportAuthError("codex", res.DecidedBy, res.KeyEnv)
+	}
+	return res, notices, err
+}
+
+func resolveCodexAuth(cfg Config, flag string, lookup func(string) (string, bool)) (domain.CodexAuth, []string, error) {
 	c := cfg.Providers.Codex
 	res := domain.CodexAuth{Requested: c.EffectiveAuth(), DecidedBy: domain.CodexAuthByDefault, KeyEnv: c.KeyEnv()}
 	if flag != "" {
@@ -279,6 +301,11 @@ func providersProblems(cfg Config) []string {
 		problems = append(problems, fmt.Sprintf("providers.claude.api_key_env %q belongs to the agent session that launched the orchestrator; no child process gets it", env))
 	}
 
+	problems = append(problems, transportProblems(cfg, "claude", c.TransportConfig)...)
+	if c.UsesAPI() && len(c.APIEnv) > 0 {
+		problems = append(problems, "providers.claude.api_env only configures the claude CLI; with transport: api "+
+			"name the endpoint in providers.claude.base_url and the models by their full IDs in the routes")
+	}
 	if c.apiKeyLiteralSet {
 		problems = append(problems, "providers.claude.api_key must not be set in the configuration file; "+
 			"name an environment variable via providers.claude.api_key_env instead")
@@ -293,6 +320,7 @@ func providersProblems(cfg Config) []string {
 	case execution.IsParentSessionVar(env):
 		problems = append(problems, fmt.Sprintf("providers.codex.api_key_env %q belongs to the agent session that launched the orchestrator; no child process gets it", env))
 	}
+	problems = append(problems, transportProblems(cfg, "codex", codex.TransportConfig)...)
 	if codex.apiKeyLiteralSet {
 		problems = append(problems, "providers.codex.api_key must not be set in the configuration file; name an environment variable via providers.codex.api_key_env instead")
 	}

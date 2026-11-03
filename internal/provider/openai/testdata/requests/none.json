@@ -1,0 +1,17 @@
+{
+  "model": "gpt-5.5",
+  "instructions": "You answer one request from an automated orchestrator. You have no tools: answer from the request alone, exactly in the form the request asks for.",
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "ACTION: decide-classify\nClassify this."
+        }
+      ]
+    }
+  ],
+  "store": false,
+  "stream": true
+}

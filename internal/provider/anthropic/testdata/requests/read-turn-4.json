@@ -1,0 +1,221 @@
+{
+  "model": "claude-opus-5-5",
+  "max_tokens": 64000,
+  "system": [
+    {
+      "type": "text",
+      "text": "You work for an automated orchestrator on one repository, through your tools read_file, grep and glob; every path is relative to the repository root. You cannot run commands, change files or reach the network. Answer exactly in the form the request asks for."
+    }
+  ],
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "ACTION: investigate\nWhere is Add?",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "text": "Looking.",
+          "type": "text"
+        },
+        {
+          "id": "t1",
+          "input": {
+            "limit": null,
+            "offset": null,
+            "path": "a.go"
+          },
+          "name": "read_file",
+          "type": "tool_use"
+        },
+        {
+          "id": "t2",
+          "input": {
+            "limit": null,
+            "offset": null,
+            "path": ".env"
+          },
+          "name": "read_file",
+          "type": "tool_use"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "t1",
+          "content": "     1\tpackage a\n     2\t\n     3\tfunc Add() {}\n"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "t2",
+          "content": ".env: the path is not accessible",
+          "is_error": true
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "id": "t3",
+          "input": {
+            "glob": null,
+            "path": null,
+            "pattern": "^func"
+          },
+          "name": "grep",
+          "type": "tool_use"
+        },
+        {
+          "id": "t4",
+          "input": {},
+          "name": "no_such",
+          "type": "tool_use"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "t3",
+          "content": "a.go:3:func Add() {}\n"
+        },
+        {
+          "type": "tool_result",
+          "tool_use_id": "t4",
+          "content": "there is no tool \"no_such\"",
+          "is_error": true,
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "id": "t5",
+          "input": {
+            "pattern": "**/*.go"
+          },
+          "name": "glob",
+          "type": "tool_use"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "tool_result",
+          "tool_use_id": "t5",
+          "content": "a.go\n",
+          "cache_control": {
+            "type": "ephemeral"
+          }
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "name": "glob",
+      "description": "List repository files whose path matches a glob: * and ? within a path segment, ** for any number of directories, e.g. internal/**/*_test.go. Paths are relative to the repository root, sorted.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "description": "Glob over paths relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "grep",
+      "description": "Search file contents with an RE2 regular expression. Returns path:line:text for each matching line. path narrows the search to a directory or a file (null for the whole repository); glob filters file names, e.g. *.go (null for all files). Binary and large files are skipped.",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "glob": {
+            "description": "File-name glob, e.g. *.go",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "Directory or file relative to the repository root",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pattern": {
+            "description": "RE2 regular expression",
+            "type": "string"
+          }
+        },
+        "required": [
+          "glob",
+          "path",
+          "pattern"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read a text file of the repository. Lines come numbered (number, tab, text). path is relative to the repository root. offset is the first line to read (1-based, null for 1); limit is how many lines (null for 2000).",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Number of lines",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "offset": {
+            "description": "First line, 1-based",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "path": {
+            "description": "File path relative to the repository root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "limit",
+          "offset",
+          "path"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "stream": true
+}
