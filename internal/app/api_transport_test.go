@@ -1,9 +1,14 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"orchestrator/internal/config"
+	"orchestrator/internal/provider"
+	"orchestrator/internal/provider/anthropic"
 	"orchestrator/internal/provider/httpapi"
 )
 
@@ -25,5 +30,38 @@ func TestAPIPrices(t *testing.T) {
 	}
 	if apiPrices(nil) != nil {
 		t.Error("no prices must stay nil")
+	}
+}
+
+// Skills are read only when an action with user_settings runs over the API transport (SPEC §5.4):
+// otherwise the home directory is not even asked for.
+func TestRegisterSkills(t *testing.T) {
+	home := t.TempDir()
+	skill := filepath.Join(home, ".claude", "skills", "graphify", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(skill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, []byte("---\nname: graphify\ndescription: a graph\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	cfg.Actions.Investigate.Provider = "claude"
+	cfg.Providers.Claude.Transport = config.TransportAPI
+	asked := 0
+	homeDir := func() (string, error) { asked++; return home, nil }
+	registry := provider.NewRegistry()
+	registry.Register(provider.Claude, anthropic.New("", true, nil))
+	if notes := registerSkills(registry, cfg, homeDir); notes != nil || asked != 0 {
+		t.Fatalf("without user_settings: notes %v, home asked %d times", notes, asked)
+	}
+	cfg.Extensions.UserSettings = true
+	cfg.Providers.Claude.Transport = ""
+	if notes := registerSkills(registry, cfg, homeDir); notes != nil || asked != 0 {
+		t.Fatalf("user_settings on the CLI: notes %v, home asked %d times", notes, asked)
+	}
+	cfg.Providers.Claude.Transport = config.TransportAPI
+	notes := registerSkills(registry, cfg, homeDir)
+	if asked != 1 || len(notes) != 1 || !strings.HasSuffix(notes[0], "the skill tool offers graphify") {
+		t.Errorf("notes %v, home asked %d times", notes, asked)
 	}
 }

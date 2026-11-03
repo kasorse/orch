@@ -218,7 +218,8 @@ inside that skill's directory). The result is the file's text, under the bounds 
 deny list; the path rules of §5 item 2 apply with the skill's directory as the root. A skill is
 instructions: if it tells the model to run a command, there is still no tool that runs one. Skill
 text is the operator's, but it reaches the model as a tool result, not as a system prompt. Hooks are
-the CLI's own events and do not run (§2 item 8).
+the CLI's own events and do not run (§2 item 8). The tool is offered to `read` and `edit` calls
+only: a `web` call has a way out, a `none` call no tools.
 
 ## 6. Web tools (O11)
 

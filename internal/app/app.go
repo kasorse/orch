@@ -40,6 +40,7 @@ import (
 	"orchestrator/internal/provider/gemini"
 	"orchestrator/internal/provider/httpapi"
 	"orchestrator/internal/provider/openai"
+	"orchestrator/internal/provider/tools"
 	"orchestrator/internal/report"
 	"orchestrator/internal/repository"
 	"orchestrator/internal/story"
@@ -704,6 +705,7 @@ func loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag string, reg
 			return fail(err)
 		}
 	}
+	notices = append(notices, registerSkills(registry, cfg, os.UserHomeDir)...)
 	// A host that cannot sandbox (e.g. AppArmor blocking bwrap's user namespaces) must fail
 	// here, not at the first test step after the AI calls.
 	if cfg.Test.Sandboxed() {
@@ -978,6 +980,35 @@ func registerAPIClients(registry *provider.Registry, cfg config.Config) {
 	if c := cfg.Providers.Codex; c.UsesAPI() {
 		registry.Register(provider.Codex, openai.New(c.BaseURL, c.WebToolsOn(), apiPrices(c.Prices)))
 	}
+}
+
+// registerSkills gives the API clients the operator's skills when an action with user_settings runs
+// over the API transport (specs/api-transport/SPEC.md §5.4), and returns what discovery noted, the
+// hooks that do not run included (§2 item 8). Otherwise nothing under ~/.claude is read.
+func registerSkills(registry *provider.Registry, cfg config.Config, home func() (string, error)) []string {
+	if !config.UserSettingsOverAPI(cfg) {
+		return nil
+	}
+	dir, err := home()
+	if err != nil {
+		return []string{"no skills are offered over the API transport: the home directory is unknown"}
+	}
+	skills, notes := tools.DiscoverSkills(dir)
+	for _, id := range []string{string(provider.Claude), string(provider.Codex)} {
+		if client, err := registry.Resolve(id); err == nil {
+			if s, ok := client.(interface{ SetSkills([]tools.Skill) }); ok {
+				s.SetSkills(skills)
+			}
+		}
+	}
+	if len(skills) == 0 {
+		return append(notes, "user_settings over the API transport: no skills found in ~/.claude")
+	}
+	names := make([]string, len(skills))
+	for i, s := range skills {
+		names[i] = s.Name
+	}
+	return append(notes, "user_settings over the API transport: the skill tool offers "+strings.Join(names, ", "))
 }
 
 // apiPrices turns providers.<p>.prices into httpapi prices: the cache rates default to 0.1× and

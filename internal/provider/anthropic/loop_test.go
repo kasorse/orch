@@ -14,6 +14,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
+	"orchestrator/internal/provider/tools"
 )
 
 // stream renders one response: blocks are text strings or tool calls {id, name, input}.
@@ -229,4 +230,51 @@ func TestLoop_Edit(t *testing.T) {
 		t.Errorf("edit tools = %s", tools)
 	}
 	golden(t, "edit", f.bodies[0])
+}
+
+// With user_settings a read call gets the skill tool and its result is the skill's text; without
+// it, or on a web call, there is no skill tool (SPEC §5.4).
+func TestLoop_Skill(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "graphify")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("Use graphify query first.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	skills := []tools.Skill{{Name: "graphify", Description: "a code graph", Dir: dir}}
+	f := newFake(t,
+		answer{stream: stream("tool_use", 0, toolCall{"s1", "skill", `{"name":"graphify","path":null}`})},
+		answer{stream: stream("end_turn", 0, "done")},
+	)
+	c := client(f, nil)
+	c.SetSkills(skills)
+	req := readRequest(t)
+	req.Extensions.UserSettings = true
+	res, err := c.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(f.bodies[0], []byte(`"name":"skill"`)) || !bytes.Contains(f.bodies[1], []byte("Use graphify query first.")) {
+		t.Errorf("the skill was not offered or not answered:\n%s\n%s", f.bodies[0], f.bodies[1])
+	}
+	if res.Call.Tools["Skill"] != 1 {
+		t.Errorf("tools = %v", res.Call.Tools)
+	}
+	for _, tc := range []struct {
+		a  domain.Authority
+		us bool
+	}{{domain.AuthorityRead, false}, {domain.AuthorityWeb, true}, {domain.AuthorityNone, true}} {
+		f := newFake(t, answer{stream: stream("end_turn", 0, "ok")})
+		c := client(f, nil)
+		c.SetSkills(skills)
+		req := readRequest(t)
+		req.Authority, req.Extensions.UserSettings = tc.a, tc.us
+		if _, err := c.Execute(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(f.bodies[0], []byte(`"name":"skill"`)) {
+			t.Errorf("%s with user_settings %v offers the skill tool", tc.a, tc.us)
+		}
+	}
 }

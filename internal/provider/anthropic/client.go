@@ -77,6 +77,8 @@ type Client struct {
 	ep       httpapi.Endpoint
 	prices   map[string]httpapi.Price
 	webTools bool
+	// skills are the operator's (SPEC §5.4), offered to a read or edit call with user_settings.
+	skills []tools.Skill
 }
 
 // New returns the client of the endpoint (baseURL "" is DefaultBaseURL) with the operator's
@@ -138,6 +140,24 @@ func (c *Client) ReportsCost(model string) bool {
 // so action gives an implement the verify server. It makes *Client a provider.MCPSupporter.
 func (c *Client) SupportsMCP() bool { return true }
 
+// SetSkills gives the client the operator's skills (tools.DiscoverSkills, read by app only when an
+// action with user_settings runs over the API transport).
+func (c *Client) SetSkills(skills []tools.Skill) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.skills = skills
+}
+
+// skillsFor is the skills a call is offered: none without user_settings for its action.
+func (c *Client) skillsFor(req provider.Request) []tools.Skill {
+	if !req.Extensions.UserSettings {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.skills
+}
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	if !c.Supports(req.Authority) {
 		return provider.Result{}, &apperr.AuthorityError{
@@ -153,7 +173,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	r := buildRequest(req, c.webTools)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + messagesPath}
 	obs := observe(req)
-	toolset, err := repositoryTools(req, &r)
+	toolset, err := repositoryTools(req, &r, c.skillsFor(req))
 	if err != nil {
 		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
 	}
@@ -347,9 +367,9 @@ func toolName(name string) string {
 }
 
 // repositoryTools gives a read call the confined read tools and an edit call the text editor with
-// grep and glob (SPEC §5.1): their definitions go into the request, sorted by name, and the set
+// grep and glob (SPEC §5.1), and either the skill tool over skills (§5.4): their definitions go into the request, sorted by name, and the set
 // runs the model's calls. Other calls get none.
-func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
+func repositoryTools(req provider.Request, r *request, skills []tools.Skill) (*tools.Set, error) {
 	if req.Authority != domain.AuthorityRead && req.Authority != domain.AuthorityEdit {
 		return nil, nil
 	}
@@ -367,6 +387,11 @@ func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
 		offered = slices.DeleteFunc(offered, func(t tools.Tool) bool { return t.Name == "read_file" })
 		offered = append(offered, tools.EditorTool(root))
 		r.System = []textBlock{{Type: "text", Text: systemEdit}}
+	}
+	// With user_settings, the operator's skills (SPEC §5.4): read and edit calls only, never one
+	// with a way out.
+	if t, ok := tools.SkillTool(skills, req.DenyRead); ok {
+		offered = append(offered, t)
 	}
 	for _, t := range offered {
 		if t.Name == tools.EditorName {

@@ -49,6 +49,8 @@ type Client struct {
 	ep       httpapi.Endpoint
 	prices   map[string]httpapi.Price
 	webTools bool
+	// skills are the operator's (SPEC §5.4), offered to a read or edit call with user_settings.
+	skills []tools.Skill
 }
 
 // New returns the client of the endpoint (baseURL "" is DefaultBaseURL) with the operator's
@@ -109,6 +111,24 @@ func (c *Client) ReportsCost(model string) bool {
 // so action gives an implement the verify server. It makes *Client a provider.MCPSupporter.
 func (c *Client) SupportsMCP() bool { return true }
 
+// SetSkills gives the client the operator's skills (tools.DiscoverSkills, read by app only when an
+// action with user_settings runs over the API transport).
+func (c *Client) SetSkills(skills []tools.Skill) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.skills = skills
+}
+
+// skillsFor is the skills a call is offered: none without user_settings for its action.
+func (c *Client) skillsFor(req provider.Request) []tools.Skill {
+	if !req.Extensions.UserSettings {
+		return nil
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.skills
+}
+
 func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	if !c.Supports(req.Authority) {
 		return provider.Result{}, &apperr.AuthorityError{
@@ -123,7 +143,7 @@ func (c *Client) Execute(ctx context.Context, req provider.Request) (provider.Re
 	}
 	r := buildRequest(req, c.webTools)
 	call := callError{req: req, endpoint: "POST " + ep.BaseURL + responsesPath}
-	set, err := repositoryTools(req, &r)
+	set, err := repositoryTools(req, &r, c.skillsFor(req))
 	if err != nil {
 		return provider.Result{}, call.failure(apperr.FailureAPI, err.Error(), 0, err)
 	}
@@ -399,9 +419,9 @@ func applyPatch(set *tools.Set, oc outputCall) applyPatchOutput {
 }
 
 // repositoryTools gives a read call the confined read tools as strict function tools, sorted by
-// name, and an edit call apply_patch besides, with the reasoning replay and the cache key a loop
+// name (with user_settings the skill tool after them, §5.4), and an edit call apply_patch besides, with the reasoning replay and the cache key a loop
 // needs (SPEC §4.2). Other calls get none.
-func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
+func repositoryTools(req provider.Request, r *request, skills []tools.Skill) (*tools.Set, error) {
 	if req.Authority != domain.AuthorityRead && req.Authority != domain.AuthorityEdit {
 		return nil, nil
 	}
@@ -413,6 +433,11 @@ func repositoryTools(req provider.Request, r *request) (*tools.Set, error) {
 		return nil, fmt.Errorf("the working directory cannot be used: %w", err)
 	}
 	read := tools.ReadTools(root)
+	// With user_settings, the operator's skills (SPEC §5.4): read and edit calls only, never one
+	// with a way out.
+	if t, ok := tools.SkillTool(skills, req.DenyRead); ok {
+		read = append(read, t)
+	}
 	for _, t := range read {
 		r.Tools = append(r.Tools, functionTool{Type: "function", Name: t.Name, Description: t.Description, Parameters: t.Schema, Strict: &strict})
 	}

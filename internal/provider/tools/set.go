@@ -63,6 +63,8 @@ func DisplayName(name string) string {
 		return "Grep"
 	case "glob":
 		return "Glob"
+	case SkillName:
+		return "Skill"
 	}
 	return name
 }
@@ -97,15 +99,20 @@ func PatchDisplay(op PatchOp) string {
 	return "Edit"
 }
 
-// Label is what the console shows for a call: the display name and its path or pattern.
+// Label is what the console shows for a call: the display name and its path or pattern (a skill's
+// name first).
 func Label(name string, input json.RawMessage) string {
 	var in struct {
+		Name    *string `json:"name"`
 		Path    *string `json:"path"`
 		Pattern *string `json:"pattern"`
 	}
 	label := Display(name, input)
 	if json.Unmarshal(input, &in) == nil {
-		for _, arg := range []*string{in.Path, in.Pattern} {
+		if name != SkillName {
+			in.Name = nil
+		}
+		for _, arg := range []*string{in.Name, in.Path, in.Pattern} {
 			if arg != nil && *arg != "" {
 				label += " " + *arg
 			}

@@ -3365,7 +3365,14 @@ human sees and confirms between steps.
   or `.claude`, no deny-listed path, no write through a symlink, no file over 1 MiB. The guard,
   the secret scan and the protected paths still run around every `implement` and `test`
   unchanged (§38.3). A `read` call never carries a web tool, a `web` call never a repository
-  tool. `call.web_tools` records the web tools a call
+  tool. With `extensions.user_settings` for the action a `read` or `edit` call also gets the
+  `skill` tool (never a `none` or `web` call): `app` reads the operator's skills once, only when
+  such an action runs over the API transport (`tools.DiscoverSkills`: `~/.claude/skills/*/SKILL.md`
+  and the skills of the plugins `settings.json` enables, named `<plugin>:<skill>`, the front
+  matter's name and description), the tool's `name` is an enum of them and its result the
+  skill's `SKILL.md` or another file of its directory (`path`), read through a `Root` over that
+  directory with the call's deny list. A skill is instructions: no tool runs what it asks to
+  run. Hooks do not run over the API transport; the run says so once. `call.web_tools` records the web tools a call
   offered; `call.tools` counts the tools by the CLI's names (Read, Grep, Glob, WebSearch). In place of the version check, `GET {base_url}/v1/models` must list every model the
   config routes to the provider (`config.RoutedModels`), before any run exists.
 * `config.ValidateAuthorities` refuses an unenforceable route before any AI call (§7);

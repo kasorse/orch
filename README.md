@@ -468,8 +468,18 @@ extensions:
   - **Your hooks run your code with your permissions** on every such step. Enable this for
     hooks you trust, ideally only on the actions that need them.
 
-Extensions are only supported with provider `claude`; `validate` refuses them elsewhere. The
-server names `orch` (the orchestrator's own) and any name with `__` are refused.
+- **Over the API transport** (`providers.<p>.transport: api`) there is no CLI to load your
+  settings, so `user_settings` means your **skills**: every `~/.claude/skills/*/SKILL.md` and
+  the skills of the plugins your `settings.json` enables (as `<plugin>:<skill>`) are offered
+  to `investigate`, `implement` and `review` through one `skill` tool. The model asks for a
+  skill (for example `graphify`) and the orchestrator returns its text, or another file of the
+  skill's directory; nothing outside that directory or on the deny list is returned. A skill
+  that says to run a command still has no tool to run it with. Hooks do not run; the run says so
+  once. `research` (web) gets no skills. Here `user_settings` works for codex too.
+
+MCP servers work with provider `claude` and `codex`; `user_settings` with `claude`, and with
+`codex` only over the API transport; `validate` refuses them elsewhere. The server names `orch`
+(the orchestrator's own) and any name with `__` are refused.
 
 ### Verify: let `implement` run the tests (opt-in)
 

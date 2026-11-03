@@ -323,7 +323,8 @@ security:
 #       args: ["{source}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
 #       actions: [investigate, implement, review]     # default: investigate, review
-#   user_settings: true                               # plugins, skills, hooks
+#   user_settings: true                               # plugins, skills, hooks; over the API
+#                                                     # transport: your skills, via a skill tool
 #   user_settings_actions: [implement, review]        # default: every model step
 
 # Optional: a review that passes but reports a medium issue sends the run back to implement

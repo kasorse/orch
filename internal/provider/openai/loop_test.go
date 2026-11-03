@@ -14,6 +14,7 @@ import (
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/domain"
 	"orchestrator/internal/provider"
+	"orchestrator/internal/provider/tools"
 )
 
 // call is a function_call item of a response; a string is a message's text.
@@ -232,4 +233,31 @@ func TestLoop_ApplyPatch(t *testing.T) {
 		t.Errorf("edit tools = %s", f.bodies[0])
 	}
 	golden(t, "edit", f.bodies[0])
+}
+
+// The skill tool is a strict function tool of a read or edit call with user_settings, and of no
+// other call (SPEC §5.4).
+func TestSkillToolOffered(t *testing.T) {
+	skills := []tools.Skill{{Name: "graphify", Description: "a code graph", Dir: t.TempDir()}}
+	for _, tc := range []struct {
+		a    domain.Authority
+		us   bool
+		want bool
+	}{{domain.AuthorityRead, true, true}, {domain.AuthorityEdit, true, true}, {domain.AuthorityRead, false, false}, {domain.AuthorityWeb, true, false}} {
+		f := newFake(t, answer{stream: completed(0, "ok")})
+		c := client(f, "", nil)
+		c.SetSkills(skills)
+		req := readRequest(t)
+		req.Authority, req.Extensions.UserSettings = tc.a, tc.us
+		if _, err := c.Execute(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		got := bytes.Contains(f.bodies[0], []byte(`"name":"skill"`))
+		if got != tc.want {
+			t.Errorf("%s user_settings %v: skill tool %v", tc.a, tc.us, got)
+		}
+		if got && !bytes.Contains(f.bodies[0], []byte(`"enum":["graphify"]`)) {
+			t.Errorf("the skill tool has no enum: %s", f.bodies[0])
+		}
+	}
 }

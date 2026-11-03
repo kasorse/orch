@@ -216,7 +216,8 @@ and review), without it, as the last read-only step, it writes the answer.
   `bypassPermissions` or any equivalent. On the API transport (`providers.<p>.transport: api`)
   there is no CLI: the authority is the tool set the client offers (none: no tools; web: the
   server's web tools or none; read: `read_file`/`grep`/`glob`; edit: those with Anthropic's text
-  editor or OpenAI's `apply_patch`), every tool runs in `internal/provider/tools` and confines its
+  editor or OpenAI's `apply_patch`; with `user_settings`, read and edit also the `skill` tool over
+  the operator's skills, read once by `app`, never for an action without it), every tool runs in `internal/provider/tools` and confines its
   path in Go, and no tool runs a command or opens a connection.
 - **The operator's tree is never touched in worktree mode** (MVP.md §47). A workflow with
   `implement` runs in a worktree by default (`execution.isolation: worktree`; `run --inplace` or

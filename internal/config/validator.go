@@ -154,7 +154,7 @@ func Validate(cfg Config) error {
 	for _, pm := range cfg.actionProviderModels() {
 		providers[pm.Action] = pm.Provider
 	}
-	problems = append(problems, validateExtensions(cfg.Extensions, providers)...)
+	problems = append(problems, validateExtensions(cfg.Extensions, providers, cfg.Providers.UsesAPI)...)
 
 	if len(problems) == 0 {
 		return nil

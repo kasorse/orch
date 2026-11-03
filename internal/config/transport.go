@@ -74,6 +74,18 @@ func (p ProvidersConfig) UsesAPI(id string) bool {
 	return false
 }
 
+// UserSettingsOverAPI reports whether an action with user_settings runs on a provider over the API
+// transport: then the orchestrator reads the operator's skills itself (SPEC §5.4). Otherwise nothing
+// under ~/.claude is read.
+func UserSettingsOverAPI(cfg Config) bool {
+	for _, pm := range cfg.actionProviderModels() {
+		if slices.Contains(extensionActions, pm.Action) && cfg.Extensions.UserSettingsFor(domain.ActionType(pm.Action)) && cfg.Providers.UsesAPI(pm.Provider) {
+			return true
+		}
+	}
+	return false
+}
+
 // RoutedModels lists the distinct models the config routes to provider id, in route order:
 // what the API transport's model check asks the endpoint for (SPEC §9).
 func RoutedModels(cfg Config, id string) []string {
