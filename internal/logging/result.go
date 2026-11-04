@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // testOutputTailLines is how much of a failed test command's output the step result shows;

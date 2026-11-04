@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 33, stage context (specs/quality/SPEC.md §4): what an earlier stage found reaches

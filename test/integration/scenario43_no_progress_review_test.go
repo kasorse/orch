@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 43, no progress: the review (specs/quality/SPEC.md §8.1, §7.4). The tests pass each

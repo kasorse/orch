@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // org_config (specs/governance/SPEC.md §6.3): an absolute, clean path and a 64-digit

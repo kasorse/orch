@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 func TestLimitWait(t *testing.T) {

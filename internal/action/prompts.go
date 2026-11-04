@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Every Build*Prompt function starts with a literal "ACTION: <name>" first line, which

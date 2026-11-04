@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // CommitOffer is what the operator is shown before deciding whether a finished run's

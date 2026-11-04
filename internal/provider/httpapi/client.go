@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 const (

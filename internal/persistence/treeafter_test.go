@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func TestValidateRun_TreeAfter(t *testing.T) {

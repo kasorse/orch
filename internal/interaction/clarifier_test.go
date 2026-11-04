@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func clarifyPoints() []domain.ClarifyPoint {

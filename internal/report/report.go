@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // maxReportBytes bounds report.md (specs/delivery/SPEC.md §5, A8): GitLab's note limit is

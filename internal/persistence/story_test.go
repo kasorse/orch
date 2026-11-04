@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/story"
 )
 
 func TestNewStoryPlan_Layout(t *testing.T) {

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/listener"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/listener"
 )
 
 // The listener reads a failed run's reason, the error that ended it as rendered, to decide its

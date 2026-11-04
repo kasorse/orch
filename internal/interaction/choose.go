@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ManualChoice is what the user picked when the decision provider failed (TASKS.md

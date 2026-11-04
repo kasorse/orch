@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden.json from the current requests")

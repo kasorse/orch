@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/logging"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/logging"
 )
 
 // pathRuleWarnings are the start warnings of specs/governance/SPEC.md §4.2: one per rule

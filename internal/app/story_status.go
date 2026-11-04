@@ -7,11 +7,11 @@ import (
 	"io/fs"
 	"path/filepath"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // storyStatus is `orchestrator story status <dir>` (specs/story/SPEC.md §10): the README's table

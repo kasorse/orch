@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Panels: titled, bordered side cards in the pretty renderer (repository state, usage,

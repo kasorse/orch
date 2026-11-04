@@ -18,8 +18,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // OrgConfigEnv names the org file when the /etc one does not exist (SPEC §6.1).

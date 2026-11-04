@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/jira"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/jira"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/story"
 )
 
 const storyPlanUsage = `usage: orchestrator story plan [--repo <name>]... "<task>"   or   orchestrator story plan --jira <KEY|URL> [--repo <name>]... ["notes"]`

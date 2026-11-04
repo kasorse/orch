@@ -5,7 +5,7 @@ import (
 	"hash/fnv"
 	"slices"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // exploreEps absorbs the float error of a probability that sits exactly one band below its

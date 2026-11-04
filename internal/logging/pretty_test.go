@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // prettyRun renders a whole run the way the terminal shows it. ORCHESTRATOR_DEMO=1 prints

@@ -8,7 +8,7 @@ import (
 	"io"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 type Request struct {

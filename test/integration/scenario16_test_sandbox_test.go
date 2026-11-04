@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // fakeBwrap records its argv (one argument per line, "---" after each call), then skips

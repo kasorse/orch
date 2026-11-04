@@ -48,7 +48,7 @@ func TestImportsOnlyDomainAndStdlib(t *testing.T) {
 			}
 			first, _, _ := strings.Cut(p, "/")
 			switch {
-			case p == "orchestrator/internal/domain":
+			case p == "github.com/kasorse/orch/internal/domain":
 			case strings.HasPrefix(first, "orchestrator") || strings.Contains(first, "."):
 				t.Errorf("%s imports %q: internal/listener may import only domain and the standard library", path, p)
 			case !isTest && banned[p]:

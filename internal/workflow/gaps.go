@@ -1,6 +1,6 @@
 package workflow
 
-import "orchestrator/internal/domain"
+import "github.com/kasorse/orch/internal/domain"
 
 // Gaps names the earlier stages a workflow skips that a selected stage normally builds
 // on (specs/stage-select/SPEC.md §8), one line per affected stage in workflow order. It

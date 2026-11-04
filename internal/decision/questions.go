@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The questions every decision provider answers (TASKS.md §2). They are shared so

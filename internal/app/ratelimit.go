@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // resetMargin is added to the reported reset time, so a clock a little behind the provider's

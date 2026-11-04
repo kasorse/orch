@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files")

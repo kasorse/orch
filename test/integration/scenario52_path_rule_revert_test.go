@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 52 (specs/governance/SPEC.md §12, GV02): the rule is checked on the run's net diff.

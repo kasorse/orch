@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 const testKey = "sk-jev-test-0123456789"

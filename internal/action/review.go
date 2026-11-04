@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"slices"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/projectctx"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/secretscan"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/projectctx"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/secretscan"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // DefaultDiffSummarize are the files the review diff always shows as a stat line only:

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/testexec"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/testexec"
 )
 
 // TestTestSandbox checks the real bwrap sandbox of the test step (SPEC.md §8): the same

@@ -18,13 +18,13 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/verify"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 // V-verify-1 to 4 (specs/quality/SPEC.md §6.10): with implement.verify on, the session gets
@@ -56,8 +56,8 @@ func orchestratorBinary(t *testing.T) string {
 			return
 		}
 		orchBin = filepath.Join(orchDir, "orchestrator")
-		if out, err := exec.Command("go", "build", "-o", orchBin, "orchestrator/cmd/orchestrator").CombinedOutput(); err != nil {
-			orchErr = fmt.Errorf("go build orchestrator/cmd/orchestrator: %v\n%s", err, out)
+		if out, err := exec.Command("go", "build", "-o", orchBin, "github.com/kasorse/orch/cmd/orchestrator").CombinedOutput(); err != nil {
+			orchErr = fmt.Errorf("go build github.com/kasorse/orch/cmd/orchestrator:%v\n%s", err, out)
 		}
 	})
 	if orchErr != nil {

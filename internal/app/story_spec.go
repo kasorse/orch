@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // maxTaskFileBytes bounds a task file read: the text is at most 16 KiB, and the As built

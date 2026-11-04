@@ -9,8 +9,8 @@ import (
 	"slices"
 	"testing"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 func guardRepo(t *testing.T) (*repository.Repository, string) {

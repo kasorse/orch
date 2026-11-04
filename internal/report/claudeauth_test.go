@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func TestRunSummary_ClaudeAuth(t *testing.T) {

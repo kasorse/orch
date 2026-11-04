@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // Lock takes an exclusive, non-blocking flock on the run directory itself, so only one

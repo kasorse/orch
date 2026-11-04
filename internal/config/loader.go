@@ -11,7 +11,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // Load reads and parses the YAML config file at path. It does not validate contents -

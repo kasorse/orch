@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // DecisionFailureKind classifies how a call to the decision provider (Jev) failed. It

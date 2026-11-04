@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The Messages API's wire (specs/api-transport/SPEC.md §4.1). Unexported: nothing outside this

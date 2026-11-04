@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 56 (specs/governance/SPEC.md §12, §7.4, GV06): with policy.explore a stage whose

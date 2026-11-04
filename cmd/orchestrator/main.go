@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/logging"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/logging"
 )
 
 func main() {

@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // ResolveCommit returns the full SHA of the commit ref names, and false when it names none. ref

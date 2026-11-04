@@ -8,7 +8,7 @@ import (
 	"io"
 	"slices"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // supportedVersions are the MCP protocol versions the server speaks, newest first. The

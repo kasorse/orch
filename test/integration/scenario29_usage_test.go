@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 29 (specs/benchmark/tasks/TASK-BM01): what each provider call cost is recorded

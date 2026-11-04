@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/story"
 )
 
 func loadStoryConfig(t *testing.T, extra string) (Config, error) {

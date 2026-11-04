@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 7 (MVP.md §29): provider runtime failure. The run ends as failed, and the

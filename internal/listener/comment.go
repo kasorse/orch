@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The comments the listener writes are Go's wiki templates (specs/jira-listener/SPEC.md §8): the

@@ -8,9 +8,9 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Provider is the Jev decision provider. It renders the shared questions

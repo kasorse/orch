@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // TerminalGate implements workflow.Gate for manual mode: it confirms before every

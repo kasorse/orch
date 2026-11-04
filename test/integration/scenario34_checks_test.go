@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 34, checks (specs/quality/SPEC.md §5): the operator's vet check fails, the test

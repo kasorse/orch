@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ParseRef turns the operator's --jira value into an issue key, without any network

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // The branch of a worktree run is named when the worktree is created (specs/delivery/SPEC.md §4.3):

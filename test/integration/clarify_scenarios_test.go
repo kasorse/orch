@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
 )
 
 // The scenarios of specs/clarify CL08 that clarify_test.go does not cover: an operator at a

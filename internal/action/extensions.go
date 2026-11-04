@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // extensionsFor resolves the operator's opt-in extensions (config.ExtensionsConfig) for

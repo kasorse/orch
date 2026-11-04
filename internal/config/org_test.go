@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // writeOrg writes content as org.yaml in a fresh directory and returns its path.

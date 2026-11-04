@@ -5,7 +5,7 @@ import (
 	"math"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 30 (specs/benchmark/tasks/TASK-BM02): a run that reached a terminal status says

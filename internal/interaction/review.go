@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ReviewAndSelectMode asks the user to approve the decided workflow (already printed by

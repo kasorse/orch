@@ -214,7 +214,7 @@ func TestImportsOnlyTheStandardLibrary(t *testing.T) {
 			}
 			// A standard library path has no dot in its first element.
 			first, _, _ := strings.Cut(path, "/")
-			if path != "orchestrator/internal/domain" && (strings.Contains(first, ".") || first == "orchestrator") {
+			if path != "github.com/kasorse/orch/internal/domain" && (strings.Contains(first, ".") || first == "orchestrator") {
 				t.Errorf("%s imports %q: only domain and the standard library are allowed", file, path)
 			}
 		}

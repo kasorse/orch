@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 var testLimits = domain.LimitsView{MaxSteps: 20, MaxFixIterations: 3}

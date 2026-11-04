@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // ShowFile returns the content of the file rel (slash-separated, relative to the repository's

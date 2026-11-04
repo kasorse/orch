@@ -6,7 +6,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // minIssueWordLen is the shortest word that takes part in telling two issue descriptions

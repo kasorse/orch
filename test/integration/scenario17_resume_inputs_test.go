@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 17 (specs/resume/SPEC.md §9): a run records what a later resume is checked

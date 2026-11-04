@@ -4,9 +4,9 @@ import (
 	"context"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // Execute implements workflow.StepExecutor. Actions with a configured

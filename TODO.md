@@ -1111,6 +1111,17 @@ LiteLLM (к Bedrock). Цикл инструментов в Go с огранич�
 Реализовано 2026-11-03 (AT01–AT12, AT14), `scripts/check.sh` зелёный. Открыто: AT13 — живые
 проверки с ключами (`go test -tags security`, оператор); после них P13 закрывается.
 
+### [x] P14. Listener как библиотека: run в процессе, публичный пакет, сервис на платформе — P1 · L · ⚠ спека
+Спека: `specs/embed/` (EB01–EB04). Корпоративный сервис на платформенной библиотеке импортирует
+оркестратор и запускает listener как runner; доступ к моделям только по API-ключам (`transport:
+api`, §52). Для этого: run становится вызовом, который listener делает в своём процессе (дочерний
+режим и `run --listener-task` удаляются; `story run` детей сохраняет), модуль получает
+путь `github.com/kasorse/orch` (репозиторий станет публичным, O6), публичный пакет `orchestrator` с `Listen` и `Embedded` (хост-бинарь
+отвечает на оставшиеся self-exec `git-credential` и `mcp-verify`), пример `examples/embed/` и
+MVP.md §53. Реализовано 2026-11-04 (EB01–EB04), `scripts/check.sh` зелёный. Живой прогон на
+платформе (сервис по `examples/embed/README.md`, один тикет на dev) — за оператором; результат
+записывается в `Status:` у `specs/embed/README.md`.
+
 ### [x] P11. Claude по API-ключу или по логину CLI — P1 · M
 Спека: `specs/claude-auth/` (CA01–CA08). Режим на процесс: `api` (ключ Console из
 переменной `providers.claude.api_key_env`) или `login` (логин самого CLI). Выбирается флагом

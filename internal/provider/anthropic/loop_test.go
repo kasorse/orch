@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/tools"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/tools"
 )
 
 // stream renders one response: blocks are text strings or tool calls {id, name, input}.

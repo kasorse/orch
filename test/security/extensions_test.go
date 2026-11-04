@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/projectctx"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/projectctx"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // The opt-in extensions (README "Extensions") widen a call in exactly two named ways: the

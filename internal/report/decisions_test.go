@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func trace(source domain.DecisionSource, model string, choice, score domain.Complexity, request string) domain.DecisionTrace {

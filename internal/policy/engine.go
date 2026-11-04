@@ -10,7 +10,7 @@ package policy
 import (
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // SelectContextDepth decides whether a task needs project context (SPEC.md §4):

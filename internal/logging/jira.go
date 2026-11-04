@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The ticket lines of run --jira (specs/jira/SPEC.md §13), printed between the

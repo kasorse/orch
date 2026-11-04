@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/story"
 )
 
 const (

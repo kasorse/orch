@@ -8,10 +8,10 @@ import (
 	"io"
 	"os"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/persistence"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/persistence"
 )
 
 // outputJSON is the only value of --output: stdout gets the one result line (specs/delivery/SPEC.md

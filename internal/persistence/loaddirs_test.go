@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // placeRun creates a run with a Store, then moves its directory to dst, the way a bench

@@ -43,6 +43,9 @@ by the real exit code of your test command, never by anything a model says.
 go build -o orchestrator ./cmd/orchestrator
 ```
 
+The Go module is `github.com/kasorse/orch`; the binary's package is
+`github.com/kasorse/orch/cmd/orchestrator`.
+
 ## Configuration
 
 Copy `orchestrator.example.yaml` to `orchestrator.yaml` (the default config path; override with
@@ -1233,14 +1236,17 @@ stops the next start until you set `jira: <KEY>` (or `none`) in the task file. D
 
 The listener takes the Jira tickets labelled `ai-run`, one at a time, and runs each as an
 ordinary worktree run in its service's checkout (MVP.md §51, design record
-`specs/jira-listener/`). Add the `listener` and `gitlab` sections to its configuration file
+`specs/jira-listener/`). The run is a call inside the listener's own process, not a child process
+(`specs/embed/`): the listener's process environment is the one thing it shapes, once, at start
+(the Jira variables are removed from it after the Jira client is built). Add the `listener` and
+`gitlab` sections to its configuration file
 (`orchestrator.example.yaml` has them, commented), export `JIRA_EMAIL`, `JIRA_API_TOKEN`,
 `GITLAB_TOKEN` and the provider's credential, and start it in a working directory:
 
 ```bash
 orchestrator jira listen --config orchestrator.yaml        # poll until SIGTERM
 orchestrator jira listen --config orchestrator.yaml --once # one poll and its ticket, then exit
-orchestrator jira listen --claude-auth login               # every child run uses the CLI's login
+orchestrator jira listen --claude-auth login               # every run uses the CLI's login
 ```
 
 A ticket names its service with a label `service:billing` (or a component of that name) and, when
@@ -1256,9 +1262,10 @@ In Docker:
 * **The working directory is a volume.** The clones (`listener.services_dir`) and
   `.orchestrator/listener/` (the state, the lock, the task files) must survive a restart; that is
   how a ticket interrupted by `docker stop` is resumed. Run one listener per volume.
-* **Give the stop timeout more than the child's wait delay** (`docker stop --time` or
-  `stop_grace_period`): on SIGTERM the listener sends SIGINT to the running child and waits for
-  it to stop; a SIGKILL before that leaves the ticket in the start status for the next start.
+* **Give the stop timeout enough for a step to end** (`docker stop --time` or
+  `stop_grace_period`): on SIGTERM the listener cancels the run in progress (the provider call
+  aborts, the test process is killed) and waits for the call to return; a SIGKILL before that
+  leaves the ticket in the start status for the next start, which resumes it.
 * **Check the Jira workflow first.** The `start` transition must be allowed from the status in
   `query.statuses` (it is the only lock: a second listener's claim fails), and `start`,
   `blocked`, `failed`, `done` and `retry` must exist as transitions from the statuses the ticket
@@ -1269,7 +1276,21 @@ In Docker:
   `listener.default_config`.
 * The GitLab token reaches only git, through a credential helper the listener configures for
   `gitlab.base_url`; it is in no URL, `.git/config`, log or comment, and not in the provider
-  CLIs' or the test command's environment. The Jira variables are not passed to the child runs.
+  CLIs' or the test command's environment. The Jira variables are in no process a run starts.
+
+#### As a library
+
+The listener can also run inside a Go service of your own, as one of its runners, instead of
+as the `orchestrator` binary. Import `github.com/kasorse/orch` (the package
+`orchestrator`, which exports `Listen` and `Embedded`; `go doc` shows what the host must know).
+Call `orchestrator.Embedded(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)` first in `main`, so
+that the service answers git's credential helper and the verify server when the listener
+starts it, then `orchestrator.Listen(ctx, orchestrator.Options{Dir: ..., Config: ...})`. The
+process becomes the listener's: it changes the process environment and holds a lock in `Dir`
+(a volume), so run one per process and one replica per volume. `examples/embed/` has the smallest
+host (`main.go`) and the README for the service on the platform: its `Dockerfile`, CI file,
+deployment values, configuration files and the host's duties as a checklist. The design is
+`specs/embed/`; the summary is MVP.md §53.
 
 ## Run artifacts
 

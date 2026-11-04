@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // mergeFixture is a repository with a base commit and three branches from it: "left" and "right"

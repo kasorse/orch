@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 23 (specs/hardening/SPEC.md §4): a 300 KiB task reaches the claude CLI on stdin.

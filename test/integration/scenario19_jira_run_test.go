@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 19 (specs/jira/SPEC.md §16): run --jira takes the task from a ticket on a fake

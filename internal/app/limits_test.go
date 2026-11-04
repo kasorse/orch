@@ -3,9 +3,9 @@ package app
 import (
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 func TestRunOptions_ReviewFixMedium(t *testing.T) {
@@ -17,7 +17,7 @@ func TestRunOptions_ReviewFixMedium(t *testing.T) {
 	}
 }
 
-// resumeTask takes only limitsView(cfg) from the current config into workflow.Entry; the
+// resumeRun takes only limitsView(cfg) from the current config into workflow.Entry; the
 // fix_medium rule comes from run.Options. A run started with the rule on therefore enters
 // implement after its first passing review with medium issues, whatever the config says now.
 func TestResumeEntry_UsesTheRunsFixMediumNotTheConfigs(t *testing.T) {

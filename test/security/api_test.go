@@ -28,12 +28,12 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/projectctx"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/anthropic"
-	"orchestrator/internal/provider/httpapi"
-	"orchestrator/internal/provider/openai"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/projectctx"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/anthropic"
+	"github.com/kasorse/orch/internal/provider/httpapi"
+	"github.com/kasorse/orch/internal/provider/openai"
 )
 
 // apiClient is what both API clients are: a provider and its endpoint.

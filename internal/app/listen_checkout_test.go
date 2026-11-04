@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/listener"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/listener"
+	"github.com/kasorse/orch/internal/story"
 )
 
 const checkoutTestToken = "glpat-checkout-test-value"

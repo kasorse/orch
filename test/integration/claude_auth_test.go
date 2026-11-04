@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 58 (specs/claude-auth/SPEC.md §4-§13, CA06): every credential mode end to end with

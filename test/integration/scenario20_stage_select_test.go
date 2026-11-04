@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 20 (specs/stage-select/SPEC.md §16): run --stage names the stages and skips the

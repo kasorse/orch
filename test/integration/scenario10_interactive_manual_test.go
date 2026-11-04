@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // runOrchestratorInteractive is like runOrchestrator but feeds canned stdin and never

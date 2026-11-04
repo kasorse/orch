@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/config"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // The org config layer (specs/governance/SPEC.md §6, GV04). The tests name the org file

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // testAWSKey is assembled at run time: no token-shaped literal in the repository.

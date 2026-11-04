@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Render turns a validated ticket and the operator's notes into the task text

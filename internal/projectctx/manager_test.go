@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // Secret markers: none of these may appear anywhere in a collected context.

@@ -24,9 +24,9 @@ import (
 	"syscall"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/testexec"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/testexec"
 )
 
 // SpecFile is the name of the server's input inside its directory, and SpecVersion the one

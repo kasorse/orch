@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // story plan (specs/story/tasks/TASK-ST04-story-plan.md): the services a task names are

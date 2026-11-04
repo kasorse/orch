@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // A run that stopped with "task needs input" lists the open points and the last P(clear) against

@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Decision-flow scenarios (specs/JEV integration/TASKS.md T13). They drive app.Run

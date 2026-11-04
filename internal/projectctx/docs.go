@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ruleFiles hold project instructions: every bullet in them is a candidate rule

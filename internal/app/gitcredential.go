@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/listener"
-	"orchestrator/internal/logging"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/listener"
+	"github.com/kasorse/orch/internal/logging"
 )
 
 const gitCredentialUsage = "usage: orchestrator [--config <path>] git-credential get|store|erase   (git starts it as a credential helper)"

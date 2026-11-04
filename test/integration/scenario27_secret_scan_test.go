@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 27 (specs/hardening/SPEC.md §9): what implement or the test command adds is

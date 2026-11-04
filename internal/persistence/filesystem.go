@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 type Store struct {

@@ -3,7 +3,7 @@ package workflow
 import (
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func wfOf(actions ...domain.ActionType) domain.Workflow {

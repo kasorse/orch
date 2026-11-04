@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/story"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/story"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // story run delivers (specs/delivery/SPEC.md §9, §9.1, TASK-DL05): every task's child pushes its

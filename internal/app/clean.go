@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 const runsCleanUsage = "usage: orchestrator runs clean [--older-than <N>d|<duration> | --unreadable] [--dry-run]"

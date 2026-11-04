@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The apply* methods are the only places the Dispatcher's per-run context changes. The

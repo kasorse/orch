@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 func workflowOf(actions ...domain.ActionType) *domain.Workflow {

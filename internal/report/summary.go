@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // RunSummary renders summary.md: one run's report for a reader - how it ended, what it

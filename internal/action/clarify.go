@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // The clarify step's prompt and answer (specs/clarify, Approach §3, Contracts: Clarify answer).

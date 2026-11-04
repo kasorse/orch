@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
 )
 
 // Scenario 19, refusals (specs/jira/SPEC.md §14, J2): a ticket that cannot be read ends
