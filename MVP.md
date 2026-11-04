@@ -6582,3 +6582,40 @@ paths; hooks; LiteLLM as a part of the orchestrator (it is only an endpoint behi
 an automatic choice or fallback between the transports. The live checks against the real
 endpoints and the gateway (`go test -tags security`, specs/api-transport AT13) are the operator's
 gate.
+
+---
+
+# 53. The listener as a library
+
+The Jira listener (§51) is importable: a corporate Go service starts it as one of its runners.
+The design record is `specs/embed/` (the owner's answers O1–O7 in `SPEC.md` §0). The module is
+`github.com/kasorse/orch`; one package outside `internal/`, `orchestrator` at the module
+root (`embed.go`), exports `Options`, `Listen` and `Embedded` and nothing else. It imports only
+`internal/app`, `internal/exitcode` and the standard library (a test asserts it).
+
+## 53.1 The package (SPEC §4)
+
+* `Listen(ctx, Options) error` is `orchestrator jira listen` as a call: it builds the argv the CLI
+  would have (`--config`, `--once`, `--claude-auth`, `--codex-auth`) and calls `app.Run` with
+  `Options.Stderr` as stdout and stderr, so the fail-fast chain, the flock, `GET /myself`, the
+  state and the loop are the CLI's, with no second code path. `Options.Dir` is the one thing the
+  CLI has no flag for: it travels in the context (`app.WithDir`) to `app.listen`, whose `dir`
+  parameter the CLI fills from the working directory. `Options.Config` is required (a
+  `ConfigError` without it, and one for a file that cannot be read, before any request). It
+  returns nil when `ctx` ends, or the error the CLI would map to exit 2 or 1.
+* `Embedded(args, stdin, stdout, stderr) (code, handled)` runs `app.Run` with the CLI's signal
+  handling when the first word of `args` (after a leading `--config <path>`, which is how git
+  starts the credential helper) is one of the orchestrator's commands (`run`, `resume`, `review`,
+  `validate`, `version`, `story`, `decisions`, `runs`, `jira`, `mcp-verify`, `git-credential`,
+  `help`), and returns the exit code `exitcode.FromError` gives and true; otherwise it returns
+  false and touches nothing. The host's `main` calls it first. That keeps the two execs that
+  remain, `git-credential` and `mcp-verify`, working when `os.Executable()` is the service.
+* The package documentation (`go doc .`) states what the host must know: the process is the
+  listener's (`Listen` changes the environment and holds a flock in `Dir`; one `Listen` per
+  process, one process per `Dir`); `Dir` must be a volume; `git`, `bwrap` (unless every service
+  says `test.sandbox: none`), the services' toolchains and the variables the configuration names
+  must be on the host, and no provider CLI with `transport: api`; one replica; a host whose own
+  first argument is a command word cannot embed the listener.
+
+`examples/embed/` (the service on the platform) and the rest of the story complete this section
+(EB04).

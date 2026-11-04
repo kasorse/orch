@@ -253,7 +253,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err != nil {
 			return err
 		}
-		dir, err := workingDir()
+		dir, err := listenDir(ctx)
 		if err != nil {
 			return err
 		}
@@ -269,6 +269,29 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
+}
+
+// dirKey carries the listener's working directory in a context (WithDir).
+type dirKey struct{}
+
+// WithDir returns a context for Run in which `jira listen` works in dir instead of the process's
+// working directory (specs/embed/SPEC.md §4.1). It is no flag: the command line has none, and
+// only the public package orchestrator.Listen sets it. Every other command ignores it.
+func WithDir(ctx context.Context, dir string) context.Context {
+	return context.WithValue(ctx, dirKey{}, dir)
+}
+
+// NewConfigError is a configuration error (exit 2) for the public package, which imports no
+// other internal package than app and exitcode.
+func NewConfigError(msg string) error { return &apperr.ConfigError{Msg: msg} }
+
+// listenDir is the working directory of `jira listen`: the one WithDir put in ctx, else the
+// process's.
+func listenDir(ctx context.Context) (string, error) {
+	if dir, ok := ctx.Value(dirKey{}).(string); ok && dir != "" {
+		return dir, nil
+	}
+	return workingDir()
 }
 
 // workingDir is the directory a command that works on "this repository" takes as its own: the

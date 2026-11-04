@@ -49,7 +49,9 @@ time, the `listener` and `gitlab` sections, the git credential helper, the run c
 listener's own process, `failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design
 record in `specs/jira-listener/`; the listener's run in process (`runTask`/`resumeRun` take a
 directory, no child mode, no `run --listener-task`): MVP.md §51.7, with its design record in
-`specs/embed/`.
+`specs/embed/`; the listener as a library (the public package `orchestrator` at the module root,
+`embed.go`: `Listen` and `Embedded`, importing only `internal/app`, `internal/exitcode` and the
+standard library): MVP.md §53, with its design record in `specs/embed/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)

@@ -1278,6 +1278,17 @@ In Docker:
   `gitlab.base_url`; it is in no URL, `.git/config`, log or comment, and not in the provider
   CLIs' or the test command's environment. The Jira variables are in no process a run starts.
 
+#### As a library
+
+The listener can also run inside a Go service of your own, as one of its runners, instead of
+as the `orchestrator` binary. Import `github.com/kasorse/orch` (the package
+`orchestrator`, which exports `Listen` and `Embedded`; `go doc` shows what the host must know).
+Call `orchestrator.Embedded(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)` first in `main`, so
+that the service answers git's credential helper and the verify server when the listener
+starts it, then `orchestrator.Listen(ctx, orchestrator.Options{Dir: ..., Config: ...})`. The
+process becomes the listener's: it changes the process environment and holds a lock in `Dir`
+(a volume), so run one per process and one replica per volume. The design is `specs/embed/`.
+
 ## Run artifacts
 
 Each `run` persists its state under `.orchestrator/runs/<run-id>/` in the target repository:
