@@ -32,6 +32,14 @@ in its doc comment.
 - Docs in the same task: CLAUDE.md summary list (a line for this spec), MVP.md §53 skeleton
   (the package and `Embedded`; EB04 completes it), README.md: one paragraph "As a library".
 
+## Notes
+
+- No token-shaped literal anywhere, tests included (CLAUDE.md, "Build & test"): the secret scan
+  stops the implement step on one (`generic-assignment`, the first attempt failed on
+  `const token = "glpat-…"`). A fake credential is assembled at run time
+  (`strings.Repeat("x", 20)`, or pieces joined with `+`) and carries no `glpat-`, `ghp_` or
+  `AKIA` prefix. Do not touch `security.secret_scan` in `orchestrator.yaml`.
+
 ## Acceptance
 
 - `embed.go` at the module root exports exactly `Options`, `Listen` and `Embedded`; a test like `internal/story/imports_test.go` asserts the package imports only `internal/app`, `internal/exitcode` and the standard library.
