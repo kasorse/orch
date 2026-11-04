@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Routing markers on the prompts' first line, like every other Build*Prompt; fake

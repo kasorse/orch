@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const clarityRunID = "7c1d2e3f-4a5b-4c6d-8e7f-0a1b2c3d4e5f"

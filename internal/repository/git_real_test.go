@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // realRepo creates a committed git repository and opens it with the real executor, for

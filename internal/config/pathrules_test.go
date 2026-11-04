@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const thresholdsLine = "    thresholds: {research: 0.70, development: 0.60}\n"

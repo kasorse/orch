@@ -7,13 +7,13 @@ import (
 	"reflect"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/policy"
-	"orchestrator/internal/translate"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/policy"
+	"github.com/kasorse/orch/internal/translate"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 type fakeTranslator struct {

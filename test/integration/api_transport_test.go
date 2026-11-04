@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 70 (specs/api-transport AT05): providers.<p>.transport: api. The calls without

@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/persistence"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/persistence"
 )
 
 func TestParseArgs_ReviewFlags(t *testing.T) {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const resumeRunID = "3f2a9c1e-8d4b-4c6a-9e21-5b7f0a3c9d10"

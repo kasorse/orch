@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // validConfig returns a fully valid version 2 config, matching the example in

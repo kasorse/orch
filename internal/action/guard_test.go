@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // The guard itself is tested in package guard; these tests cover what stays here: the

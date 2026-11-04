@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // remoteTimeout bounds a call that talks to the remote (specs/delivery/SPEC.md §7.3, A10): fixed,

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/app"
+	"github.com/kasorse/orch/internal/app"
 )
 
 // What running the tickets in the listener's own process asks of the run (specs/embed/SPEC.md §2.2,

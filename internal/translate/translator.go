@@ -10,9 +10,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // logName keys the translation call's logs: logs/translate.{stdout,stderr}.log.

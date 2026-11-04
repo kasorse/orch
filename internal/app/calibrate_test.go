@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/report"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/report"
 )
 
 func TestDecisionsCalibrateArgs(t *testing.T) {

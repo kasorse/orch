@@ -104,7 +104,7 @@ index 1111111..2222222 100644
  	"strings"
 +	"time"
  
- 	"orchestrator/internal/apperr"
+ 	"github.com/kasorse/orch/internal/apperr"
 @@ -266,3 +268,2 @@ func x() {
  	return strings.TrimSpace(commit), nil
  }

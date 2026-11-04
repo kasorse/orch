@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // Runner executes test.command through a shell. This is the one documented exception to

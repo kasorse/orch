@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // specRecord is runningRecord with the spec branch recorded and RF03 in the conflict status.

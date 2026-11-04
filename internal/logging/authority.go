@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Authority prints what each step of the workflow is allowed to do, right after the

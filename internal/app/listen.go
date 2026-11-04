@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/jira"
-	"orchestrator/internal/listener"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/secretscan"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/jira"
+	"github.com/kasorse/orch/internal/listener"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/secretscan"
 )
 
 // orchestrator jira listen (specs/jira-listener/SPEC.md): a supervisor that polls Jira for tickets

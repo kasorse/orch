@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // The write-back to the issue of a run whose push opened a merge request (specs/delivery/SPEC.md

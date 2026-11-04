@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const renderedTask = `PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor

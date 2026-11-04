@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/report"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/report"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 const gitLabAnswer = "remote: \n" +

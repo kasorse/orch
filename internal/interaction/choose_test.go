@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 var jevDown = &apperr.DecisionError{Provider: "jev", Kind: apperr.DecisionUnavailable, StatusCode: 529, Attempts: 2}

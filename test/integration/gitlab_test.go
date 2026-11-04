@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/story"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/story"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Delivery scenarios 64-77 (specs/delivery/tasks/TASK-DL11-integration.md): a run that ends with a

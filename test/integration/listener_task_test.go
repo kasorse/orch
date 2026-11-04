@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // The run of a Jira listener's ticket (specs/jira-listener/SPEC.md §7.2, specs/embed/SPEC.md §2.1):

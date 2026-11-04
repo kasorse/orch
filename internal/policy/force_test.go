@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // belowDevelopment is what SelectStages gives a task whose development is under its threshold:

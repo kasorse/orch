@@ -3,7 +3,7 @@ package listener
 import (
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The exit codes of a child run (specs/delivery/SPEC.md §11.3), as the listener reads them. The

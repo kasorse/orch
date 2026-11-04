@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 55 (specs/governance/SPEC.md §12, GV04): ORCHESTRATOR_ORG_CONFIG applies only while

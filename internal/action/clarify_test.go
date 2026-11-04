@@ -7,8 +7,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const goldenClarifyTask = "Add an export button to the report page."

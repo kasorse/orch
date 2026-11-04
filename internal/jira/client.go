@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Authentication schemes, as in jira.auth.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 28 (specs/hardening/SPEC.md §5): what review and a retried implement are shown

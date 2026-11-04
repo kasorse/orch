@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/report"
-	"orchestrator/internal/secretscan"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/report"
+	"github.com/kasorse/orch/internal/secretscan"
 )
 
 const (

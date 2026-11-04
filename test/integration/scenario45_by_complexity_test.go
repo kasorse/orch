@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 45, by_complexity (specs/quality/SPEC.md §9): a static table in the config picks the

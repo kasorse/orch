@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // treeGit answers the git calls of a retried implement: write-tree gives a tree, a numstat

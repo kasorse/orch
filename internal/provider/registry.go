@@ -3,7 +3,7 @@ package provider
 import (
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Registry resolves a provider ID to its Client implementation. Constructed once at

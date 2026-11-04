@@ -22,13 +22,13 @@ import (
 	"sync"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/httpapi"
-	"orchestrator/internal/provider/mcp"
-	"orchestrator/internal/provider/tools"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/httpapi"
+	"github.com/kasorse/orch/internal/provider/mcp"
+	"github.com/kasorse/orch/internal/provider/tools"
 )
 
 const (

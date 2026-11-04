@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/story"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata/prompts from the current prompts")

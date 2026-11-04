@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // StateVersion is the "v" of state.json.

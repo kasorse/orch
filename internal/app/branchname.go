@@ -10,11 +10,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // The branch name of a worktree run (specs/delivery/SPEC.md §4.3): proposed by a tool-less call

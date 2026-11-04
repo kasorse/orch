@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/classification"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/decision/jev"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/translate"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/classification"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/decision/jev"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/translate"
 )
 
 type fakeClient struct {

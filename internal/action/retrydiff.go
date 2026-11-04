@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // statBarWidth is the longest +/- bar of a stat line, as in git diff --stat.

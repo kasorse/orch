@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // claude_auth (specs/claude-auth/SPEC.md §10): optional on the run and on each resume, the mode

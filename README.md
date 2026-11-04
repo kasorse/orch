@@ -43,6 +43,9 @@ by the real exit code of your test command, never by anything a model says.
 go build -o orchestrator ./cmd/orchestrator
 ```
 
+The Go module is `github.com/kasorse/orch`; the binary's package is
+`github.com/kasorse/orch/cmd/orchestrator`.
+
 ## Configuration
 
 Copy `orchestrator.example.yaml` to `orchestrator.yaml` (the default config path; override with

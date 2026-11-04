@@ -9,11 +9,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/jira"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/jira"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // maxJiraSummary is Jira's limit on an issue's summary.

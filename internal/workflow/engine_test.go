@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // scriptedExecutor returns outcomes[action] in order, one per call, cycling through

@@ -1,6 +1,6 @@
 package action
 
-import "orchestrator/internal/testexec"
+import "github.com/kasorse/orch/internal/testexec"
 
 // BoundTestOutput lives in package testexec so the verify server can bound its output the
 // same way without importing this package (specs/quality/SPEC.md §6.1). It keeps its old

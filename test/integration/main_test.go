@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/exitcode"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/exitcode"
 )
 
 // storyChildEnv, set to "1" by the story run scenarios, makes this test binary answer as the

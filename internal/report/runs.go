@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // noValue stands for a complexity or a stage set a run has none of, and for a share that

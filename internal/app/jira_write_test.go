@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const jiraWriteTestToken = "jira-test-token-0123456789"

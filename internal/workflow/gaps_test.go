@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func TestGaps(t *testing.T) {

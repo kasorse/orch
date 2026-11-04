@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // worktree.branch (specs/delivery/SPEC.md §4.3): a template and the route of the call that reads

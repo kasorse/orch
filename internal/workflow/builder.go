@@ -8,7 +8,7 @@ package workflow
 import (
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Build maps a stage selection to its workflow (specs/JEV integration/SPEC.md §13,

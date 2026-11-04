@@ -6,9 +6,9 @@ import (
 	"path"
 	"slices"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // The guard lives in package guard so the verify server can use it without importing this

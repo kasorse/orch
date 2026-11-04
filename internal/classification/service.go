@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/policy"
-	"orchestrator/internal/translate"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/policy"
+	"github.com/kasorse/orch/internal/translate"
 )
 
 // Translator prepares the request text for the decision provider (T15).

@@ -102,7 +102,7 @@ only, enforced by a test): it reads failing test names out of a failed test step
 pass/fail (specs/quality §8.2).
 
 `bench/` is a black box to the core and the core is one to it. It is a separate Go module
-with the path `orchbench`, so `orchestrator/internal/...` cannot be imported from it (a
+with the path `orchbench`, so `github.com/kasorse/orch/internal/...` cannot be imported from it (a
 compile error, backed by `bench/boundary_test.go`, which also catches a `replace` or a vendored
 copy); it starts `orchestrator` and `claude` as programs and reads only what they write
 (`run.json`, `decision.json`, stream-json). Nothing in the core imports it or exists only for

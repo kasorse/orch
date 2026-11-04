@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // ErrAuthRefused is wrapped by the error of a Clone or a fetch that git says the remote refused

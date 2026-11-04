@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/verify"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 func TestRun_MCPVerifyUsageErrorsExitTwo(t *testing.T) {

@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // The fakes of the Jira listener scenarios (specs/jira-listener/SPEC.md, TASK-JL05): a Jira with

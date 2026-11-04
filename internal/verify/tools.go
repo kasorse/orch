@@ -16,9 +16,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/testexec"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/testexec"
 )
 
 // Files the server writes inside its directory (specs/quality/SPEC.md §6.4, §6.6, §6.8).

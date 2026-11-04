@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const testKey = "test-key-0123456789"
@@ -323,7 +323,7 @@ func TestImports(t *testing.T) {
 			p, _ := strconv.Unquote(imp.Path.Value)
 			first, _, _ := strings.Cut(p, "/")
 			switch {
-			case p == "orchestrator/internal/domain", p == "orchestrator/internal/apperr":
+			case p == "github.com/kasorse/orch/internal/domain", p == "github.com/kasorse/orch/internal/apperr":
 			case strings.HasPrefix(first, "orchestrator") || strings.Contains(first, "."):
 				t.Errorf("%s imports %q: httpapi may import only domain, apperr and the standard library", e.Name(), p)
 			}

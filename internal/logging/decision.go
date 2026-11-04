@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Decided prints the decision summary once classification is done (TASKS.md T11):

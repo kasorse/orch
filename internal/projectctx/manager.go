@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Repo is the slice of internal/repository the manager needs. Listing goes through git

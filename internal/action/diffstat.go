@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // stepDiff counts what an implement step changed: the working tree now against before (a

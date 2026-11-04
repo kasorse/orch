@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/tui"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/tui"
 )
 
 // The review screen: the decision as a keyboard form instead of a typed prompt. The

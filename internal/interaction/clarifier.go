@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // openMark is what an operator types to leave a point open.

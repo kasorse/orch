@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 func addTestWorktree(t *testing.T, repo *Repository, dir string) (wtPath, admin string) {

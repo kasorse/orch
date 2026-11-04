@@ -4,8 +4,8 @@
 tasks from a repository's history, checks them without a model, runs configurations over them
 and reports pass rate, cost and time side by side. It drives `orchestrator` and `claude` as
 programs and reads only what they write (`run.json`, `decision.json`, stream-json): `bench/` is
-a separate Go module with the path `orchbench` and never imports `orchestrator/internal/...`
-(`bench/boundary_test.go` checks it too). It never selects models: it only measures.
+a separate Go module with the path `orchbench` and never imports
+`github.com/kasorse/orch/internal/...` (`bench/boundary_test.go` checks it too). It never selects models: it only measures.
 
 This file is the manual of what is built. The design, the reasons and the questions it answers
 are in [`specs/benchmark/SPEC.md`](../specs/benchmark/SPEC.md) (§13 is the usage this file

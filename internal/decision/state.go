@@ -1,6 +1,6 @@
 package decision
 
-import "orchestrator/internal/domain"
+import "github.com/kasorse/orch/internal/domain"
 
 // The state every question is asked against. Both providers send exactly this, so
 // their answers are comparable (T22).

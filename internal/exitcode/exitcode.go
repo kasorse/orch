@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 const (

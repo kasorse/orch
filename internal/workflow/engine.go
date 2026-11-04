@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // StepOutcome is what a StepExecutor reports back after running one action.

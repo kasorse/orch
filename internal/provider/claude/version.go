@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // The claude versions every authority's flag set was verified on: a minimum and the next

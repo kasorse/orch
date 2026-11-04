@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // This file is the shape section of `orchestrator decisions calibrate`

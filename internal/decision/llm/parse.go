@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // sumTolerance is wider than Jev's (domain.distributionTolerance): an LLM writes

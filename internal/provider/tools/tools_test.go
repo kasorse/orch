@@ -275,7 +275,7 @@ func TestImports(t *testing.T) {
 			switch {
 			case p == "os/exec", p == "net", strings.HasPrefix(p, "net/"), p == "syscall", p == "plugin", p == "unsafe":
 				t.Errorf("%s imports %q: the tools run no command and open no connection", e.Name(), p)
-			case strings.HasPrefix(p, "orchestrator/") && p != "orchestrator/internal/projectctx":
+			case strings.HasPrefix(p, "github.com/kasorse/orch/") && p != "github.com/kasorse/orch/internal/projectctx":
 				t.Errorf("%s imports %q: tools may import only projectctx and the standard library", e.Name(), p)
 			}
 		}

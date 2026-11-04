@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // versionedModelRe matches a pinned model version. The API accepts versioned IDs but does

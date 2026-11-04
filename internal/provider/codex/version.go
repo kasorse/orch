@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 const versionTimeout = 10 * time.Second

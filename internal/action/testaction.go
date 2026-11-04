@@ -4,11 +4,11 @@ import (
 	"context"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/testreport"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/testreport"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // executeTest makes no AI call - it runs the operator's checks and then the real test

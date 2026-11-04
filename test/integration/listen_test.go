@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
 )
 
 // orchestrator jira listen (specs/jira-listener/SPEC.md, TASK-JL05): the supervisor polls a fake
