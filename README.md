@@ -1287,7 +1287,10 @@ Call `orchestrator.Embedded(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)` first 
 that the service answers git's credential helper and the verify server when the listener
 starts it, then `orchestrator.Listen(ctx, orchestrator.Options{Dir: ..., Config: ...})`. The
 process becomes the listener's: it changes the process environment and holds a lock in `Dir`
-(a volume), so run one per process and one replica per volume. The design is `specs/embed/`.
+(a volume), so run one per process and one replica per volume. `examples/embed/` has the smallest
+host (`main.go`) and the README for the service on the platform: its `Dockerfile`, CI file,
+deployment values, configuration files and the host's duties as a checklist. The design is
+`specs/embed/`; the summary is MVP.md §53.
 
 ## Run artifacts
 

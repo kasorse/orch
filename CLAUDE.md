@@ -484,7 +484,10 @@ API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and
 a merge request (no API client; a token only for the listener's git credential helper, MVP.md §50.13),
 no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
 transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
-comments and transitions without a merge request (no links or worklogs), no remote repository execution, no RAG or persistent
+comments and transitions without a merge request (no links or worklogs), the listener as a library only
+as `Listen` and `Embedded` (MVP.md §53: no `Source` interface for Slack or another origin of tasks, one
+`Listen` per process and per working directory, no `transport` floor in the org layer, no published
+module), no remote repository execution, no RAG or persistent
 conversational memory, no database, no custom dynamically-defined action types or
 user-defined workflow language. Don't add abstractions only useful for these.
 

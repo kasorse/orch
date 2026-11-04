@@ -2671,6 +2671,10 @@ GitHub integration; GitLab beyond clone, fetch and the push of the run's branch,
   issues of an approved story (§48.7), a comment and a transition after a merge request
   (§39.12), and, for `jira listen` only (§51), a JQL search, reading comments and `/myself`,
   and comments and transitions without a merge request (no links or worklogs)
+the listener as a library beyond `Listen` and `Embedded` (§53): no `Source` interface for Slack
+  or another origin of tasks, no second `Listen` in one process or `Dir`, no in-memory verify
+  server or credential helper script (the host answers the two execs through `Embedded`), no
+  `transport` floor in the org layer, no published module (a tag, a proxy)
 remote repository execution
 RAG
 persistent conversational memory
@@ -6617,5 +6621,67 @@ root (`embed.go`), exports `Options`, `Listen` and `Embedded` and nothing else. 
   must be on the host, and no provider CLI with `transport: api`; one replica; a host whose own
   first argument is a command word cannot embed the listener.
 
-`examples/embed/` (the service on the platform) and the rest of the story complete this section
-(EB04).
+## 53.2 What the host provides (SPEC §4.3)
+
+A service that embeds the listener answers for all of this; the package documentation and the
+checklist in `examples/embed/README.md` say the same.
+
+* **The process is the listener's.** `Listen` sets the git credential helper's entries
+  (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`), removes the Jira variables
+  (`jira.email_env`, `jira.token_env`) and the parent-session variables from the process once the
+  Jira client is built, and registers the Jira and GitLab variable names with
+  `execution.ScrubCredentials`. It holds the flock `.orchestrator/listener/lock` in `Dir`. One
+  `Listen` per process, one process per `Dir`. A host that reads the Jira variables elsewhere
+  breaks.
+* **`Embedded` first in `main`**, so `<exe> --config <path> git-credential get` and `<exe>
+  mcp-verify --dir <path>` (found through `os.Executable()`) are answered by the service. A host
+  whose own first argument is one of the command words cannot embed the listener.
+* **`Dir` is a volume**: the state, the lock, the task files (§51.7), the clones under
+  `listener.services_dir` and their worktrees survive a restart; that is how a ticket interrupted
+  by a stop is resumed (§51.9, §51.10).
+* **On the host**: `git` on `PATH`; `bwrap` unless every service's configuration says `test.sandbox:
+  none`; the toolchains of the services' test commands; no provider CLI when the providers are on
+  `transport: api` (§52); the environment variables the configuration names (`jira.*_env`,
+  `gitlab.token_env`, `providers.*.api_key_env`).
+* **One replica.** A second listener on the same volume is refused by the flock; two on different
+  volumes claim the same tickets.
+* **The stop timeout** exceeds `execution.timeout`: on SIGTERM the listener cancels the run in
+  progress and waits for the call to return (§51.10).
+
+## 53.3 The example (SPEC §5)
+
+`examples/embed/` holds `main.go` (`Embedded`, then `signal.NotifyContext`, then `Listen`, standard
+library only; a comment shows the platform's `app.AddRunnerFunc(func() error { return
+orchestrator.Listen(app.Context(), opts) })`; the root module compiles it under `go vet ./...`) and
+a README with the files of the service's repository: its `main.go` on `bootstrap`; a `Dockerfile`
+on the Go build image plus `bubblewrap` (the runtime image has git and make but neither Go nor
+`bwrap`, and a run compiles and tests the service it changes); the `.gitlab-ci.yml` that includes
+the platform's shared jobs; the deployment values (`secretKeys` for the Jira, GitLab and provider
+variables, one replica, a persistent volume at `Dir`, CPU and memory for a compile and a test run,
+the stop timeout above `execution.timeout`); `listener.yaml` and `default.yaml`
+(`listener.default_config`) on `transport: api`; and `/etc/orchestrator/org.yaml` for the corporate
+policy (`allowed_models`, cost ceilings, §45.3). Corporate names are placeholders. A test parses
+the README's YAML blocks and checks `main.go`'s imports and call order. "API only" is no new rule:
+a service's `orchestrator.yaml` that routes to a CLI fails the run's fail-fast chain in an image
+without that CLI (exit 2, the ticket `failed`, §51.8).
+
+## 53.4 Module, version, licence (SPEC §3)
+
+`go get github.com/kasorse/orch` from the corporate CI needs three things this
+repository does not do: the repository public (the build image sets `GOPRIVATE` for the company's
+GitLab only, so the module comes through `proxy.golang.org` and `sum.golang.org`); a tag (until
+then `go get` records a pseudo-version); and a licence that covers the service (`LICENSE` is
+PolyForm Noncommercial 1.0.0, which excludes commercial use: the owner grants the company a
+separate written licence, and the platform's dependency scan classifies PolyForm Noncommercial as
+non-permissive until it has it).
+
+## 53.5 Not covered (SPEC §10)
+
+A `Source` interface for Slack or another origin of tasks (the seam is the supervisor loop of
+`listen.go` against the Jira calls it makes; the interface is cut when the second source exists); a
+`transport` floor in the org layer; the Jira or GitLab token from anything but the environment;
+several tickets at once; a webhook; a UI; an in-memory verify server and a credential helper
+script; publishing the module (a tag, a proxy, the mirror's CI). Several `Listen` calls in one
+process, or a host that is not the process's owner, are not supported (§53.2). The live check on
+the platform (the service built from `examples/embed/README.md`, deployed to dev, one ticket end
+to end) is the operator's gate, recorded in `specs/embed/README.md`.
