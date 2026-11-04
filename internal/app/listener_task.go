@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +33,14 @@ const (
 // scrubEnvNameRE is what a name in scrub_env looks like.
 var scrubEnvNameRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
-// listenerTask is the file `run --listener-task` reads (specs/jira-listener/SPEC.md §7.2): the
-// ticket the listener rendered, with the variables its child must not pass on. The child makes no
-// Jira call; everything it knows of the ticket is here.
+// listenerTaskGone is why parseArgs refuses --listener-task: the flag was how the listener's child
+// run got its ticket, and the listener now calls the run in its own process (specs/embed/SPEC.md §2).
+const listenerTaskGone = "--listener-task is gone: the Jira listener runs a ticket in its own process and passes the task as a value, there is no child run to hand a file to (specs/embed)"
+
+// listenerTask is the ticket the listener rendered (specs/jira-listener/SPEC.md §7.2, specs/embed/
+// SPEC.md §2.1), with the variables the run must not pass on. The listener passes it to runTask as a
+// value and records it as tasks/<KEY>.<attempt>.json before the run: the file is the record and what
+// a restart reads back. The run makes no Jira call; everything it knows of the ticket is here.
 type listenerTask struct {
 	V           int       `json:"v"`
 	Key         string    `json:"key"`
@@ -44,28 +50,24 @@ type listenerTask struct {
 	ScrubEnv    []string  `json:"scrub_env"`
 }
 
-// checkListenerTaskFlags refuses the hidden --listener-task where it does not belong: outside run,
-// and with anything else that says what the task is or where it runs. Nothing has been created when
-// this answers.
-func checkListenerTaskFlags(cli cliArgs, rest []string) error {
-	switch {
-	case rest[0] != "run":
-		return &apperr.ConfigError{Msg: "--listener-task is only valid with run"}
-	case len(cli.stages) > 0:
-		return &apperr.ConfigError{Msg: "--listener-task cannot be combined with --stage"}
-	case cli.jiraRef != "":
-		return &apperr.ConfigError{Msg: "--listener-task cannot be combined with --jira"}
-	case cli.storyTaskFile != "":
-		return &apperr.ConfigError{Msg: "--listener-task cannot be combined with --story-task"}
-	case cli.isolation == "inplace":
-		return &apperr.ConfigError{Msg: "--listener-task cannot be combined with --inplace: a listener task runs in a worktree"}
-	case len(rest) > 1:
-		return &apperr.ConfigError{Msg: "--listener-task cannot be combined with task text: the text is in the task file"}
+// RunListenerTask makes the call the listener makes for one ticket, without the listener around it:
+// the run of the task in taskFile (a file as the listener records it, validated as it validates
+// it), in dir, under the configuration at configPath, --mode auto. It writes the result line to
+// stdout as `run --output json` did, and returns what the run returned. It exists for the
+// integration tests, which live in another package and drive the run itself (specs/embed/SPEC.md
+// §7); the process's working directory plays no part.
+func RunListenerTask(ctx context.Context, dir, configPath, taskFile string, stdout, stderr io.Writer) error {
+	ctx, rec := withResultRecorder(ctx)
+	task, err := readListenerTask(taskFile)
+	if err == nil {
+		err = runTask(ctx, dir, configPath, "", "", "", &task, nil, false, "", domain.ModeAuto, "", "", false,
+			strings.NewReader(""), plainWriter{stderr}, stderr)
 	}
-	return nil
+	writeResult(stdout, rec, err)
+	return err
 }
 
-// readListenerTask reads and validates the task file of run --listener-task. It reads at most
+// readListenerTask reads and validates a task file the listener wrote. It reads at most
 // maxListenerTaskFileBytes, so a wrong path to a large file costs nothing.
 func readListenerTask(path string) (listenerTask, error) {
 	f, err := os.Open(path)

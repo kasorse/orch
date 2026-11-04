@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,15 +10,18 @@ import (
 	"strings"
 	"testing"
 
+	"orchestrator/internal/app"
 	"orchestrator/internal/apperr"
 	"orchestrator/internal/exitcode"
 	"orchestrator/internal/testutil/fakeexec"
 )
 
-// run --listener-task (specs/jira-listener/SPEC.md §7.2, TASK-JL03): the child run of the Jira
-// listener gets its ticket from one validated file, makes no Jira call whatever the config says,
-// runs the clarify step like any run, and says in its --output json line when it failed on a
-// credential.
+// The run of a Jira listener's ticket (specs/jira-listener/SPEC.md §7.2, specs/embed/SPEC.md §2.1):
+// it gets its ticket from one validated task, makes no Jira call whatever the config says, runs the
+// clarify step like any run, and says in its result line when it failed on a credential. The
+// scenarios call the run as the listener does, in this process and in the repository's directory,
+// while the process's working directory stays elsewhere (app.RunListenerTask); `run --listener-task`
+// is deleted, and only its refusal is left of it.
 
 const (
 	listenerKey         = "PAY-12"
@@ -51,6 +56,16 @@ func writeListenerTask(t *testing.T, mutate ...func(m map[string]any)) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// runListenerTask makes the listener's call of the run for the task in file, in repoDir, and returns
+// what it wrote (stdout is the result line) and returned. The working directory is not changed: the
+// run takes its directory as a parameter.
+func runListenerTask(t *testing.T, repoDir, configPath, file string) (stdout, stderr string, err error) {
+	t.Helper()
+	var outBuf, errBuf bytes.Buffer
+	err = app.RunListenerTask(context.Background(), repoDir, configPath, file, &outBuf, &errBuf)
+	return outBuf.String(), errBuf.String(), err
 }
 
 // listenerRunJSON is the part of run.json these scenarios read.
@@ -124,7 +139,7 @@ func TestListenerTask_RunsClarifyAndMakesNoJiraCall(t *testing.T) {
 	repoDir, cfg, invocationsLog, envDir, jira := newListenerRun(t)
 	file := writeListenerTask(t)
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "--output", "json", "run", "--listener-task", file)
+	stdout, stderr, err := runListenerTask(t, repoDir, cfg, file)
 	mustSucceed(t, stdout, stderr, err)
 
 	want := []string{"decide-context", "clarify", "decide-clarity", "decide-classify", "investigate", "implement", "review"}
@@ -203,7 +218,7 @@ func TestListenerTask_InvalidFileIsAConfigErrorBeforeAnyCall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repoDir, cfg, invocationsLog, _, jira := newListenerRun(t)
 
-			stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "--output", "json", "run", "--listener-task", writeListenerTask(t, tc.mutate))
+			stdout, stderr, err := runListenerTask(t, repoDir, cfg, writeListenerTask(t, tc.mutate))
 			var cfgErr *apperr.ConfigError
 			if !errors.As(err, &cfgErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v (exit %d), want a ConfigError (exit 2) containing %q", err, exitcode.FromError(err), tc.want)
@@ -228,7 +243,7 @@ func TestListenerTask_InvalidFileIsAConfigErrorBeforeAnyCall(t *testing.T) {
 func TestListenerTask_MissingFile(t *testing.T) {
 	repoDir, cfg, invocationsLog, _, _ := newListenerRun(t)
 
-	_, _, err := runOrchestrator(t, repoDir, cfg, "run", "--listener-task", filepath.Join(t.TempDir(), "none.json"))
+	_, _, err := runListenerTask(t, repoDir, cfg, filepath.Join(t.TempDir(), "none.json"))
 	if exitcode.FromError(err) != exitcode.ConfigOrDependency || err == nil || !strings.Contains(err.Error(), "cannot read the listener task file") {
 		t.Fatalf("err = %v, want a config error", err)
 	}
@@ -238,28 +253,27 @@ func TestListenerTask_MissingFile(t *testing.T) {
 	}
 }
 
-// The hidden flag is refused with everything that says what the task is or where it runs, and
-// outside run; nothing is created.
-func TestListenerTask_FlagRefusals(t *testing.T) {
+// The deleted flag is refused, as a usage error naming the spec that deleted it, wherever it stands;
+// nothing is created and nothing is called.
+func TestListenerTask_FlagIsRefused(t *testing.T) {
 	tests := []struct {
 		name string
 		args func(file string) []string
-		want string
 	}{
-		{"--stage", func(f string) []string { return []string{"run", "--listener-task", f, "--stage", "review"} }, "cannot be combined with --stage"},
-		{"--jira", func(f string) []string { return []string{"run", "--listener-task", f, "--jira", "PMC-1"} }, "cannot be combined with --jira"},
-		{"--story-task", func(f string) []string { return []string{"run", "--listener-task", f, "--story-task", f} }, "cannot be combined with --story-task"},
-		{"--inplace", func(f string) []string { return []string{"run", "--listener-task", f, "--inplace"} }, "cannot be combined with --inplace"},
-		{"task text", func(f string) []string { return []string{"run", "--listener-task", f, "fix it"} }, "cannot be combined with task text"},
-		{"another command", func(f string) []string { return []string{"validate", "--listener-task", f} }, "--listener-task is only valid with run"},
+		{"run", func(f string) []string { return []string{"run", "--listener-task", f} }},
+		{"run --output json", func(f string) []string { return []string{"--output", "json", "run", "--listener-task=" + f} }},
+		{"another command", func(f string) []string { return []string{"validate", "--listener-task", f} }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repoDir, cfg, invocationsLog, _, jira := newListenerRun(t)
 
-			_, _, err := runOrchestrator(t, repoDir, cfg, tc.args(writeListenerTask(t))...)
-			if exitcode.FromError(err) != exitcode.ConfigOrDependency || err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want a config error containing %q", err, tc.want)
+			stdout, _, err := runOrchestrator(t, repoDir, cfg, tc.args(writeListenerTask(t))...)
+			if exitcode.FromError(err) != exitcode.ConfigOrDependency || err == nil || !strings.Contains(err.Error(), "specs/embed") {
+				t.Fatalf("err = %v, want a config error naming specs/embed", err)
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want nothing", stdout)
 			}
 			noRunDirectory(t, repoDir)
 			if got := invocations(t, invocationsLog); len(got) != 0 {
@@ -280,7 +294,7 @@ func TestListenerTask_FailureKindAuth(t *testing.T) {
 	t.Setenv("FAKE_API_KEY_SOURCE", "none")
 	repoDir, cfg, invocationsLog, _, jira := newListenerRun(t)
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, cfg, "--output", "json", "run", "--listener-task", writeListenerTask(t))
+	stdout, stderr, err := runListenerTask(t, repoDir, cfg, writeListenerTask(t))
 	if exitcode.FromError(err) != exitcode.ConfigOrDependency {
 		t.Fatalf("exit %d (%v), want 2\nstdout:\n%s\nstderr:\n%s", exitcode.FromError(err), err, stdout, stderr)
 	}
@@ -306,7 +320,7 @@ func TestListenerTask_FailureKindIsEmptyForARedTest(t *testing.T) {
 	repoDir := fakeexec.InitGitFixture(t)
 	r, _, _ := newWorktreeRun(t, repoDir, func(o *configOptions) { o.testCommand = "exit 1" })
 
-	stdout, stderr, err := runOrchestrator(t, repoDir, r.cfg, "--output", "json", "run", "--listener-task", writeListenerTask(t))
+	stdout, stderr, err := runListenerTask(t, repoDir, r.cfg, writeListenerTask(t))
 	if exitcode.FromError(err) != exitcode.WorkflowOrLimit {
 		t.Fatalf("exit %d (%v), want 4\nstdout:\n%s\nstderr:\n%s", exitcode.FromError(err), err, stdout, stderr)
 	}

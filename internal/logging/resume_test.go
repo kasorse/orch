@@ -118,7 +118,7 @@ func TestResumeOverview_Golden(t *testing.T) {
 			run := tc.run
 			run.ID, run.Workflow = resumeRunID, resumeWorkflow()
 
-			// The order resumeTask prints in; --verbose must not change any of it.
+			// The order resumeRun prints in; --verbose must not change any of it.
 			render := func(verbose bool) string {
 				var buf bytes.Buffer
 				r := NewConsoleReporter(&buf)

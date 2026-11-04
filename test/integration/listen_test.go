@@ -16,8 +16,9 @@ import (
 )
 
 // orchestrator jira listen (specs/jira-listener/SPEC.md, TASK-JL05): the supervisor polls a fake
-// Jira, claims the tickets it may, runs each as a child run in its service, and writes the outcome
-// back. The children are this test binary run as the orchestrator; the "GitLab" is a bare repository.
+// Jira, claims the tickets it may, runs each in its service, in this process, and writes the outcome
+// back (specs/embed/SPEC.md §2). The "GitLab" is a bare repository; this test binary answers only for
+// the two execs that remain, mcp-verify and git's credential helper (TestMain).
 
 const listenTask = "fix Add in fixture.go so that it adds instead of subtracting"
 
@@ -121,9 +122,9 @@ func TestListen_ClearTicketBecomesAMergeRequest(t *testing.T) {
 	}
 }
 
-// --claude-auth and --codex-auth on the listener reach the child: its run records both modes as
-// the flags'.
-func TestListen_AuthFlagsArePassedToTheChild(t *testing.T) {
+// --claude-auth and --codex-auth on the listener reach the run: it records both modes as the
+// flags'.
+func TestListen_AuthFlagsArePassedToTheRun(t *testing.T) {
 	env := newListenEnv(t, listenOptions{pPre: 0.85})
 	env.jira.add("PAY-12", "Add() subtracts", listenTask, "service:billing")
 
@@ -345,7 +346,7 @@ func TestListen_AProviderFailureRetriesLaterWithoutAnAttempt(t *testing.T) {
 }
 
 // failure_kind: auth sends the ticket to retry, counts no attempt, and the listener stops with exit 2.
-func TestListen_AuthFailureOfAChildStopsTheListener(t *testing.T) {
+func TestListen_AuthFailureOfARunStopsTheListener(t *testing.T) {
 	clearAuthEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", authKey())
 	t.Setenv("FAKE_API_KEY_SOURCE", "none")
@@ -478,7 +479,7 @@ func TestListen_ARestartResumesTheInterruptedRunAndWritesItsOutcomeOnce(t *testi
 	defer stop()
 	var stderr syncBuffer
 	wait := env.startListener(ctx, &stderr, "--once")
-	waitFor(t, "the child to reach implement", func() bool {
+	waitFor(t, "the run to reach implement", func() bool {
 		for _, a := range invocationsOrNone(env.invocationsLog) {
 			if a == "implement" {
 				return true
@@ -533,6 +534,9 @@ func TestListen_ASecondListenerInTheSameDirectoryRefuses(t *testing.T) {
 	wait := env.startListener(ctx, &stderr)
 	waitFor(t, "the first listener to start", func() bool { return strings.Contains(stderr.String(), "listening on") })
 
+	// The first listener removed the Jira variables from the process, as it does; a second process
+	// would have its own.
+	env.setJiraEnv()
 	err := app.Run(context.Background(), []string{"--config", env.cfg, "jira", "listen", "--once"}, strings.NewReader(""), io.Discard, io.Discard)
 	var cfgErr *apperr.ConfigError
 	if !errors.As(err, &cfgErr) || exitcode.FromError(err) != exitcode.ConfigOrDependency || !strings.Contains(err.Error(), "another orchestrator jira listen is running") {

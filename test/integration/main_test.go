@@ -18,14 +18,16 @@ import (
 // and in these tests the own executable is the test binary.
 const storyChildEnv = "ORCHE_TEST_ORCHESTRATOR"
 
-// TestMain lets this test binary stand in for the orchestrator when the fake claude starts the
-// verify server. The implement step names its own executable in the MCP config
-// (`<exe> mcp-verify --dir <dir>`), and in these tests that executable is the test binary, so
-// it answers the hidden subcommand here, before the testing package parses flags. It answers the
-// children of a story run the same way, under storyChildEnv, with SIGINT and SIGTERM cancelling
-// the command as main.go does.
+// TestMain lets this test binary stand in for the orchestrator in the two execs that remain of the
+// listener (specs/embed/SPEC.md O3): the verify server the fake claude starts (the implement step
+// names its own executable in the MCP config, `<exe> mcp-verify --dir <dir>`) and git's credential
+// helper (`<exe> git-credential --config <path>`, the listener's entries in git's environment). In
+// these tests the executable is the test binary, so it answers the hidden subcommands here, before
+// the testing package parses flags. It answers the children of a story run the same way, under
+// storyChildEnv, with SIGINT and SIGTERM cancelling the command as main.go does. A ticket of the
+// Jira listener is not a child: it runs in the test's process.
 func TestMain(m *testing.M) {
-	if len(os.Args) > 1 && os.Args[1] == "mcp-verify" {
+	if isExecOfTheListener(os.Args) {
 		err := app.Run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -37,6 +39,19 @@ func TestMain(m *testing.M) {
 		os.Exit(runAsOrchestrator())
 	}
 	os.Exit(runWithoutHostOrgConfig(m))
+}
+
+// isExecOfTheListener reports whether args, a command line of this binary, is one of the two execs
+// the listener still makes: `mcp-verify --dir <dir>`, or git's call of the credential helper the
+// listener names in its environment, `--config <path> git-credential get` (withListenerGit).
+func isExecOfTheListener(args []string) bool {
+	switch {
+	case len(args) > 1 && args[1] == "mcp-verify":
+		return true
+	case len(args) > 3 && args[1] == "--config" && args[3] == "git-credential":
+		return true
+	}
+	return false
 }
 
 // runAsOrchestrator is a child of a story run: the test binary run as `orchestrator <args>`.

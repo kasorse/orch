@@ -2,7 +2,7 @@ package app
 
 // helpText is what `orchestrator help`, --help and -h print: the commands, the run modes and
 // the flags an operator types. The hidden flags and commands the orchestrator starts itself
-// (--story-task, --listener-task, --story-no-push, mcp-verify, git-credential) are left out.
+// (--story-task, --story-no-push, mcp-verify, git-credential) are left out.
 const helpText = `orchestrator - takes one engineering task, decides which stages it needs and runs them
 with the AI CLIs (claude, codex, gemini) against the git repository in the current directory.
 

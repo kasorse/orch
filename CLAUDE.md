@@ -45,9 +45,11 @@ review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its desig
 §50.5, §50.8, with its design record in `specs/delivery-push/`; the land of such a story on its
 base branch: MVP.md §50.8, with its design record in `specs/story-land/`;
 the Jira listener (`orchestrator jira listen`: tickets labelled `ai-run` become runs, one at a
-time, the `listener` and `gitlab` sections, the git credential helper, `run --listener-task`,
-`failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design record in
-`specs/jira-listener/`.
+time, the `listener` and `gitlab` sections, the git credential helper, the run called in the
+listener's own process, `failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design
+record in `specs/jira-listener/`; the listener's run in process (`runTask`/`resumeRun` take a
+directory, no child mode, no `run --listener-task`): MVP.md §51.7, with its design record in
+`specs/embed/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -439,16 +441,24 @@ fallback: stacked on the same-repository task it
   (`mr.state: created`; the same intent-first, never-repeated rules; a failure is a warning;
   `options.jira_write` is the copy a resume uses, and a resume still reads nothing from Jira).
   `story plan` writes nothing to Jira. `run --jira` refuses an issue type in `story.jira_issue_types`.
-- **The listener owns Jira; its child never calls it** (MVP.md §51, `specs/jira-listener/`).
-  `orchestrator jira listen` is a supervisor like `story run`: it polls Jira (JQL built by Go,
-  re-checked in Go), claims a ticket by a transition, finds the service and project from the
-  labels and components (never a model), clones or fast-forwards the checkout, and runs the ticket
-  as a child `run --listener-task <file> --mode auto --output json`, which builds no Jira client
-  and has `jira.write` off; the listener reads the child's JSON line and `run.json` and only then
-  writes a comment and a transition (intent first in `.orchestrator/listener/state.json`, never
-  repeated, a failure is a log line). The GitLab token reaches only git, through the credential
-  helper (the hidden `git-credential`), never a URL, argv, `.git/config`, log, state or comment, and
-  never a provider CLI or the test command; the child gets no Jira variables. Only allowlisted
+- **The listener owns Jira; the run never calls it** (MVP.md §51, `specs/jira-listener/`,
+  `specs/embed/`). `orchestrator jira listen` is a supervisor like `story run`: it polls Jira (JQL
+  built by Go, re-checked in Go), claims a ticket by a transition, finds the service and project
+  from the labels and components (never a model), clones or fast-forwards the checkout, and runs
+  the ticket by calling `runTask` (or `resumeRun`) in its own process, with the service's directory
+  and the task as a value, `--mode auto`: that run builds no Jira client and gets no Jira variable
+  (the listener removes them from its process once its client is built) and has `jira.write` off.
+  The run reads the working directory nowhere (its directory is a parameter; a test asserts no
+  `os.Getwd`/`os.Chdir` in `internal/app` outside the commands that read it themselves), and
+  nothing a run leaves in package-level state may reach the next one. A panic in a run is the
+  ticket's `failed` (`internal error: …`), never the listener's end. There is no child mode:
+  `run --listener-task` is refused. The listener reads the run's result value (the one
+  `--output json` writes as a line) and `run.json` and only then writes a comment and a
+  transition (intent first in `.orchestrator/listener/state.json`, never repeated, a failure is a
+  log line). The GitLab token reaches only git, through the credential helper (the hidden
+  `git-credential`, the one exec besides `mcp-verify`), never a URL, argv, `.git/config`, log,
+  state or comment, and never a provider CLI or the test command; no process of a run gets a Jira
+  variable. Only allowlisted
   groups (`gitlab.allowed_groups`) are cloned, and only reporters in `listener.query.reporters`
   start a run (the label alone is not enough). A cloned repository's `orchestrator.yaml` is
   trusted because its group is. `internal/listener` is pure (domain and the standard library);
@@ -593,9 +603,11 @@ re-check), `logs/pre-run-test.*`, `logs/pre-run-test.<check>.*` and `logs/branch
 
 `jira listen` keeps its own home in the working directory (MVP.md §51.9): `.orchestrator/listener/`
 holds `state.json` (per ticket: attempts, service, phase, run id, outcome, the writes done, `next_try_at`),
-`lock` (flocked, one listener per directory) and `tasks/<KEY>.<attempt>.json` (a child's task input,
-whose `run.json` has `task.source.listener: true`); the clones live in `listener.services_dir`
-(`.clone-*` is a clone in progress).
+`lock` (flocked, one listener per directory) and `tasks/<KEY>.<attempt>.json` (the run's input: the
+listener writes it, validates it as the run will, and passes the validated task to `runTask` as a
+value, in its own process; the file stays as the record, which `readListenerTask` reads back; the run's `run.json` has
+`task.source.listener: true`); the clones live in `listener.services_dir` (`.clone-*` is a clone
+in progress).
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`

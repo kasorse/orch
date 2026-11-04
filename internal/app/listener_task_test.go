@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -152,79 +155,82 @@ func TestListenerTaskSource(t *testing.T) {
 	}
 }
 
-func TestParseArgs_ListenerTask(t *testing.T) {
-	got, err := parseArgs([]string{"run", "--listener-task", "t.json", "--mode=auto"})
-	if err != nil || got.listenerTaskFile != "t.json" || got.mode != domain.ModeAuto || len(got.rest) != 1 || got.rest[0] != "run" {
-		t.Errorf("parseArgs = %+v, %v", got, err)
-	}
-	if got, err = parseArgs([]string{"--listener-task=t.json", "run"}); err != nil || got.listenerTaskFile != "t.json" {
-		t.Errorf("parseArgs(=) = %+v, %v", got, err)
-	}
-	for _, tc := range []struct{ args, want string }{
-		{"run --listener-task a --listener-task=b", "--listener-task given twice"},
-		{"run --listener-task=", "--listener-task requires a file"},
-		{"run --listener-task", "--listener-task requires a value"},
+// run --listener-task is deleted (specs/embed/SPEC.md O2): parseArgs refuses the flag, in either
+// spelling and wherever it stands, with a message that names the spec.
+func TestParseArgs_ListenerTaskIsRefused(t *testing.T) {
+	for _, args := range []string{
+		"run --listener-task t.json --mode=auto",
+		"--listener-task=t.json run",
+		"run --listener-task",
+		"run --listener-task=",
+		"validate --listener-task t.json",
 	} {
-		if _, err := parseArgs(strings.Fields(tc.args)); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("parseArgs(%q) = %v, want %q", tc.args, err, tc.want)
+		_, err := parseArgs(strings.Fields(args))
+		if err == nil || !strings.Contains(err.Error(), "specs/embed") || !strings.Contains(err.Error(), "--listener-task is gone") {
+			t.Errorf("parseArgs(%q) = %v, want the refusal naming specs/embed", args, err)
 		}
 	}
 }
 
-// The hidden flag is refused before the config is read, a file opened or a run created, wherever it
-// does not belong.
-func TestRun_ListenerTaskRefusals(t *testing.T) {
+// Run refuses it as a usage error before the config is read, a run created or a word written.
+func TestRun_ListenerTaskIsRefused(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "none.yaml")
-	tests := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"outside run", []string{"validate", "--listener-task", "t.json"}, "--listener-task is only valid with run"},
-		{"review", []string{"review", "--base", "main", "--listener-task", "t.json"}, "--listener-task is only valid with run"},
-		{"--stage", []string{"run", "--listener-task", "t.json", "--stage", "review"}, "cannot be combined with --stage"},
-		{"--jira", []string{"run", "--listener-task", "t.json", "--jira", "PAY-1"}, "cannot be combined with --jira"},
-		{"--story-task", []string{"run", "--listener-task", "t.json", "--story-task", "s.json"}, "cannot be combined with --story-task"},
-		{"--inplace", []string{"run", "--listener-task", "t.json", "--inplace"}, "cannot be combined with --inplace"},
-		{"task text", []string{"run", "--listener-task", "t.json", "fix it"}, "cannot be combined with task text"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			args := append([]string{"--config", missing, "--mode", "auto"}, tc.args...)
-			err := Run(context.Background(), args, pipeStdin(t), &stdout, &stderr)
-			var cfgErr *apperr.ConfigError
-			if !errors.As(err, &cfgErr) || !strings.Contains(err.Error(), tc.want) || exitcode.FromError(err) != exitcode.ConfigOrDependency {
-				t.Errorf("Run = %v, want a ConfigError containing %q", err, tc.want)
-			}
-			if stdout.Len() != 0 || stderr.Len() != 0 {
-				t.Errorf("output on stdout %q, stderr %q", stdout.String(), stderr.String())
-			}
-		})
+	for _, args := range [][]string{
+		{"run", "--listener-task", "t.json"},
+		{"--output", "json", "run", "--listener-task", "t.json"},
+		{"review", "--base", "main", "--listener-task", "t.json"},
+	} {
+		var stdout, stderr bytes.Buffer
+		err := Run(context.Background(), append([]string{"--config", missing, "--mode", "auto"}, args...), pipeStdin(t), &stdout, &stderr)
+		var cfgErr *apperr.ConfigError
+		if !errors.As(err, &cfgErr) || !strings.Contains(err.Error(), "specs/embed") || exitcode.FromError(err) != exitcode.ConfigOrDependency {
+			t.Errorf("Run(%v) = %v, want a ConfigError naming specs/embed", args, err)
+		}
+		if stdout.Len() != 0 || stderr.Len() != 0 {
+			t.Errorf("Run(%v): output on stdout %q, stderr %q", args, stdout.String(), stderr.String())
+		}
 	}
 }
 
-// An invalid task file is a config error before the config is read: no validation chain, no
-// provider, no run. With --output json the line says so and has no failure kind.
-func TestRun_ListenerTaskInvalidFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "PAY-12.1.json")
-	if err := os.WriteFile(path, listenerTaskJSON(t, func(m map[string]any) { m["url"] = "http://jira.example.com/browse/PAY-12" }), 0o644); err != nil {
-		t.Fatal(err)
+// The run and resume paths read the working directory nowhere (specs/embed/SPEC.md §2.1): the
+// listener calls them with a service's directory while the process stays in its own, so a
+// os.Getwd or os.Chdir in them would work on the wrong repository. Only the entry that hands the
+// directory down (workingDir) and the commands that read "this repository" themselves may call them.
+func TestRunPathsReadNoWorkingDirectory(t *testing.T) {
+	ownCwd := map[string]bool{"review.go": true, "story_plan.go": true, "clean.go": true, "validate.go": true}
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no source files: %v", err)
 	}
-	missing := filepath.Join(dir, "none.yaml")
-
-	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--config", missing, "--mode", "auto", "--output", "json", "run", "--listener-task", path}, pipeStdin(t), &stdout, &stderr)
-	if exitcode.FromError(err) != exitcode.ConfigOrDependency || err == nil || !strings.Contains(err.Error(), "not an absolute https URL") {
-		t.Fatalf("Run = %v, want a config error about the url (the config does not exist: it was not read)", err)
-	}
-	m := resultLine(t, stdout.String())
-	if m["status"] != "error" || m["exit_code"] != float64(2) || m["failure_kind"] != "" || m["run_id"] != "" {
-		t.Errorf("line = %v", m)
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want nothing: the validation chain did not start", stderr.String())
+	fset := token.NewFileSet()
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") || ownCwd[name] {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name.Name == "workingDir" {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "os" && (sel.Sel.Name == "Getwd" || sel.Sel.Name == "Chdir") {
+					t.Errorf("%s: %s calls os.%s: the run takes its directory as a parameter", name, fn.Name.Name, sel.Sel.Name)
+				}
+				return true
+			})
+		}
 	}
 }
 

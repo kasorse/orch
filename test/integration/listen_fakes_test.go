@@ -22,8 +22,8 @@ import (
 
 // The fakes of the Jira listener scenarios (specs/jira-listener/SPEC.md, TASK-JL05): a Jira with
 // a search, comments, transitions and a status, a "GitLab" that is a local bare repository, and a
-// listener whose children are this test binary (TestMain answers as the orchestrator under
-// storyChildEnv).
+// listener that runs its tickets in this process (specs/embed/SPEC.md §2): TestMain answers only
+// for the two execs that remain, mcp-verify and git's credential helper.
 
 const (
 	listenBot      = "bot-1"
@@ -341,7 +341,6 @@ type listenOptions struct {
 
 func newListenEnv(t *testing.T, o listenOptions) *listenEnv {
 	t.Helper()
-	t.Setenv(storyChildEnv, "1")
 	t.Setenv("GITLAB_TOKEN", "glpat-integration-token")
 	repoDir, invocationsLog, _, _ := clarifyEnv(t, o.pPre, o.rechecks...)
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -401,10 +400,37 @@ gitlab:
 		invocationsLog: invocationsLog, maxAttempts: attempts}
 }
 
+// listenerEnvNames are the variables the listener changes in its own process (specs/embed/SPEC.md
+// §2.4) besides the Jira ones, which startListener sets again: git's credential helper entries.
+var listenerEnvNames = []string{"GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1"}
+
+// setJiraEnv sets the Jira variables the fake accepts: a listener removes them from its process
+// once its client is built, and the next one this test process starts needs them again. The test's
+// t.Setenv restores the original values.
+func (e *listenEnv) setJiraEnv() {
+	e.t.Helper()
+	e.t.Setenv("JIRA_EMAIL", jiraEmail)
+	e.t.Setenv("JIRA_API_TOKEN", jiraToken)
+}
+
+// resetListenerProcessEnv puts the process's environment where a listener finds it at its start: the
+// Jira variables set and no helper entries of an earlier listener of this test process.
+func (e *listenEnv) resetListenerProcessEnv() {
+	e.t.Helper()
+	e.setJiraEnv()
+	for _, name := range listenerEnvNames {
+		e.t.Setenv(name, "")
+		_ = os.Unsetenv(name)
+	}
+}
+
 // startListener runs `orchestrator jira listen args...` in the working directory, in the
 // background. wait stops it (when cancel is not nil it is called first) and returns what it returned.
+// The tickets it takes run in this process, in the services' directories, while the process's working
+// directory is the listener's.
 func (e *listenEnv) startListener(ctx context.Context, stderr io.Writer, args ...string) (wait func() error) {
 	e.t.Helper()
+	e.resetListenerProcessEnv()
 	orig, err := os.Getwd()
 	if err != nil {
 		e.t.Fatal(err)

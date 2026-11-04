@@ -263,6 +263,11 @@ The exit code is part of the interface, for a CI job as much as for a person (§
 and every flag an operator types, each with one line on what it does, on stdout with exit 0, before
 any config is read; the hidden flags and commands the orchestrator starts itself are not listed.
 
+`run --listener-task` no longer exists: the Jira listener (§51) runs a ticket by calling the run in
+its own process, and passes the task as a value (§51.7). `parseArgs` refuses the flag, in any
+position, as a usage error (exit 2) whose message names `specs/embed`. `story run` keeps its
+children (`run --story-task`, §48.5).
+
 Support configuration file selection, for example:
 
 ```bash
@@ -2605,13 +2610,17 @@ variables; neither the test command nor a provider CLI inherits `JIRA_API_TOKEN`
 The listener (§51) has its own scenarios (`test/integration/listen_test.go`,
 `listener_task_test.go`) against a fake Jira, extended with a search, a
 comments endpoint, `/myself` and transitions, and a fake GitLab remote: a labelled ticket is
-claimed, cloned, run as a child and ends in a comment and the `done` transition; a ticket from a
+claimed, cloned, run in the listener's own process and ends in a comment and the `done` transition; a ticket from a
 reporter outside `query.reporters`, or of a foreign project, is never dispatched; an unknown or
 ambiguous service and an unlisted group are `blocked` with a comment and no run; a clarify stop
 is `blocked` with the numbered points, a red run `failed`; a provider failure is `retry` with a
 backoff and no attempt counted; a spent ticket is commented once; a restart resumes a `running`
 ticket from the state; a second listener in the same directory refuses; the GitLab token appears
-in no argv, URL, `.git/config`, log, comment or child environment.
+in no argv, URL, `.git/config`, log, comment or the environment of a process the run starts. Run in
+the listener's process (§51.7), they also cover: two tickets in one process leave nothing of the first
+in the second run's artifacts and no descriptor or goroutine behind; the Jira variables are in no git
+process and no test process; a panic in a run ends the ticket `failed` with `internal error: …` and
+the listener polls again.
 
 ### Decision scenarios
 
@@ -3683,7 +3692,7 @@ task.source.requested_key   the key asked for, only when the issue has moved
 task.source.url             <base_url>/browse/<key>
 task.source.fetched_at
 task.source.notes           operator notes were appended
-task.source.listener        true for a task `jira listen` handed to the child (§51.7)
+task.source.listener        true for a task `jira listen` handed to the run (§51.7)
 ```
 
 `task.description` stays the complete rendered text. Loading validates the source like
@@ -4949,7 +4958,7 @@ re-resolves the transport from the current config, like the mode. With `limits.m
 (`providers.<p>.prices` or the built-in table), or the budget is refused naming the route.
 
 `--claude-auth auto|api|login` is valid with `run`, `resume`, `review`, `validate`, `story run`
-(passed to each child) and `jira listen` (resolved at its start, passed to each child) in any position,
+(passed to each child) and `jira listen` (resolved at its start, passed to each run) in any position,
 `--claude-auth X` or `--claude-auth=X`, once; anything else is a usage error.
 
 ## 46.3 The child's environment
@@ -6246,10 +6255,11 @@ is that SPEC's section.
 `orchestrator jira listen` is a supervisor like `story run` (§48.6). It polls Jira for tickets
 labelled `ai-run`, and takes them one at a time: it claims a ticket by a transition, finds the
 service and the GitLab project from the ticket, clones or updates the checkout, runs the ticket
-as a child `orchestrator run --listener-task <file> --mode auto --output json` in the service's
-directory, and writes the outcome to Jira. The child is an ordinary worktree run (clarify, the
+by calling the run (`runTask`, `resumeRun`) in its own process, with the service's directory and
+the task as a value, `--mode auto`, and writes the outcome to Jira. There is no child process and
+no `run --listener-task` (`specs/embed`, §4). The run is an ordinary worktree run (clarify, the
 decision, the guard, the sandbox, delivery with the merge request) and knows nothing about the
-listener. **The listener owns Jira; its child never calls it.** No model is called by the
+listener. **The listener owns Jira; the run never calls it.** No model is called by the
 listener itself: every word it writes to Jira is Go's, and model-written text is escaped and
 bounded.
 
@@ -6263,14 +6273,16 @@ Runs in the current directory (the container's working directory, a volume); no 
 is needed there. `--once` runs one poll and the ticket it dispatches, then exits (tests, cron).
 It cannot be combined with `--mode`, `--stage`, `--jira`, `--output`, task text or `--inplace`.
 `--claude-auth` and `--codex-auth` are resolved in the listener's fail-fast chain and passed to
-every child run, so they outrank each service's `providers.claude.auth` and `providers.codex.auth`.
+every run, so they outrank each service's `providers.claude.auth` and `providers.codex.auth`.
 Exit: 0 after SIGTERM/SIGINT with nothing left half-written; 2 for a configuration, credential or
 `FailureAuth` stop (§51.10); 1 for an unexpected error. Logs go to stderr, one line per event
 (`listen: PAY-12 claimed`, `listen: PAY-12 → Ready to Review (!12)`). At start: the fail-fast
 chain of the listener's file (`ValidateDependencies` with `DependencyOptions{Jira: true}` plus the
-GitLab variable, `git` and the listener's own executable; the provider CLIs are checked per
-service by the child), `GET /myself`, the flock, and the recovery of the state (§51.9). The
-org layer applies to the listener's file as to any other.
+GitLab variable and `git`; the provider CLIs are checked per service by the run, and the
+listener's own executable is named only for the two execs that remain, git's credential helper
+and the verify server, §51.6), `GET /myself`, the flock, and the recovery of the state (§51.9).
+The org layer applies to the listener's file as to any other. The listener changes its own
+process environment once, after the Jira client is built (§51.6, §51.11).
 
 ## 51.2 Configuration (SPEC §2)
 
@@ -6290,7 +6302,7 @@ service's own configuration (§51.6).
 
 Go builds the JQL, nothing comes from the configuration as JQL: `project in (…) AND labels =
 "ai-run" AND status in (…) AND reporter in (…) ORDER BY priority DESC, created ASC`, on the
-search of §39.3, at most 200 issues a poll. It polls only while no child runs: after a poll
+search of §39.3, at most 200 issues a poll. It polls only while no run is in progress: after a poll
 that dispatched a ticket, again at once when the ticket is finished, otherwise after
 `poll_interval`. A failed poll is a log line and the next one waits twice as long (up to 1 h);
 401 stops the listener. **The search is a filter, not a boundary**: Go re-checks, for each
@@ -6325,13 +6337,19 @@ otherwise `blocked`.
   <services_dir>/.clone-<service>-<rand>` under `clone_timeout`, then `os.Rename` to the
   service's directory, so a cut clone never looks like a service; a `.clone-*` left by a crash
   is removed at start.
-* **The GitLab credential**: the token never enters a URL, argv or `.git/config`. Every git
-  process of the listener, and every child, has in its environment `GIT_CONFIG_COUNT`/`KEY_n`/
+* **The GitLab credential**: the token never enters a URL, argv or `.git/config`. The listener
+  sets once, in its own process environment (`os.Setenv`, at start), `GIT_CONFIG_COUNT`/`KEY_n`/
   `VALUE_n` setting `credential.<gitlab.base_url>.helper` to `!<listener executable>
   git-credential`, a hidden subcommand that answers git's `get` with the username and the token
-  from `gitlab.token_env`, only for exactly that protocol and host. Provider CLIs never see the
-  token (`ScrubCredentials`), and `test.command` has `TestEnv`'s allowlist. The child's
-  environment has no Jira variables.
+  from `gitlab.token_env`, only for exactly that protocol and host; every git process of the
+  listener and of a run inherits them, and they hold no secret. `<listener executable>` is
+  `os.Executable()`: the same binary answers the call (a host that embeds the listener answers it
+  through `orchestrator.Embedded`, `specs/embed` §4). It and `mcp-verify` are the two execs that
+  remain. Provider CLIs never see the token (`ScrubCredentials` registers the Jira and GitLab
+  variable names), and `test.command` has `TestEnv`'s allowlist. The Jira variables and the
+  parent-session variables are removed from the process (`os.Unsetenv`) right after the Jira
+  client, which took the values at its construction, is built: no process the listener or a run
+  starts inherits them.
 * **A fresh base**: before each run the default branch from `origin/HEAD`, the checkout must be
   clean; a clean checkout off it is switched to it (`git switch`), then `git fetch origin` and
   `git merge --ff-only origin/<default>`. Dirty, a refused switch or diverged: a comment ("the service checkout is not on a clean <default>") and `failed`: the listener
@@ -6345,20 +6363,33 @@ otherwise `blocked`.
 `jira.Fetch` and `jira.Render` as in §39.4–§39.5, plus the discussion section (§39.5), where the
 comments come from `GET …/comment` (at most 100). A text longer than `jira.max_bytes` gets a
 comment and `blocked`. The listener writes `.orchestrator/listener/tasks/<KEY>.<attempt>.json`
-(`{v: 1, key, url, fetched_at, description, scrub_env}`) and starts `run --listener-task
-<file>` (hidden, like `--story-task`), which reads it with a size cap and validates it strictly.
-The child records `task.source {kind: jira, key, url, fetched_at, listener: true}`, builds no
-Jira client and needs no `jira` section, runs the clarify step like any run (unlike a story
-task), and has `jira.write` off (`options.jira_write` empty) whatever the service's file says
-(D14). It refuses `--stage`, `--jira`, `--story-task`, task text and `--inplace`.
+(`{v: 1, key, url, fetched_at, description, scrub_env}`), the record of the task and what a
+restart reads back, validates it strictly (a size cap, no unknown key, every field checked), and
+passes the validated task to the run as a value: `runTask(ctx, dir, configPath, …, task, …)`, with
+`dir` the service's directory. The run reads the working directory nowhere: `dir` gives the
+repository, `reporter.Cwd`, the runs directory and every path it derives, and a resume takes the
+same parameter (`resumeRun`); `run` and `resume` on the command line pass the working directory.
+The configuration is the service's own `orchestrator.yaml`, else `listener.default_config`, as an
+absolute path. The run records `task.source {kind: jira, key, url, fetched_at, listener: true}`,
+builds no Jira client and needs no `jira` section, runs the clarify step like any run (unlike a
+story task), and has `jira.write` off (`options.jira_write` empty) whatever the service's file
+says (D14). It is `--mode auto`, with the isolation the service's configuration gives. The run's
+progress goes to the listener's stderr through the plain reporter; nothing of it goes to stdout.
+The result is the value `buildResult` computes for the `--output json` line (§50.10), returned
+through the result recorder together with the error, with the exit code `exitcode.FromError`
+gives: `listener.Decide` reads `run_id`, `exit_code`, `failure_reason`, `failure_kind` and `error`
+from it. A panic in a run is the listener's to contain (`recover`): the ticket's outcome is exit 1
+with the error `internal error: <the panic's first line>`, so `failed` (§51.8), the goroutine's
+stack goes to stderr, the state is saved, and the listener goes on.
 
 ## 51.8 Outcomes (SPEC §8)
 
-The child's exit code and JSON line, then `run.json` loaded with the persistence validators.
+The run's result (the exit code and the fields of the JSON line, §51.7), then `run.json` loaded
+with the persistence validators.
 Every comment starts `[orchestrator]`, is Go's wiki markup with model text escaped (§39.12,
 §50.4), is bounded to 8 KiB and ends with `Run <run-id>`.
 
-| child | comment | transition | attempt counted |
+| run | comment | transition | attempt counted |
 |---|---|---|---|
 | 0, `mr.state: created` | merge request link, commit header, review, tests, cost | `done` | yes |
 | 4, `task needs input` | the open points of `task.clarification`, numbered; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
@@ -6368,7 +6399,7 @@ Every comment starts `[orchestrator]`, is Go's wiki markup with model text escap
 | 2 otherwise | the error as printed (already redacted) | `failed` | yes |
 | 1 | the error | `failed` | yes |
 | 3, a clone or fetch that failed on the network | none | `retry`, `next_try_at` with backoff from `poll_interval`, doubling, at most 1 h | no |
-| 5 / killed (the listener is stopping) | none | none: stays `start`, resumed on restart | no |
+| 5 (the listener is stopping and the run was cut off) | none | none: stays `start`, resumed on restart | no |
 
 A ticket blocked before the run (service, project, size, Epic) counts no attempt. At most
 `max_attempts` finished runs per ticket: one more pick of a spent ticket gets a comment ("N
@@ -6388,17 +6419,21 @@ path), `outcome`, `writes {comment, transition}`, `next_try_at`. Strict validati
 corrupt file stops the listener (exit 2). At start, for every key not `finished`: `claiming` →
 the status is read, in `start` it counts as `claimed`, else the entry is dropped; `claimed`
 without a run → transition `retry`, no attempt; `running` → a non-terminal `run.json` is resumed
-(`orchestrator resume <id> --mode auto --output json` in the service directory, D15) and then
+(`resumeRun` in the service directory, `--mode auto`, in the listener's process, D15) and then
 §51.8, a terminal one goes to §51.8 straight (only the writes not yet done); an intent without
 its result is not repeated, a log line.
 
 ## 51.10 Stopping (SPEC §10)
 
-SIGTERM/SIGINT: no new poll or claim; a running child gets SIGINT and up to `childWaitDelay`;
-the state is saved; the ticket stays in `start` and is resumed on restart. The container's stop
-timeout must exceed `childWaitDelay` (README). Exit 2, after saving the state and putting a
+SIGTERM/SIGINT cancels the listener's context; no new poll or claim. The run's context is derived
+from it, so the step in flight ends as it ended in a child (the HTTP call aborts, the test process
+is killed by `CommandContext`, the engine persists the step as cut off), and the listener waits
+for the call to return: there is no child to wait for, and `childWaitDelay` no longer applies to
+the listener (it stays `story run`'s). The state is saved; the ticket stays in `start` and is
+resumed on restart, by `resumeRun`. The container's stop timeout must exceed the time a step
+takes to end after the cancel (README). Exit 2, after saving the state and putting a
 claimed-but-not-run ticket back to `retry`: Jira 401 on any call, `failure_kind: auth` from a
-child, a clone that git says was refused for authentication.
+run, a clone that git says was refused for authentication.
 
 ## 51.11 Security (SPEC §11)
 
@@ -6409,8 +6444,16 @@ child, a clone that git says was refused for authentication.
   `test.command` are trusted because its group is allowlisted; the default configuration applies
   to a repository without one.
 * **Credentials**: the Jira and GitLab tokens come from the environment only, never from argv,
-  URLs, `.git/config`, logs, state or comments; the child gets no Jira variables; provider CLIs
+  URLs, `.git/config`, logs, state or comments; the run gets no Jira client and no Jira variable
+  (they are removed from the process once the listener's client is built, §51.6); provider CLIs
   and the test command get no token (§51.6).
+* **One process, many runs** (`specs/embed` §2.6): the listener reviews the package-level state
+  the run writes. The only one that outlives a run is `execution.ScrubCredentials`, additive and
+  names only, and `execution.AllowTestEnv` (`test.env_pass`), likewise additive and names only
+  (it widens what the test command inherits, never to a credential or a parent-session
+  variable); the test hook `SetListenRunHook` is read-only to a run. The rest of what a run
+  keeps (registry, executor, store, reporter, session) is built per call. Every file a run opens
+  is closed and every process it starts is waited for when `runTask` returns.
 * **Comments**: Go's template; the only model text is the clarify points and review issues,
   escaped, bounded and secret-scanned (a finding → "(withheld: looked like a secret)").
 * Ticket and comment text is task text (§38.5): no authority comes from it.

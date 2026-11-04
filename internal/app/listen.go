@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -25,9 +25,9 @@ import (
 )
 
 // orchestrator jira listen (specs/jira-listener/SPEC.md): a supervisor that polls Jira for tickets
-// labelled ai-run, takes them one at a time, and runs each as a child `orchestrator run
-// --listener-task` in its service's directory. It owns Jira, the services directory and its state;
-// the child knows nothing of any of them.
+// labelled ai-run, takes them one at a time, and runs each by calling the run (runTask, resumeRun)
+// in its own process, with its service's directory (specs/embed/SPEC.md §2). It owns Jira, the
+// services directory and its state; the run knows nothing of any of them.
 
 const (
 	listenUsage = "usage: orchestrator jira listen [--config orchestrator.yaml] [--once]"
@@ -45,14 +45,14 @@ type listenOptions struct {
 	// once runs one poll and the ticket it dispatches, then returns (tests, cron).
 	once bool
 	// claudeAuth and codexAuth are --claude-auth and --codex-auth, checked here and passed to
-	// every child; empty if not given.
+	// every run; empty if not given.
 	claudeAuth string
 	codexAuth  string
 	verbose    bool
 }
 
 // jiraListenArgs checks the command line of `jira listen`: only --once, and none of the flags that
-// say what a run is or how it runs (the listener's children always run --mode auto in a worktree).
+// say what a run is or how it runs (the listener's runs are always --mode auto, in a worktree).
 func jiraListenArgs(cli cliArgs, rest []string) (once bool, err error) {
 	if len(rest) < 2 || rest[1] != "listen" {
 		return false, &apperr.ConfigError{Msg: listenUsage}
@@ -72,7 +72,7 @@ func jiraListenArgs(cli cliArgs, rest []string) (once bool, err error) {
 		return false, &apperr.ConfigError{Msg: "jira listen cannot be combined with --jira"}
 	case cli.isolation != "":
 		return false, &apperr.ConfigError{Msg: "jira listen cannot be combined with --" + cli.isolation + ": its runs are always worktree runs"}
-	case cli.storyTaskFile != "" || cli.listenerTaskFile != "":
+	case cli.storyTaskFile != "":
 		return false, &apperr.ConfigError{Msg: "jira listen cannot be combined with a task file"}
 	case cli.allowRedTests:
 		return false, &apperr.ConfigError{Msg: "jira listen cannot be combined with --allow-red-tests"}
@@ -83,7 +83,11 @@ func jiraListenArgs(cli cliArgs, rest []string) (once bool, err error) {
 // listen is `orchestrator jira listen`. It returns nil after SIGTERM or SIGINT (ctx cancelled) with
 // nothing left half-written, an error that maps to exit 2 for a configuration, a credential or a
 // FailureAuth stop (SPEC §10), and any other error for exit 1.
-func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
+//
+// dir is the listener's working directory: its state, its lock, its task files and (when the
+// configuration gives a relative path) its services directory. The CLI passes the process's;
+// specs/embed/SPEC.md §4 lets a host name another. Nothing below reads the working directory.
+func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Writer) error {
 	reporter := newReporter(stderr, opts.verbose)
 	defer reporter.Finish()
 	osExec := execution.NewOSProcessExecutor()
@@ -97,10 +101,11 @@ func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
 	if cfg.Listener == nil || cfg.GitLab == nil || cfg.Jira == nil {
 		return &apperr.ConfigError{Msg: fmt.Sprintf("jira listen needs the listener, gitlab and jira sections in %s", opts.configPath)}
 	}
-	wd, err := os.Getwd()
+	wd, err := filepath.Abs(dir)
 	if err != nil {
-		return fmt.Errorf("cannot find the working directory: %w", err)
+		return fmt.Errorf("cannot resolve the working directory %s: %w", dir, err)
 	}
+	// Absolute: the credential helper git starts is given it, and git runs in other directories.
 	configPath, err := filepath.Abs(opts.configPath)
 	if err != nil {
 		return &apperr.ConfigError{Msg: "cannot resolve the configuration path", Err: err}
@@ -109,8 +114,8 @@ func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// The task file names the variables its child must keep from every process it starts; the
-	// child refuses a name that is not an upper-case variable name.
+	// The task file names the variables the run must keep from every process it starts; the
+	// task is refused (parseListenerTask) when a name is not an upper-case variable name.
 	scrub := listenerScrubEnv(cfg)
 	for _, name := range scrub {
 		if !scrubEnvNameRE.MatchString(name) {
@@ -140,12 +145,17 @@ func listen(ctx context.Context, opts listenOptions, stderr io.Writer) error {
 		servicesDir: servicesDir, stateFile: filepath.Join(stateDir, "state.json"), tasksDir: filepath.Join(stateDir, "tasks"),
 		scrub: scrub, now: time.Now, sleep: sleepContext,
 	}
-	r.childEnv = r.environment()
+	// The Jira client takes the credentials from the environment at its construction; the
+	// environment is shaped after it (specs/embed/SPEC.md §2.4), and the git processes of the
+	// checkout get the shaped one.
+	r.jira = newListenerJiraClient(cfg)
+	if err := r.environment(); err != nil {
+		return err
+	}
 	r.checkout = &serviceCheckout{
 		servicesDir: servicesDir, baseURL: cfg.GitLab.BaseURL, allowedGroups: cfg.GitLab.AllowedGroups,
-		cloneTimeout: cfg.Listener.CloneTimeout, executor: osExec, env: r.childEnv,
+		cloneTimeout: cfg.Listener.CloneTimeout, executor: osExec, env: os.Environ(),
 	}
-	r.jira = newListenerJiraClient(cfg)
 
 	bot, err := r.jira.Myself(ctx)
 	if err != nil {
@@ -214,7 +224,7 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 // listenRunner is one running listener.
 type listenRunner struct {
 	ctx context.Context
-	// bg is ctx without its cancellation: what is written after a child ended must also happen when
+	// bg is ctx without its cancellation: what is written after a run ended must also happen when
 	// the listener was told to stop.
 	bg          context.Context
 	cfg         config.Config
@@ -235,7 +245,6 @@ type listenRunner struct {
 	jira     *jira.Client
 	bot      string
 	checkout *serviceCheckout
-	childEnv []string
 
 	state listener.State
 	now   func() time.Time
@@ -250,21 +259,46 @@ func (r *listenRunner) logf(format string, args ...any) {
 	fmt.Fprintf(r.stderr, "listen: "+format+"\n", args...)
 }
 
-// environment is the environment of every git process the listener starts and of every child: the
-// process's own without the Jira variables and without the parent-session variables, plus the
-// credential helper's entries (SPEC §6.2). The GitLab token stays, for the helper; provider CLIs
-// and the test command never get it (the child scrubs it, scrub_env).
-func (r *listenRunner) environment() []string {
-	drop := map[string]bool{r.cfg.Jira.EmailEnv: true, r.cfg.Jira.TokenEnv: true}
-	var env []string
+// environment shapes the listener's own process environment, once, at start (specs/embed/SPEC.md
+// §2.4; SPEC §6.2): what every git process the listener starts and every process a run starts
+// inherits is then what the child of the earlier design was given.
+//
+//   - The credential helper's entries (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n) are
+//     set. They name `<exe> git-credential --config <path>` and hold no secret.
+//   - The Jira variables and the parent-session variables are removed. It runs after the Jira
+//     client was built: the client took the values at its construction.
+//   - The names of the Jira and GitLab variables are registered with execution.ScrubCredentials:
+//     provider CLIs and the test command never get the GitLab token, while git keeps it, for the
+//     helper.
+//
+// os.Setenv and os.Unsetenv are process-global: the listener's process is the listener's.
+func (r *listenRunner) environment() error {
+	execution.ScrubCredentials(r.scrub...)
+
+	env := withListenerGit(os.Environ(), r.exe, r.cfg.GitLab.BaseURL, "--config", r.configPath)
+	// The helper's entries are the last three, after the GIT_CONFIG entries the environment held.
+	for _, kv := range env[len(env)-3:] {
+		name, value, _ := strings.Cut(kv, "=")
+		if err := os.Setenv(name, value); err != nil {
+			return fmt.Errorf("cannot set %s for git's credential helper: %w", name, err)
+		}
+	}
+
+	unset := []string{r.cfg.Jira.EmailEnv, r.cfg.Jira.TokenEnv}
 	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if drop[name] || execution.IsParentSessionVar(name) {
+		if name, _, _ := strings.Cut(kv, "="); execution.IsParentSessionVar(name) {
+			unset = append(unset, name)
+		}
+	}
+	for _, name := range unset {
+		if name == "" {
 			continue
 		}
-		env = append(env, kv)
+		if err := os.Unsetenv(name); err != nil {
+			return fmt.Errorf("cannot remove %s from the environment: %w", name, err)
+		}
 	}
-	return withListenerGit(env, r.exe, r.cfg.GitLab.BaseURL, "--config", r.configPath)
+	return nil
 }
 
 // loadState reads state.json; a missing file is an empty state, a corrupt one stops the listener.
@@ -553,7 +587,7 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 	if err != nil {
 		return r.checkoutProblem(key, err)
 	}
-	args, err := r.configArgs(res.Dir)
+	configPath, err := r.configFor(res.Dir)
 	if err != nil {
 		return r.endBefore(key, listener.ResultFailed, err.Error())
 	}
@@ -571,7 +605,7 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 		return r.endBefore(key, listener.ResultBlocked,
 			fmt.Sprintf("The ticket and its discussion are longer than %d bytes; shorten it.", r.cfg.Jira.MaxBytes))
 	}
-	file, err := r.writeTask(ticket, text, r.state.Tickets[key].Attempts+1)
+	task, err := r.writeTask(ticket, text, r.state.Tickets[key].Attempts+1)
 	if err != nil {
 		return r.endInfra(key, err)
 	}
@@ -585,56 +619,59 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 		return err
 	}
 	r.logf("%s running in %s", key, service)
-	if r.claudeAuth != "" {
-		args = append(args, "--claude-auth", r.claudeAuth)
-	}
-	if r.codexAuth != "" {
-		args = append(args, "--codex-auth", r.codexAuth)
-	}
-	return r.execute(key, res.Dir, append([]string{"run", "--listener-task", file, "--mode", "auto", "--output", "json"}, args...))
+	return r.execute(key, res.Dir, func(ctx context.Context) error {
+		return runTask(ctx, res.Dir, configPath, "", "", "", &task, nil, false, "", domain.ModeAuto,
+			r.claudeAuth, r.codexAuth, false, strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
+	})
 }
 
-// configArgs is the --config the child needs: none when the service has its own orchestrator.yaml
-// (the repository's own rules apply, SPEC §6.4), else listener.default_config, absolute.
-func (r *listenRunner) configArgs(serviceDir string) ([]string, error) {
-	if _, err := os.Stat(filepath.Join(serviceDir, defaultConfigPath)); err == nil {
-		return nil, nil
+// configFor is the configuration file the run of a service loads, absolute: the service's own
+// orchestrator.yaml when it has one (the repository's own rules apply, SPEC §6.4), else
+// listener.default_config.
+func (r *listenRunner) configFor(serviceDir string) (string, error) {
+	own := filepath.Join(serviceDir, defaultConfigPath)
+	if _, err := os.Stat(own); err == nil {
+		return own, nil
 	}
 	def := r.lc.DefaultConfig
 	if def == "" {
-		return nil, fmt.Errorf("the service %s has no %s and listener.default_config is not set", filepath.Base(serviceDir), defaultConfigPath)
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config is not set", filepath.Base(serviceDir), defaultConfigPath)
 	}
 	if !filepath.IsAbs(def) {
 		def = filepath.Join(r.wd, def)
 	}
 	if _, err := os.Stat(def); err != nil {
-		return nil, fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", filepath.Base(serviceDir), defaultConfigPath, r.lc.DefaultConfig)
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", filepath.Base(serviceDir), defaultConfigPath, r.lc.DefaultConfig)
 	}
-	return []string{"--config", def}, nil
+	return def, nil
 }
 
-// writeTask writes the task file of the child (SPEC §7.2) and returns its path.
-func (r *listenRunner) writeTask(t domain.Ticket, text string, attempt int) (string, error) {
+// writeTask records the task of the run (SPEC §7.2) as tasks/<KEY>.<attempt>.json, the record and
+// the input a restart reads back, and returns it as the value the run takes (specs/embed/SPEC.md
+// §2.1).
+func (r *listenRunner) writeTask(t domain.Ticket, text string, attempt int) (listenerTask, error) {
 	in := listenerTask{
 		V: listenerTaskVersion, Key: t.Key, URL: taskURL(t.URL), FetchedAt: t.FetchedAt.UTC(),
 		Description: text, ScrubEnv: r.scrub,
 	}
 	data, err := json.Marshal(in)
 	if err != nil {
-		return "", err
+		return listenerTask{}, err
 	}
-	// The child reads the file as it will check it here, so a task it would refuse never starts one.
-	if _, err := parseListenerTask(data); err != nil {
-		return "", err
+	// Validated as the run will take it, so a task it would refuse never starts one. The value the
+	// run gets is what the file holds.
+	task, err := parseListenerTask(data)
+	if err != nil {
+		return listenerTask{}, err
 	}
 	if err := os.MkdirAll(r.tasksDir, 0o755); err != nil {
-		return "", fmt.Errorf("cannot create %s: %w", r.tasksDir, err)
+		return listenerTask{}, fmt.Errorf("cannot create %s: %w", r.tasksDir, err)
 	}
 	file := filepath.Join(r.tasksDir, fmt.Sprintf("%s.%d.json", t.Key, attempt))
 	if err := persistence.ReplaceFile(file, data); err != nil {
-		return "", fmt.Errorf("cannot write %s: %w", file, err)
+		return listenerTask{}, fmt.Errorf("cannot write %s: %w", file, err)
 	}
-	return file, nil
+	return task, nil
 }
 
 // taskURL is the address the run records for the ticket. It is only displayed; the task file
@@ -726,48 +763,61 @@ func (r *listenRunner) endUnclaimed(h domain.TicketHead, result listener.Result,
 	return r.write(h.Key, listener.Before(result == listener.ResultBlocked), nil)
 }
 
-// outcome is what is known of a finished child when its outcome is written.
+// outcome is what is known of a finished run when its outcome is written: the run as it is on
+// disk, and the result the call returned (the value of the JSON line `run --output json` writes).
 type outcome struct {
 	run  *domain.Run
-	line childLine
+	line runResult
 }
 
-// childLine is the part of the child's --output json line the listener reads.
-type childLine struct {
-	RunID         string    `json:"run_id"`
-	Status        string    `json:"status"`
-	ExitCode      int       `json:"exit_code"`
-	FailureReason string    `json:"failure_reason"`
-	FailureKind   string    `json:"failure_kind"`
-	Error         string    `json:"error"`
-	MR            *resultMR `json:"mr"`
+// listenRunHook, when set, is called with the ticket's key inside the contained call of a run, just
+// before the run (SetListenRunHook). It exists for the integration tests, which make it panic;
+// nothing sets it in production, and no run writes it (specs/embed/SPEC.md §2.6).
+var listenRunHook func(key string)
+
+// SetListenRunHook makes hook run inside every run the listener makes, before the run, and returns
+// a function that puts the previous hook back. It exists for the integration tests, which live in
+// another package and inject a panic with it.
+func SetListenRunHook(hook func(key string)) (restore func()) {
+	previous := listenRunHook
+	listenRunHook = hook
+	return func() { listenRunHook = previous }
 }
 
-// parseChildLine reads the last non-empty line of the child's stdout; a child that printed none
-// gives the zero value.
-func parseChildLine(out []byte) childLine {
-	lines := bytes.Split(bytes.TrimSpace(out), []byte("\n"))
-	var l childLine
-	if len(lines) > 0 {
-		_ = json.Unmarshal(lines[len(lines)-1], &l)
-	}
-	return l
+// execute makes one call of the run (runTask for a new ticket, resumeRun for an interrupted one) in
+// the service's directory dir, in this process, and writes its outcome. The call gets a context
+// derived from the listener's, so a stop reaches the step in flight (specs/embed/SPEC.md §2.5), and
+// a recorder, from which the result is built exactly as the JSON line of `run --output json` is
+// (§2.2). A panic in the call is contained here (§2.2): it is the run's, never the listener's.
+func (r *listenRunner) execute(key, dir string, call func(ctx context.Context) error) error {
+	ctx, rec := withResultRecorder(r.ctx)
+	err := r.contained(key, func() error {
+		if h := listenRunHook; h != nil {
+			h(key)
+		}
+		return call(ctx)
+	})
+	return r.afterRun(key, dir, buildResult(rec, err))
 }
 
-// execute runs the child in the service's directory and writes its outcome.
-func (r *listenRunner) execute(key, dir string, args []string) error {
-	var stdout bytes.Buffer
-	code, err := runChildEnv(r.ctx, r.exe, dir, r.childEnv, args, nil, &stdout, r.stderr)
-	line := parseChildLine(stdout.Bytes())
-	if code < 0 && err != nil {
-		line.Error = "the run could not be started: " + err.Error()
-		code = listener.ExitError
-	}
-	return r.afterChild(key, dir, code, line)
+// contained calls f and turns a panic in it into an error: "internal error: " and the first line of
+// what was panicked with, never a prompt, a diff or an environment (specs/embed/SPEC.md §6). The
+// goroutine's stack goes to stderr, where the listener logs.
+func (r *listenRunner) contained(key string, f func() error) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			stack := debug.Stack()
+			first := oneLineText(firstLineOf(fmt.Sprint(p)), 300)
+			fmt.Fprintf(r.stderr, "listen: %s: the run panicked: %s\n%s\n", key, first, stack)
+			err = errors.New("internal error: " + first)
+		}
+	}()
+	return f()
 }
 
-// afterChild decides the outcome of a child that ended, records it and writes it to Jira.
-func (r *listenRunner) afterChild(key, dir string, code int, line childLine) error {
+// afterRun decides the outcome of a run that returned res, records it and writes it to Jira.
+func (r *listenRunner) afterRun(key, dir string, res runResult) error {
+	line, code := res, res.ExitCode
 	e := r.state.Tickets[key]
 	var run *domain.Run
 	if listener.ValidRunID(line.RunID) {
@@ -778,8 +828,8 @@ func (r *listenRunner) afterChild(key, dir string, code int, line childLine) err
 			r.logf("%s: cannot read run %s: %s", key, line.RunID, firstLineOf(err.Error()))
 		}
 	}
-	if code < 0 || listener.CutOff(code, r.stopping()) {
-		// Killed, or cut off by the listener's stop: the run is resumed on restart.
+	if listener.CutOff(code, r.stopping()) {
+		// Cut off by the listener's stop: the run is resumed on restart.
 		e.Interrupted = true
 		if err := r.state.Set(key, e); err != nil {
 			return err
@@ -797,7 +847,7 @@ func (r *listenRunner) afterChild(key, dir string, code int, line childLine) err
 	})
 	e.Interrupted = false
 	if d.Transition == listener.ResultNone {
-		// The child was cancelled by someone else: it stays where it is, to be resumed on restart.
+		// The run was cancelled by someone else: it stays where it is, to be resumed on restart.
 		e.Interrupted = true
 		if err := r.state.Set(key, e); err != nil {
 			return err
@@ -1045,7 +1095,7 @@ func (r *listenRunner) mergeRequestBody(service string, run *domain.Run) []strin
 
 // failureBody is the comment of a run that did not deliver (SPEC §8): why, and the last test or
 // check that failed, or the review's verdict and its issues, or why there is no merge request.
-func (r *listenRunner) failureBody(run *domain.Run, line childLine) []string {
+func (r *listenRunner) failureBody(run *domain.Run, line runResult) []string {
 	reason := line.FailureReason
 	if reason == "" && run != nil {
 		reason = run.FailureReason
@@ -1190,7 +1240,7 @@ func (r *listenRunner) recoverRunning(key string, e listener.Entry) error {
 	}
 	mrCreated := run.MR != nil && run.MR.State == domain.MRCreated
 	code, kind := listener.ExitFromRun(run.Status, run.FailureReason, mrCreated)
-	line := childLine{RunID: run.ID, Status: string(run.Status), ExitCode: code, FailureReason: run.FailureReason, FailureKind: kind}
+	line := runResult{RunID: run.ID, Status: string(run.Status), ExitCode: code, FailureReason: run.FailureReason, FailureKind: kind}
 
 	if e.Outcome != "" {
 		// The outcome was decided before the listener stopped: only the writes not yet made. A
@@ -1201,23 +1251,26 @@ func (r *listenRunner) recoverRunning(key string, e listener.Entry) error {
 		}
 		return r.write(key, d, &outcome{run: run, line: line})
 	}
-	// A run that did not end, or that the listener's stop cut off (a child it interrupted left a
-	// cut call as a failure), goes on; one that reached a verdict of its own is written.
+	// A run that did not end, or that the listener's stop cut off (a call it interrupted left a
+	// cut step as a failure), goes on; one that reached a verdict of its own is written.
 	resumable := run.Status == domain.RunPending || run.Status == domain.RunRunning || code == listener.ExitCancelled ||
 		(e.Interrupted && run.Status != domain.RunCompleted && run.FailureReason != domain.FailureTaskNeedsInput)
 	if !resumable {
-		return r.afterChild(key, dir, code, line)
+		return r.afterRun(key, dir, line)
 	}
-	args, err := r.configArgs(dir)
+	configPath, err := r.configFor(dir)
 	if err != nil {
 		return r.endBefore(key, listener.ResultFailed, err.Error())
 	}
 	r.logf("%s: resuming run %s", key, run.ID)
-	return r.execute(key, dir, append([]string{"resume", run.ID, "--mode", "auto", "--output", "json"}, args...))
+	return r.execute(key, dir, func(ctx context.Context) error {
+		return resumeRun(ctx, dir, configPath, run.ID, domain.ModeAuto, r.claudeAuth, r.codexAuth, false,
+			strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
+	})
 }
 
-// findRun is the run the ticket's child created: the recorded one, else the newest run of this
-// ticket in the service that began after the child was about to start.
+// findRun is the run the ticket's earlier call created: the recorded one, else the newest run of
+// this ticket in the service that began after the call was about to start.
 func (r *listenRunner) findRun(store *persistence.Store, dir, key string, e listener.Entry) *domain.Run {
 	if e.RunID != "" {
 		run, err := store.LoadRun(e.RunID)

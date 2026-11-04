@@ -143,11 +143,6 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
 		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, review, validate, story run and jira listen"}
 	}
-	if cli.listenerTaskFile != "" {
-		if err := checkListenerTaskFlags(cli, rest); err != nil {
-			return err
-		}
-	}
 	if cli.storyTaskFile != "" {
 		if err := checkStoryTaskFlags(cli, rest); err != nil {
 			return err
@@ -162,7 +157,7 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		return runValidate(ctx, cli.configPath, cli.claudeAuth, cli.codexAuth, !cli.storyNoPush, stdout, stderr)
 	case "run":
 		// With --jira the ticket is the task, and any text is the operator's notes on it.
-		if cli.jiraRef == "" && cli.storyTaskFile == "" && cli.listenerTaskFile == "" && len(rest) < 2 {
+		if cli.jiraRef == "" && cli.storyTaskFile == "" && len(rest) < 2 {
 			return &apperr.ConfigError{Msg: `usage: orchestrator run [--stage <name>]... "<task description>"   or   orchestrator run --jira <KEY|URL> ["notes"]`}
 		}
 		if err := checkNotAStory(rest[1:]); err != nil {
@@ -171,7 +166,11 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err := checkTerminal(cli.mode, stdin); err != nil {
 			return err
 		}
-		return runTask(ctx, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, cli.listenerTaskFile, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+		dir, err := workingDir()
+		if err != nil {
+			return err
+		}
+		return runTask(ctx, dir, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, nil, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "review":
 		if len(rest) != 1 {
 			return &apperr.ConfigError{Msg: reviewUsage}
@@ -190,7 +189,11 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err := checkTerminal(cli.mode, stdin); err != nil {
 			return err
 		}
-		return resumeTask(ctx, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+		dir, err := workingDir()
+		if err != nil {
+			return err
+		}
+		return resumeRun(ctx, dir, cli.configPath, rest[1], cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "story":
 		switch storySub {
 		case "plan":
@@ -250,7 +253,11 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err != nil {
 			return err
 		}
-		return listen(ctx, listenOptions{configPath: cli.configPath, once: once, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth, verbose: cli.verbose}, stderr)
+		dir, err := workingDir()
+		if err != nil {
+			return err
+		}
+		return listen(ctx, dir, listenOptions{configPath: cli.configPath, once: once, claudeAuth: cli.claudeAuth, codexAuth: cli.codexAuth, verbose: cli.verbose}, stderr)
 	case "git-credential":
 		// Hidden, like mcp-verify: git starts it as the listener's credential helper
 		// (specs/jira-listener/SPEC.md §6.2), with the listener's --config.
@@ -262,6 +269,32 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	default:
 		return &apperr.ConfigError{Msg: fmt.Sprintf("unknown command %q", rest[0])}
 	}
+}
+
+// workingDir is the directory a command that works on "this repository" takes as its own: the
+// process's working directory, read once by the command's entry (dispatch) and handed down as a
+// parameter. run and resume take it as dir (specs/embed/SPEC.md §2.1), so that the listener can call
+// them for a service's directory; nothing below the entry reads the working directory.
+func workingDir() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
+	}
+	return dir, nil
+}
+
+// runsDirOf is the runs directory of the repository at dir, for the store of a run or a resume. It is
+// spelled relative (runsBaseDir) when dir is the directory the process is in, so that the paths a
+// command reports (the run header, a failure's log path) read relative to it, as they always did
+// for run and resume; for any other dir, the listener's service, it is under dir. The working
+// directory is not read: os.Stat(".") names it, and os.SameFile compares.
+func runsDirOf(dir string) string {
+	if here, err := os.Stat("."); err == nil {
+		if there, err := os.Stat(dir); err == nil && os.SameFile(here, there) {
+			return runsBaseDir
+		}
+	}
+	return filepath.Join(dir, runsBaseDir)
 }
 
 // checkNotAStory refuses `run story <dir>`: run would take it for the text of one task and do
@@ -385,9 +418,6 @@ type cliArgs struct {
 	// storyTaskFile is the hidden --story-task's value: the task input file of a story's child
 	// run (specs/story/SPEC.md §11.1).
 	storyTaskFile string
-	// listenerTaskFile is the hidden --listener-task's value: the task file the Jira listener wrote
-	// for its child run (specs/jira-listener/SPEC.md §7.2).
-	listenerTaskFile string
 	// help is --help or -h anywhere: print helpText and run nothing.
 	help bool
 	// storyNoPush is the hidden validate --story-no-push: story run checks a service of a story
@@ -431,7 +461,7 @@ type cliArgs struct {
 
 // parseArgs pulls --config/--config=X, --mode/--mode=X, --claude-auth/--claude-auth=X,
 // --codex-auth/--codex-auth=X, --output/--output=X, --jira/--jira=X, --retry/--retry=X, --base/--base=X, --head/--head=X,
-// --task/--task=X, the hidden --story-task/--story-task=X and --listener-task/--listener-task=X, the repeatable
+// --task/--task=X, the hidden --story-task/--story-task=X (--listener-task is refused, listenerTaskGone), the repeatable
 // --stage/--stage=X and --repo/--repo=X, --allow-red-tests, --inplace and --verbose/-v out of args, in any position, and returns them
 // with the remaining positional arguments.
 func parseArgs(args []string) (cliArgs, error) {
@@ -509,16 +539,7 @@ func parseArgs(args []string) (cliArgs, error) {
 				return cliArgs{}, fmt.Errorf("--story-task requires a file")
 			}
 		case arg == "--listener-task" || strings.HasPrefix(arg, "--listener-task="):
-			if cli.listenerTaskFile != "" {
-				return cliArgs{}, fmt.Errorf("--listener-task given twice")
-			}
-			v, err := value(&i, "--listener-task")
-			if err != nil {
-				return cliArgs{}, err
-			}
-			if cli.listenerTaskFile = v; cli.listenerTaskFile == "" {
-				return cliArgs{}, fmt.Errorf("--listener-task requires a file")
-			}
+			return cliArgs{}, errors.New(listenerTaskGone)
 		case arg == "--stage" || strings.HasPrefix(arg, "--stage="):
 			v, err := value(&i, "--stage")
 			if err != nil {
@@ -861,7 +882,9 @@ func urlHost(v string) string {
 }
 
 // orgConfigEtcPath is where the machine-wide org file lives (specs/governance/SPEC.md §6.1);
-// a variable so tests can point it elsewhere.
+// a variable so tests can point it elsewhere. No run writes it (specs/embed/SPEC.md §2.6: the
+// package-level state of internal/app, action, execution and provider is read-only to a run, except
+// the add-only name sets of internal/execution).
 var orgConfigEtcPath = "/etc/orchestrator/org.yaml"
 
 // SetOrgConfigEtcPath makes path the machine-wide org file location and returns a function that
@@ -1320,9 +1343,14 @@ func runsReport(stdout io.Writer, dir string) error {
 // runTask runs a new task. text is the task typed on the command line or, with jiraRef
 // (run --jira), the operator's notes on the ticket, which may be empty. With storyTaskFile (the
 // hidden run --story-task) the task is the one that file describes (specs/story/SPEC.md §11); with
-// listenerTaskFile (the hidden run --listener-task) it is the Jira ticket the listener rendered into
-// that file, and the run calls Jira not at all (specs/jira-listener/SPEC.md §7.2).
-func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, listenerTaskFile string, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+// listenerIn (the Jira listener's call, specs/embed/SPEC.md §2.1) it is the Jira ticket the listener
+// rendered, passed as a value, and the run calls Jira not at all (specs/jira-listener/SPEC.md §7.2).
+//
+// dir is the repository the run works in: the run reads the working directory nowhere (the process's
+// is the caller's, which for the listener is not the service's). The run's directory, the repository
+// and the reporter's header come from it; configPath is resolved by the caller (the process's
+// working directory for run, an absolute path for the listener).
+func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile string, listenerIn *listenerTask, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -1340,17 +1368,12 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, list
 		storyIn = &in
 		text = in.Text
 	}
-	var listenerIn *listenerTask
-	if listenerTaskFile != "" {
-		in, err := readListenerTask(listenerTaskFile)
-		if err != nil {
-			return err
-		}
-		listenerIn = &in
-		text = in.Description
+	if listenerIn != nil {
+		text = listenerIn.Description
 		// Before any provider is constructed: the variables the listener names are credentials
-		// that no process of this run may inherit.
-		execution.ScrubCredentials(in.ScrubEnv...)
+		// that no process of this run may inherit. The names only add to what the process
+		// scrubs (execution.ScrubCredentials), as the listener registered them at its start.
+		execution.ScrubCredentials(listenerIn.ScrubEnv...)
 	}
 
 	osExec := execution.NewOSProcessExecutor()
@@ -1396,13 +1419,9 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, list
 		}
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
-	}
-	reporter.Cwd = cwd
+	reporter.Cwd = dir
 
-	repo, err := repository.Open(decideCtx, cwd, osExec)
+	repo, err := repository.Open(decideCtx, dir, osExec)
 	if err != nil {
 		return err
 	}
@@ -1453,7 +1472,7 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, list
 		}
 	}
 
-	store := persistence.NewStore(runsBaseDir)
+	store := persistence.NewStore(runsDirOf(dir))
 	run, err := store.NewRun(task)
 	if err != nil {
 		return err
@@ -1504,10 +1523,10 @@ func runTask(ctx context.Context, configPath, text, jiraRef, storyTaskFile, list
 		if err := checkStagesDeliverable(decideCtx, repo, cfg, stages, task.Source); err != nil {
 			return failRun(store, run, err)
 		}
-		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, cwd, run, stages, task.Description,
+		out, err = decideManual(decideCtx, ctx, cfg, registry, store, repo, dir, run, stages, task.Description,
 			reporter, prompter, interactive, stream, stderr)
 	} else {
-		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, cwd, run, task.Description,
+		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, dir, run, task.Description,
 			reporter, prompter, interactive, storyIn != nil, stream, stderr)
 	}
 	if err != nil {
@@ -1707,7 +1726,9 @@ func newSession(ctx context.Context, cfg *config.Config, configPath string, regi
 	dispatcher.Logs = store
 	dispatcher.Observer = reporter
 	dispatcher.Stream = stream
-	runsRel := worktreeRel(ctx, repo, runsBaseDir)
+	// The store's own directory, not runsBaseDir: relative to the working directory only for the
+	// commands that read it themselves (review); run and resume hand the store a path under dir.
+	runsRel := worktreeRel(ctx, repo, store.RunDir(""))
 	dispatcher.RunsDir = runsRel
 	return &session{
 		cfg: cfg, repo: repo, store: store, run: run, reporter: reporter, prompter: prompter, stdout: stdout,

@@ -28,7 +28,8 @@ const (
 	maxRejectedBytes = 500
 )
 
-// branchToday is the clock {date} and the call's date read; a test replaces it.
+// branchToday is the clock {date} and the call's date read; a test replaces it. No run writes it, so
+// it is the same for every run of a process (specs/embed/SPEC.md §2.6).
 var branchToday = time.Now
 
 // branchInput is what nameBranch names a branch from. A story task (specs/delivery/SPEC.md §9.1)

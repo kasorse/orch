@@ -35,7 +35,8 @@ func taskBlock(task string) string {
 		"TASK-", task)
 }
 
-// nonce draws 128 random bits as text; a variable so a test can force a collision.
+// nonce draws 128 random bits as text; a variable so a test can force a collision. It holds no state
+// and no run writes it (specs/embed/SPEC.md §2.6).
 var nonce = rand.Text
 
 // block writes preamble, then content between "<<<delim" and ">>>delim" lines, where delim
