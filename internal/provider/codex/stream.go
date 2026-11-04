@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Codex --json emits JSONL. The parser keeps the event envelope permissive so newer CLI

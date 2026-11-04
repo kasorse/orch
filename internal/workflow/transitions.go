@@ -3,7 +3,7 @@ package workflow
 import (
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 type State string

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/translate"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/translate"
 )
 
 // The clarify loop with fakes for the decision provider, the clarify call and the operator.

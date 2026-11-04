@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // checkValidateDelivery is what `orchestrator validate` adds when the configured isolation is

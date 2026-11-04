@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 37, the guard before every verify call (specs/quality/SPEC.md §6.6): the second

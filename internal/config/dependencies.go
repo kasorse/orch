@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // DependencyChecker wraps behavior equivalent to exec.LookPath so callers never call

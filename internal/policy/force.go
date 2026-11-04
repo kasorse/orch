@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ForceDevelopment turns on development, and testing with it, for a task that is a code change

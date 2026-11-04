@@ -1,4 +1,4 @@
-module orchestrator
+module github.com/kasorse/orch
 
 go 1.26.1
 

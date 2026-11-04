@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Headless runs (specs/delivery/SPEC.md §11.2): with --output json stdout is exactly one JSON

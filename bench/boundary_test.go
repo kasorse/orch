@@ -11,8 +11,9 @@ import (
 )
 
 // TestNoImportOfTheCore enforces the black-box rule of specs/benchmark/SPEC.md §3 and §4 a
-// second time. The module path `orchbench` already makes orchestrator/internal/... a compile
-// error; this catches a replace directive or a vendored copy that would work around it.
+// second time. The module path `orchbench` already makes
+// github.com/kasorse/orch/internal/... a compile error; this catches a replace
+// directive or a vendored copy that would work around it.
 // It reads the sources, so it needs no go command and no network.
 func TestNoImportOfTheCore(t *testing.T) {
 	fset := token.NewFileSet()
@@ -45,7 +46,7 @@ func TestNoImportOfTheCore(t *testing.T) {
 				t.Errorf("%s: bad import %s", path, imp.Path.Value)
 				continue
 			}
-			if strings.HasPrefix(p, "orchestrator") {
+			if strings.HasPrefix(p, "github.com/kasorse/orch") {
 				t.Errorf("%s imports %q: bench is a black box and must not import the core", path, p)
 			}
 		}

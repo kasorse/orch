@@ -6,9 +6,9 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/secretscan"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/secretscan"
 )
 
 // locatedFinding is a secretscan finding with the file it is in.

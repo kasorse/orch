@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The mapper trusts nothing in a response: every expected answer must be present with

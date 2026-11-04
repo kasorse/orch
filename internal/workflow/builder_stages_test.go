@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/policy"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/policy"
 )
 
 // outcome is a small StageOutcome builder for tests that only care about which stages

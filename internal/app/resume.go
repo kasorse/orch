@@ -5,27 +5,29 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/interaction"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
-// resumeTask continues a persisted run where its history left off (specs/resume/SPEC.md
+// resumeRun continues a persisted run where its history left off (specs/resume/SPEC.md
 // §6.1). It never decides again: no translator, decision provider or project-context
 // manager exists here. Everything read back from the run directory is validated first,
 // and on a run that has executed a step, the protected state is compared with the run's
 // start - git fingerprint first - before anything runs git status. A worktree run resumes in
 // its worktree, verified before any git command runs there (specs/worktree/SPEC.md §11). Until
 // the operator approves, the persisted run is left exactly as it was found.
-func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+//
+// dir is the repository the run lives in, as for runTask (specs/embed/SPEC.md §2.1): the runs
+// directory and the repository come from it, never from the process's working directory.
+func resumeRun(ctx context.Context, dir, configPath, runArg string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	stderr = reporter.Wrap(stderr)
@@ -41,16 +43,12 @@ func resumeTask(ctx context.Context, configPath, runArg string, mode domain.RunM
 	}
 	reporter.TestCommand = cfg.Test.Command
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return &apperr.RepositoryError{Msg: "failed to determine working directory", Err: err}
-	}
-	repo, err := repository.Open(ctx, cwd, osExec)
+	repo, err := repository.Open(ctx, dir, osExec)
 	if err != nil {
 		return err
 	}
 
-	store := persistence.NewStore(runsBaseDir)
+	store := persistence.NewStore(runsDirOf(dir))
 	runID, err := store.ResolveRunID(runArg)
 	if err != nil {
 		return err

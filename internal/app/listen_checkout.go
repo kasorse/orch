@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/listener"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/listener"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // staleClonePrefix starts the name of a clone in progress, in the services directory: a

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/anthropic"
-	"orchestrator/internal/provider/httpapi"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/anthropic"
+	"github.com/kasorse/orch/internal/provider/httpapi"
 )
 
 // providers.<p>.prices: the cache rates default to 0.1× and 1.25× input, an explicit 0 is kept.

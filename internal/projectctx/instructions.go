@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // maxInstructionFiles bounds the files clarify.docs may make Docs read.

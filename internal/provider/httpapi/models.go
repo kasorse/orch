@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // maxModelsBody bounds one page of GET /v1/models; maxModelPages bounds the paging.

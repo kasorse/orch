@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/tools"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/tools"
 )
 
 // call is a function_call item of a response; a string is a message's text.

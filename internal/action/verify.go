@@ -11,10 +11,10 @@ import (
 	"strings"
 	"syscall"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/verify"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 // What readVerifyDir accepts from a directory a process running model code wrote into.

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata/*.golden from the current output")

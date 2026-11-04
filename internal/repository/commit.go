@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // CommitSubject is the first line of the message of the commit sha, which must be a full commit

@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // minRunIDPrefix is the shortest prefix ResolveRunID accepts. Shorter prefixes would too

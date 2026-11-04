@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 38, acceptance criteria (specs/quality/SPEC.md §7.1): the plan lists two criteria,

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // BoundTestOutput itself is tested in package testexec; the tests here cover how the

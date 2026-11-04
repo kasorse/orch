@@ -93,6 +93,12 @@ var (
 
 // testEnvPass is test.env_pass. Process-wide and add-only for the same reason as
 // credentialVars: the test runner exists before the config is loaded.
+//
+// Many runs in one process (the Jira listener, specs/embed/SPEC.md §2.6): the names one service's
+// configuration adds stay for the next service's runs. That only widens which of the process's
+// variables the test command inherits, by names the operator wrote in an allowlisted group's
+// configuration; it never lets a credential or a parent-session variable through (TestEnv drops
+// those first), and it holds no value.
 var (
 	testEnvMu   sync.RWMutex
 	testEnvPass = map[string]bool{}

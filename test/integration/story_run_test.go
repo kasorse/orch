@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/exitcode"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/story"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/exitcode"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/story"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // story run (specs/story/tasks/TASK-ST06-story-run.md): the driver of a spec directory. Two

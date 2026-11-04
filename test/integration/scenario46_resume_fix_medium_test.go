@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 46, resume and review.fix_medium (specs/quality/SPEC.md §7.3, §10): a run that is

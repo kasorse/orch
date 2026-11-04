@@ -19,8 +19,8 @@ import (
 	"sort"
 	"strings"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // Guard checks what an implement call - or the test command, which runs code a model

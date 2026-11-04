@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/projectctx"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/projectctx"
 )
 
 // Bounds of the replace tool.

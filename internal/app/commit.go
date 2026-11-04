@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/interaction"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/interaction"
 )
 
 // commitHeaderMax is the longest first line of a proposed commit message, in runes.

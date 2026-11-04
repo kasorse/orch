@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/jira"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/jira"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // maxJiraWarningBytes bounds one warning about the write-back.

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 func TestRenderDiffStat_Small(t *testing.T) {

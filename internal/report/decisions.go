@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Entry is one run's decision trace, as persistence.Store.LoadDecision returns it.

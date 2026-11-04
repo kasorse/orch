@@ -10,11 +10,11 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // The branch name of a worktree run (specs/delivery/SPEC.md §4.3): proposed by a tool-less call
@@ -28,7 +28,8 @@ const (
 	maxRejectedBytes = 500
 )
 
-// branchToday is the clock {date} and the call's date read; a test replaces it.
+// branchToday is the clock {date} and the call's date read; a test replaces it. No run writes it, so
+// it is the same for every run of a process (specs/embed/SPEC.md §2.6).
 var branchToday = time.Now
 
 // branchInput is what nameBranch names a branch from. A story task (specs/delivery/SPEC.md §9.1)

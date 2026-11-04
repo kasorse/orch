@@ -7,12 +7,12 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/verify"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 const mcpVerifyUsage = "usage: orchestrator mcp-verify --dir <absolute path>"

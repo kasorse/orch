@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/projectctx"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/claude"
-	"orchestrator/internal/story"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/projectctx"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/claude"
+	"github.com/kasorse/orch/internal/story"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 const surveyAnswer = `{"summary": "Refunds live in internal/refund.", "relevant_files": ["internal/refund/service.go"], "interfaces": [], "constraints": []}`

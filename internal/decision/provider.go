@@ -7,7 +7,7 @@ package decision
 import (
 	"context"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Provider answers the two decision rounds. It returns probability distributions only:

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // The pretty renderer: what ConsoleReporter prints when Pretty is set (an interactive

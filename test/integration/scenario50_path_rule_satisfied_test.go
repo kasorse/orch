@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 50 (specs/governance/SPEC.md §12, GV02): the rule of scenario 49 against a workflow

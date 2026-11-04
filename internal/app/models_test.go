@@ -4,9 +4,9 @@ import (
 	"reflect"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 func routedConfig() config.Config {

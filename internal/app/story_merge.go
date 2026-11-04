@@ -6,11 +6,11 @@ import (
 	"maps"
 	"slices"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // The spec branch and the merge of a task's parents (specs/parallel-story/SPEC.md §1, §3): the

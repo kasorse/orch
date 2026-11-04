@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 44, old and new failures (specs/quality/SPEC.md §8.2-§8.3). The run starts red with

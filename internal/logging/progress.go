@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // ConsoleReporter implements workflow.Observer and also provides the surrounding

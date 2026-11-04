@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Entry returns the state the engine continues from, given the run's history, and a

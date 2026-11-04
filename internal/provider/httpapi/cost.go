@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Price is a model's price in USD per million tokens. Long, when set, replaces it for a

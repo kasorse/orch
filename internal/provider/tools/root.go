@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"orchestrator/internal/projectctx"
+	"github.com/kasorse/orch/internal/projectctx"
 )
 
 // Bounds of SPEC §5 item 5.

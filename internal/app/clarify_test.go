@@ -5,10 +5,10 @@ import (
 	"math"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/classification"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/persistence"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/classification"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/persistence"
 )
 
 // undecidedTrace is the trace a decision step had when it ended the run: the pre-check, the clarify

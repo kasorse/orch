@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // testPolicy: the asked stages' thresholds of specs/JEV integration/TASKS.md T02 (research

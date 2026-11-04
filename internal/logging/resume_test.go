@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const resumeRunID = "3f2a9c1e-8d4b-4c6a-9e21-5b7f0a3c9d10"
@@ -118,7 +118,7 @@ func TestResumeOverview_Golden(t *testing.T) {
 			run := tc.run
 			run.ID, run.Workflow = resumeRunID, resumeWorkflow()
 
-			// The order resumeTask prints in; --verbose must not change any of it.
+			// The order resumeRun prints in; --verbose must not change any of it.
 			render := func(verbose bool) string {
 				var buf bytes.Buffer
 				r := NewConsoleReporter(&buf)

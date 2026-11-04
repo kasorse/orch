@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 func (d *Dispatcher) executeInvestigate(ctx context.Context, run *domain.Run) (workflow.StepOutcome, error) {

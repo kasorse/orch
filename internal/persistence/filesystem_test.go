@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 func TestNewRun_CreatesDirectoryStructureAndRunJSON(t *testing.T) {

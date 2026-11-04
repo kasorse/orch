@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/verify"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 const verifyTestExe = "/usr/bin/orchestrator"

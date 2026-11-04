@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // StateDir is the base of the orchestrator's state outside any repository: $XDG_STATE_HOME when

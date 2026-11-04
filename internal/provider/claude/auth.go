@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // The credential of the CLI, per mode (specs/claude-auth/SPEC.md §7–§9). The mode is the

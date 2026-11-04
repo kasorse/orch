@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const wtRunID = "0b6f3c1e-1111-4222-8333-444455556666"

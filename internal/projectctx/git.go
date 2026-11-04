@@ -3,7 +3,7 @@ package projectctx
 import (
 	"context"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const maxChangedFiles = 50

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // gitAs runs git in dir with an identity and returns its trimmed output.

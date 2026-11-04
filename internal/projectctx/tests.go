@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const maxBuildTagScans = 200

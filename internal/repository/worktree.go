@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // ErrWorktreeKept is wrapped by the error RemoveWorktree returns when git refuses to remove

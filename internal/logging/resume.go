@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The resume overview (specs/resume/SPEC.md §12) is printed before the approval prompt, so

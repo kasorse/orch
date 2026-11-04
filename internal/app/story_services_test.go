@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // topLevelExecutor answers git rev-parse --show-toplevel with the working directory itself,

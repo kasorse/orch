@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // A story's own directory, <home>/.orchestrator/stories/<slug>/ (specs/story/SPEC.md §14):

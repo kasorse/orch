@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/jira"
-	"orchestrator/internal/logging"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/jira"
+	"github.com/kasorse/orch/internal/logging"
 )
 
 // taskFromJira fetches the issue key names and renders it, with the operator's notes,

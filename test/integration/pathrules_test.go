@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // policy.paths (specs/governance/SPEC.md §4, GV02): the rules are recorded when the run starts,

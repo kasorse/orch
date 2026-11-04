@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func exploreDraw(seed string, stage domain.Stage) uint64 {

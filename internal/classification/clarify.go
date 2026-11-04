@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/policy"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/policy"
 )
 
 // The clarify loop (specs/clarify, Approach §2-§4): when the pre-check rates the task below

@@ -12,14 +12,14 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/action"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/action"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // memArtifacts serves one implementation artifact to Dispatcher.Restore.

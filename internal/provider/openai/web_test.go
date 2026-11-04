@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 func webRequest() provider.Request {

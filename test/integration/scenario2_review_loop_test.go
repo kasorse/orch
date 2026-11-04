@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 2 (MVP.md §29): review fail -> implement -> tests pass -> review pass.

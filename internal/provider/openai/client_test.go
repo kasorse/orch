@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/httpapi"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/httpapi"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden request bodies")

@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 // ProviderName identifies Jev in errors, traces, and TaskClassification.Provider.

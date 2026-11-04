@@ -11,14 +11,14 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // routedClient answers each prompt by its "ACTION: <name>" first line, taking the next

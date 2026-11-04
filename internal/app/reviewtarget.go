@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 const reviewUsage = `usage: orchestrator review --base <ref> [--head <ref>] [--task "<text>" | --jira <KEY|URL>]`

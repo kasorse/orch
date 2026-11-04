@@ -17,11 +17,11 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/claude"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/claude"
 )
 
 const liveKeyVar = "ORCH_LIVE_ANTHROPIC_KEY"

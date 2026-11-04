@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // The branch-name call's prompt and answer (specs/delivery/SPEC.md §4.3). Like the translator and

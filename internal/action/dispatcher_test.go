@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/testexec"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/testexec"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 type fakeClient struct {

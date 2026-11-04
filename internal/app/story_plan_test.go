@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/story"
 )
 
 const twoTaskAnswer = `{"slug": "refunds", "prefix": "RF", "title": "Partial refunds",

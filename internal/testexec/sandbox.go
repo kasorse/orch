@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/execution"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/execution"
 )
 
 // Sandbox runs the test command under bubblewrap (specs/permissions/SPEC.md §8): the test

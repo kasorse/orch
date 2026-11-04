@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/decision"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/decision"
 )
 
 // MockModelPrefix marks the model reported by the mock client, so a decision trace

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"orchestrator/internal/apperr"
+	"github.com/kasorse/orch/internal/apperr"
 )
 
 func TestFromError(t *testing.T) {

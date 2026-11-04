@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // The CLI runs with --output-format stream-json: one JSON event per line (init, assistant

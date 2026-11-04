@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"orchestrator/internal/execution"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // serviceNameRE is the name a service's directory must have (specs/story/SPEC.md §7.1), which

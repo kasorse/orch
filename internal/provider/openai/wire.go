@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider/tools"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider/tools"
 )
 
 // The Responses API's wire (specs/api-transport/SPEC.md §4.2). Unexported: nothing outside this

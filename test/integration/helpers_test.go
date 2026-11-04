@@ -16,8 +16,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/app"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/app"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // providerSet names which provider each action, the translator and the decision

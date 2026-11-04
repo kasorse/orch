@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // createdFields is the part of a creation request these scenarios read.

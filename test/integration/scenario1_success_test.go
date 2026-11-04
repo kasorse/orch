@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 1 (MVP.md §29): classification -> investigate -> implement -> tests pass ->

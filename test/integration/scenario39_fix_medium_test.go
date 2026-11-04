@@ -3,7 +3,7 @@ package integration
 import (
 	"testing"
 
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 39, review.fix_medium (specs/quality/SPEC.md §7.3): a review that passes but reports a

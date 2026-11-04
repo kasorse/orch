@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
 )
 
 // OnFailure selects what happens when the Jev decision provider fails (SPEC.md §17,

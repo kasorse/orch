@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // ExtensionsConfig opts provider calls into the operator's own provider extensions, which

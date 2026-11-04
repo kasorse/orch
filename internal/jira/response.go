@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // issueResponse is the part of GET /rest/api/2/issue/{key} this package reads. Fields

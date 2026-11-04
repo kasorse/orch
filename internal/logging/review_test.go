@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/tui"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/tui"
 )
 
 func reviewFixture(askMode bool) *reviewState {

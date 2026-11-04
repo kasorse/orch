@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func routedDispatcher(client *fakeClient) *Dispatcher {

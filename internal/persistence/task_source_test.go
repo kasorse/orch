@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 const storyBase = "8d0e4b2c1f3a5b7d9e0f1a2b3c4d5e6f7a8b9c0d"

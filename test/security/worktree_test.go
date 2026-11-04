@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/execution"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/repository"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/execution"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/repository"
 )
 
 // worktreeFixture is the committed fixture repository (the operator's tree) with a linked

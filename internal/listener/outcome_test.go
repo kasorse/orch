@@ -3,7 +3,7 @@ package listener
 import (
 	"testing"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 func TestDecideIsTheTableOfSpec8(t *testing.T) {

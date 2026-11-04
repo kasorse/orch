@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/testreport"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/testreport"
 )
 
 func TestValidateRun_FailedTests(t *testing.T) {

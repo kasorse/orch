@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // This file is `orchestrator decisions calibrate` (specs/governance/SPEC.md §7.1–§7.3). It

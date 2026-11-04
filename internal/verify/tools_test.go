@@ -15,10 +15,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/guard"
-	"orchestrator/internal/testexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/guard"
+	"github.com/kasorse/orch/internal/testexec"
 )
 
 func testState(t testing.TB) guard.State {

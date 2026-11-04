@@ -3,10 +3,10 @@ package provider_test
 import (
 	"testing"
 
-	"orchestrator/internal/provider"
-	"orchestrator/internal/provider/claude"
-	"orchestrator/internal/provider/codex"
-	"orchestrator/internal/provider/gemini"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/provider/claude"
+	"github.com/kasorse/orch/internal/provider/codex"
+	"github.com/kasorse/orch/internal/provider/gemini"
 )
 
 func TestRegistry_ReportsCost(t *testing.T) {

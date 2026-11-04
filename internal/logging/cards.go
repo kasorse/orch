@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"orchestrator/internal/domain"
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // Cards for the dock: fixed width (so the sidebar is one straight column), title in the

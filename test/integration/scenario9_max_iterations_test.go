@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenario 9 (MVP.md §29): max fix iterations reached. The implement fake never fixes

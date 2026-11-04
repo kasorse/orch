@@ -5,11 +5,11 @@ import (
 	"maps"
 	"slices"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/logging"
-	"orchestrator/internal/persistence"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/story"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/logging"
+	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/story"
 )
 
 // The spec branch on the remote (specs/delivery/SPEC.md §9, D22): the merge requests of the tasks

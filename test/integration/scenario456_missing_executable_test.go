@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/testutil/fakeexec"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/testutil/fakeexec"
 )
 
 // Scenarios 4-6 (MVP.md §29): missing Claude / Codex / Gemini. In every case config

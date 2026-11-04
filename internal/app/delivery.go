@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"orchestrator/internal/apperr"
-	"orchestrator/internal/config"
-	"orchestrator/internal/domain"
-	"orchestrator/internal/repository"
-	"orchestrator/internal/workflow"
+	"github.com/kasorse/orch/internal/apperr"
+	"github.com/kasorse/orch/internal/config"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/repository"
+	"github.com/kasorse/orch/internal/workflow"
 )
 
 // inplaceHint ends every message of the checks below and the unborn-HEAD refusal: the way out of

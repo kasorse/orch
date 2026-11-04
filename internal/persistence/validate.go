@@ -10,11 +10,11 @@ import (
 	"strings"
 	"unicode"
 
-	"orchestrator/internal/domain"
-	"orchestrator/internal/provider"
-	"orchestrator/internal/secretscan"
-	"orchestrator/internal/story"
-	"orchestrator/internal/testreport"
+	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/provider"
+	"github.com/kasorse/orch/internal/secretscan"
+	"github.com/kasorse/orch/internal/story"
+	"github.com/kasorse/orch/internal/testreport"
 )
 
 // validateRun applies the structural checks of specs/resume/SPEC.md §6.3 to a decoded
