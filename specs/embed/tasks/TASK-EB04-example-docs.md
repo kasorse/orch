@@ -35,3 +35,10 @@ on the platform, and the documentation that needs every task done.
 - `examples/embed/main.go` compiles under `go vet ./...`, imports nothing outside the module and the standard library, and calls `Embedded` before `Listen` under a `signal.NotifyContext`.
 - `examples/embed/README.md` lists the service repository's files of SPEC §5 with corporate names as placeholders and repeats the host's duties of §4.3 as a checklist; a test asserts its YAML blocks parse.
 - MVP.md §53 answers, without this spec, how a service embeds the listener and what it must provide; §30 and CLAUDE.md's "Out of scope" name the library's limits; `TODO.md` P14 is ticked; `scripts/check.sh` passes.
+
+## As built (2026-11-04)
+
+Run `11cf4a7c-a722-4e87-95c2-3cea42c2c29f` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/embed/EB04` on `story/embed/EB03.2` @ 7893f89, commit bcb7ffe.
+Cost $0.71. Implementation summary: Add examples/embed service, README and test; complete MVP.md §53.
+Conflicts with spec/embed: none.

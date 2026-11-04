@@ -46,3 +46,10 @@ in its doc comment.
 - Test: `Listen` with a missing configuration returns a `ConfigError` before any request (an `httptest` server that must not be hit); `Listen` with `Options.Dir` runs the listener there (the state directory appears under `Dir`).
 - Test: `Embedded` returns false for an unknown first word and the CLI's exit code for `version` and for `git-credential get` with the fake remote's input (or `runGitCredential`'s unit input if the root package cannot reach the fake without a cycle).
 - `go doc .` shows the two functions and `Options` with the §4.3 statements; CLAUDE.md's summary list has a line for this spec; MVP.md §53 has the package and `Embedded`; README.md has a paragraph "As a library"; `scripts/check.sh` passes.
+
+## As built (2026-11-04)
+
+Run `30f0213a-8d91-4e74-80fe-6107e4e10341` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/embed/EB03.2` on `story/embed/EB02` @ 93fe6a2, commit 7893f89.
+Cost $0.81. Implementation summary: Add the public orchestrator package with Listen and Embedded.
+Conflicts with spec/embed: none.

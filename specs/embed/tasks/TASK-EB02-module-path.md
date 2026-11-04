@@ -30,3 +30,10 @@ nothing else in it. Stacked on EB01 so the import blocks it edits are renamed on
 - `go.mod` names `github.com/kasorse/orch` and `grep -rn '"orchestrator/' --include=*.go .` is empty; the commit contains nothing but the rename and the documents that spell the path.
 - `go build ./...`, `go vet ./...`, `go test ./...` and `gofmt -l .` (empty) pass; `bench/boundary_test.go` refuses the new prefix and passes (`cd bench && go test ./...`, by hand, noted in the commit if the sandbox skips it).
 - CLAUDE.md's bench paragraph, README.md's build section and MVP.md where an import path is quoted spell the new path.
+
+## As built (2026-11-04)
+
+Run `0af4d68e-56e2-4a58-ad5b-d80f8bae0a0d` in orche: completed, 0 fix iterations, tests passed, no review.
+Branch `story/embed/EB02` on `story/embed/EB01` @ 3c5eadc, commit 93fe6a2.
+Cost $0.53. Implementation summary: Rename the module to github.com/kasorse/orch.
+Conflicts with spec/embed: none.

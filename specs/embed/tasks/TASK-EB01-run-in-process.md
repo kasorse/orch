@@ -45,3 +45,10 @@ mode and `run --listener-task` are deleted (O2). `story run` keeps its children.
 - New test: a panic injected into a run ends the ticket `failed` with `internal error: …`, the state is saved and the listener polls again.
 - `run --listener-task` is refused by `parseArgs` with a message naming `specs/embed`; a test asserts no `os.Getwd()` or `os.Chdir` in the files of the run and resume paths of `internal/app`.
 - `story run`'s tests are unchanged; `scripts/check.sh` passes; MVP.md §4, §51 and CLAUDE.md's listener invariant and "Run artifacts" describe the run in process.
+
+## As built (2026-11-04)
+
+Run `a9f1cb5d-23f9-48fb-b147-027456cad94a` in orche: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/embed/EB01` on `spec/embed` @ b489cb8, commit 3c5eadc.
+Cost $6.07. Implementation summary: Run Jira listener tickets in process, delete the child mode.
+Conflicts with spec/embed: none.
