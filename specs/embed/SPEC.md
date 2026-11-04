@@ -1,6 +1,6 @@
 # The listener as a library: the run in process, a public package, a service on the platform
 
-Status: **draft** (2026-11-04). The owner's answers are §0; everything else follows from them
+Status: **implemented** (2026-11-04: EB01–EB04 done by `story run`, landed on `spec/embed`; `scripts/check.sh` and the `bench/` tests ran outside the sandbox the same day, 635 bench tests passed, none skipped). The live check on the platform (§7, last item) is the operator's. Written as a draft on 2026-11-04. The owner's answers are §0; everything else follows from them
 and from the invariants in CLAUDE.md. Normative where it says "must". The listener's own rules
 (`specs/jira-listener/SPEC.md`, MVP.md §51) hold unless §9 changes them.
 
