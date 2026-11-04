@@ -1,6 +1,8 @@
 ---
 id: EB03
-depends_on: [EB01, EB02]
+repo: orche
+depends_on: [EB02]
+jira: none
 ---
 # EB03 — the public package `orchestrator`: `Listen`, `Embedded`
 
@@ -32,5 +34,7 @@ in its doc comment.
 
 ## Acceptance
 
-- `go doc .` shows the two functions and `Options` with the §4.3 statements.
-- The tests above; `scripts/check.sh` passes.
+- `embed.go` at the module root exports exactly `Options`, `Listen` and `Embedded`; a test like `internal/story/imports_test.go` asserts the package imports only `internal/app`, `internal/exitcode` and the standard library.
+- Test: `Listen` with a missing configuration returns a `ConfigError` before any request (an `httptest` server that must not be hit); `Listen` with `Options.Dir` runs the listener there (the state directory appears under `Dir`).
+- Test: `Embedded` returns false for an unknown first word and the CLI's exit code for `version` and for `git-credential get` with the fake remote's input (or `runGitCredential`'s unit input if the root package cannot reach the fake without a cycle).
+- `go doc .` shows the two functions and `Options` with the §4.3 statements; CLAUDE.md's summary list has a line for this spec; MVP.md §53 has the package and `Embedded`; README.md has a paragraph "As a library"; `scripts/check.sh` passes.

@@ -20,6 +20,9 @@ spec makes the run a Go call the listener makes in its own process (the child mo
 renames the module, and adds one public package with `Listen` and `Embedded`, the latter so that
 a host binary still answers the two execs that remain, `git-credential` and `mcp-verify`.
 
+Run it with `orchestrator story run specs/embed`; `story run` regenerates this file, the ground
+rules live in `SPEC.md` (Approach).
+
 ## Ground rules
 
 - A task is done when its acceptance holds, `scripts/check.sh` passes, its row below and
@@ -36,6 +39,6 @@ a host binary still answers the two execs that remain, `git-credential` and `mcp
 | done | task | title | size | depends on |
 |---|---|---|---|---|
 | [ ] | [EB01](tasks/TASK-EB01-run-in-process.md) | the run in process: `runTask`/`resumeRun` with a directory, the result as a value, the child mode deleted | L | — |
-| [ ] | [EB02](tasks/TASK-EB02-module-path.md) | the module path (O6): `go.mod`, every import, `bench/boundary_test.go` | S | — |
-| [ ] | [EB03](tasks/TASK-EB03-package.md) | the public package `orchestrator`: `Listen`, `Embedded` | M | EB01, EB02 |
+| [ ] | [EB02](tasks/TASK-EB02-module-path.md) | the module path (O6): `go.mod`, every import, `bench/boundary_test.go` | S | EB01 |
+| [ ] | [EB03](tasks/TASK-EB03-package.md) | the public package `orchestrator`: `Listen`, `Embedded` | M | EB02 |
 | [ ] | [EB04](tasks/TASK-EB04-example-docs.md) | `examples/embed/`, MVP.md §53, the summaries | S | EB03 |

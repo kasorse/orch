@@ -1,6 +1,8 @@
 ---
 id: EB02
-depends_on: []
+repo: orche
+depends_on: [EB01]
+jira: none
 ---
 # EB02 — the module path (O6): `go.mod`, every import, `bench/boundary_test.go`
 
@@ -9,7 +11,7 @@ depends_on: []
 ## Goal
 
 SPEC.md §3: the module becomes `github.com/kasorse/orch`. Mechanical, one commit,
-nothing else in it.
+nothing else in it. Stacked on EB01 so the import blocks it edits are renamed once.
 
 ## Files
 
@@ -25,7 +27,6 @@ nothing else in it.
 
 ## Acceptance
 
-- `go build ./...`, `go vet ./...`, `go test ./...`, `gofmt -l .` empty; `cd bench && go test
-  ./...` (outside the sandbox, by hand) passes including the boundary test.
-- `grep -rn '"orchestrator/' --include=*.go .` is empty.
-- `go list -m` prints `github.com/kasorse/orch`.
+- `go.mod` names `github.com/kasorse/orch` and `grep -rn '"orchestrator/' --include=*.go .` is empty; the commit contains nothing but the rename and the documents that spell the path.
+- `go build ./...`, `go vet ./...`, `go test ./...` and `gofmt -l .` (empty) pass; `bench/boundary_test.go` refuses the new prefix and passes (`cd bench && go test ./...`, by hand, noted in the commit if the sandbox skips it).
+- CLAUDE.md's bench paragraph, README.md's build section and MVP.md where an import path is quoted spell the new path.

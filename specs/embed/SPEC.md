@@ -38,6 +38,40 @@ Three things stand in the way today:
 O1 removes the biggest self-exec and makes the run a function the service can call; O3 covers
 the two that stay with ten lines in the host's `main`; §3 and §4 make the module importable.
 
+## Approach
+
+The listener (`internal/app/listen.go`) keeps its loop, its state and its Jira writes, and runs a
+ticket by calling the run in its own process instead of starting a child: `runTask` and
+`resumeRun` take the repository directory and the task as a value, return the result the JSON
+line carried, and the listener's process environment is shaped once at start (the credential
+helper's entries set, the Jira variables removed after the client is built, the credential names
+registered for scrubbing). The child mode and `run --listener-task` are deleted; `story run`
+keeps its children. The module becomes `github.com/kasorse/orch`, and one public
+package at the module root exports `Listen` (the listener as a call) and `Embedded` (the host
+binary answering `git-credential` and `mcp-verify`, the two execs that remain, through
+`os.Executable()` as today). `examples/embed/` shows the corporate service on the platform.
+
+### Ground rules for the tasks of this story
+
+- This is a story task, run with `orchestrator story run specs/embed`. `story run` writes
+  `specs/embed/README.md` and each task's `## As built`: **do not edit anything under
+  `specs/embed/`**. CLAUDE.md's bookkeeping for `specs/*/tasks` (ticking, the `Status:` line, As
+  built) is done by `story run`; tick `TODO.md` P14 only in EB04.
+- Read `specs/embed/SPEC.md` in full before starting: the task text names its sections (§N), the
+  prompt carries only this Approach and may cut it.
+- Each task updates the documentation its own change makes out of date (MVP.md, CLAUDE.md,
+  README.md) in the same change; EB04 adds only what needs every task done. The tasks form one
+  chain (EB01 → EB02 → EB03 → EB04), each stacked on the one before.
+- CLAUDE.md's invariants hold unless §9 changes them: the run never gets a Jira client or a Jira
+  variable; `internal/listener` stays pure; git is argv only; no token in argv, `.git/config`,
+  logs, state or comments; the public package imports only `internal/app`, `internal/exitcode`
+  and the standard library.
+- Nothing outside the listener changes behaviour: `run`, `resume`, `review`, `story run` and
+  their tests stay as they are, except for the parameter §2.1 names; change a test only where the
+  task's own change requires it, and say so in the commit.
+- Tests need no network, no key and no platform: the fakes of `test/integration` and the standard
+  library. The gate is `scripts/check.sh`; the live check on the platform is the operator's.
+
 ## 2. The run in process (O1, O2)
 
 ### 2.1 The entry

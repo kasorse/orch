@@ -1,6 +1,8 @@
 ---
 id: EB01
+repo: orche
 depends_on: []
+jira: none
 ---
 # EB01 — the run in process: `runTask`/`resumeRun` with a directory, the result as a value, the child mode deleted
 
@@ -37,13 +39,9 @@ mode and `run --listener-task` are deleted (O2). `story run` keeps its children.
 
 ## Acceptance
 
-- `test/integration/listen_test.go`, `listen_fakes_test.go`, `listener_task_test.go`: every
-  scenario passes with the tickets run in the test's process; `TestMain` still stands in for
-  `mcp-verify` and `git-credential` only.
-- New tests of SPEC §7: two tickets in one process with no carry-over and no leak (file
-  descriptors, goroutines, within a tolerance); the Jira variables absent from a git and a test
-  process during the run (`FAKE_ENV_DIR`); an injected panic → `failed`, the listener polls
-  again; `run --listener-task` refused.
-- A test asserts no `os.Getwd()`/`os.Chdir` on the run and resume paths of `internal/app`
-  (the files the paths consist of, by name).
-- `story run`'s tests unchanged. `scripts/check.sh` passes.
+- Every scenario of `test/integration/listen_test.go`, `listen_fakes_test.go` and `listener_task_test.go` passes with the tickets run in the test's process; `TestMain` stands in for `mcp-verify` and `git-credential` only.
+- New test: two tickets in one process, the second run's artifacts carry nothing of the first, and file descriptors and goroutines return to the count before the first run, within a tolerance (SPEC §2.6).
+- New test: the Jira variables are absent from a git process and a test process during a run (`FAKE_ENV_DIR`); the GitLab token reaches git and neither the provider nor the test command.
+- New test: a panic injected into a run ends the ticket `failed` with `internal error: …`, the state is saved and the listener polls again.
+- `run --listener-task` is refused by `parseArgs` with a message naming `specs/embed`; a test asserts no `os.Getwd()` or `os.Chdir` in the files of the run and resume paths of `internal/app`.
+- `story run`'s tests are unchanged; `scripts/check.sh` passes; MVP.md §4, §51 and CLAUDE.md's listener invariant and "Run artifacts" describe the run in process.
