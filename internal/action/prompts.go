@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kasorse/orch/internal/config"
 	"github.com/kasorse/orch/internal/domain"
+	"github.com/kasorse/orch/internal/verify"
 )
 
 // Every Build*Prompt function starts with a literal "ACTION: <name>" first line, which
@@ -143,6 +145,22 @@ type InvestigatePromptInput struct {
 	Clarification string
 	Research      *domain.ResearchArtifact
 	FinalAnswer   bool
+	// Fetch is the gitlab section when the session has fetch_repository; nil otherwise.
+	Fetch *config.GitLabConfig
+}
+
+// writeFetchRule tells an investigate session with fetch_repository to read a linked
+// repository instead of guessing its API, and where the clone lands for the later steps.
+func writeFetchRule(b *strings.Builder, g *config.GitLabConfig) {
+	if g == nil {
+		return
+	}
+	fmt.Fprintf(b, "When the task links a repository under %s of %s (for example the service whose API it integrates, or a library it names), "+
+		"fetch it with the mcp__orch__fetch_repository tool, passing the URL as the task gives it: it is cloned read-only into %s/<name> inside this repository. "+
+		"Read it there with Read, Grep and Glob, take the contract from its code (routes and handlers, request and response types, validation), "+
+		"and name the files you relied on, with that path, in the plan: implement reads the same files. "+
+		"Do not guess an API the task points you to, and do not list the clone's files as affected.\n\n",
+		strings.Join(g.AllowedGroups, ", "), g.BaseURL, verify.FetchDir)
 }
 
 func BuildInvestigatePrompt(in InvestigatePromptInput) string {
@@ -154,6 +172,7 @@ func BuildInvestigatePrompt(in InvestigatePromptInput) string {
 	b.WriteString(rootCauseRule + "\n\n")
 	b.WriteString(acceptanceCriteriaRule + "\n\n")
 	writeFinalAnswerRule(&b, in.FinalAnswer)
+	writeFetchRule(&b, in.Fetch)
 	b.WriteString("Task:\n" + taskBlock(in.Task))
 	writeClarificationAfterTask(&b, in.Clarification)
 	writeResearch(&b, in.Research)

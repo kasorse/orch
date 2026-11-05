@@ -8,12 +8,21 @@ import (
 )
 
 // The tools of the in-session verify server (specs/quality/SPEC.md §6.1): run_tests and
-// run_check with actions.implement.verify, replace with actions.implement.replace.
+// run_check with actions.implement.verify, replace with actions.implement.replace, and
+// fetch_repository in investigate when a gitlab section names the allowed groups (§6.12).
 const (
-	VerifyToolRunTests = "run_tests"
-	VerifyToolRunCheck = "run_check"
-	VerifyToolReplace  = "replace"
+	VerifyToolRunTests        = "run_tests"
+	VerifyToolRunCheck        = "run_check"
+	VerifyToolReplace         = "replace"
+	VerifyToolFetchRepository = "fetch_repository"
 )
+
+// MaxFetchCalls is the most fetch_repository calls per step; fixed, not configured.
+const MaxFetchCalls = 10
+
+// RepositoryPathRE is the shape of a project path a fetch_repository call records
+// (group/subgroup/project): the segments GitLab allows, no empty, "." or ".." segment.
+var RepositoryPathRE = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)+\z`)
 
 // VerifyFilterPattern is the filter a run_tests call may carry, as the JSON Schema of the
 // tool states it (specs/quality/SPEC.md §6.2). The filter reaches the test command only as
@@ -55,6 +64,9 @@ type VerifyCall struct {
 	Files        int  `json:"files,omitempty"`
 	Replacements int  `json:"replacements,omitempty"`
 	DryRun       bool `json:"dry_run,omitempty"`
+	// Repository is the project path a fetch_repository call cloned (group/project), set on
+	// every such call that was not refused for its arguments. The URL itself is not kept.
+	Repository string `json:"repository,omitempty"`
 }
 
 // maxVerifyRefusedBytes bounds the reason of a refused call; the server's own reasons are
@@ -89,8 +101,22 @@ func (c VerifyCall) Validate() error {
 		if c.ExitCode != 0 && c.ExitCode != 1 || c.OutputCut {
 			return fmt.Errorf("a %s call carries a command result", c.Tool)
 		}
+	case VerifyToolFetchRepository:
+		if c.Check != "" || c.Filter != "" {
+			return fmt.Errorf("check or filter on a %s call", c.Tool)
+		}
+		// Exit code 1 is a clone that failed; there is no command and the output is not cut.
+		if c.ExitCode != 0 && c.ExitCode != 1 || c.OutputCut {
+			return fmt.Errorf("a %s call carries a command result", c.Tool)
+		}
+		if c.Repository == "" && c.Refused == "" {
+			return fmt.Errorf("%s call without a repository", c.Tool)
+		}
 	default:
 		return fmt.Errorf("unknown tool %q", c.Tool)
+	}
+	if c.Repository != "" && (c.Tool != VerifyToolFetchRepository || !RepositoryPathRE.MatchString(c.Repository)) {
+		return fmt.Errorf("repository %q on a %s call", c.Repository, c.Tool)
 	}
 	if c.Filter != "" && !VerifyFilterRE.MatchString(c.Filter) {
 		return fmt.Errorf("filter %q does not match %s", c.Filter, VerifyFilterPattern)

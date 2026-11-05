@@ -303,7 +303,14 @@ and review), without it, as the last read-only step, it writes the answer.
   implement whose adapter is a `provider.MCPSupporter` (MVP.md §44.3, D18): two literal
   strings and a file filter, rewritten in Go over the files git lists, never a deny-listed,
   protected, ignored, binary or large file, a symlink or a path outside the repository; the
-  same guard before every call, and neither string is recorded.
+  same guard before every call, and neither string is recorded. `mcp__orch__fetch_repository` is
+  on for an investigate whose adapter speaks MCP whenever the config has a `gitlab:` section
+  (MVP.md §44.3, specs/quality §6.12): the model names a URL from the task, Go requires
+  `gitlab.base_url` and a project path under `gitlab.allowed_groups` before git sees it, and the
+  server clones that one project shallow into `.orchestrator/deps/<name>` (outside every diff,
+  commit, review and project context) with the operator's git credentials and prompts off; the
+  model gets no network, the guard runs before every call, the record keeps the project path,
+  never the URL.
 - **Go decides the quality loop, from config and the persisted run** (MVP.md §44). The
   no-progress stop, `review.fix_medium` (read from `options.review_fix_medium` on the run, never
   from the current config), the extra reviewers' merge and the `by_complexity` route are Go code

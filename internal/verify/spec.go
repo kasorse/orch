@@ -1,11 +1,14 @@
 // Package verify is the in-session verify server (specs/quality/SPEC.md §6): a stdio MCP
 // server, started as `orchestrator mcp-verify --dir <dir>`, that serves an implement session
-// run_tests and run_check (actions.implement.verify) and replace (actions.implement.replace).
-// Each call checks the guard and records the call; run_tests and run_check run a command
-// chosen in Go from verify.json in the sandbox, replace rewrites text in the repository's
-// files in Go, with no process at all.
+// run_tests and run_check (actions.implement.verify) and replace (actions.implement.replace),
+// and an investigate session fetch_repository (§6.12). Each call checks the guard and records
+// the call; run_tests and run_check run a command chosen in Go from verify.json in the
+// sandbox, replace rewrites text in the repository's files in Go, with no process at all, and
+// fetch_repository clones one project from under the allowed GitLab groups into
+// .orchestrator/deps of the repository.
 //
-// The server reads no config file, opens no run directory and makes no network call. Its
+// The server reads no config file and opens no run directory; its one network call is the
+// git clone of fetch_repository, to a URL Go checked against the allowed groups. Its
 // inputs are dir/verify.json and its stdin; its outputs are its stdout (the MCP channel,
 // written only by the JSON-RPC writer) and, inside dir, calls.jsonl, violation and the
 // per-call log files. The protocol is implemented with the standard library alone.
@@ -17,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -48,7 +52,7 @@ type Check struct {
 // Spec is everything the server needs (specs/quality/SPEC.md §6.4). Go computes it before
 // the implement call; the model cannot write the file it is stored in. An empty TestCommand
 // means the test tools are off: then Checks, Sandbox, TestEnv and the call limits are unused,
-// and Replace must be set.
+// and Replace or Fetch must be set.
 type Spec struct {
 	Version int `json:"version"`
 	// RepoRoot is the directory every command runs in, and the one replace rewrites files of.
@@ -73,7 +77,24 @@ type Spec struct {
 	OutputBytes int `json:"output_bytes"`
 	// Replace turns the replace tool on.
 	Replace *ReplaceSpec `json:"replace,omitempty"`
+	// Fetch turns the fetch_repository tool on.
+	Fetch *FetchSpec `json:"fetch,omitempty"`
 }
+
+// FetchSpec is what fetch_repository needs: where the repositories of the allowed groups
+// live and how long one clone may take. The clones go under FetchDir of the repository.
+type FetchSpec struct {
+	// BaseURL is gitlab.base_url: the scheme and host (and context path) every fetched URL
+	// must start with.
+	BaseURL string `json:"base_url"`
+	// AllowedGroups is gitlab.allowed_groups: project-path prefixes.
+	AllowedGroups []string      `json:"allowed_groups"`
+	Timeout       time.Duration `json:"timeout"`
+}
+
+// FetchDir is where fetch_repository clones, relative to the repository root. .orchestrator
+// is outside every diff, commit, review and project context already.
+const FetchDir = ".orchestrator/deps"
 
 // ReplaceSpec is what the replace tool needs besides the repository and the guard state.
 type ReplaceSpec struct {
@@ -97,7 +118,34 @@ func (s *Spec) ToolNames() []string {
 	if s.Replace != nil {
 		names = append(names, domain.VerifyToolReplace)
 	}
+	if s.Fetch != nil {
+		names = append(names, domain.VerifyToolFetchRepository)
+	}
 	return names
+}
+
+// validateFetch checks the fetch section: an http(s) base URL without userinfo, query or
+// fragment, at least one group of the shape the config allows, a positive timeout.
+func (f *FetchSpec) validateFetch() error {
+	u, err := url.Parse(f.BaseURL)
+	switch {
+	case err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "":
+		return fmt.Errorf("fetch.base_url %q is not an http(s) URL", f.BaseURL)
+	case u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.HasSuffix(u.Path, "/"):
+		return fmt.Errorf("fetch.base_url %q must have no userinfo, query, fragment or trailing slash", f.BaseURL)
+	}
+	if len(f.AllowedGroups) == 0 {
+		return errors.New("fetch.allowed_groups is empty")
+	}
+	for _, g := range f.AllowedGroups {
+		if !domain.RepositoryPathRE.MatchString(g + "/x") {
+			return fmt.Errorf("fetch.allowed_groups entry %q is not a project-path prefix", g)
+		}
+	}
+	if f.Timeout <= 0 {
+		return fmt.Errorf("fetch.timeout %s must be positive", f.Timeout)
+	}
+	return nil
 }
 
 // envNameRE is what the name of a TestEnv pair must look like.
@@ -114,9 +162,14 @@ func (s *Spec) Validate() error {
 	if !s.Before.Taken() {
 		return errors.New("before: the guard state is empty")
 	}
+	if s.Fetch != nil {
+		if err := s.Fetch.validateFetch(); err != nil {
+			return err
+		}
+	}
 	if !s.Tests() {
-		if s.Replace == nil {
-			return errors.New("test_command is empty and replace is off: the server would offer no tool")
+		if s.Replace == nil && s.Fetch == nil {
+			return errors.New("test_command is empty and replace and fetch are off: the server would offer no tool")
 		}
 		if len(s.Checks) > 0 {
 			return errors.New("checks without a test_command")

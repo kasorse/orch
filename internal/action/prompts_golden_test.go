@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kasorse/orch/internal/config"
 	"github.com/kasorse/orch/internal/domain"
 	"github.com/kasorse/orch/internal/story"
 )
@@ -116,6 +117,9 @@ func TestPrompts_Golden(t *testing.T) {
 		}},
 		{"implement_first", func() string {
 			return BuildImplementPrompt(ImplementPromptInput{Task: goldenTask, Plan: goldenPlan()})
+		}},
+		{"investigate_fetch", func() string {
+			return BuildInvestigatePrompt(InvestigatePromptInput{Task: goldenTask, Fetch: &config.GitLabConfig{BaseURL: "https://gitlab.example", AllowedGroups: []string{"backend", "platform/payments"}}})
 		}},
 		{"investigate_clarified", func() string {
 			return BuildInvestigatePrompt(InvestigatePromptInput{Task: goldenTask, Clarification: goldenClarification})

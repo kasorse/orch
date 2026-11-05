@@ -265,7 +265,7 @@ func validateVerifyCalls(exec domain.StepExecution) error {
 	if len(calls) == 0 {
 		return nil
 	}
-	if exec.Action != domain.ActionImplement {
+	if exec.Action != domain.ActionImplement && exec.Action != domain.ActionInvestigate {
 		return fmt.Errorf("recorded on a %s step", exec.Action)
 	}
 	if len(calls) > domain.MaxRecordedCalls {
@@ -274,6 +274,10 @@ func validateVerifyCalls(exec domain.StepExecution) error {
 	for i, c := range calls {
 		if err := c.Validate(); err != nil {
 			return fmt.Errorf("[%d]: %w", i, err)
+		}
+		// fetch_repository is investigate's one tool, and investigate's only one (§6.12).
+		if (c.Tool == domain.VerifyToolFetchRepository) != (exec.Action == domain.ActionInvestigate) {
+			return fmt.Errorf("[%d]: a %s call on a %s step", i, c.Tool, exec.Action)
 		}
 	}
 	return nil

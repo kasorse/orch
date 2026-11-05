@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 
 	"github.com/kasorse/orch/internal/domain"
 )
@@ -164,6 +165,24 @@ func (s *Server) toolsList() (json.RawMessage, *rpcError) {
 					"dry_run": map[string]any{"type": "boolean"},
 				},
 				"required":             []string{"old", "new"},
+				"additionalProperties": false,
+			},
+		})
+	}
+	if s.Tools.Offers(domain.VerifyToolFetchRepository) {
+		tools = append(tools, toolDef{
+			Name: domain.VerifyToolFetchRepository,
+			Description: "Clone another repository of this organisation read-only into " + FetchDir + "/<name> of this repository, " +
+				"so you can read it with Read, Grep and Glob: the service whose API contract the task integrates, " +
+				"or a library the task names. url is the repository's URL as the task gives it (a link to a file or " +
+				"directory in it works too). Only repositories under " + strings.Join(s.Tools.Spec.Fetch.AllowedGroups, ", ") +
+				" of " + s.Tools.Spec.Fetch.BaseURL + " can be fetched. The clone is not part of this repository's change.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"url": map[string]any{"type": "string", "minLength": 1, "maxLength": maxFetchURLBytes},
+				},
+				"required":             []string{"url"},
 				"additionalProperties": false,
 			},
 		})
