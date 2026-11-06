@@ -3,3 +3,5 @@
 orchestrator.yaml
 /bin
 graphify-out
+/slackbridge/slackbridge
+/slackbridge/slackbridge.yaml
