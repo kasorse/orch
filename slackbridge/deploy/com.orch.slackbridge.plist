@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.orch.slackbridge</string>
+  <key>ProgramArguments</key>
+  <array><string>__HOME__/src/orch/slackbridge/run-service.sh</string></array>
+  <key>WorkingDirectory</key><string>__HOME__/src/orch/slackbridge</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>__HOME__/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HOME</key><string>__HOME__</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/slackbridge/slackbridge.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/slackbridge/slackbridge.log</string>
+</dict>
+</plist>

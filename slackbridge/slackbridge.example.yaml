@@ -1,0 +1,58 @@
+# slackbridge configuration. No secret goes here: tokens are read from the variables named.
+# Copy to slackbridge.yaml (git-ignored) and fill in the IDs.
+
+slack:
+  bot_token_env: SLACK_BOT_TOKEN   # xoxb-...
+  app_token_env: SLACK_APP_TOKEN   # xapp-... (Socket Mode, connections:write)
+
+# Slack user IDs that may start a run (profile → ⋮ → Copy member ID). Everyone else is refused.
+allowed_users:
+  - U0123456789
+
+# A message picks its project by a "name:" prefix ("web: fix X"), else by its
+# channel, else default_project.
+default_project: orchestrator
+channels: {}
+#  C0123456789: web
+
+# Optional: tickets. A message may hold "PROJ-15230", its /browse/ URL, or just "15230"
+# (default_project_key) anywhere; the rest of the message is extra instructions. The bridge
+# reads the ticket and picks the project whose jira_match names one of its components,
+# labels or [summary tags]; a "<project>:" prefix overrides it.
+# jira:
+#   base_url: https://example.atlassian.net
+#   email_env: JIRA_EMAIL
+#   token_env: JIRA_API_TOKEN
+#   default_project_key: PROJ
+#   env_command: echo "export JIRA_API_TOKEN='$(security find-generic-password -a "$USER" -s jira-api-token -w)'"
+
+projects:
+  # Runs on this machine with ANTHROPIC_API_KEY from the bridge's environment.
+  # approve: plan first, then Run/Cancel buttons in the thread (T6).
+  orchestrator:
+    runner: local
+    approve: true
+    # jira_match: [proj-web, web]
+    # api_spec:                         # refresh before each run, add the named endpoints' contract
+    #   url: https://…/swagger.json
+    #   path: swagger-cache/swagger.json  # relative to local.dir, keep it git-ignored
+    #   max_age: 1h
+    local:
+      dir: /Users/you/src/orch
+      orchestrator: ./orchestrator
+      config: orchestrator.yaml
+      args: [--claude-auth, api]
+      # Optional: print `export NAME=value` lines before each run, e.g. a gateway key.
+      # env_command: ...
+      timeout: 60m
+
+  # Triggers the orchestrator job in GitLab CI (specs/slack-gitlab T2); the job opens the MR.
+  # web:
+  #   runner: gitlab
+  #   gitlab:
+  #     base_url: https://gitlab.com
+  #     project_id: group/web
+  #     ref: develop
+  #     trigger_token_env: WEB_TRIGGER_TOKEN
+  #     api_token_env: GITLAB_READ_TOKEN      # read_api, to follow the pipeline
+  #     timeout: 90m
