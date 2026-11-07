@@ -49,12 +49,33 @@ func TestExtensionsFor(t *testing.T) {
 	if research := extensionsFor(cfg, domain.ActionResearch, "/r", "/r"); research.MCPConfig != "" || len(research.MCPTools) != 0 || research.UserSettings {
 		t.Errorf("research must get nothing: %+v", research)
 	}
-	if got := withExtensionsHint("ACTION: investigate\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionInvestigate, "/r", "/r")); got != "ACTION: investigate\nbody" {
+	if got := withExtensionsHint("ACTION: investigate\nbody", extensionsFor(config.ExtensionsConfig{}, domain.ActionInvestigate, "/r", "/r"), nil); got != "ACTION: investigate\nbody" {
 		t.Errorf("no extensions, no hint: %q", got)
 	}
 	// The hint comes right after the first line, which stays "ACTION: <name>".
-	got := withExtensionsHint("ACTION: investigate\nbody", investigate)
-	if !strings.HasPrefix(got, "ACTION: investigate\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. ") || !strings.HasSuffix(got, "\nbody") {
+	got := withExtensionsHint("ACTION: investigate\nbody", investigate, nil)
+	if !strings.HasPrefix(got, "ACTION: investigate\n\nExtra tools are available in this step: mcp__graphify__get_node, mcp__graphify__query_graph. Your first") || !strings.HasSuffix(got, "\nbody") {
+		t.Errorf("hint = %q", got)
+	}
+}
+
+func TestMCPDescriptions(t *testing.T) {
+	cfg := config.ExtensionsConfig{MCP: map[string]config.MCPServerConfig{
+		"sku-master-db":     {Command: "pg", Tools: []string{"query"}, Description: "The sku-master database,\n  dev or UAT."},
+		"product-master-db": {Command: "pg", Tools: []string{"query"}, Description: "The product-master database"},
+		"graphify":          {Command: "graphify-mcp", Tools: []string{"query_graph"}},
+		"memory":            {Command: "mem", Tools: []string{"*"}, Actions: []string{"implement"}, Description: "Notes"},
+	}}
+	about := mcpDescriptions(cfg, domain.ActionInvestigate)
+	want := []string{
+		"mcp__product-master-db: The product-master database.",
+		"mcp__sku-master-db: The sku-master database, dev or UAT.",
+	}
+	if strings.Join(about, "|") != strings.Join(want, "|") {
+		t.Errorf("descriptions = %q, want %q", about, want)
+	}
+	got := withExtensionsHint("ACTION: investigate\nbody", extensionsFor(cfg, domain.ActionInvestigate, "/r", "/r"), about)
+	if !strings.Contains(got, "mcp__sku-master-db__query. "+want[0]+" "+want[1]+" Your first tool call") {
 		t.Errorf("hint = %q", got)
 	}
 }

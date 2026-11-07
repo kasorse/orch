@@ -450,6 +450,7 @@ extensions:
       args: ["{source}/graphify-out/graph.json"] # {source} = your repository, {repo} = where the step works (a worktree run's worktree)
       tools: [query_graph, get_node, get_neighbors, shortest_path]   # or ["*"]
       actions: [investigate, implement, review]                      # default: investigate, review
+      description: "The code knowledge graph of this repository"     # optional, given in the prompt
   user_settings: true             # ~/.claude/settings.json: plugins, skills, hooks
   user_settings_actions: [implement, review]                         # default: every model step
 ```
@@ -459,7 +460,8 @@ extensions:
   - Only the listed actions get the server.
   - Steps keep `--restricted`, so the file tools and the authority table stay as above.
   - The step's prompt names the extra tools, so the model uses them rather than defaulting
-    to grep.
+    to grep, and gives each server's `description`, so the model can tell two servers of the
+    same kind apart (the databases of two services).
   - The server runs with your permissions, like any MCP server you use with Claude.
 - **`user_settings`** loads your **user** settings only (`--setting-sources user`): your
   plugins, skills and hooks, such as writing a session to memory.

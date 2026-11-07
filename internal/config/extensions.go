@@ -55,6 +55,10 @@ type MCPServerConfig struct {
 	// Actions are the workflow actions (research, investigate, implement, review) that
 	// get this server. Empty means the read-only ones: investigate and review.
 	Actions []string `yaml:"actions"`
+	// Description says what the server is for (optional). The step's prompt gives it next to
+	// the server's tools, so the model can tell two servers of the same kind apart, such as
+	// the databases of two services.
+	Description string `yaml:"description"`
 }
 
 // DefaultMCPActions are the actions an MCP server is offered to when none are listed:
