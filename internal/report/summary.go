@@ -91,12 +91,19 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	// verify_calls holds the test tools' calls and replace's; each gets its own row. A refused
 	// call ran nothing, so it never passed and changed nothing.
 	var verifyCalls, passed, replaceCalls, files, replacements int
+	var fetched []string
 	for _, e := range run.Executions {
 		for _, c := range e.VerifyCalls {
 			if c.Tool == domain.VerifyToolReplace {
 				replaceCalls++
 				if !c.DryRun {
 					files, replacements = files+c.Files, replacements+c.Replacements
+				}
+				continue
+			}
+			if c.Tool == domain.VerifyToolFetchRepository {
+				if c.Refused == "" && c.Success && !slices.Contains(fetched, c.Repository) {
+					fetched = append(fetched, c.Repository)
 				}
 				continue
 			}
@@ -111,6 +118,9 @@ func writeTotals(b *strings.Builder, run domain.Run, trace *domain.DecisionTrace
 	}
 	if replaceCalls > 0 {
 		row("Replace", fmt.Sprintf("%s, %s in %s", plural(replaceCalls, "call"), plural(replacements, "occurrence"), plural(files, "file")))
+	}
+	if len(fetched) > 0 {
+		row("Fetched", strings.Join(fetched, ", "))
 	}
 
 	tests := "not run"

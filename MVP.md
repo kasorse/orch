@@ -3315,6 +3315,14 @@ literal string across the files git lists, never a deny-listed, protected, ignor
 large file and never outside the repository. It runs no process; the guard checks the
 before-state before every call.
 
+**Fetch a repository (investigate, with a `gitlab:` section, §44.3).** Under `read`, when the
+adapter speaks MCP, the investigate session gets `mcp__orch__fetch_repository`: the model names
+a URL the task gave it, Go checks it against `gitlab.base_url` and `gitlab.allowed_groups` and
+clones that one project, shallow, into `.orchestrator/deps/<name>` of the repository, where the
+file tools read it; what the model wrote never reaches git otherwise. The model gets no
+network: the clone is the server's, of an allowlisted project, with every prompt turned off.
+The guard checks the before-state before every call.
+
 **Verify tools (opt-in, `actions.implement.verify: true`, §44.3).** Under `edit` the session
 gets two more tools from an MCP server named `orch` that the orchestrator itself serves,
 `mcp__orch__run_tests` and `mcp__orch__run_check`. This is not a shell and does not change the
@@ -4304,7 +4312,7 @@ implement step only).
 | `outcome.active_ms` | Sum of the steps' durations. |
 | `outcome.usage.partial_calls` | How many of `outcome.usage.calls` were partial; when not 0, `cost_usd` is a lower bound. |
 | `outcome.diff` | The run's net change: the last implement's `diff.run`. |
-| `outcome.verify_calls` | The calls of the whole run to the `orch` tools, replace included (§44.3), 0 and absent when there were none. |
+| `outcome.verify_calls` | The calls of the whole run to the `orch` tools, replace and fetch_repository included (§44.3), 0 and absent when there were none. |
 | `outcome.approval_required` | `true` when the last implement matched a `policy.paths` rule with `approval: manual` (an earlier implement's matches do not count); absent otherwise. A CI job can read it: the change was not committed by the orchestrator. |
 | `options.path_rules` | A copy of `policy.paths` made when the run is created: `{match, require_stages, approval}` in file order. A resume applies these and never the current config's; if the config's rules differ, it prints `Warning: policy.paths changed since the run started; this run keeps the rules it started with`. Absent without rules. Each rule is validated as in the config. |
 | `executions[].path_rules` | On an implement that passed the guard and the secret scan: `{match, files, require_stages, missing, approval}` for each rule that matched a file of the run's net diff (`pre_run_ref` against the tree after the step; the step's own diff without a restore point; the runs directory excluded). `files` holds at most 50 clean repository-relative paths; `missing` is always present and a subset of `require_stages`. Recorded also when the step failed because of it. On an implement step only. |
@@ -4515,6 +4523,27 @@ most 50 replace calls per step, apart from `max_calls_per_step`. Each call is a
 it in a `Replace` row. When replace alone cannot be set up, the step warns and runs without
 it. The implement prompt names the tool. Design: `specs/quality/SPEC.md` §6.11, D18.
 
+**Fetch a repository (investigate, with `gitlab:`).** When the configuration has a `gitlab`
+section (`base_url`, `allowed_groups`, the listener's) and the adapter speaks MCP, every
+investigate session gets `mcp__orch__fetch_repository` from the same `orch` server, with no
+further key. A task that links another repository of the organisation (the service whose API
+it integrates, a library it names) is investigated with that code instead of a guess: the model
+passes the URL as the task gives it (a link into the project, `/-/blob/...`, `.git`, resolves to
+the project); Go requires the base URL's scheme and host and a project path under an allowed
+group, and refuses anything else before git sees it; the server runs `git clone --depth 1` of
+that project into `.orchestrator/deps/<name>` (ignored by every diff, commit, review and project
+context, so the clone is never part of the change; a worktree's clones go with the worktree) with
+the operator's own git credentials, `GIT_TERMINAL_PROMPT=0` and ssh in batch mode, and tries the
+ssh form of the URL once when https is refused. The answer names the path, and the plan names the
+files it relied on there, so implement and review read the same code. A project already fetched
+is answered from the clone; a name already held by another project is refused. The guard compares
+the before-state before each call as for the other tools; at most 10 calls per step, one clone
+within `limits.verify.call_timeout`. Each call is a `verify_calls` entry with `repository` (the
+project path, never the URL), a failed clone has `exit_code: 1`, git's output is in
+`logs/<NNN>-investigate.verify-<K>.stderr.log`, and `summary.md` shows a `Fetched` row. When the
+tool cannot be set up, the step warns and runs without it. The investigate prompt names the tool
+only when it is on. Design: `specs/quality/SPEC.md` §6.12.
+
 ## 44.4 Review
 
 * **A verdict per criterion.** When the investigation has `acceptance_criteria`, the review
@@ -4667,7 +4696,7 @@ actions:
 | `checks[]` | `test_result`, `pre_run_test` | `{name, exit_code, success, duration}` of each command that ran; names valid per §44.2; a failed check is the last entry |
 | `failed_check` | `test_result`, `pre_run_test` | the name of the failing `checks[]` entry; absent when every check passed |
 | `failed_tests`, `report_format` | `test_result`, `pre_run_test` | §44.7; a failed result only, a known format, at most 200 names of 1 to 300 bytes without control characters |
-| `verify_calls[]` | implement executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused, files, replacements, dry_run}`; `tool` is `run_tests`, `run_check` or `replace`; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; `files`, `replacements` (at least `files`) and `dry_run` only on `replace`, whose `exit_code` is 0, or 1 for a write that failed part way; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 100 |
+| `verify_calls[]` | implement and investigate executions | `{tool, check, filter, exit_code, success, duration, output_cut, refused, files, replacements, dry_run, repository}`; `tool` is `run_tests`, `run_check` or `replace` on implement, `fetch_repository` on investigate only; `check` only on `run_check` (and only valid names); `filter` only on `run_tests` and matching the filter rule; `files`, `replacements` (at least `files`) and `dry_run` only on `replace`, whose `exit_code` is 0, or 1 for a write that failed part way; `repository` (a project path) only on `fetch_repository`, present unless refused, whose `exit_code` is 0, or 1 for a failed clone; a refused call has a short one-line `refused` and no result, a call that ran has `success == (exit_code == 0)`; at most 100 |
 | `tree_after` | implement executions | the git tree of the working tree after the step; 40 or 64 hex characters |
 | `provider.model_source` | executions | `base`, `by_complexity.{simple,medium,complex}`, `by_complexity.<level>.escalate` or `escalated.{medium,complex}` (§44.8) |
 | `review_result.criteria[]` | review executions | `{index, criterion, met, evidence}`; indexes `1…N` unique; evidence at most 500 bytes |

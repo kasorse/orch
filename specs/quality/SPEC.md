@@ -531,6 +531,58 @@ written), the step warns and runs without it; with verify on, that is still a st
   replace writes only what the Edit tool of authority `edit` could write, file by file, and
   never touches a deny-listed or protected file. It runs nothing and opens no way out.
 
+### 6.12 Fetch a repository (investigate, added 2026-11-05)
+
+A task often links the repository whose API the change integrates ("the contract is in
+gitlab.com/org/meta-model"). The stages are confined to the working directory, so without this
+tool investigate guesses the API. With a `gitlab` section in the configuration (`base_url`,
+`allowed_groups`; the section the listener uses, no new key) every investigate session whose
+adapter speaks MCP gets `mcp__orch__fetch_repository` from the `orch` server, alone in its
+`verify.json` (`fetch: {base_url, allowed_groups, timeout}`, the test tools and replace off).
+
+| argument | type | meaning |
+|---|---|---|
+| `url` | string, 1..500 bytes, required | the repository's URL as the task gives it; a link into it (`/-/blob/...`, `/-/tree/...`, `.git`, a trailing slash) resolves to the project |
+
+* **Which repositories.** The URL must have the base URL's scheme and host (and context
+  path), no userinfo, and a path of two or more GitLab path segments (no `.`/`..`, no segment
+  starting with `.`) under one of `allowed_groups` (`group/` as a prefix). Anything else is
+  refused before git sees it, with a fixed reason; the model's text is never echoed into a
+  record. The project path (`group/project`) is what the record keeps; the URL is not.
+* **How.** `git clone --quiet --depth 1 --no-tags -- <base_url>/<project>.git
+  <repo>/.orchestrator/deps/<name>` in the server's process, with the server's environment
+  (the operator's git credentials: the claude CLI's scrubbed environment, so never the
+  listener's token) plus `GIT_TERMINAL_PROMPT=0` and, unless the operator set one,
+  `GIT_SSH_COMMAND=ssh -o BatchMode=yes`: a missing credential fails, never hangs. When the
+  https clone fails the ssh form (`git@host:project.git`) is tried once, since the operator's
+  own checkouts most often use it. The clone runs under `limits.verify.call_timeout` in its own
+  process group, killed at the deadline. A failed clone leaves no directory.
+* **Where.** `.orchestrator/deps/<name>` (`verify.FetchDir`): `.orchestrator` is already outside
+  `git status`, `add`, the review diff, the commit, the secret scan baseline and the project
+  context, and the file tools may read it (only the runs directory is denied). In a worktree
+  run the clones go with the worktree; in place they stay under the operator's
+  `.orchestrator/deps`. A project already there (its origin is the same URL) is answered with
+  its path and not cloned again; a name held by another project is refused.
+* **Guard.** As §6.6: the before-state is compared before every call that passed its argument
+  check, a change refuses this call and every later one, and `violation` fails the step. The
+  guard's pathspecs never descend into a nested repository, so the clone's own files cannot
+  trip it.
+* **Limits.** At most `domain.MaxFetchCalls` (10) per step, refused calls included, apart from
+  the other tools' limits.
+* **Record.** One `verify_calls` entry per call: `{tool: fetch_repository, repository, success,
+  duration, exit_code}` (1 for a failed clone) or a `refused` reason; git's output in
+  `logs/<NNN>-investigate.verify-<K>.stderr.log`; the `Fetched` row of `summary.md` names the
+  projects. `validateVerifyCalls` admits `fetch_repository` on investigate steps only, and
+  nothing else there.
+* **Prompt.** The investigate prompt gets one paragraph only when the tool is on: fetch what the
+  task links, read the contract from the code, name the files relied on with their
+  `.orchestrator/deps/...` path in the plan, do not list them as affected. Implement and review
+  read the clone through the plan's paths; they get no tool of their own.
+* **Why it is not a way out.** The model chooses only a URL, and only one that resolves to an
+  allowlisted project of the configured GitLab reaches git; the clone is the server's, with the
+  credentials the operator's own `git clone` would use, into a directory nothing of the change
+  reads back. No shell, no arbitrary host, no write outside `.orchestrator/deps`.
+
 ---
 
 ## 7. Review (QL02, QL11, QL12) — TODO Q6

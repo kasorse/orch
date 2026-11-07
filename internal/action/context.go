@@ -201,7 +201,7 @@ func (d *Dispatcher) call(ctx context.Context, run *domain.Run, pm config.Provid
 		sourceDir = d.Repo.Dir
 	}
 	ext := extensionsFor(d.Config.Extensions, actionName, d.Repo.Dir, sourceDir)
-	prompt = withExtensionsHint(prompt, ext)
+	prompt = withExtensionsHint(prompt, ext, mcpDescriptions(d.Config.Extensions, actionName))
 	ext, err = mergeExtensions(ext, builtin)
 	if err != nil {
 		return provider.Result{}, ref, &apperr.WorkflowError{Msg: "failed to merge the MCP servers of the step", Err: err}

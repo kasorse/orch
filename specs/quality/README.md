@@ -1,6 +1,6 @@
 # Quality — a better result from the same stages (phase 2)
 
-Status: **in progress** (specified 2026-10-08; 2026-10-11): QL01–QL14 done. The four gates
+Status: **in progress** (specified 2026-10-08; 2026-10-11): QL01–QL14 done; §6.12 fetch_repository added 2026-11-05 (no task, built directly). The four gates
 (`scripts/check.sh`, root and `bench/`, outside the sandbox) passed on 2026-10-11 over all of
 them, including the tasks that were written without running anything (QL05, QL07–QL10, QL13,
 QL14), and the live suite (`go test -tags security ./test/security/...`, V-verify-1…4) passed

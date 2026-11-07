@@ -99,6 +99,22 @@ func (d *Dispatcher) verifySpec(run *domain.Run, before GuardState, replace bool
 	return spec, nil
 }
 
+// fetchSpec is the server's input for an investigate step: fetch_repository alone, over
+// the gitlab section's base URL and allowed groups (specs/quality/SPEC.md §6.12). One clone
+// gets the verify call timeout.
+func (d *Dispatcher) fetchSpec(before GuardState) (*verify.Spec, error) {
+	root, err := filepath.Abs(d.Repo.Dir)
+	if err != nil {
+		return nil, err
+	}
+	g := d.Config.GitLab
+	return &verify.Spec{Version: verify.SpecVersion, RepoRoot: root, Before: before, Fetch: &verify.FetchSpec{
+		BaseURL:       g.BaseURL,
+		AllowedGroups: append([]string{}, g.AllowedGroups...),
+		Timeout:       d.Config.Limits.Verify.Timeout(),
+	}}, nil
+}
+
 // openVerifyFile opens a regular file of dir for reading without following a symlink or
 // blocking on a FIFO. ok is false when it does not exist.
 func openVerifyFile(dir, name string) (f *os.File, ok bool, err error) {

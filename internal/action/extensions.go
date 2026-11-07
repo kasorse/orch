@@ -128,17 +128,34 @@ func addMCPServers(servers map[string]json.RawMessage, cfg string) error {
 // instead of defaulting to grep. It goes right after the "ACTION: <name>" first line: at the
 // end of a long prompt (a review diff) models ignored it, and a "start with them" in the
 // middle of it was ignored too (bench pilot E, 2026-10-26: no call in three sessions), so it
-// names the first tool call. prompt is unchanged without tools.
-func withExtensionsHint(prompt string, ext provider.Extensions) string {
+// names the first tool call. about are the servers' descriptions (mcpDescriptions). prompt is
+// unchanged without tools.
+func withExtensionsHint(prompt string, ext provider.Extensions, about []string) string {
 	if len(ext.MCPTools) == 0 {
 		return prompt
 	}
-	hint := "Extra tools are available in this step: " + strings.Join(ext.MCPTools, ", ") + ". " +
-		"Your first tool call must be one of them: ask about the functions, types and files the task names " +
+	hint := "Extra tools are available in this step: " + strings.Join(ext.MCPTools, ", ") + ". "
+	for _, a := range about {
+		hint += a + " "
+	}
+	hint += "Your first tool call must be one of them: ask about the functions, types and files the task names " +
 		"(for example a knowledge graph for structure, callers and relationships), then read the files the answer points to. " +
 		"Do not start with Grep or Glob; use them only for what these tools do not answer."
 	first, rest, _ := strings.Cut(prompt, "\n")
 	return first + "\n\n" + hint + "\n" + rest
+}
+
+// mcpDescriptions returns "mcp__<server>: <description>." for each server offered to action
+// that has a description, in ServersFor's order, its whitespace folded to single spaces.
+func mcpDescriptions(cfg config.ExtensionsConfig, action domain.ActionType) []string {
+	var out []string
+	for _, name := range cfg.ServersFor(action) {
+		d := strings.TrimSuffix(strings.Join(strings.Fields(cfg.MCP[name].Description), " "), ".")
+		if d != "" {
+			out = append(out, "mcp__"+name+": "+d+".")
+		}
+	}
+	return out
 }
 
 func firstNonEmpty(v ...string) string {

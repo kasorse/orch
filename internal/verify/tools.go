@@ -78,9 +78,9 @@ type Tools struct {
 	mu sync.Mutex
 	// count is the calls received, refused ones included; it numbers the call logs.
 	count int
-	// testCalls and replaceCalls split count by limit: run_tests and run_check share
-	// Spec.MaxCalls, replace has domain.MaxReplaceCalls.
-	testCalls, replaceCalls int
+	// testCalls, replaceCalls and fetchCalls split count by limit: run_tests and run_check
+	// share Spec.MaxCalls, replace has domain.MaxReplaceCalls, fetch domain.MaxFetchCalls.
+	testCalls, replaceCalls, fetchCalls int
 	// recorded is the lines in calls.jsonl.
 	recorded int
 	// violated is true once dir/violation exists.
@@ -110,9 +110,13 @@ func NewTools(spec *Spec, dir string, runner Runner, g Guard) (*Tools, error) {
 			t.count++
 			// A line that does not decode counts against the test limit, the stricter one.
 			var c struct{ Tool string }
-			if json.Unmarshal([]byte(line), &c) == nil && c.Tool == domain.VerifyToolReplace {
+			_ = json.Unmarshal([]byte(line), &c)
+			switch c.Tool {
+			case domain.VerifyToolReplace:
 				t.replaceCalls++
-			} else {
+			case domain.VerifyToolFetchRepository:
+				t.fetchCalls++
+			default:
 				t.testCalls++
 			}
 		}
@@ -155,8 +159,11 @@ func (t *Tools) Call(ctx context.Context, tool string, args json.RawMessage) Res
 	}
 	t.count++
 	k := t.count
-	if tool == domain.VerifyToolReplace {
+	switch tool {
+	case domain.VerifyToolReplace:
 		return t.replace(ctx, args)
+	case domain.VerifyToolFetchRepository:
+		return t.fetch(ctx, args, k)
 	}
 	t.testCalls++
 	// parseArgs is pure; doing it first only lets every record, refused or not, name the

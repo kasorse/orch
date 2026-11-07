@@ -322,6 +322,8 @@ security:
 #       # which in a worktree run is the worktree, without ignored files
 #       args: ["{source}/graphify-out/graph.json"]
 #       tools: [query_graph, get_node, get_neighbors, shortest_path]
+#       # optional: what the server is for, given in the step's prompt next to its tools
+#       description: "The code knowledge graph of this repository"
 #       actions: [investigate, implement, review]     # default: investigate, review
 #   user_settings: true                               # plugins, skills, hooks; over the API
 #                                                     # transport: your skills, via a skill tool
@@ -392,6 +394,9 @@ security:
 #   token_env: GITLAB_TOKEN        # env only, reaches git through a credential helper; a literal token is refused
 #   username: oauth2
 #   allowed_groups: [backend, platform/payments]   # required; clone only from under these
+#   # With this section every investigate step may fetch a repository the task links from under
+#   # these groups (mcp__orch__fetch_repository, MVP.md §44.3): a shallow clone into
+#   # .orchestrator/deps/<name>, read-only, with your own git credentials.
 
 # Optional: a task split into a specification and ordered subtasks across services
 # (specs/story/SPEC.md §5). The task names the services it touches; they are the checkouts

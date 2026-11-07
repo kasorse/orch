@@ -18,12 +18,18 @@ import (
 
 // prepareVerify writes the server's input into dir and returns the extension that starts it.
 func (d *Dispatcher) prepareVerify(dir string, run *domain.Run, before GuardState, replace bool) (provider.Extensions, error) {
-	// MkdirTemp creates the directory 0700 already; the server's files are only for us.
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return provider.Extensions{}, err
-	}
 	spec, err := d.verifySpec(run, before, replace)
 	if err != nil {
+		return provider.Extensions{}, err
+	}
+	return d.prepareServer(dir, spec)
+}
+
+// prepareServer writes spec into dir and returns the extension that starts the orch server
+// over it, with the spec's tools allowed.
+func (d *Dispatcher) prepareServer(dir string, spec *verify.Spec) (provider.Extensions, error) {
+	// MkdirTemp creates the directory 0700 already; the server's files are only for us.
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return provider.Extensions{}, err
 	}
 	if err := verify.WriteSpec(dir, spec); err != nil {
