@@ -75,6 +75,20 @@ func (c *Client) Transition(ctx context.Context, key, id string) error {
 	return err
 }
 
+// RemoveLabel removes label from key: PUT on the issue with an update that removes it, answered 204.
+// Removing a label the issue no longer has changes nothing, so a repeat is harmless.
+func (c *Client) RemoveLabel(ctx context.Context, key, label string) error {
+	body, err := json.Marshal(map[string]map[string][]map[string]string{"update": {"labels": {{"remove": label}}}})
+	if err != nil {
+		jerr := c.fail(key, apperr.JiraInvalidResponse, 0, "", "", fmt.Errorf("build request: %w", err))
+		jerr.Op, jerr.NotSent = apperr.JiraOpLabel, true
+		return jerr
+	}
+	_, err = exchange(ctx, c, apperr.JiraOpLabel, key, http.MethodPut, c.issueURL(key), body, http.StatusNoContent,
+		func([]byte) (struct{}, string) { return struct{}{}, "" })
+	return err
+}
+
 // Status is the name of the status key is in now: GET with fields=status. It reads nothing else
 // of the issue.
 func (c *Client) Status(ctx context.Context, key string) (string, error) {

@@ -32,6 +32,8 @@ const (
 	JiraOpTransitions = "transitions"
 	JiraOpComment     = "comment"
 	JiraOpTransition  = "transition"
+	// JiraOpLabel is the listener's removal of the restart label (specs/jira-listener/SPEC.md §3.3).
+	JiraOpLabel = "label"
 )
 
 var transientJiraFailures = map[JiraFailureKind]bool{
@@ -100,7 +102,7 @@ func (e *JiraError) headline() string {
 		if h, ok := e.createHeadline(key); ok {
 			return h
 		}
-	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition:
+	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition, JiraOpLabel:
 		if h, ok := e.writeHeadline(key); ok {
 			return h
 		}
@@ -151,6 +153,7 @@ func (e *JiraError) writeHeadline(key string) (string, bool) {
 		JiraOpTransitions: "reading the transitions of " + key,
 		JiraOpComment:     "commenting on " + key,
 		JiraOpTransition:  "moving " + key,
+		JiraOpLabel:       "removing a label of " + key,
 	}[e.Op]
 	switch e.Kind {
 	case JiraNotFound:
@@ -182,6 +185,8 @@ func (e *JiraError) opVerb() string {
 		return "comment on"
 	case JiraOpTransition:
 		return "move"
+	case JiraOpLabel:
+		return "edit"
 	}
 	return "read"
 }

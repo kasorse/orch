@@ -1257,7 +1257,13 @@ must be one of `listener.query.reporters`; the label alone starts nothing. The o
 comment starting `[orchestrator]` and a transition: merge request opened → `done`; an unclear
 task, an unknown service or a ticket that is too long → `blocked` (answer in a comment and move
 the ticket back to the queue's status); a red run → `failed`; a provider or network failure →
-`retry`, without spending one of `max_attempts`.
+`retry`, without spending one of `max_attempts`. A ticket moved back to the queue after its run
+stopped or failed (not for input) continues that run, `resume` under the current configuration,
+in its worktree: raise `limits.max_fix_iterations` or fix what failed before you move it. A new
+run starts instead when the summary, description or fields were edited since the run started (a
+comment alone does not count, it is not read by the resumed run), or when the ticket has the label
+`ai-restart` (`listener.labels.restart`), which the listener then removes: its account needs the
+permission to edit the issue.
 
 In Docker:
 

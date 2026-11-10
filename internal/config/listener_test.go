@@ -13,7 +13,7 @@ func validListener() ListenerConfig {
 		Query: ListenerQuery{
 			Projects: []string{"PAY"}, Label: "ai-run", Statuses: []string{"To Do"}, Reporters: []string{"5b10a2844c20165700ede21g"},
 		},
-		Labels: ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:"},
+		Labels: ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:", Restart: "ai-restart"},
 		Transitions: ListenerTransitions{
 			Start: "In Progress", Blocked: "Blocked", Failed: "Failed", Done: "Ready to Review", Retry: "To Do",
 		},
@@ -55,7 +55,7 @@ func TestLoad_ListenerDefaults(t *testing.T) {
 		t.Fatalf("sections = %v, %v", l, g)
 	}
 	if l.PollInterval != time.Minute || l.ServicesDir != "." || l.MaxAttempts != 3 || l.CloneTimeout != 10*time.Minute ||
-		l.Query.Label != "ai-run" || l.Labels.ServicePrefix != "service:" || l.Labels.ProjectPrefix != "gitlab:" ||
+		l.Query.Label != "ai-run" || l.Labels.ServicePrefix != "service:" || l.Labels.ProjectPrefix != "gitlab:" || l.Labels.Restart != "ai-restart" ||
 		g.Username != "oauth2" || g.BaseURL != "https://gitlab.corp" {
 		t.Errorf("defaults: %+v %+v", l, g)
 	}
@@ -135,6 +135,7 @@ func TestValidateListener(t *testing.T) {
 		{"service prefix empty", func(l *ListenerConfig) { l.Labels.ServicePrefix = "" }, "listener.labels.service_prefix"},
 		{"project prefix space", func(l *ListenerConfig) { l.Labels.ProjectPrefix = "git lab:" }, "listener.labels.project_prefix"},
 		{"prefixes equal", func(l *ListenerConfig) { l.Labels.ProjectPrefix = "service:" }, "must differ"},
+		{"restart label empty", func(l *ListenerConfig) { l.Labels.Restart = "" }, "listener.labels.restart"},
 		{"start missing", func(l *ListenerConfig) { l.Transitions.Start = "" }, "listener.transitions.start is required"},
 		{"blocked missing", func(l *ListenerConfig) { l.Transitions.Blocked = "" }, "listener.transitions.blocked is required"},
 		{"failed missing", func(l *ListenerConfig) { l.Transitions.Failed = "" }, "listener.transitions.failed is required"},

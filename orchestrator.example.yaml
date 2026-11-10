@@ -383,6 +383,7 @@ security:
 #   labels:
 #     service_prefix: "service:"   # a label service:billing names the service
 #     project_prefix: "gitlab:"    # a label gitlab:backend/billing names the GitLab project
+#     restart: ai-restart          # a re-queued ticket with it starts a new run; the listener removes it
 #   transitions:                   # a transition's name or its target status, as jira.write.transition
 #     start: In Progress           # the claim; the workflow must allow it from the statuses above
 #     blocked: Blocked
