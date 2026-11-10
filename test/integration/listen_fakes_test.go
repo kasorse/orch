@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,6 +103,19 @@ func (j *listenJira) setStatus(key, status string) {
 	j.issues[key].status = status
 }
 
+// edit runs f on the issue key, as a person editing it in Jira.
+func (j *listenJira) edit(key string, f func(*listenIssue)) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	f(j.issues[key])
+}
+
+func (j *listenJira) labelsOf(key string) []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.issues[key].labels)
+}
+
 func (j *listenJira) statusOf(key string) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -158,7 +172,7 @@ func (j *listenJira) searches() []string {
 
 func (j *listenJira) handle(w http.ResponseWriter, r *http.Request) {
 	req := jiraRequest{Path: r.URL.Path, Query: r.URL.RawQuery, Auth: r.Header.Get("Authorization")}
-	if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		body, _ := io.ReadAll(r.Body)
 		req.Method, req.Body = r.Method, string(body)
 	}
@@ -208,6 +222,24 @@ func (j *listenJira) handle(w http.ResponseWriter, r *http.Request) {
 		status := is.status
 		j.mu.Unlock()
 		writeJSON(map[string]any{"key": key, "fields": map[string]any{"status": map[string]string{"name": status}}})
+	case sub == "" && r.Method == http.MethodPut:
+		var in struct {
+			Update struct {
+				Labels []struct {
+					Remove string `json:"remove"`
+				} `json:"labels"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal([]byte(req.Body), &in); err != nil || len(in.Update.Labels) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		j.mu.Lock()
+		for _, l := range in.Update.Labels {
+			is.labels = slices.DeleteFunc(is.labels, func(have string) bool { return have == l.Remove })
+		}
+		j.mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 	case sub == "" && r.Method == http.MethodGet:
 		j.mu.Lock()
 		v := j.issueJSON(is, true)
@@ -479,15 +511,16 @@ type listenerState struct {
 }
 
 type listenerStateItem struct {
-	Attempts  int    `json:"attempts"`
-	Retries   int    `json:"retries"`
-	Service   string `json:"service"`
-	Phase     string `json:"phase"`
-	RunID     string `json:"run_id"`
-	RunDir    string `json:"run_dir"`
-	Outcome   string `json:"outcome"`
-	NextTryAt string `json:"next_try_at"`
-	Writes    struct {
+	Attempts   int    `json:"attempts"`
+	Retries    int    `json:"retries"`
+	Service    string `json:"service"`
+	Phase      string `json:"phase"`
+	RunID      string `json:"run_id"`
+	RunDir     string `json:"run_dir"`
+	TicketHash string `json:"ticket_hash"`
+	Outcome    string `json:"outcome"`
+	NextTryAt  string `json:"next_try_at"`
+	Writes     struct {
 		Comment    struct{ State, ID string } `json:"comment"`
 		Transition struct{ State string }     `json:"transition"`
 	} `json:"writes"`

@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -253,6 +255,90 @@ func TestListen_FailedRunsAreCommentedAndFailed(t *testing.T) {
 			}
 			if e := env.state().Tickets["PAY-12"]; e.Outcome != "failed" || e.Attempts != 1 {
 				t.Errorf("state = %+v, want failed after one attempt", e)
+			}
+		})
+	}
+}
+
+// requeueStopped runs PAY-12 to a stopped run (a red test, its fix iterations spent), then does what
+// the operator does: fixes the test, gives the run more fix iterations, and moves the ticket back to
+// the queue. It returns the stopped run's id.
+func requeueStopped(t *testing.T, env *listenEnv) string {
+	t.Helper()
+	env.jira.add("PAY-12", "Add() subtracts", listenTask, "service:billing")
+	stderr := mustListen(t, env)
+	runs := env.runs()
+	if len(runs) != 1 || runs[0].Status != "stopped" || env.jira.statusOf("PAY-12") != "Failed" {
+		t.Fatalf("runs = %+v, PAY-12 in %q, want one stopped run\nstderr:\n%s", runs, env.jira.statusOf("PAY-12"), stderr)
+	}
+	data, err := os.ReadFile(env.childCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := strings.Replace(string(data), `command: "exit 1"`, `command: "go test ./..."`, 1)
+	fixed = regexp.MustCompile(`max_fix_iterations: \d+`).ReplaceAllString(fixed, "max_fix_iterations: 5")
+	if !strings.Contains(fixed, `command: "go test ./..."`) || !strings.Contains(fixed, "max_fix_iterations: 5") {
+		t.Fatalf("the test command or max_fix_iterations is not in the child configuration:\n%s", data)
+	}
+	if err := os.WriteFile(env.childCfg, []byte(fixed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.jira.setStatus("PAY-12", "To Do")
+	return runs[0].ID
+}
+
+// A ticket moved back to the queue after its run stopped continues that run, under the current
+// configuration, while the ticket is unchanged and has no restart label; an edited ticket, or one
+// with the label, starts a new run (and the label is removed).
+func TestListen_ATicketPutBackInTheQueueResumesItsStoppedRun(t *testing.T) {
+	tests := []struct {
+		name    string
+		change  func(env *listenEnv)
+		resumed bool
+		log     string
+	}{
+		{"unchanged, a comment added", func(env *listenEnv) { env.jira.person("PAY-12", "please try again") }, true, "resuming its earlier run "},
+		{"the description edited", func(env *listenEnv) {
+			env.jira.edit("PAY-12", func(is *listenIssue) { is.description += "\nAlso keep Add() pure." })
+		}, false, "PAY-12 changed since its run "},
+		{"the restart label", func(env *listenEnv) {
+			env.jira.edit("PAY-12", func(is *listenIssue) { is.labels = append(is.labels, "ai-restart") })
+		}, false, "PAY-12 has the label ai-restart"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			red := func(o *configOptions) { o.testCommand = "exit 1" }
+			env := newListenEnv(t, listenOptions{pPre: 0.85, childOpts: []func(*configOptions){red}})
+			first := requeueStopped(t, env)
+			tc.change(env)
+
+			stderr := mustListen(t, env)
+			if !strings.Contains(stderr, tc.log) {
+				t.Errorf("stderr lacks %q:\n%s", tc.log, stderr)
+			}
+			runs := env.runs()
+			e := env.state().Tickets["PAY-12"]
+			var last listenerRun
+			for _, r := range runs {
+				if r.ID == e.RunID {
+					last = r
+				}
+			}
+			wantRuns := 2
+			if tc.resumed {
+				wantRuns = 1
+			}
+			if len(runs) != wantRuns || (last.ID == first) != tc.resumed || last.Status != "completed" || last.MR == nil || last.MR.State != "created" {
+				t.Fatalf("runs = %+v, want %d, the last completed (resumed: %v)\nstderr:\n%s", runs, wantRuns, tc.resumed, stderr)
+			}
+			if got := env.jira.statusOf("PAY-12"); got != "Ready to Review" {
+				t.Errorf("PAY-12 is in %q, want Ready to Review", got)
+			}
+			if slices.Contains(env.jira.labelsOf("PAY-12"), "ai-restart") {
+				t.Errorf("labels = %v, want the restart label removed", env.jira.labelsOf("PAY-12"))
+			}
+			if e.Phase != "finished" || e.Outcome != "done" || e.Attempts != 2 || e.TicketHash == "" {
+				t.Errorf("state = %+v", e)
 			}
 		})
 	}

@@ -130,8 +130,11 @@ type Entry struct {
 	Interrupted bool   `json:"interrupted,omitempty"`
 	RunID       string `json:"run_id,omitempty"`
 	// RunDir is derived from Service and RunID (RunDir) and checked on load, never trusted as a path.
-	RunDir  string `json:"run_dir,omitempty"`
-	Outcome Result `json:"outcome,omitempty"`
+	RunDir string `json:"run_dir,omitempty"`
+	// TicketHash is the sha256 of the ticket's text without its discussion when the run started: a
+	// later cycle resumes that run only while the ticket still hashes the same.
+	TicketHash string `json:"ticket_hash,omitempty"`
+	Outcome    Result `json:"outcome,omitempty"`
 	// Reason is the one-line cause of an outcome decided before any run (a service that could not be
 	// found, a ticket too long): what the comment says.
 	Reason    string    `json:"reason,omitempty"`

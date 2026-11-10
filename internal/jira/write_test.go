@@ -176,6 +176,34 @@ func TestComment_CancelledBeforeSending(t *testing.T) {
 	}
 }
 
+func TestRemoveLabel(t *testing.T) {
+	var log bodyLog
+	srv := newServer(t, func(w http.ResponseWriter, r *http.Request, _ int) {
+		b, _ := io.ReadAll(r.Body)
+		log.add(b)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	c, _ := testClient(testOptions(srv.URL), basicCreds())
+
+	if err := c.RemoveLabel(context.Background(), "PAY-12", "ai-restart"); err != nil {
+		t.Fatal(err)
+	}
+	req := srv.requests()[0]
+	if req.Method != http.MethodPut || req.URL.Path != "/rest/api/2/issue/PAY-12" {
+		t.Errorf("request = %s %s", req.Method, req.URL.Path)
+	}
+	if got, want := string(log.all()[0]), `{"update":{"labels":[{"remove":"ai-restart"}]}}`; got != want {
+		t.Errorf("body = %s, want %s", got, want)
+	}
+
+	refused := newServer(t, answer(http.StatusForbidden, `{"errorMessages":["no"]}`))
+	c, _ = testClient(testOptions(refused.URL), basicCreds())
+	err := c.RemoveLabel(context.Background(), "PAY-12", "ai-restart")
+	if jerr := asJiraError(t, err); jerr.Op != apperr.JiraOpLabel {
+		t.Errorf("error = %+v, want op label", jerr)
+	}
+}
+
 func TestTransitions(t *testing.T) {
 	srv := newServer(t, answer(http.StatusOK, transitionsAnswer))
 	c, _ := testClient(testOptions(srv.URL), basicCreds())

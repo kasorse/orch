@@ -23,6 +23,7 @@ const (
 	defaultListenerLabel         = "ai-run"
 	defaultListenerServicePrefix = "service:"
 	defaultListenerProjectPrefix = "gitlab:"
+	defaultListenerRestartLabel  = "ai-restart"
 	defaultGitLabUsername        = "oauth2"
 )
 
@@ -63,10 +64,12 @@ type ListenerQuery struct {
 	Reporters []string `yaml:"reporters"`
 }
 
-// ListenerLabels is listener.labels: the prefixes of the labels naming the service and the project.
+// ListenerLabels is listener.labels: the prefixes of the labels naming the service and the project,
+// and the label that makes a ticket start a new run instead of resuming its earlier one.
 type ListenerLabels struct {
 	ServicePrefix string `yaml:"service_prefix"`
 	ProjectPrefix string `yaml:"project_prefix"`
+	Restart       string `yaml:"restart"`
 }
 
 // ListenerTransitions is listener.transitions: each a transition's name or its target status, as
@@ -97,6 +100,7 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		Labels struct {
 			ServicePrefix *string `yaml:"service_prefix"`
 			ProjectPrefix *string `yaml:"project_prefix"`
+			Restart       *string `yaml:"restart"`
 		} `yaml:"labels"`
 		Transitions ListenerTransitions `yaml:"transitions"`
 	}
@@ -105,13 +109,13 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 	}
 	return l.finish(raw.PollInterval, raw.ServicesDir, raw.DefaultConfig, raw.MaxAttempts, raw.CloneTimeout,
 		raw.Query.Projects, raw.Query.Label, raw.Query.Statuses, raw.Query.Reporters,
-		raw.Labels.ServicePrefix, raw.Labels.ProjectPrefix, raw.Transitions)
+		raw.Labels.ServicePrefix, raw.Labels.ProjectPrefix, raw.Labels.Restart, raw.Transitions)
 }
 
 // finish builds the section from the decoded keys, defaulting the absent ones.
 func (l *ListenerConfig) finish(poll string, dir *string, defaultConfig string, attempts *int, clone string,
 	projects []string, label *string, statuses, reporters []string,
-	servicePrefix, projectPrefix *string, transitions ListenerTransitions) error {
+	servicePrefix, projectPrefix, restart *string, transitions ListenerTransitions) error {
 	pollInterval, err := parseDurationField("listener.poll_interval", poll)
 	if err != nil {
 		return err
@@ -149,6 +153,7 @@ func (l *ListenerConfig) finish(poll string, dir *string, defaultConfig string, 
 		Labels: ListenerLabels{
 			ServicePrefix: or(servicePrefix, defaultListenerServicePrefix),
 			ProjectPrefix: or(projectPrefix, defaultListenerProjectPrefix),
+			Restart:       or(restart, defaultListenerRestartLabel),
 		},
 		Transitions: transitions,
 	}
@@ -191,9 +196,10 @@ func validateListener(l ListenerConfig) []string {
 	for _, p := range []struct{ key, value string }{
 		{"listener.labels.service_prefix", l.Labels.ServicePrefix},
 		{"listener.labels.project_prefix", l.Labels.ProjectPrefix},
+		{"listener.labels.restart", l.Labels.Restart},
 	} {
 		if p.value == "" || strings.ContainsFunc(p.value, func(r rune) bool { return unicode.IsSpace(r) || !unicode.IsPrint(r) }) {
-			problems = append(problems, fmt.Sprintf("%s %q must be a non-empty label prefix without whitespace", p.key, p.value))
+			problems = append(problems, fmt.Sprintf("%s %q must be a non-empty label or label prefix without whitespace", p.key, p.value))
 		}
 	}
 	if l.Labels.ServicePrefix == l.Labels.ProjectPrefix && l.Labels.ServicePrefix != "" {

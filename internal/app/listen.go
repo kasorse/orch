@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -551,7 +553,7 @@ func (r *listenRunner) dispatch(h domain.TicketHead) (bool, error) {
 		return true, err
 	}
 	r.logf("%s claimed", key)
-	return true, r.process(h)
+	return true, r.process(h, prev)
 }
 
 // restore puts the entry of key back as it was before a claim that did not happen.
@@ -565,7 +567,7 @@ func (r *listenRunner) restore(key string, prev listener.Entry, had bool) error 
 }
 
 // process takes a claimed ticket as far as its outcome.
-func (r *listenRunner) process(h domain.TicketHead) error {
+func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry) error {
 	key := h.Key
 	dirs, err := r.checkout.serviceDirs()
 	if err != nil {
@@ -596,6 +598,21 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 	if err != nil {
 		return r.jiraProblem(key, err)
 	}
+	hash := r.ticketHash(ticket)
+	restart := slices.Contains(ticket.Labels, r.lc.Labels.Restart)
+	if run := r.previousRun(key, res.Dir, service, prev, hash, restart); run != nil {
+		if r.stopping() {
+			return nil
+		}
+		if err := r.update(key, func(e *listener.Entry) {
+			e.Phase, e.StartedAt = listener.PhaseRunning, r.now().UTC()
+			e.RunID, e.RunDir, e.TicketHash = run.ID, listener.RunDir(service, run.ID), hash
+		}); err != nil {
+			return err
+		}
+		r.logf("%s: resuming its earlier run %s", key, run.ID)
+		return r.resume(key, res.Dir, configPath, run.ID)
+	}
 	comments, err := r.jira.Comments(r.ctx, key)
 	if err != nil {
 		return r.jiraProblem(key, err)
@@ -613,8 +630,15 @@ func (r *listenRunner) process(h domain.TicketHead) error {
 	if r.stopping() {
 		return nil
 	}
+	if restart {
+		// Best effort: a label left behind only makes the next cycle start a new run again.
+		if err := r.jira.RemoveLabel(r.ctx, key, r.lc.Labels.Restart); err != nil {
+			r.isAuth(err)
+			r.logf("%s: cannot remove the label %s: %s", key, r.lc.Labels.Restart, firstLineOf(err.Error()))
+		}
+	}
 	if err := r.update(key, func(e *listener.Entry) {
-		e.Phase, e.StartedAt = listener.PhaseRunning, r.now().UTC()
+		e.Phase, e.StartedAt, e.TicketHash = listener.PhaseRunning, r.now().UTC(), hash
 	}); err != nil {
 		return err
 	}
@@ -1263,10 +1287,62 @@ func (r *listenRunner) recoverRunning(key string, e listener.Entry) error {
 		return r.endBefore(key, listener.ResultFailed, err.Error())
 	}
 	r.logf("%s: resuming run %s", key, run.ID)
+	return r.resume(key, dir, configPath, run.ID)
+}
+
+// resume continues the run id of the ticket key in the service directory dir.
+func (r *listenRunner) resume(key, dir, configPath, id string) error {
 	return r.execute(key, dir, func(ctx context.Context) error {
-		return resumeRun(ctx, dir, configPath, run.ID, domain.ModeAuto, r.claudeAuth, r.codexAuth, false,
+		return resumeRun(ctx, dir, configPath, id, domain.ModeAuto, r.claudeAuth, r.codexAuth, false,
 			strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
 	})
+}
+
+// ticketHash is the sha256 of the ticket's text without its discussion: a person's edit of the
+// summary, the description or the fields changes it, a comment does not (the listener's own comment
+// after every run would). "" when the text cannot be rendered; the new run then reports why.
+func (r *listenRunner) ticketHash(t domain.Ticket) string {
+	text, err := jira.Render(t, "", r.cfg.Jira.MaxBytes)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(sum[:])
+}
+
+// previousRun is the run of an earlier cycle of the ticket that this cycle continues instead of
+// starting a new one: a ticket moved back to the queue after its run stopped or failed resumes it
+// (its worktree and steps, under the current configuration). A run that needs input is not one: the
+// new cycle's task carries the answers from the discussion. Nor is one that opened its merge request,
+// nor one of a ticket that has the restart label or was edited since (hash differs from the one the
+// run started with; an entry without one, from before the hash was kept, counts as unchanged).
+func (r *listenRunner) previousRun(key, dir, service string, prev listener.Entry, hash string, restart bool) *domain.Run {
+	if prev.Service != service || !listener.ValidRunID(prev.RunID) {
+		return nil
+	}
+	run, err := persistence.NewStore(filepath.Join(dir, runsBaseDir)).LoadRun(prev.RunID)
+	if err != nil {
+		r.logf("%s: cannot read its earlier run %s, a new run starts: %s", key, prev.RunID, firstLineOf(err.Error()))
+		return nil
+	}
+	if src := run.Task.Source; src == nil || !src.Listener || src.Key != key {
+		return nil
+	}
+	if run.Status != domain.RunStopped && run.Status != domain.RunFailed {
+		return nil
+	}
+	if run.FailureReason == domain.FailureTaskNeedsInput || (run.MR != nil && run.MR.State == domain.MRCreated) {
+		return nil
+	}
+	if restart {
+		r.logf("%s has the label %s: a new run starts instead of resuming %s", key, r.lc.Labels.Restart, prev.RunID)
+		return nil
+	}
+	if prev.TicketHash != "" && prev.TicketHash != hash {
+		r.logf("%s changed since its run %s: a new run starts", key, prev.RunID)
+		return nil
+	}
+	return run
 }
 
 // findRun is the run the ticket's earlier call created: the recorded one, else the newest run of
