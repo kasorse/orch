@@ -256,7 +256,7 @@ the details. Every comment starts `[orchestrator]`, is Go's wiki markup with mod
 | child | comment | transition | attempt counted |
 |---|---|---|---|
 | 0, `mr.state: created` | merge request link, commit header, review, tests, cost (`MergeRequestComment`) | `done` | yes |
-| 4, `task needs input` | the open points from `task.clarification`, numbered; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
+| 4, `task needs input` | the open points from `task.clarification`, numbered; then the points settled by an assumption, numbered, each "<question> Assumed: <answer>", to confirm or correct; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
 | 4, any other reason (red tests, red pre-run suite, `max_steps`, budget, no progress, path rule) | the failure reason and the last test or check that failed | `failed` | yes |
 | 6 (review fail, no MR, push refused, branch exists) | the verdict and its issues, or why there is no MR | `failed` | yes |
 | 2 with `failure_kind: auth` | none | `retry` | no; the listener stops (§10) |

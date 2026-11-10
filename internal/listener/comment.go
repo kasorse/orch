@@ -90,10 +90,13 @@ func oneLine(s string) string {
 // text is a model-written string made safe: one line, bounded, escaped.
 func text(esc Escape, s string) string { return esc(oneLine(s)) }
 
+// Assumption is a point the clarify step settled by an assumption: its question and what it assumed.
+type Assumption struct{ Question, Answer string }
+
 // NeedsInput is the comment of a task that stayed unclear (SPEC §8): the open points, numbered,
-// and where to move the ticket after answering. A point the caller found to look like a secret
-// is passed as Withheld.
-func NeedsInput(esc Escape, points []string, backTo string) []string {
+// then the assumptions the run would have made, so one answer settles both, and where to move the
+// ticket after answering. A text the caller found to look like a secret is passed as Withheld.
+func NeedsInput(esc Escape, points []string, assumed []Assumption, backTo string) []string {
 	body := []string{"The task is not clear enough to start. Open points:"}
 	if len(points) == 0 {
 		body = append(body, "No single point was left open, but the task is still rated unclear.")
@@ -101,7 +104,15 @@ func NeedsInput(esc Escape, points []string, backTo string) []string {
 	for _, p := range points {
 		body = append(body, "# "+text(esc, p))
 	}
-	body = append(body, "", "Answer in a comment and move the ticket back to "+esc(oneLine(backTo))+".")
+	answer := "Answer in a comment"
+	if len(assumed) > 0 {
+		body = append(body, "", "Assumed, confirm or correct:")
+		for _, a := range assumed {
+			body = append(body, "# "+text(esc, a.Question)+" Assumed: "+text(esc, a.Answer))
+		}
+		answer = "Answer and correct the assumptions in a comment"
+	}
+	body = append(body, "", answer+" and move the ticket back to "+esc(oneLine(backTo))+".")
 	return body
 }
 
