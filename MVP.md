@@ -6427,7 +6427,7 @@ Every comment starts `[orchestrator]`, is Go's wiki markup with model text escap
 | run | comment | transition | attempt counted |
 |---|---|---|---|
 | 0, `mr.state: created` | merge request link, commit header, review, tests, cost | `done` | yes |
-| 4, `task needs input` | the open points of `task.clarification`, numbered; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
+| 4, `task needs input` | the open points of `task.clarification`, numbered; then the points settled by an assumption, numbered, each "<question> Assumed: <answer>", to confirm or correct; "answer in a comment and move the ticket back to <status>" | `blocked` | yes |
 | 4, any other reason | the failure reason and the last test or check that failed | `failed` | yes |
 | 6 | the verdict and its issues, or why there is no merge request | `failed` | yes |
 | 2 with `failure_kind: auth` | none | `retry`; the listener stops | no |

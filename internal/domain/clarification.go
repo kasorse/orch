@@ -202,6 +202,22 @@ func (c *Clarification) Open() []ClarifyPoint {
 	return open
 }
 
+// Assumed is every point a round settled by an assumption, in round order.
+func (c *Clarification) Assumed() []ClarifyPoint {
+	if c == nil {
+		return nil
+	}
+	var assumed []ClarifyPoint
+	for _, r := range c.Rounds {
+		for _, p := range r.Points {
+			if p.By == ClarifyByAssumption {
+				assumed = append(assumed, p)
+			}
+		}
+	}
+	return assumed
+}
+
 // NeedsInputText is what the console says when the task stays unclear: the last P(clear) against
 // the threshold and the points no round answered (specs/clarify, Approach §4).
 func (c *Clarification) NeedsInputText() string {

@@ -34,9 +34,26 @@ func TestComposeBoundsTheCommentAtACharacterBoundary(t *testing.T) {
 }
 
 func TestNeedsInputNumbersTheOpenPointsAndEscapesThem(t *testing.T) {
-	body := NeedsInput(testEscape, []string{"Which {code} to use?", "Where [here]?"}, "To Do")
+	body := NeedsInput(testEscape, []string{"Which {code} to use?", "Where [here]?"}, nil, "To Do")
 	text := strings.Join(body, "\n")
-	for _, want := range []string{"# Which \\{code\\} to use?", "# Where \\[here\\]?", "move the ticket back to To Do."} {
+	for _, want := range []string{"# Which \\{code\\} to use?", "# Where \\[here\\]?", "Answer in a comment and move the ticket back to To Do."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("comment lacks %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Assumed") {
+		t.Errorf("comment without assumptions lists some:\n%s", text)
+	}
+}
+
+func TestNeedsInputListsTheAssumptionsToConfirm(t *testing.T) {
+	assumed := []Assumption{{Question: "What key format?", Answer: "Assume {id}-<code>, e.g. 38-5-HTP."}}
+	text := strings.Join(NeedsInput(testEscape, nil, assumed, "To Do"), "\n")
+	for _, want := range []string{
+		"No single point was left open",
+		"Assumed, confirm or correct:\n# What key format? Assumed: Assume \\{id\\}-<code>, e.g. 38-5-HTP.",
+		"Answer and correct the assumptions in a comment and move the ticket back to To Do.",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("comment lacks %q:\n%s", want, text)
 		}

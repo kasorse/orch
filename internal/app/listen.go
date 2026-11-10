@@ -1048,7 +1048,7 @@ func (r *listenRunner) commentBody(key string, e listener.Entry, d listener.Deci
 	case listener.CommentMergeRequest:
 		return r.mergeRequestBody(e.Service, run), runID
 	case listener.CommentNeedsInput:
-		return listener.NeedsInput(jira.Escape, r.openPoints(run), r.queueStatus()), runID
+		return listener.NeedsInput(jira.Escape, r.openPoints(run), r.assumedPoints(run), r.queueStatus()), runID
 	case listener.CommentFailure:
 		return r.failureBody(run, oc.line), runID
 	}
@@ -1085,6 +1085,18 @@ func (r *listenRunner) openPoints(run *domain.Run) []string {
 		points = append(points, r.scrubText(p.Question))
 	}
 	return points
+}
+
+// assumedPoints are the points a round settled by an assumption: a person should confirm or correct them.
+func (r *listenRunner) assumedPoints(run *domain.Run) []listener.Assumption {
+	if run == nil {
+		return nil
+	}
+	var assumed []listener.Assumption
+	for _, p := range run.Task.Clarification.Assumed() {
+		assumed = append(assumed, listener.Assumption{Question: r.scrubText(p.Question), Answer: r.scrubText(p.Answer)})
+	}
+	return assumed
 }
 
 // mergeRequestBody is the comment of a delivered run: the merge request, its title, and what the
