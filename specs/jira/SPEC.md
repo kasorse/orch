@@ -277,6 +277,7 @@ type Ticket struct {
 PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
 Type: Bug
 Parent: PMC-2663 — Tags & Labels
+Labels: ai-run, service:catalog
 Source: https://yourcompany.atlassian.net/browse/PMC-2789
 
 Description:
@@ -291,8 +292,10 @@ Operator notes:
 only the FE part; leave pim-qa alone
 ```
 
-- Sections with no content (no parent, empty description, empty custom field, no notes)
-  are left out entirely.
+- Sections with no content (no parent, no labels, empty description, empty custom field, no
+  notes) are left out entirely.
+- The labels are on one line in Jira's order: the listener picks the service and the GitLab
+  project by label (`service:`, `gitlab:`), and the models would otherwise not know them.
 - Wiki markup is passed through verbatim (F4). Models read it, and conversion would be an
   unaudited transform (J5). `\r\n` is normalised to `\n`, and nothing else changes.
 - The operator's notes come **last** and are labelled, so the operator's own words are

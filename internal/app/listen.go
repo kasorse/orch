@@ -1298,10 +1298,11 @@ func (r *listenRunner) resume(key, dir, configPath, id string) error {
 	})
 }
 
-// ticketHash is the sha256 of the ticket's text without its discussion: a person's edit of the
-// summary, the description or the fields changes it, a comment does not (the listener's own comment
-// after every run would). "" when the text cannot be rendered; the new run then reports why.
+// ticketHash is the sha256 of the ticket's text without its discussion and labels: a person's edit
+// of the summary, the description or the fields changes it, a comment or a label does not (the
+// listener's own comment after every run would). "" when the text cannot be rendered; the new run then reports why.
 func (r *listenRunner) ticketHash(t domain.Ticket) string {
+	t.Labels = nil // rendered, but the restart and queue labels come and go without an edit
 	text, err := jira.Render(t, "", r.cfg.Jira.MaxBytes)
 	if err != nil {
 		return ""

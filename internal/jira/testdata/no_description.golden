@@ -1,6 +1,7 @@
 PMC-2789: FE[catalog]: Tags/Labels disable reason not shown on hover in the editor
 Type: Bug
 Parent: PMC-2663 — Tags & Labels
+Labels: ai-run, service:catalog
 Source: https://yourcompany.atlassian.net/browse/PMC-2789
 
 Acceptance criteria:

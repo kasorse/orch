@@ -27,6 +27,7 @@ func fullTicket() domain.Ticket {
 			"Steps to reproduce:\n# Open a product\n# Hover {{Tags}}\n\n" +
 			"Actual result:\nNothing is shown.\n\nExpected result:\nThe disable reason is shown.\n\n\n",
 		Parent: &domain.TicketParent{Key: "PMC-2663", Summary: "Tags & Labels"},
+		Labels: []string{"ai-run", "service:catalog"},
 		Fields: []domain.TicketField{
 			{ID: "customfield_10035", Label: "Acceptance criteria", Value: "* Reason shown on hover\n* No layout shift"},
 			{ID: "customfield_10036", Label: "Design", Value: "[Figma|https://figma.example/f/1]"},

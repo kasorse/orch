@@ -3643,6 +3643,7 @@ For the listener (§51) the same validation covers `fields.status.name` (non-emp
 <KEY>: <summary>
 Type: <issue type>
 Parent: <parent key> — <parent summary>
+Labels: <label>, <label>      (the issue's labels, in Jira's order)
 Source: <base_url>/browse/<KEY>
 
 Description:
@@ -6449,9 +6450,9 @@ input`, and opened no merge request, continues that run instead of starting a ne
 takes its `run_id`, `running`, and `resumeRun` runs it as on restart (§51.9), under the current
 configuration (§37), without writing a task file; its end counts an attempt as any run's. Two
 things start a new run instead. The ticket changed: the entry keeps `ticket_hash`, the sha256 of
-`jira.Render` of the ticket without its discussion, taken when the run started; a different one
-now means a person edited the summary, the description or a field (a comment does not count; an
-entry without the hash counts as unchanged). Or the ticket has the label `listener.labels.restart`
+`jira.Render` of the ticket without its discussion and labels, taken when the run started; a
+different one now means a person edited the summary, the description or a field (a comment or a
+label does not count; an entry without the hash counts as unchanged). Or the ticket has the label `listener.labels.restart`
 (default `ai-restart`): the listener removes it (PUT on the issue, best effort, a log line when it
 fails) just before the new run starts. A run that needs input gets a new run, whose task carries
 the answers. A run that cannot be read is logged and a new run starts.

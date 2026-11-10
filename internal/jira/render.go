@@ -32,6 +32,10 @@ func Render(t domain.Ticket, notes string, maxBytes int, opts ...RenderOptions) 
 		}
 		header = append(header, clean(parent))
 	}
+	if len(t.Labels) > 0 {
+		// the listener picks the service and the GitLab project by label; the models see them here
+		header = append(header, clean("Labels: "+strings.Join(t.Labels, ", ")))
+	}
 	header = append(header, "Source: "+t.URL)
 
 	var b strings.Builder
