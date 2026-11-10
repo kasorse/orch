@@ -34,7 +34,7 @@ type Ticket struct {
 	Fields    []TicketField `json:"fields,omitempty"`
 	FetchedAt time.Time     `json:"fetched_at"`
 	// Status, Labels and Reporter are what the Jira listener re-checks (specs/jira-listener/SPEC.md
-	// §3.3). None of them is rendered into the task text. Reporter is the accountId on Jira
+	// §3.3). Only Labels is rendered into the task text, as the header's Labels line. Reporter is the accountId on Jira
 	// Cloud and the username on Data Center; "" when the issue has none.
 	Status   string   `json:"status,omitempty"`
 	Labels   []string `json:"labels,omitempty"`

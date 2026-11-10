@@ -212,12 +212,15 @@ func TestFetch_StatusLabelsReporter(t *testing.T) {
 			if got.Status != "To Do" || !reflect.DeepEqual(got.Labels, []string{"ai-run", "service:billing"}) || got.Reporter != tc.reporter {
 				t.Errorf("status %q labels %q reporter %q", got.Status, got.Labels, got.Reporter)
 			}
-			// None of them is part of the task text.
+			// Only the labels are part of the task text.
 			text, err := Render(got, "", 32768)
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, leaked := range []string{"To Do", "ai-run", tc.reporter} {
+			if !strings.Contains(text, "\nLabels: ai-run, service:billing\n") {
+				t.Errorf("the rendered ticket lacks its labels:\n%s", text)
+			}
+			for _, leaked := range []string{"To Do", tc.reporter} {
 				if strings.Contains(text, leaked) {
 					t.Errorf("the rendered ticket holds %q:\n%s", leaked, text)
 				}
