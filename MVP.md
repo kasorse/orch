@@ -6925,3 +6925,13 @@ for the write-back and the description. New in `run.json`: `task.source` kind `r
 validated on load against the others (§54.4, §54.6). `summary.md`'s merge request row reads
 `!<iid> <url>, updated`; `report.md` links the merge request as for `created`.
 
+## 54.11 Not covered (SPEC §12)
+
+The listener (a ticket re-queued with a revision comment, R1); changing a merge request's title,
+description, labels or reviewers, or a note on it; reading merge request discussions as task text;
+rebasing a stale branch, resolving conflicts, force-push; merge requests from forks, another GitLab
+than `gitlab.base_url`, GitHub; a key guessed from a merge request title; the Jira development panel
+(`dev-status`); several merge requests in one `revise` (one per service of a ticket: one call each).
+The live check (a real ticket on Jira Cloud and a real merge request on gitlab.com) is the
+operator's gate, recorded in `specs/revise/README.md`.
+

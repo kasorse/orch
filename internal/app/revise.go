@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"slices"
@@ -417,8 +418,21 @@ func newReviseGitLab(cfg config.Config) reviseGitLab {
 	g := cfg.GitLab
 	return gitlab.NewHTTPClient(gitlab.Options{
 		BaseURL: g.BaseURL, AllowedGroups: g.AllowedGroups, TokenEnv: g.APITokenEnv,
-		UserAgent: "orchestrator/" + Version,
+		UserAgent: "orchestrator/" + Version, HTTPClient: gitlabHTTPClient,
 	}, gitlab.NewToken(os.Getenv(g.APITokenEnv)))
+}
+
+// gitlabHTTPClient is what the GitLab client sends its requests with; nil is the client's own.
+// Only SetGitLabHTTPClient changes it.
+var gitlabHTTPClient *http.Client
+
+// SetGitLabHTTPClient makes c carry the GitLab API's requests and returns a function that puts the
+// previous one back. It exists for the integration tests, which serve a fake GitLab on loopback
+// under the remote's host name; no run changes it.
+func SetGitLabHTTPClient(c *http.Client) (restore func()) {
+	previous := gitlabHTTPClient
+	gitlabHTTPClient = c
+	return func() { gitlabHTTPClient = previous }
 }
 
 // jiraForRevise is the ticket's read for a Jira target: taskFromJira's fetch and render, and the

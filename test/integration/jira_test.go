@@ -29,7 +29,8 @@ const defaultJiraTransitions = `{"transitions":[` +
 // jiraRequest is what the fake Jira recorded of one request.
 type jiraRequest struct {
 	Path, Query, Auth string
-	// Method and Body are set for a write (a POST: a creation, a comment, a transition).
+	// Method and Body are set for a write (a POST: a creation, a comment, a transition; a PUT: a
+	// revise run's description).
 	Method, Body string
 }
 
@@ -75,7 +76,7 @@ func (j *fakeJira) Requests() []jiraRequest {
 
 func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
 	req := jiraRequest{Path: r.URL.Path, Query: r.URL.RawQuery, Auth: r.Header.Get("Authorization")}
-	if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		body, _ := io.ReadAll(r.Body)
 		req.Method, req.Body = r.Method, string(body)
 	}
@@ -116,6 +117,9 @@ func (j *fakeJira) handle(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"id":"10042"}`))
 		return
 	case req.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/transitions"):
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case req.Method == http.MethodPut:
 		w.WriteHeader(http.StatusNoContent)
 		return
 	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/transitions"):

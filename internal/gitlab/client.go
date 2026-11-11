@@ -71,6 +71,9 @@ type Options struct {
 	Timeout    time.Duration
 	MaxRetries int
 	UserAgent  string
+	// HTTPClient carries the requests; nil is a plain one. The integration tests give one that
+	// reaches their fake GitLab. Its redirects are never followed, whatever it says.
+	HTTPClient *http.Client
 }
 
 // Client reads merge requests from one GitLab.
@@ -93,14 +96,13 @@ func NewHTTPClient(opts Options, token Token) *Client {
 	if opts.UserAgent == "" {
 		opts.UserAgent = "orchestrator"
 	}
-	return &Client{
-		opts:  opts,
-		token: token,
-		http: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}},
-		sleep: sleepCtx,
+	hc := &http.Client{}
+	if opts.HTTPClient != nil {
+		copied := *opts.HTTPClient
+		hc = &copied
 	}
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &Client{opts: opts, token: token, http: hc, sleep: sleepCtx}
 }
 
 // Allowed reports whether project is under one of groups, matched on whole path segments.
