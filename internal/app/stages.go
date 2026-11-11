@@ -168,11 +168,11 @@ func askClarity(ctx, userCtx context.Context, cfg config.Config, registry *provi
 }
 
 // decideWithProvider is the decision layer: translation, pre-check, project context and
-// classification (MVP.md §8-§9). storyTask is run --story-task: development is then forced on
-// after the policy.
+// classification (MVP.md §8-§9). storyTask is run --story-task and revise is orchestrator revise:
+// development is then forced on after the policy.
 func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registry *provider.Registry, store *persistence.Store,
 	repo *repository.Repository, cwd string, run *domain.Run, text string, reporter *logging.ConsoleReporter,
-	prompter interaction.Prompter, interactive, storyTask bool, stream, stderr io.Writer) (decisionOutcome, error) {
+	prompter interaction.Prompter, interactive, storyTask, revise bool, stream, stderr io.Writer) (decisionOutcome, error) {
 	decisions, err := newDecisionProvider(cfg, registry, store, run.ID, reporter, "Deciding the workflow", stream, stderr)
 	if err != nil {
 		return decisionOutcome{}, err
@@ -223,6 +223,11 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 		res.Decision = policy.ForceDevelopment(res.Decision, storyTaskReason)
 		// The task file is the plan: research and investigation are not run again.
 		res.Decision = policy.SkipPlanning(res.Decision, storyTaskPlannedReason)
+	}
+	// A revision is a code change too (specs/revise/SPEC.md §6.2); research and investigation stay
+	// the policy's.
+	if revise {
+		res.Decision = policy.ForceDevelopment(res.Decision, reviseReason)
 	}
 	return decisionOutcome{
 		decision:     res.Decision,

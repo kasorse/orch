@@ -644,7 +644,7 @@ func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry) error {
 	}
 	r.logf("%s running in %s", key, service)
 	return r.execute(key, res.Dir, func(ctx context.Context) error {
-		return runTask(ctx, res.Dir, configPath, "", "", "", &task, nil, false, "", domain.ModeAuto,
+		return runTask(ctx, res.Dir, configPath, "", "", "", &task, nil, nil, false, "", domain.ModeAuto,
 			r.claudeAuth, r.codexAuth, false, strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
 	})
 }

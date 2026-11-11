@@ -56,7 +56,7 @@ const defaultConfigPath = "orchestrator.yaml"
 const runsBaseDir = ".orchestrator/runs"
 
 const usage = `usage: orchestrator [--config path] [--mode plan|manual|accept-edits|auto] [--claude-auth auto|api|login] [--codex-auth auto|api|login] [--output json] [--verbose] ` +
-	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|jira listen [--once]|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]|help>` +
+	`<version|validate|run [--stage <name>]... [--allow-red-tests] [--inplace|--worktree] "<task>"|run --jira <KEY|URL> ["notes"]|review --base <ref> [--head <ref>] [--task "<text>"|--jira <KEY|URL>]|revise [--allow-red-tests] <KEY|MR-URL|run-id|branch> "<requirement>"|resume <run-id>|story plan [--jira <KEY|URL>] [--repo <name>]... "<task>"|story run <spec-dir> [--retry <ID>] [--parallel <N>]|story status <spec-dir>|jira listen [--once]|decisions report|decisions calibrate [--runs <dir>] [--min-runs N]|runs report [--dir <path>]|runs clean [--older-than <N>d | --unreadable] [--dry-run]|help>` +
 	"\n(orchestrator --help lists the commands, the run modes and every flag)"
 
 // Run parses args and dispatches to the requested subcommand. It never calls
@@ -131,17 +131,17 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 	if cli.storyNoPush && rest[0] != "validate" {
 		return &apperr.ConfigError{Msg: "--story-no-push is only valid with validate"}
 	}
-	if cli.allowRedTests && rest[0] != "run" {
-		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run"}
+	if cli.allowRedTests && rest[0] != "run" && rest[0] != "revise" {
+		return &apperr.ConfigError{Msg: "--allow-red-tests is only valid with run and revise"}
 	}
 	if cli.isolation != "" && rest[0] != "run" {
 		return &apperr.ConfigError{Msg: "--" + cli.isolation + " is only valid with run"}
 	}
-	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
-		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, review, validate, story run and jira listen"}
+	if cli.claudeAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "revise" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--claude-auth is only valid with run, resume, review, revise, validate, story run and jira listen"}
 	}
-	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
-		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, review, validate, story run and jira listen"}
+	if cli.codexAuth != "" && rest[0] != "run" && rest[0] != "resume" && rest[0] != "review" && rest[0] != "revise" && rest[0] != "validate" && rest[0] != "jira" && !storyRunCmd {
+		return &apperr.ConfigError{Msg: "--codex-auth is only valid with run, resume, review, revise, validate, story run and jira listen"}
 	}
 	if cli.storyTaskFile != "" {
 		if err := checkStoryTaskFlags(cli, rest); err != nil {
@@ -170,7 +170,20 @@ func dispatch(ctx context.Context, cli cliArgs, stdin io.Reader, stdout, stderr 
 		if err != nil {
 			return err
 		}
-		return runTask(ctx, dir, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, nil, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+		return runTask(ctx, dir, cli.configPath, strings.Join(rest[1:], " "), cli.jiraRef, cli.storyTaskFile, nil, nil, cli.stages, cli.allowRedTests, cli.isolation, cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
+	case "revise":
+		req, err := reviseArgs(rest, stdin)
+		if err != nil {
+			return err
+		}
+		if err := checkTerminal(cli.mode, stdin); err != nil {
+			return err
+		}
+		dir, err := workingDir()
+		if err != nil {
+			return err
+		}
+		return runTask(ctx, dir, cli.configPath, req.Requirement, "", "", nil, &req, nil, cli.allowRedTests, "", cli.mode, cli.claudeAuth, cli.codexAuth, cli.verbose, stdin, stdout, stderr)
 	case "review":
 		if len(rest) != 1 {
 			return &apperr.ConfigError{Msg: reviewUsage}
@@ -1373,7 +1386,7 @@ func runsReport(stdout io.Writer, dir string) error {
 // is the caller's, which for the listener is not the service's). The run's directory, the repository
 // and the reporter's header come from it; configPath is resolved by the caller (the process's
 // working directory for run, an absolute path for the listener).
-func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile string, listenerIn *listenerTask, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
+func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile string, listenerIn *listenerTask, reviseIn *reviseRequest, stages []domain.Stage, allowRedTests bool, isolation string, mode domain.RunMode, claudeAuthFlag, codexAuthFlag string, verbose bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	reporter := newReporter(stdout, verbose)
 	defer reporter.Finish()
 	// Warnings on stderr go to the same terminal; routed through the reporter they stop
@@ -1407,7 +1420,10 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 	// credential variables, and the reference is resolved before any request.
 	cfg, clis, org, auth, codexAuth, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, osExec, reporter,
 		func(c config.Config) config.DependencyOptions {
-			return config.DependencyOptions{Jira: jiraRef != "" || jiraWriteDependencies(c, storyIn)}
+			return config.DependencyOptions{
+				Jira:   jiraRef != "" || jiraWriteDependencies(c, storyIn) || (reviseIn != nil && reviseJiraTarget(reviseIn.Target)),
+				GitLab: reviseIn != nil,
+			}
 		})
 	if err != nil {
 		return err
@@ -1415,8 +1431,8 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 	if isolation != "" {
 		cfg.Execution.Isolation = isolation
 	}
-	if storyIn != nil {
-		// Whatever execution.isolation says (specs/story/SPEC.md §11.2).
+	if storyIn != nil || reviseIn != nil {
+		// Whatever execution.isolation says (specs/story/SPEC.md §11.2, specs/revise/SPEC.md A11).
 		cfg.Execution.Isolation = domain.IsolationWorktree
 	}
 	reporter.TestCommand = cfg.Test.Command
@@ -1468,6 +1484,27 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 
 	task := domain.Task{Description: text, CreatedAt: time.Now()}
 	var ticket domain.Ticket
+	if reviseIn != nil {
+		// Before the run exists: a target that does not resolve creates none (specs/revise/SPEC.md §4).
+		res, err := resolveRevise(decideCtx, reviseDeps{
+			cfg: cfg, repo: repo, loadRun: persistence.NewStore(runsDirOf(dir)).LoadRun, gitlab: newReviseGitLab(cfg),
+			jira: func() (reviseJira, error) {
+				client, err := newJiraWriteClient(&cfg)
+				if err != nil {
+					return nil, &apperr.ConfigError{Msg: "a Jira target needs the jira section and its credentials", Err: err}
+				}
+				return jiraForRevise{cfg: cfg, client: client, reporter: reporter}, nil
+			},
+			out: stderr,
+		}, *reviseIn)
+		if err != nil {
+			return err
+		}
+		task.Description, task.Acceptance, task.Source = res.description, res.acceptance, &res.source
+		if res.ticket != nil {
+			ticket, jiraKey = *res.ticket, res.ticket.Key
+		}
+	}
 	if storyIn != nil {
 		task.Acceptance = storyIn.Acceptance
 		task.Source = storyTaskSource(*storyIn)
@@ -1475,7 +1512,7 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 	if listenerIn != nil {
 		task.Source = listenerTaskSource(*listenerIn)
 	}
-	if jiraKey != "" {
+	if jiraKey != "" && reviseIn == nil {
 		// The one Jira request. A failure creates no run: there is nothing to resume
 		// without a task (specs/jira/SPEC.md J2).
 		if ticket, task.Description, err = taskFromJira(decideCtx, cfg, jiraKey, text, reporter); err != nil {
@@ -1550,7 +1587,7 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 			reporter, prompter, interactive, stream, stderr)
 	} else {
 		out, err = decideWithProvider(decideCtx, ctx, cfg, registry, store, repo, dir, run, task.Description,
-			reporter, prompter, interactive, storyIn != nil, stream, stderr)
+			reporter, prompter, interactive, storyIn != nil, reviseIn != nil, stream, stderr)
 	}
 	if err != nil {
 		return stopUndecided(store, run, out, err)
@@ -1599,12 +1636,16 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 		// make a dirty tree a refusal), and run.json and decision.json rewritten, so a
 		// resume continues exactly what was approved.
 		onEdit: func(d domain.Decision) error {
-			if storyIn != nil {
-				// WithEdit rebuilds the forced stages from the policy alone: a story task is a
-				// code change whatever the edit says.
-				kept := policy.ForceDevelopment(d, storyTaskReason)
+			if storyIn != nil || reviseIn != nil {
+				// WithEdit rebuilds the forced stages from the policy alone: a story or revise
+				// task is a code change whatever the edit says.
+				reason, what := storyTaskReason, "A story task"
+				if reviseIn != nil {
+					reason, what = reviseReason, "A revision"
+				}
+				kept := policy.ForceDevelopment(d, reason)
 				if !slices.Equal(kept.Stages.EnabledStages(), d.Stages.EnabledStages()) {
-					fmt.Fprintln(stderr, "A story task always implements and tests: development stays on.")
+					fmt.Fprintln(stderr, what+" always implements and tests: development stays on.")
 				}
 				d = kept
 			}

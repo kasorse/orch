@@ -28,6 +28,10 @@ const TaskSourceJira = "jira"
 // TaskSourceStory is TaskSource.Kind for a task of a story (run --story-task).
 const TaskSourceStory = "story"
 
+// TaskSourceRevise is TaskSource.Kind for a revision of work that opened a merge request
+// (orchestrator revise, specs/revise/SPEC.md §7).
+const TaskSourceRevise = "revise"
+
 // TaskSource says where a task came from. For a Jira task (specs/jira/SPEC.md §11.1) it says
 // which ticket it was rendered from; it is only displayed, never used to make a request:
 // resume never re-fetches (J3). For a story task (specs/story/SPEC.md §11.1) it names the
@@ -65,6 +69,9 @@ type TaskSource struct {
 	Branch     string `json:"branch,omitempty"`
 	BaseRef    string `json:"base_ref,omitempty"`
 	BaseBranch string `json:"base_branch,omitempty"`
+
+	// Revise is set on a revise task (Kind TaskSourceRevise), whose Key is its Jira issue, if any.
+	Revise *ReviseSource `json:"revise,omitempty"`
 }
 
 // JiraKey is the key of the Jira issue the task stands for: the issue a run --jira task was

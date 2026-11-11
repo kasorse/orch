@@ -38,8 +38,8 @@ func validateRun(run *domain.Run, runID string) error {
 		return fmt.Errorf("task.clarification: %w", err)
 	}
 	if len(run.Task.Acceptance) > 0 {
-		if run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceStory {
-			return fmt.Errorf("task.acceptance on a task that is not a story task")
+		if src := run.Task.Source; src == nil || (src.Kind != domain.TaskSourceStory && src.Kind != domain.TaskSourceRevise) {
+			return fmt.Errorf("task.acceptance on a task that is not a story or revise task")
 		}
 		if err := story.CheckAcceptance("task.acceptance", run.Task.Acceptance, story.MaxAcceptanceRunesCeiling); err != nil {
 			return err
@@ -361,8 +361,82 @@ func validateTaskSource(src domain.TaskSource) error {
 		return validateJiraSource(src)
 	case domain.TaskSourceStory:
 		return validateStorySource(src)
+	case domain.TaskSourceRevise:
+		return validateReviseSource(src)
 	}
 	return fmt.Errorf("unknown kind %q", src.Kind)
+}
+
+// validateReviseSource checks a revise task's source (specs/revise/SPEC.md §10): the branch and
+// the base are passed to git and the push, so each is checked as a worktree's own.
+func validateReviseSource(src domain.TaskSource) error {
+	r := src.Revise
+	switch {
+	case r == nil:
+		return fmt.Errorf("a revise task needs revise")
+	case src.Story != "" || src.Task != "" || src.Attempt != 0 || src.Jira != "" || src.Title != "" ||
+		src.Branch != "" || src.BaseRef != "" || src.BaseBranch != "" || src.RequestedKey != "" || src.Notes || src.Listener:
+		return fmt.Errorf("a revise task has only key, url, fetched_at and revise")
+	case src.Key != "" && !domain.ValidTicketKey(src.Key):
+		return fmt.Errorf("key %q is not an issue key", src.Key)
+	case r.Target == "" || len(r.Target) > 2048 || strings.ContainsAny(r.Target, "\r\n\x00"):
+		return fmt.Errorf("revise.target is empty, too long or not one line")
+	case !slices.Contains([]string{domain.ReviseTargetJira, domain.ReviseTargetMR, domain.ReviseTargetRun, domain.ReviseTargetBranch}, r.TargetKind):
+		return fmt.Errorf("revise.target_kind %q is unknown", r.TargetKind)
+	case !validProjectPath(r.Project):
+		return fmt.Errorf("revise.project %q is not a project path", r.Project)
+	case !validBranchName(r.BaseBranch):
+		return fmt.Errorf("revise.base_branch %q is not a valid branch name", r.BaseBranch)
+	case r.FromRun != "" && !isRunID(r.FromRun):
+		return fmt.Errorf("revise.from_run %q is not a run ID", r.FromRun)
+	}
+	switch r.Mode {
+	case domain.ReviseUpdate:
+		if !validBranchName(r.Branch) || !isCommitSHA(r.BaseRef) {
+			return fmt.Errorf("an update needs revise.branch and a full revise.base_ref")
+		}
+	case domain.ReviseNew:
+		if r.Branch != "" || r.BaseRef != "" || r.MR == nil {
+			return fmt.Errorf("a new merge request has a revised merge request and no revise.branch or revise.base_ref")
+		}
+	default:
+		return fmt.Errorf("revise.mode %q is unknown", r.Mode)
+	}
+	if mr := r.MR; mr != nil {
+		switch {
+		case mr.IID <= 0 || mr.Project != r.Project:
+			return fmt.Errorf("revise.mr is not a merge request of %s", r.Project)
+		case !slices.Contains([]string{domain.MRStateOpened, domain.MRStateMerged, domain.MRStateClosed}, mr.State):
+			return fmt.Errorf("revise.mr.state %q is not opened, merged or closed", mr.State)
+		case !validBranchName(mr.SourceBranch) || !validBranchName(mr.TargetBranch) || !isCommitSHA(mr.SHA):
+			return fmt.Errorf("revise.mr has an invalid branch or sha")
+		case mr.Fork:
+			return fmt.Errorf("revise.mr is a fork's")
+		case !strings.HasPrefix(mr.URL, "https://") && !strings.HasPrefix(mr.URL, "http://"):
+			return fmt.Errorf("revise.mr.url %q is not an http(s) URL", mr.URL)
+		case mr.Title == "" || len(mr.Title) > 1024 || strings.ContainsAny(mr.Title, "\r\n\x00"):
+			return fmt.Errorf("revise.mr.title is empty, too long or not one line")
+		}
+		if r.Mode == domain.ReviseUpdate && (r.Branch != mr.SourceBranch || r.BaseRef != mr.SHA || r.BaseBranch != mr.TargetBranch) {
+			return fmt.Errorf("an update's branch, base_ref and base_branch are its merge request's")
+		}
+	}
+	return nil
+}
+
+// validProjectPath is a GitLab project path: two or more segments of letters, digits, _ . -, no
+// "." or ".." segment.
+func validProjectPath(p string) bool {
+	parts := strings.Split(p, "/")
+	if len(parts) < 2 || len(p) > 512 {
+		return false
+	}
+	for _, seg := range parts {
+		if seg == "" || seg == "." || seg == ".." || strings.Trim(seg, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // validateStorySource checks a story task's source (specs/story/SPEC.md §11.1). The branch is

@@ -78,6 +78,10 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return openReviewWorktree(ctx, s)
 	}
 	var base, baseBranch string
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceRevise {
+		// shortcut: the worktree on the merge request's branch is specs/revise RV04.
+		return nil, &apperr.ConfigError{Msg: "orchestrator revise cannot create its worktree yet (specs/revise RV04)"}
+	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		// The commit may have gone since the task input was checked, or the run be resumed
 		// before it had a worktree. CommitExists refuses anything but a full SHA.

@@ -6747,6 +6747,21 @@ request URL, a run ID, a branch), makes the change on that branch in a worktree,
 (fast-forward, the merge request updates itself) or, when the merge request is merged or closed,
 opens a new one, and appends the requirement to the ticket's description after the push.
 
+## 54.1 CLI (SPEC §1)
+
+```
+orchestrator revise <target> "<requirement>" [--mode M] [--allow-red-tests] [--claude-auth M] [--codex-auth M]
+  <target>: PAY-12 | https://<gitlab>/<group>/<project>/-/merge_requests/<iid> | <run-id> | <branch>
+```
+
+The target's kind comes from its form, in this order: a URL that `gitlab.ParseMergeRequestURL`
+accepts on `gitlab.base_url` (any other URL is refused); an upper-case Jira key (`pay-12` is a
+branch); a run ID (a lowercase UUID); a branch name `domain.CheckBranchName` accepts. The
+requirement is the rest of the arguments, or stdin for a single `-`: non-empty UTF-8 text without
+NUL, at most 8 KiB. A revise is always a worktree run whatever `execution.isolation` says;
+`--stage`, `--jira`, `--inplace`, `--worktree` and `--story-task` are refused. It needs
+`DependencyOptions{GitLab: true}` and, for a Jira target, `Jira: true`.
+
 ## 54.2 Configuration (SPEC §2)
 
 ```yaml
@@ -6785,6 +6800,40 @@ cut: auth, not found, redirect and scope are exit 2, cancelled 5, the rest 3.
   is set when the source project is not the target project.
 * `ParseMergeRequestURL(base_url, url)`: the same scheme and host as `base_url`, under its path,
   `<project>/-/merge_requests/<n>` with no query, fragment or userinfo.
+
+## 54.4 Resolving the target (SPEC §4)
+
+Before `store.NewRun`, with no model call (`app.resolveRevise`); a failure creates no run. First
+`CheckReadOnly`, then this repository's project: the path of `delivery.remote`'s URL (https,
+ssh or scp form, `.git` dropped, `base_url`'s context path dropped for https) on `base_url`'s
+host, under `allowed_groups`. Then by kind:
+
+| target | merge request | the original task |
+|---|---|---|
+| Jira key | `jira.Fetch` + `jira.Render` (printed, saved as `ticket.json`), then `RemoteLinks`: the links that are merge requests of **this project** (another project's are listed in the refusal), at most the 20 highest iids, each read; the latest `created_at` | the rendered ticket |
+| MR URL | that one; another project's is refused ("run revise in a checkout of it") | its title and description |
+| run ID | the run's `mr.url` (read with the persistence validators); a run whose push opened none: its branch, as a branch target | the run's task with its clarification |
+| branch | `LatestMergeRequest`; without one, the branch must be on the remote (`ls-remote`), its target the operator's current branch, else `delivery.target_branch` | the merge request's title and description, else none |
+
+The run's task text is the requirement, then `---`, a line naming the merge request (or branch),
+its state and where the change goes, and `The task it was opened for:` with the original (cut at
+32 KiB). The requirement's non-empty lines (at most 10, each at most 2 000 characters) are
+`task.acceptance`: the review's criteria. `task.source` is `{kind: revise, key?, url?,
+fetched_at?, revise: {target, target_kind, project, mode, mr?, branch?, base_ref?, base_branch,
+from_run?}}`, validated on load (a fork, a locked merge request, an update whose branch, base or
+target are not its merge request's are refused). The key is a Jira target's, or a run target's
+`task.source` key; none is guessed from a title.
+
+## 54.5 Update or new (SPEC §5)
+
+`opened` → **update**: `revise.branch` = the source branch, `base_ref` = the merge request's
+`sha`, `base_branch` = its target. `merged` or `closed` → **new**: a new branch from the target,
+named as any run's (§50.3), and a new merge request. A branch on the remote without a merge
+request → update, and the push opens one. A fork or a `locked` merge request is refused; a branch
+`domain.CheckBranchName` refuses (a story's `story/…`) cannot be updated. The decision runs as
+usual, clarify included, and development is forced on (reason `revise`, also after an edit on the
+review screen). Printed before the approval: `Revise !1294 (opened) on fix/PAY-31-round in
+acme/payments/billing`, or `!1290 is merged: a new branch from main and a new merge request`.
 
 ## 54.9 The ticket (SPEC §8)
 

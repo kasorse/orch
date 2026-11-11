@@ -117,6 +117,9 @@ func decodeRun(data []byte, wantID string) (*domain.Run, error) {
 
 // isRunID reports whether name has the shape newUUIDv4 produces: lowercase hex in
 // 8-4-4-4-12 groups.
+// IsRunID reports whether name has the form of a run ID (a lowercase UUID); it reads nothing.
+func IsRunID(name string) bool { return isRunID(name) }
+
 func isRunID(name string) bool {
 	if len(name) != 36 {
 		return false

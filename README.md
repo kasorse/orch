@@ -1012,6 +1012,24 @@ worktree at `head`, so your working tree may be dirty and is never touched. The 
 issues are printed and `report.md` is written; a failing verdict exits 6. Without `--task` or
 `--jira`, the task is written from the commits' subjects.
 
+### Revising a merge request (`orchestrator revise`)
+
+```
+orchestrator revise PAY-31 "Round half up, not to even"     # the ticket's latest merge request
+orchestrator revise https://gitlab.example.com/acme/payments/billing/-/merge_requests/1294 "Keep VAT"
+orchestrator revise 3f2a9c1e-… "Log the rounding mode"     # the merge request an earlier run opened
+orchestrator revise fix/PAY-31-round - < requirement.txt    # a branch; - reads the requirement from stdin
+```
+
+Adds a requirement to work that already opened a merge request. Go finds the merge request and
+its branch (a ticket's merge requests are its web links, which the GitLab integration adds; their
+branch and state come from the GitLab API, read with a read-only token, `gitlab.api_token_env`).
+An open merge request gets a new commit on its own branch, pushed without force, so it updates
+itself; a merged or closed one gets a new branch from its target and a new merge request. The
+review sees the whole merge request's diff, and the requirement's lines are its criteria. After
+the push the ticket's description gets `Update <date>: <requirement>`. Run it in a checkout of the
+merge request's project. See `MVP.md` §54.
+
 ### Exit codes and CI
 
 | code | meaning |

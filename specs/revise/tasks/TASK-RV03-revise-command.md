@@ -34,3 +34,23 @@ together).
 - A resolution failure creates no run directory.
 - A run target reads the run with the persistence validators and refuses a run with no branch.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-11)
+
+- `internal/app/revise.go`: `reviseArgs`, `reviseTargetKind`, `resolveRevise` (with `applyMR`,
+  `branchWithoutMR`, `latestTicketMR`, `runTarget`, `remoteProject`), `reviseDescription`,
+  `reviseCriteria`; `runTask` takes a `*reviseRequest` and resolves before `store.NewRun`;
+  `decideWithProvider` forces development for it (reason `revise`, also after an edit).
+- **No `artifacts/revise-original.txt`** (SPEC §7 said so): the original task goes into
+  `task.description` after the requirement and a `---` line, so every stage, the decision, clarify,
+  resume and the branch-naming call read one text through the paths they already use, and no
+  prompt or golden file changes. The requirement's lines are `task.acceptance` (the review's
+  criteria), which `run.json` now allows on a revise task as on a story task.
+- `task.source.revise` (`domain.ReviseSource`) records the resolution; the Jira key goes in
+  `task.source.key`, so `JiraKey()` and the existing write-back see it. `persistence.IsRunID` is
+  exported for the target's kind.
+- A branch target that is not on the remote is refused (SPEC §5 said "new"): there is no merge
+  request to take a target from, and new work is `orchestrator run`.
+- `reviseDeps.loadRun` and the `reviseGitLab`/`reviseJira` interfaces are seams for the tests.
+- Until RV04 `openWorktree` refuses a revise task (`shortcut:` comment).
+- MVP.md §54.1, §54.4, §54.5; README "Revising a merge request"; `orchestrator help` and usage.
