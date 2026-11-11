@@ -116,6 +116,18 @@ func FromError(err error) int {
 		return ProviderExecution
 	}
 
+	// The same split for the GitLab API of revise (specs/revise/SPEC.md §3).
+	var gitlabErr *apperr.GitLabError
+	if errors.As(err, &gitlabErr) {
+		switch gitlabErr.Kind {
+		case apperr.GitLabCancelled:
+			return UserCancellation
+		case apperr.GitLabAuth, apperr.GitLabNotFound, apperr.GitLabRedirect, apperr.GitLabScope:
+			return ConfigOrDependency
+		}
+		return ProviderExecution
+	}
+
 	var limitErr *apperr.LimitExceededError
 	if errors.As(err, &limitErr) {
 		return WorkflowOrLimit

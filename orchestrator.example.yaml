@@ -395,6 +395,8 @@ security:
 #   token_env: GITLAB_TOKEN        # env only, reaches git through a credential helper; a literal token is refused
 #   username: oauth2
 #   allowed_groups: [backend, platform/payments]   # required; clone only from under these
+#   api_token_env: GITLAB_READ_TOKEN   # orchestrator revise only: a read-only API token (scope read_api;
+#                                      # a token that can write is refused), never token_env
 #   # With this section every investigate step may fetch a repository the task links from under
 #   # these groups (mcp__orch__fetch_repository, MVP.md §44.3): a shallow clone into
 #   # .orchestrator/deps/<name>, read-only, with your own git credentials.

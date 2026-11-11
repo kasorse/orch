@@ -2667,8 +2667,10 @@ Web UI
 REST API
 IDE plugin
 GitHub integration; GitLab beyond clone, fetch and the push of the run's branch, which opens
-  one merge request (§50.6): no API client, and a token only for the git credential helper of
-  the listener (§51.6, §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
+  one merge request (§50.6), and, for `orchestrator revise` only, a read-only API client (GET,
+  a token whose scopes are read-only, §54.3) and the fast-forward push to an open merge request's
+  branch (§54); a token otherwise only for the git credential helper of the listener (§51.6,
+  §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
   issues of an approved story (§48.7), a comment and a transition after a merge request
   (§39.12), and, for `jira listen` only (§51), a JQL search, reading comments and `/myself`,
   and comments and transitions without a merge request (no links or worklogs)
@@ -6729,3 +6731,56 @@ script; publishing the module (a tag, a proxy, the mirror's CI). Several `Listen
 process, or a host that is not the process's owner, are not supported (§53.2). The live check on
 the platform (the service built from `examples/embed/README.md`, deployed to dev, one ticket end
 to end) is the operator's gate, recorded in `specs/embed/README.md`.
+
+---
+
+# 54. Revise
+
+Normative as a summary; the design record, with the owner's answers R1–R9 and the defaults
+A1–A12, is `specs/revise/` (`SPEC.md`, `tasks/` RV01–RV06). Its §N below is that SPEC's section.
+
+`orchestrator revise <target> "<requirement>"` adds a requirement to work that already opened a
+merge request: Go finds the merge request and its branch from the target (a Jira key, a merge
+request URL, a run ID, a branch), makes the change on that branch in a worktree, pushes it back
+(fast-forward, the merge request updates itself) or, when the merge request is merged or closed,
+opens a new one, and appends the requirement to the ticket's description after the push.
+
+## 54.2 Configuration (SPEC §2)
+
+```yaml
+gitlab:
+  base_url: https://gitlab.example.com
+  allowed_groups: [acme/payments]
+  api_token_env: GITLAB_READ_TOKEN   # the read-only API token, env-only
+```
+
+`gitlab.api_token_env` names the variable of a read-only GitLab API token (scope `read_api`). It is
+optional; the section needs `token_env` or `api_token_env` (the listener needs `token_env`, a
+listener without it is a config error), and the two must differ. Its value is a credential: it is
+in `Config.CredentialEnvNames`, so no child process inherits it, and a literal `api_token` in the
+file is refused. `ValidateDependencies` with `DependencyOptions{GitLab: true}` (`revise`, and
+`orchestrator validate` when the key is present) checks the section, the key and that the
+variable is set, naming the variable only.
+
+## 54.3 The GitLab client (SPEC §3)
+
+`internal/gitlab` imports only `domain`, `apperr` and the standard library, and sends only GET
+(both enforced by tests): the token in the `PRIVATE-TOKEN` header and nowhere else, requests only
+to `gitlab.base_url` and only for projects under `gitlab.allowed_groups` (whole path segments, no
+`.` or `..` segment; a project outside is refused before any request), no redirect followed, a
+30 s timeout per attempt, transient failures (timeout, connection, 429, 5xx) retried twice with
+`Retry-After` or a doubling backoff. Every error is an `apperr.GitLabError`, redacted before it is
+cut: auth, not found, redirect and scope are exit 2, cancelled 5, the rest 3.
+
+* `CheckReadOnly`: `GET /api/v4/personal_access_tokens/self`, once per run before any other call;
+  the token must be active, not revoked, with a non-empty set of scopes from `read_api`,
+  `read_repository`, `read_user`. Any other scope is a config error naming the scopes, never the
+  token.
+* `MergeRequest(project, iid)` and `LatestMergeRequest(project, branch)` (`source_branch`, the
+  newest by `created_at`) return a `domain.MergeRequest`, every field revise relies on checked:
+  iid, state (`opened|merged|closed|locked`), both branches, a full 40-hex `sha`, `created_at`,
+  a one-line title, and `web_url` equal to `<base_url>/<project>/-/merge_requests/<iid>`. `Fork`
+  is set when the source project is not the target project.
+* `ParseMergeRequestURL(base_url, url)`: the same scheme and host as `base_url`, under its path,
+  `<project>/-/merge_requests/<n>` with no query, fragment or userinfo.
+

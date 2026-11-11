@@ -1128,7 +1128,7 @@ func runValidate(ctx context.Context, configPath, claudeAuthFlag, codexAuthFlag 
 	registry := newRegistry(executor)
 	cfg, clis, org, _, _, err := loadAndValidateConfig(configPath, claudeAuthFlag, codexAuthFlag, registry, executor, reporter,
 		func(cfg config.Config) config.DependencyOptions {
-			return config.DependencyOptions{Jira: cfg.Jira != nil, Listener: cfg.Listener != nil}
+			return config.DependencyOptions{Jira: cfg.Jira != nil, Listener: cfg.Listener != nil, GitLab: cfg.GitLab != nil && cfg.GitLab.APITokenEnv != ""}
 		})
 	if err != nil {
 		return err

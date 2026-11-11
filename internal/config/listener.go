@@ -262,7 +262,10 @@ type GitLabConfig struct {
 	// BaseURL is stored without a trailing "/"; it may carry a context path.
 	BaseURL  string
 	TokenEnv string
-	Username string
+	// APITokenEnv names the read-only API token of orchestrator revise (specs/revise/SPEC.md §2),
+	// never the listener's git token.
+	APITokenEnv string
+	Username    string
 	// AllowedGroups are project-path prefixes: a clone is allowed only from under one.
 	AllowedGroups []string
 
@@ -280,6 +283,7 @@ func (g *GitLabConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
 		BaseURL       string   `yaml:"base_url"`
 		TokenEnv      string   `yaml:"token_env"`
+		APITokenEnv   string   `yaml:"api_token_env"`
 		Username      *string  `yaml:"username"`
 		AllowedGroups []string `yaml:"allowed_groups"`
 
@@ -310,6 +314,7 @@ func (g *GitLabConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*g = GitLabConfig{
 		BaseURL:        strings.TrimRight(raw.BaseURL, "/"),
 		TokenEnv:       raw.TokenEnv,
+		APITokenEnv:    raw.APITokenEnv,
 		Username:       username,
 		AllowedGroups:  raw.AllowedGroups,
 		literalSecrets: literal,
@@ -321,10 +326,16 @@ func (g *GitLabConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 func validateGitLab(g GitLabConfig) []string {
 	problems := gitlabBaseURLProblems(g.BaseURL)
 
-	if g.TokenEnv == "" {
+	// One of the two tokens: the listener's git token, or revise's read-only API token.
+	if g.TokenEnv == "" && g.APITokenEnv == "" {
 		problems = append(problems, "gitlab.token_env is required")
-	} else if !envNamePattern.MatchString(g.TokenEnv) {
+	} else if g.TokenEnv != "" && !envNamePattern.MatchString(g.TokenEnv) {
 		problems = append(problems, fmt.Sprintf("gitlab.token_env %q is not a valid environment variable name", g.TokenEnv))
+	}
+	if g.APITokenEnv != "" && !envNamePattern.MatchString(g.APITokenEnv) {
+		problems = append(problems, fmt.Sprintf("gitlab.api_token_env %q is not a valid environment variable name", g.APITokenEnv))
+	} else if g.APITokenEnv != "" && g.APITokenEnv == g.TokenEnv {
+		problems = append(problems, "gitlab.api_token_env must not be gitlab.token_env: the API token is read-only, the git token is not")
 	}
 	for _, k := range g.literalSecrets {
 		problems = append(problems, fmt.Sprintf("gitlab.%s must not be set in the configuration file; "+
@@ -382,6 +393,24 @@ func gitlabBaseURLProblems(raw string) []string {
 		problems = append(problems, "gitlab.base_url must not contain credentials; name an environment variable via gitlab.token_env instead")
 	}
 	return problems
+}
+
+// gitlabAPIProblems reports what would stop revise from reading the GitLab API (specs/revise/
+// SPEC.md §2): the section, api_token_env and its variable. It names the variable, never its value.
+func gitlabAPIProblems(g *GitLabConfig, getenv func(string) string) []string {
+	if g == nil {
+		return []string{"orchestrator revise needs a gitlab section with base_url, allowed_groups and api_token_env"}
+	}
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	switch {
+	case g.APITokenEnv == "":
+		return []string{"orchestrator revise needs gitlab.api_token_env: the variable holding a read-only GitLab API token (scope read_api)"}
+	case strings.TrimSpace(getenv(g.APITokenEnv)) == "":
+		return []string{fmt.Sprintf("gitlab.api_token_env names %s, which is not set", g.APITokenEnv)}
+	}
+	return nil
 }
 
 // listenerCredentialProblems reports what would stop the listener from authenticating to GitLab:

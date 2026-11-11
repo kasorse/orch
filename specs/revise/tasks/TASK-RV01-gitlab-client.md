@@ -32,3 +32,17 @@ check. Nothing calls it yet (RV03).
 - The token appears in no error text, log or argv (a test with a token-shaped value assembled at run time).
 - A project outside `allowed_groups` is refused before any request.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-11)
+
+- `internal/gitlab/client.go`: `NewHTTPClient`, `NewToken` (prints `[REDACTED]`), `CheckReadOnly`,
+  `MergeRequest`, `LatestMergeRequest`, and the pure `Allowed`, `ParseMergeRequestURL`,
+  `MergeRequestURL`. No `Options.Timeout`/retry keys in the config: fixed 30 s and two retries
+  (`DefaultTimeout`, `DefaultRetries`), as nothing asked for them.
+- `domain.MergeRequest` (`internal/domain/mergerequest.go`) and `apperr.GitLabError` with its kinds;
+  `exitcode` maps auth, not found, redirect and scope to 2, cancelled to 5, the rest to 3.
+- The section now needs `token_env` **or** `api_token_env` (SPEC §2 did not say): an operator who
+  only runs `revise` has no git token to name. A listener without `token_env` is refused instead.
+- Retries cover every transient kind (timeout, connection, 429, 5xx), not only 429/503 with
+  `Retry-After` as SPEC §3 said: every request is an idempotent GET.
+- MVP.md §54 starts here with §54.2 and §54.3; §30 and CLAUDE.md name the read-only client.

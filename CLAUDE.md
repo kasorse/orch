@@ -85,7 +85,9 @@ the standard library, never `os/exec` or `net` (enforced by a test). Their MCP c
 `internal/provider/mcp` (stdio servers of the call's `--mcp-config`, standard library only):
 `orch` reaches an implement over the API transport through it, unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
-are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
+are unexported. GitLab's API is isolated in `internal/gitlab` (`orchestrator revise` only: GET only, a
+token whose scopes are read-only, projects under `gitlab.allowed_groups`; it imports only `domain`,
+`apperr` and the standard library, both enforced by tests). Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
 
 `internal/workflow` and `internal/policy` must never import anything but `domain` (the
@@ -488,7 +490,9 @@ Jira calls), no model benchmarking in the core
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
 API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and the push that opens
-a merge request (no API client; a token only for the listener's git credential helper, MVP.md §50.13),
+a merge request, and for `orchestrator revise` only a read-only API client (GET, a read-only token,
+MVP.md §54.3) and the fast-forward push to an open merge request's branch (a write token only for the
+listener's git credential helper, MVP.md §50.13),
 no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
 transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
 comments and transitions without a merge request (no links or worklogs), the listener as a library only
