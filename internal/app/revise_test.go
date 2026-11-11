@@ -56,11 +56,11 @@ func (f fakeReviseJira) RemoteLinks(context.Context, string) ([]jira.RemoteLink,
 	return f.links, nil
 }
 
-const reviseBase = "https://gitlab.example.com"
+const reviseGitLabBase = "https://gitlab.example.com"
 
 func reviseMR(project string, iid int, state string, created time.Time) domain.MergeRequest {
 	return domain.MergeRequest{
-		Project: project, IID: iid, URL: gitlab.MergeRequestURL(reviseBase, project, iid), State: state,
+		Project: project, IID: iid, URL: gitlab.MergeRequestURL(reviseGitLabBase, project, iid), State: state,
 		SourceBranch: fmt.Sprintf("fix/PAY-31-%d", iid), TargetBranch: "main", SHA: strings.Repeat("b", 40),
 		CreatedAt: created, Title: fmt.Sprintf("PAY-31: Round totals (%d)", iid), Description: "MR body",
 	}
@@ -78,7 +78,7 @@ func reviseFixture(t *testing.T, gl *fakeGitLab, links []jira.RemoteLink) (revis
 		}
 		return persistence.NewStore(t.TempDir()).LoadRun(id)
 	}
-	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseBase, AllowedGroups: []string{"acme/payments"}, APITokenEnv: "GITLAB_READ_TOKEN"}}
+	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseGitLabBase, AllowedGroups: []string{"acme/payments"}, APITokenEnv: "GITLAB_READ_TOKEN"}}
 	var out bytes.Buffer
 	return reviseDeps{
 		cfg: cfg, repo: &repository.Repository{Dir: dir, Executor: execution.NewOSProcessExecutor()}, loadRun: load, gitlab: gl,
@@ -87,20 +87,20 @@ func reviseFixture(t *testing.T, gl *fakeGitLab, links []jira.RemoteLink) (revis
 }
 
 func TestReviseTargetKind(t *testing.T) {
-	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseBase}}
+	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseGitLabBase}}
 	for target, want := range map[string]string{
 		"PAY-31": domain.ReviseTargetJira,
-		reviseBase + "/acme/payments/billing/-/merge_requests/1294": domain.ReviseTargetMR,
-		"0f8fad5b-d9cb-469f-a165-70867728950e":                      domain.ReviseTargetRun,
-		"fix/PAY-31-round":                                          domain.ReviseTargetBranch,
-		"pay-31":                                                    domain.ReviseTargetBranch,
+		reviseGitLabBase + "/acme/payments/billing/-/merge_requests/1294": domain.ReviseTargetMR,
+		"0f8fad5b-d9cb-469f-a165-70867728950e":                            domain.ReviseTargetRun,
+		"fix/PAY-31-round":                                                domain.ReviseTargetBranch,
+		"pay-31":                                                          domain.ReviseTargetBranch,
 	} {
 		got, err := reviseTargetKind(cfg, target)
 		if err != nil || got != want {
 			t.Errorf("%s: %q, %v; want %q", target, got, err, want)
 		}
 	}
-	for _, bad := range []string{"https://evil.example/a/b/-/merge_requests/1", "a b", "-x", reviseBase + "/a/b/-/issues/1"} {
+	for _, bad := range []string{"https://evil.example/a/b/-/merge_requests/1", "a b", "-x", reviseGitLabBase + "/a/b/-/issues/1"} {
 		if _, err := reviseTargetKind(cfg, bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -114,14 +114,14 @@ func TestRemoteProject(t *testing.T) {
 		"https://u:p@gitlab.example.com/acme/payments/billing":      "acme/payments/billing",
 		"ssh://git@gitlab.example.com:22/acme/payments/billing.git": "acme/payments/billing",
 	} {
-		if got, ok := remoteProject(remote, reviseBase); !ok || got != want {
+		if got, ok := remoteProject(remote, reviseGitLabBase); !ok || got != want {
 			t.Errorf("%s: %q %v", remote, got, ok)
 		}
 	}
 	if got, ok := remoteProject("https://h.example/gitlab/a/b.git", "https://h.example/gitlab"); !ok || got != "a/b" {
 		t.Errorf("context path: %q %v", got, ok)
 	}
-	if _, ok := remoteProject("git@github.com:a/b.git", reviseBase); ok {
+	if _, ok := remoteProject("git@github.com:a/b.git", reviseGitLabBase); ok {
 		t.Error("another host accepted")
 	}
 }
@@ -130,7 +130,7 @@ func TestResolveRevise_MergeRequestURL(t *testing.T) {
 	p := "acme/payments/billing"
 	gl := &fakeGitLab{mrs: map[int]domain.MergeRequest{1294: reviseMR(p, 1294, domain.MRStateOpened, time.Now())}}
 	d, _, out := reviseFixture(t, gl, nil)
-	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: reviseBase + "/" + p + "/-/merge_requests/1294", Requirement: "Round half up\nKeep VAT"})
+	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: reviseGitLabBase + "/" + p + "/-/merge_requests/1294", Requirement: "Round half up\nKeep VAT"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +159,10 @@ func TestResolveRevise_JiraTakesTheLatestOfThisProject(t *testing.T) {
 		1294: reviseMR(p, 1294, domain.MRStateMerged, now.Add(-2*time.Hour)),
 	}}
 	links := []jira.RemoteLink{
-		{URL: reviseBase + "/" + p + "/-/merge_requests/1290"},
-		{URL: reviseBase + "/" + p + "/-/merge_requests/1293"},
-		{URL: reviseBase + "/" + p + "/-/merge_requests/1294"},
-		{URL: reviseBase + "/acme/payments/other/-/merge_requests/9"},
+		{URL: reviseGitLabBase + "/" + p + "/-/merge_requests/1290"},
+		{URL: reviseGitLabBase + "/" + p + "/-/merge_requests/1293"},
+		{URL: reviseGitLabBase + "/" + p + "/-/merge_requests/1294"},
+		{URL: reviseGitLabBase + "/acme/payments/other/-/merge_requests/9"},
 		{URL: "https://confluence.example/page"},
 	}
 	d, _, _ := reviseFixture(t, gl, links)
@@ -182,7 +182,7 @@ func TestResolveRevise_MergedIsANewMergeRequest(t *testing.T) {
 	p := "acme/payments/billing"
 	gl := &fakeGitLab{mrs: map[int]domain.MergeRequest{7: reviseMR(p, 7, domain.MRStateMerged, time.Now())}}
 	d, _, out := reviseFixture(t, gl, nil)
-	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: reviseBase + "/" + p + "/-/merge_requests/7", Requirement: "x"})
+	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: reviseGitLabBase + "/" + p + "/-/merge_requests/7", Requirement: "x"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,11 +207,11 @@ func TestResolveRevise_Refusals(t *testing.T) {
 		want   string
 	}{
 		{"scope", &fakeGitLab{scopeErr: &apperr.GitLabError{Kind: apperr.GitLabScope, Detail: "must name a read-only token"}}, nil, "PAY-31", "read-only"},
-		{"other project", &fakeGitLab{}, nil, reviseBase + "/acme/payments/other/-/merge_requests/1", "run revise in a checkout of it"},
-		{"fork", &fakeGitLab{mrs: map[int]domain.MergeRequest{2: fork}}, nil, reviseBase + "/" + p + "/-/merge_requests/2", "fork"},
-		{"locked", &fakeGitLab{mrs: map[int]domain.MergeRequest{3: locked}}, nil, reviseBase + "/" + p + "/-/merge_requests/3", "locked"},
+		{"other project", &fakeGitLab{}, nil, reviseGitLabBase + "/acme/payments/other/-/merge_requests/1", "run revise in a checkout of it"},
+		{"fork", &fakeGitLab{mrs: map[int]domain.MergeRequest{2: fork}}, nil, reviseGitLabBase + "/" + p + "/-/merge_requests/2", "fork"},
+		{"locked", &fakeGitLab{mrs: map[int]domain.MergeRequest{3: locked}}, nil, reviseGitLabBase + "/" + p + "/-/merge_requests/3", "locked"},
 		{"no links", &fakeGitLab{}, nil, "PAY-31", "has no merge request; use orchestrator run --jira PAY-31"},
-		{"links elsewhere", &fakeGitLab{}, []jira.RemoteLink{{URL: reviseBase + "/acme/payments/other/-/merge_requests/9"}}, "PAY-31", "it has: acme/payments/other!9"},
+		{"links elsewhere", &fakeGitLab{}, []jira.RemoteLink{{URL: reviseGitLabBase + "/acme/payments/other/-/merge_requests/9"}}, "PAY-31", "it has: acme/payments/other!9"},
 		{"run missing", &fakeGitLab{}, nil, "0f8fad5b-d9cb-469f-a165-70867728950e", "no such run"},
 	}
 	for _, tc := range cases {
@@ -231,7 +231,7 @@ func TestResolveRevise_RunTarget(t *testing.T) {
 	d, runs, _ := reviseFixture(t, gl, nil)
 	run := &domain.Run{ID: "0f8fad5b-d9cb-469f-a165-70867728950e", Task: domain.Task{Description: "Round the totals", CreatedAt: time.Now(),
 		Source: &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "PAY-31", URL: "https://jira.example/browse/PAY-31", FetchedAt: time.Now()}}}
-	run.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: "fix/PAY-31-12", Target: "main", IID: 12, URL: gitlab.MergeRequestURL(reviseBase, p, 12)}
+	run.MR = &domain.RunMR{State: domain.MRCreated, Remote: "origin", Source: "fix/PAY-31-12", Target: "main", IID: 12, URL: gitlab.MergeRequestURL(reviseGitLabBase, p, 12)}
 	runs[run.ID] = run
 	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: run.ID, Requirement: "x"})
 	if err != nil {

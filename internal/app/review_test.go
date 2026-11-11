@@ -73,7 +73,7 @@ func TestRun_ReviewFlagErrors(t *testing.T) {
 		{"--stage", []string{"review", "--base", "main", "--stage", "review"}, "--stage is only valid with run"},
 		{"--inplace", []string{"review", "--base", "main", "--inplace"}, "--inplace is only valid with run"},
 		{"--worktree", []string{"review", "--base", "main", "--worktree"}, "--worktree is only valid with run"},
-		{"--allow-red-tests", []string{"review", "--base", "main", "--allow-red-tests"}, "--allow-red-tests is only valid with run"},
+		{"--allow-red-tests", []string{"review", "--base", "main", "--allow-red-tests"}, "--allow-red-tests is only valid with run and revise"},
 		{"--base on run", []string{"run", "--base", "main", "x"}, "--base is only valid with review"},
 		{"--head on resume", []string{"resume", "--head", "main", "3f2a9c1e"}, "--head is only valid with review"},
 		{"--task on run", []string{"run", "--task", "x", "y"}, "--task is only valid with review"},

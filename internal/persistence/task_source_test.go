@@ -86,11 +86,11 @@ func TestValidateRun_StoryTaskRefusals(t *testing.T) {
 			r.Task.Acceptance, r.Worktree = nil, nil
 		}, "no story fields"},
 		{"unknown kind", func(r *domain.Run) { r.Task.Source.Kind = "epic" }, "unknown kind"},
-		{"acceptance without a source", func(r *domain.Run) { r.Task.Source, r.Worktree = nil, nil }, "task.acceptance on a task that is not a story task"},
+		{"acceptance without a source", func(r *domain.Run) { r.Task.Source, r.Worktree = nil, nil }, "task.acceptance on a task that is not a story or revise task"},
 		{"acceptance on a Jira task", func(r *domain.Run) {
 			r.Task.Source = &domain.TaskSource{Kind: domain.TaskSourceJira, Key: "PAY-1", URL: "https://x.example/browse/PAY-1", FetchedAt: time.Now()}
 			r.Worktree = nil
-		}, "task.acceptance on a task that is not a story task"},
+		}, "task.acceptance on a task that is not a story or revise task"},
 		{"blank acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{"one", " "} }, "task.acceptance[1] is empty"},
 		{"multi-line acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{"a\nb"} }, "more than one line"},
 		{"oversized acceptance item", func(r *domain.Run) { r.Task.Acceptance = []string{strings.Repeat("я", 2001)} }, "2001 characters"},

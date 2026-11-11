@@ -39,3 +39,23 @@ criteria. `mode: new` uses the existing `openWorktree` with the fetched target a
 - The implement prompt contains the requirement in the task block and the original task fenced after it.
 - The review diff of an update run includes a file changed only by the MR's first commit.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-11)
+
+- `internal/repository/revise.go`: `ReviseRef`, `FetchBranch` (forced, `--no-tags
+  --no-write-fetch-head`, into `refs/orchestrator/revise/<id>[-target]` only), `AddWorktreeOnBranch`,
+  `CheckedOutAt`; the rest (`BranchTip`, `IsAncestor`, `UpdateRef`, `MergeBase`) already existed.
+- `internal/app/worktree.go`: `reviseBase` (the fetches, the sha check, `review_base`, the
+  fingerprint around them) and `localReviseBranch` (the four cases of SPEC §6.1.3), wired into
+  `openWorktree`; `domain.BranchSourceExisting`, `RunWorktree.ExistingBranch`, `Run.ReviewBase`, and
+  their load checks (`validateReviseWorktree`).
+- No prompt changes and no golden files: RV03 put the original task in the task text, and the
+  criteria in `task.acceptance` (SPEC §7's fence is not needed). `executeReview` takes
+  `run.review_base` as the diff's base.
+- No `logs/revise-fetch.*` (SPEC §10): a failed fetch's error carries git's stderr, and a fetch that
+  succeeds says nothing worth keeping.
+- `development` forced on is RV03's (`decideWithProvider`), not here.
+- Also fixed here: three tests RV03 broke and its gate did not show (the output was cut): the
+  messages of `--allow-red-tests`, `--claude-auth`/`--codex-auth` and `task.acceptance` now name
+  `revise`.
+- MVP.md §54.6, §54.7 and a line in §47.2.

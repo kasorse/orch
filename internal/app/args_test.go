@@ -188,7 +188,7 @@ func TestRun_ClaudeAuthOnlyWithRunResumeValidate(t *testing.T) {
 			args := append([]string{"--config", "/nonexistent.yaml", "--claude-auth", "api"}, command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume, review, validate, story run and jira listen" {
+			if !errors.As(err, &cerr) || err.Error() != "--claude-auth is only valid with run, resume, review, revise, validate, story run and jira listen" {
 				t.Fatalf("got %v, want the --claude-auth usage error", err)
 			}
 		})

@@ -78,11 +78,14 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return openReviewWorktree(ctx, s)
 	}
 	var base, baseBranch string
+	// existing is a revise update: the worktree goes on the merge request's own branch.
+	existing := false
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceRevise {
-		// shortcut: the worktree on the merge request's branch is specs/revise RV04.
-		return nil, &apperr.ConfigError{Msg: "orchestrator revise cannot create its worktree yet (specs/revise RV04)"}
-	}
-	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
+		var err error
+		if base, baseBranch, existing, err = reviseBase(ctx, s); err != nil {
+			return nil, err
+		}
+	} else if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		// The commit may have gone since the task input was checked, or the run be resumed
 		// before it had a worktree. CommitExists refuses anything but a full SHA.
 		base, baseBranch = src.BaseRef, src.BaseBranch
@@ -126,19 +129,30 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 			in.Task = src.Title
 		}
 	}
-	branch, naming, err := nameBranch(ctx, s, in)
-	if err != nil {
-		return nil, err
+	var branch string
+	if existing {
+		branch, run.BranchNaming = run.Task.Source.Revise.Branch, &domain.BranchNaming{Source: domain.BranchSourceExisting}
+	} else {
+		var naming *domain.BranchNaming
+		if branch, naming, err = nameBranch(ctx, s, in); err != nil {
+			return nil, err
+		}
+		run.BranchNaming = naming
 	}
-	run.BranchNaming = naming
 
 	unlock, err := persistence.LockWorktrees(filepath.Dir(path))
 	if err != nil {
 		return nil, &apperr.WorkflowError{Msg: "cannot create the run's worktree", Err: err}
 	}
 	defer unlock()
-	// Neither is ever reused: an existing one belongs to something else.
-	if exists, err := repo.BranchExists(ctx, branch); err != nil {
+	// Neither is ever reused: an existing one belongs to something else. A revise update's branch
+	// is the merge request's: a local copy of it is moved forward to base, or refused.
+	onLocal := false
+	if existing {
+		if onLocal, err = localReviseBranch(ctx, repo, branch, base); err != nil {
+			return nil, err
+		}
+	} else if exists, err := repo.BranchExists(ctx, branch); err != nil {
 		return nil, err
 	} else if exists {
 		return nil, branchExistsError(branch, nil)
@@ -158,7 +172,12 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	if err != nil {
 		return nil, err
 	}
-	admin, err := repo.AddWorktree(ctx, path, branch, base)
+	var admin string
+	if onLocal {
+		admin, err = repo.AddWorktreeOnBranch(ctx, path, branch)
+	} else {
+		admin, err = repo.AddWorktree(ctx, path, branch, base)
+	}
 	if err != nil {
 		// git refuses an existing branch too, when one appeared after the check above; or it made
 		// the branch and then failed. git's own error says which.
@@ -175,7 +194,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	if pointerErr == nil && pointer != admin && sameResolvedPath(pointer, admin) {
 		admin = pointer
 	}
-	run.Worktree = &domain.RunWorktree{Path: path, Branch: branch, BaseRef: base, BaseBranch: baseBranch, AdminDir: admin}
+	run.Worktree = &domain.RunWorktree{Path: path, Branch: branch, BaseRef: base, BaseBranch: baseBranch, AdminDir: admin, ExistingBranch: existing}
 	if err := s.store.SaveRun(run); err != nil {
 		return nil, err
 	}
@@ -194,6 +213,81 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	// The conflict check at the end of the run compares against it (finishWorktree).
 	s.operatorFingerprint = after
 	return &repository.Repository{Dir: path, Executor: repo.Executor}, nil
+}
+
+// reviseBase fetches what a revise run starts from (specs/revise/SPEC.md §6.1): the target branch,
+// always, into refs/orchestrator/revise/<id>-target, and for an update the merge request's branch
+// into refs/orchestrator/revise/<id>, which must still be at the merge request's sha. For an update
+// it records run.review_base, the merge base the review diff starts from. The fetch runs the
+// operator's credential helper, so the git config and hooks are compared around it.
+func reviseBase(ctx context.Context, s *session) (base, baseBranch string, existing bool, err error) {
+	repo, run := s.repo, s.run
+	r := run.Task.Source.Revise
+	remote := s.cfg.Delivery.RemoteName()
+	before, err := repo.GitFingerprint(ctx)
+	if err != nil {
+		return "", "", false, err
+	}
+	target, err := repo.FetchBranch(ctx, remote, r.BaseBranch, repository.ReviseRef(run.ID, "-target"))
+	if err != nil {
+		return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("cannot fetch %s from %s", r.BaseBranch, remote), Err: err}
+	}
+	base, existing = target, r.Mode == domain.ReviseUpdate
+	if existing {
+		got, err := repo.FetchBranch(ctx, remote, r.Branch, repository.ReviseRef(run.ID, ""))
+		if err != nil {
+			return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("cannot fetch %s from %s", r.Branch, remote), Err: err}
+		}
+		if got != r.BaseRef {
+			return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("%s on %s is at %s, not at %s as when the merge request was read: somebody pushed; run revise again",
+				r.Branch, remote, shortSHA(got), shortSHA(r.BaseRef))}
+		}
+		mb, ok, err := repo.MergeBase(ctx, target, got)
+		if err != nil {
+			return "", "", false, err
+		}
+		if !ok {
+			return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("%s and %s have no common commit; the merge request cannot be reviewed as a whole", r.Branch, r.BaseBranch)}
+		}
+		base, run.ReviewBase = got, mb
+	}
+	after, err := repo.GitFingerprint(ctx)
+	if err != nil {
+		return "", "", false, err
+	}
+	if after != before {
+		return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("fetching from %s changed %s in your repository; the run stops before any step", remote, guard.GitViolation)}
+	}
+	return base, r.BaseBranch, existing, nil
+}
+
+// localReviseBranch checks the operator's own copy of a revise update's branch (SPEC.md §6.1.3):
+// absent (false: the worktree creates it at base), at base or behind it and checked out nowhere
+// (moved to base by update-ref with its old value; true), or refused: diverged, or checked out.
+func localReviseBranch(ctx context.Context, repo *repository.Repository, branch, base string) (bool, error) {
+	tip, ok, err := repo.BranchTip(ctx, branch)
+	if err != nil || !ok {
+		return false, err
+	}
+	if at, err := repo.CheckedOutAt(ctx, branch); err != nil {
+		return false, err
+	} else if at != "" {
+		return false, &apperr.ConfigError{Msg: fmt.Sprintf("%s is checked out in %s; switch that checkout to another branch, then run revise again", branch, at)}
+	}
+	if tip == base {
+		return true, nil
+	}
+	behind, err := repo.IsAncestor(ctx, tip, base)
+	if err != nil {
+		return false, err
+	}
+	if !behind {
+		return false, &apperr.ConfigError{Msg: fmt.Sprintf("your local %s has commits that are not in the merge request (%s); push or drop them, then run revise again", branch, shortSHA(tip))}
+	}
+	if err := repo.UpdateRef(ctx, "refs/heads/"+branch, base, tip); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // openReviewWorktree creates the worktree of a review run (specs/delivery/SPEC.md §12.2): at the

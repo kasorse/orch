@@ -34,6 +34,14 @@ func validateRun(run *domain.Run, runID string) error {
 			return fmt.Errorf("task.source: %w", err)
 		}
 	}
+	if run.ReviewBase != "" {
+		if src := run.Task.Source; src == nil || src.Kind != domain.TaskSourceRevise || src.Revise.Mode != domain.ReviseUpdate {
+			return fmt.Errorf("review_base on a run that is not a revise update")
+		}
+		if !isCommitSHA(run.ReviewBase) {
+			return fmt.Errorf("review_base %q is not a full commit SHA", run.ReviewBase)
+		}
+	}
 	if err := run.Task.Clarification.Validate(); err != nil {
 		return fmt.Errorf("task.clarification: %w", err)
 	}

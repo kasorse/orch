@@ -5151,6 +5151,8 @@ detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every
 sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its
 lock stay in the operator's repository. The restore point is `base_ref`, pinned as in §38.3.
 Console: `Worktree: <path> (<branch> from <base branch>@<short>)`.
+`orchestrator revise` is the one exception to "neither is reused": an update puts the worktree
+on the merge request's existing branch, fetched first (§54.6).
 
 ## 47.3 The `.git` pointer
 
@@ -6834,6 +6836,33 @@ request → update, and the push opens one. A fork or a `locked` merge request i
 usual, clarify included, and development is forced on (reason `revise`, also after an edit on the
 review screen). Printed before the approval: `Revise !1294 (opened) on fix/PAY-31-round in
 acme/payments/billing`, or `!1290 is merged: a new branch from main and a new merge request`.
+
+## 54.6 The branch (SPEC §6.1)
+
+In `openWorktree`, before anything else of the worktree: the operator's git fingerprint, then
+`git fetch --quiet --no-tags --no-write-fetch-head <remote> +refs/heads/<target>:refs/orchestrator/
+revise/<run-id>-target` (argv, the full environment, 5 minutes) and, for an update, the same for the
+merge request's branch into `refs/orchestrator/revise/<run-id>`, which must be at the recorded
+`sha` (else "somebody pushed; run revise again", and no worktree); nothing under `refs/heads/` or
+`refs/remotes/` is written by a fetch; the fingerprint is compared again. An update's
+`run.json: review_base` is `merge-base(target, sha)`. Its local branch: absent → `git worktree add
+-b <branch> <path> <sha>`; at `sha` or behind it and checked out nowhere → moved by `git
+update-ref refs/heads/<branch> <sha> <old>`, then `git worktree add <path> <branch>`; diverged, or
+checked out in any worktree → refused, naming it. `worktree` records `existing_branch: true`,
+`branch_naming` is `{source: existing}` (no naming call), `base_ref` is the merge request's `sha`
+and `base_branch` its target; `run.json` refuses a revise run whose worktree is not on its merge
+request's branch at its sha, and `existing_branch`, `source: existing` or `review_base` on any other
+run. A new merge request starts from the fetched target's tip (not the operator's HEAD) on a branch
+named by §50.3. The worktree is then an ordinary one: the guard, the restore point, `pre_run_ref`,
+the secret-scan baseline and the pre-run test are taken at `base_ref`.
+
+## 54.7 The stages (SPEC §6.2, §7)
+
+The stages read the task text of §54.4 through `action.taskBlock` like any request (no prompt
+changes), and the review gets the requirement's lines as its criteria (`task.acceptance`). The
+review diff of an update starts at `review_base` (`Repository.ReviewDiff`'s base), so it is the
+whole merge request with the new change, not only the new commit; a new merge request's starts at
+`base_ref`, which is its target's tip.
 
 ## 54.9 The ticket (SPEC §8)
 

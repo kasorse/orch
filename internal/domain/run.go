@@ -272,6 +272,10 @@ type Run struct {
 	// §12.2); nil for every other run. Such a run executes in a detached worktree at its head,
 	// which has no branch.
 	ReviewTarget *ReviewTarget `json:"review_target,omitempty"`
+	// ReviewBase is the commit a revise update's review diff starts from: the merge base of the
+	// merge request's target and its tip, so the review sees the whole merge request
+	// (specs/revise/SPEC.md §6.2). Empty for every other run.
+	ReviewBase string `json:"review_base,omitempty"`
 	// JiraWrite is what the run wrote to its task's Jira issue after MR was created
 	// (specs/delivery/SPEC.md §10, §13). Nil unless options.jira_write asked for something and
 	// the task has a key; a record, never read back to decide anything.
@@ -549,6 +553,9 @@ type RunWorktree struct {
 	SetupDone  bool     `json:"setup_done,omitempty"`
 	Conflicts  []string `json:"conflicts,omitempty"`
 	Removed    bool     `json:"removed,omitempty"`
+	// ExistingBranch is set on a revise update: the worktree is on the merge request's branch,
+	// which this run did not create and which outlives it (specs/revise/SPEC.md §6.1).
+	ExistingBranch bool `json:"existing_branch,omitempty"`
 }
 
 // RunOptions are the config choices that change how a run moves between steps. They are
