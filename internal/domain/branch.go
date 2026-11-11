@@ -27,6 +27,9 @@ const (
 	BranchSourceInstructions = "instructions"
 	BranchSourceTemplate     = "template"
 	BranchSourceDefault      = "default"
+	// BranchSourceExisting is a revise update's: the merge request's own branch (specs/revise/
+	// SPEC.md §6.1), named by nobody in this run.
+	BranchSourceExisting = "existing"
 )
 
 // BranchNaming records how a worktree run's branch was named: run.json: branch_naming. Absent for
@@ -57,9 +60,9 @@ const (
 // Validate checks a recorded branch naming read back from disk.
 func (b BranchNaming) Validate() error {
 	switch b.Source {
-	case BranchSourceInstructions, BranchSourceTemplate, BranchSourceDefault:
+	case BranchSourceInstructions, BranchSourceTemplate, BranchSourceDefault, BranchSourceExisting:
 	default:
-		return fmt.Errorf("source %q is not instructions, template or default", b.Source)
+		return fmt.Errorf("source %q is not instructions, template, default or existing", b.Source)
 	}
 	if len(b.Proposed) > maxProposedBytes || strings.IndexFunc(b.Proposed, func(r rune) bool { return !unicode.IsPrint(r) }) >= 0 {
 		return fmt.Errorf("proposed is not printable text of at most %d bytes", maxProposedBytes)

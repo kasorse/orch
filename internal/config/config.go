@@ -702,7 +702,7 @@ func (s SecurityConfig) CleanWorktreeRequired() bool {
 // CredentialEnvNames lists the environment variables the configuration names as the
 // orchestrator's own credentials, sorted and without duplicates: decision.jev.api_key_env
 // whatever the decision provider (the variable may be set either way), and jira.token_env
-// and jira.email_env when the jira section is present, gitlab.token_env when the gitlab section is, and the configured Claude and Codex
+// and jira.email_env when the jira section is present, gitlab.token_env and gitlab.api_token_env when the gitlab section is, and the configured Claude and Codex
 // API key variables (their defaults when absent). No child process may inherit them; the
 // matching adapter puts its key back for its own process.
 func (c Config) CredentialEnvNames() []string {
@@ -717,7 +717,7 @@ func (c Config) CredentialEnvNames() []string {
 		names = append(names, c.Jira.TokenEnv, c.Jira.EmailEnv)
 	}
 	if c.GitLab != nil {
-		names = append(names, c.GitLab.TokenEnv)
+		names = append(names, c.GitLab.TokenEnv, c.GitLab.APITokenEnv)
 	}
 	names = slices.DeleteFunc(names, func(n string) bool { return n == "" })
 	slices.Sort(names)

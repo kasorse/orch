@@ -60,7 +60,7 @@ func RunListenerTask(ctx context.Context, dir, configPath, taskFile string, stdo
 	ctx, rec := withResultRecorder(ctx)
 	task, err := readListenerTask(taskFile)
 	if err == nil {
-		err = runTask(ctx, dir, configPath, "", "", "", &task, nil, false, "", domain.ModeAuto, "", "", false,
+		err = runTask(ctx, dir, configPath, "", "", "", &task, nil, nil, false, "", domain.ModeAuto, "", "", false,
 			strings.NewReader(""), plainWriter{stderr}, stderr)
 	}
 	writeResult(stdout, rec, err)

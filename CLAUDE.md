@@ -51,7 +51,12 @@ record in `specs/jira-listener/`; the listener's run in process (`runTask`/`resu
 directory, no child mode, no `run --listener-task`): MVP.md §51.7, with its design record in
 `specs/embed/`; the listener as a library (the public package `orchestrator` at the module root,
 `embed.go`: `Listen` and `Embedded`, importing only `internal/app`, `internal/exitcode` and the
-standard library): MVP.md §53, with its design record in `specs/embed/`.
+standard library): MVP.md §53, with its design record in `specs/embed/`;
+revise (`orchestrator revise <KEY|MR-URL|run-id|branch> "<requirement>"`: the merge request found
+from the target by Go, the read-only GitLab client `internal/gitlab`, the update pushed to the open
+merge request's branch or a new merge request for a merged one, the review over the whole merge
+request, `Update <date>` appended to the ticket's description after the push): MVP.md §54 (with
+§30, §39.10, §47.2, §50.6, §50.14), with its design record in `specs/revise/`.
 This file is a summary to keep future work aligned with them, not a replacement.
 
 ## Architecture (MVP.md §3)
@@ -85,7 +90,9 @@ the standard library, never `os/exec` or `net` (enforced by a test). Their MCP c
 `internal/provider/mcp` (stdio servers of the call's `--mcp-config`, standard library only):
 `orch` reaches an implement over the API transport through it, unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
-are unexported. Jira's is isolated in `internal/jira` (unexported wire types; it imports only
+are unexported. GitLab's API is isolated in `internal/gitlab` (`orchestrator revise` only: GET only, a
+token whose scopes are read-only, projects under `gitlab.allowed_groups`; it imports only `domain`,
+`apperr` and the standard library, both enforced by tests). Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
 
 `internal/workflow` and `internal/policy` must never import anything but `domain` (the
@@ -413,7 +420,9 @@ and review), without it, as the last read-only step, it writes the answer.
   mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
   merge request is opened by the one `git push -u … -o merge_request.create -o
   merge_request.target=… -o merge_request.title=… -o merge_request.description=…` of the run's own
-  branch (explicit refspec, never `--force`, never to a branch that exists on the remote, an intent
+  branch (explicit refspec, never `--force`, never to a branch that exists on the remote but for
+  `orchestrator revise`'s update, a plain fast-forward push to the open merge request's branch only when
+  `ls-remote` shows it at the run's `base_ref`, MVP.md §54.8; an intent
   in `run.json: mr` before it, never repeated): the orchestrator holds no GitLab token and has no
   GitLab client, the operator's git credentials do the push, and the MR URL is only read from the
   push's answer. Go writes everything a person reads (commit message, `report.md`, title,
@@ -488,7 +497,9 @@ Jira calls), no model benchmarking in the core
 model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
 story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
 API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and the push that opens
-a merge request (no API client; a token only for the listener's git credential helper, MVP.md §50.13),
+a merge request, and for `orchestrator revise` only a read-only API client (GET, a read-only token,
+MVP.md §54.3) and the fast-forward push to an open merge request's branch (a write token only for the
+listener's git credential helper, MVP.md §50.13),
 no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
 transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
 comments and transitions without a merge request (no links or worklogs), the listener as a library only
@@ -571,6 +582,8 @@ remote, source, target, iid?, url?, skipped?, error?}`: the intent is saved befo
 has its own), `claude_auth` (`{requested, mode, decided_by, key_env, api_env}`, never the key; `api_env`
 holds variable names only; each
 `resumes[]` entry has its own; a record, never read back to decide), `allow_red_tests`, `pre_run_test` (with `checks`, `failed_check`, `failed_tests`),
+`review_base` and `worktree.existing_branch` (a revise update, MVP.md §54.6), `task.source.revise`,
+`mr.state: updated` and `jira_write.description` (MVP.md §54.8, §54.9),
 `options` (`review_fix_medium` and `path_rules`, a copy of `policy.paths`, `jira_write`, a copy of
 `jira.write`, and `push: false`, a copy of a story task input's `no_push` (`story.push: false`), all recorded at run start and read by a resume instead of the config), `secret_scan_baseline`, `secret_findings` (never a
 value), `commit` (the SHA the operator approved at the end), the append-only `resumes` (each with its `provider_cli`), and each execution's

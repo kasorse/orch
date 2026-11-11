@@ -34,6 +34,10 @@ const (
 	JiraOpTransition  = "transition"
 	// JiraOpLabel is the listener's removal of the restart label (specs/jira-listener/SPEC.md §3.3).
 	JiraOpLabel = "label"
+	// JiraOpLinks reads an issue's web links, JiraOpDescription reads or writes its description
+	// (orchestrator revise, specs/revise/SPEC.md §4, §8).
+	JiraOpLinks       = "links"
+	JiraOpDescription = "description"
 )
 
 var transientJiraFailures = map[JiraFailureKind]bool{
@@ -102,7 +106,7 @@ func (e *JiraError) headline() string {
 		if h, ok := e.createHeadline(key); ok {
 			return h
 		}
-	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition, JiraOpLabel:
+	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition, JiraOpLabel, JiraOpLinks, JiraOpDescription:
 		if h, ok := e.writeHeadline(key); ok {
 			return h
 		}
@@ -154,6 +158,8 @@ func (e *JiraError) writeHeadline(key string) (string, bool) {
 		JiraOpComment:     "commenting on " + key,
 		JiraOpTransition:  "moving " + key,
 		JiraOpLabel:       "removing a label of " + key,
+		JiraOpLinks:       "reading the web links of " + key,
+		JiraOpDescription: "updating the description of " + key,
 	}[e.Op]
 	switch e.Kind {
 	case JiraNotFound:
@@ -185,7 +191,7 @@ func (e *JiraError) opVerb() string {
 		return "comment on"
 	case JiraOpTransition:
 		return "move"
-	case JiraOpLabel:
+	case JiraOpLabel, JiraOpDescription:
 		return "edit"
 	}
 	return "read"

@@ -247,6 +247,9 @@ type MergeRequestComment struct {
 	// Review, Tests and Cost are left out when empty.
 	Review, Tests, Cost string
 	RunID               string
+	// Updated is a revise run's push to the merge request's branch: the merge request is
+	// "updated", not opened (specs/revise/SPEC.md §8).
+	Updated bool
 }
 
 // linkEscaper percent-encodes what would end or split a [text|url] link early.
@@ -256,6 +259,9 @@ var linkEscaper = strings.NewReplacer("|", "%7C", "[", "%5B", "]", "%5D", "{", "
 // title, and what the run found. The same input always gives the same bytes.
 func (m MergeRequestComment) Wiki() string {
 	first := fmt.Sprintf("Merge request [!%d|%s]", m.IID, linkEscaper.Replace(m.URL))
+	if m.Updated {
+		first += " updated"
+	}
 	if title := strings.Join(strings.Fields(m.Title), " "); title != "" {
 		first += ": " + escape(title)
 	}

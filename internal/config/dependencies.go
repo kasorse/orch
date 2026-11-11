@@ -48,6 +48,10 @@ type DependencyOptions struct {
 	// Jira), the GitLab token variable and git (specs/jira-listener/SPEC.md §2).
 	Listener bool
 
+	// GitLab checks what orchestrator revise needs of the GitLab API: the gitlab section,
+	// api_token_env and its variable (specs/revise/SPEC.md §2).
+	GitLab bool
+
 	// Cost says which providers report a call's cost, for limits.max_cost_usd. *provider.Registry
 	// implements it. Nil means none does, so a budget is then refused.
 	Cost CostChecker
@@ -84,6 +88,9 @@ func ValidateDependencies(cfg Config, checker DependencyChecker, opts Dependency
 	problems = append(problems, storyBudgetProblems(cfg, opts.Cost)...)
 	if opts.Jira || opts.Listener {
 		problems = append(problems, jiraCredentialProblems(cfg.Jira, opts.getenv)...)
+	}
+	if opts.GitLab {
+		problems = append(problems, gitlabAPIProblems(cfg.GitLab, opts.getenv)...)
 	}
 	if opts.Listener {
 		problems = append(problems, listenerCredentialProblems(cfg.GitLab, opts.getenv)...)

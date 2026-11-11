@@ -76,8 +76,16 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	}
 	target := firstNonEmpty(w.BaseBranch, s.cfg.Delivery.TargetBranch)
 	out := s.reporter.PausingWriter()
+	// A revise update pushes to the merge request's own branch: GitLab updates the merge request
+	// itself, so no merge request is opened, and the branch must be where the run found it
+	// (specs/revise/SPEC.md §6.3). A branch without one gets one, opened by the same push.
+	update := w.ExistingBranch
+	updates := update && run.Task.Source.Revise.MR != nil
+	if updates {
+		fmt.Fprintf(out, "This push updates !%d (%s).\n", run.Task.Source.Revise.MR.IID, run.Task.Source.Revise.MR.URL)
+	}
 
-	wantMR := true
+	wantMR := !updates
 	if run.Mode != domain.ModeAuto {
 		ok, err := interaction.AskPush(s.prompter, out, w.Branch, remote)
 		if err != nil {
@@ -88,8 +96,10 @@ func deliver(ctx context.Context, s *session, sha string) error {
 			recordMR(s, domain.RunMR{Skipped: "declined at push"})
 			return nil
 		}
-		if wantMR, err = interaction.AskMergeRequest(s.prompter, out, w.Branch, target); err != nil {
-			fmt.Fprintf(out, "No answer (%v); no merge request.\n", err)
+		if !updates {
+			if wantMR, err = interaction.AskMergeRequest(s.prompter, out, w.Branch, target); err != nil {
+				fmt.Fprintf(out, "No answer (%v); no merge request.\n", err)
+			}
 		}
 	}
 
@@ -108,11 +118,16 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	if err != nil {
 		return stopBeforePush(s, "error", fmt.Sprintf("cannot read the URL of the remote %s: %v", remote, err))
 	}
-	// A branch of that name on the remote is somebody else's, even an ancestor of this one.
-	switch present, err := s.operator.LsRemoteHead(ctx, remote, w.Branch); {
+	// A branch of that name on the remote is somebody else's, even an ancestor of this one. A revise
+	// update's is the merge request's, and must still be at the commit the run started from.
+	switch sha, present, err := s.operator.LsRemoteHeadSHA(ctx, remote, w.Branch); {
 	case err != nil:
 		return stopBeforePush(s, "error", fmt.Sprintf("cannot ask %s whether it has %s: %v", remote, w.Branch, err))
-	case present:
+	case update && !present:
+		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s is gone from %s; it is not pushed again", w.Branch, remote))
+	case update && sha != w.BaseRef:
+		return stopBeforePush(s, "error", fmt.Sprintf("%s on %s is at %s, not at %s where this run started: somebody pushed", w.Branch, remote, shortSHA(sha), shortSHA(w.BaseRef)))
+	case !update && present:
 		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s already exists on %s; it is not pushed over", w.Branch, remote))
 	}
 
@@ -129,9 +144,10 @@ func deliver(ctx context.Context, s *session, sha string) error {
 
 	// A story child pushes without -u (specs/delivery/SPEC.md §7.3, D22): a sibling task of the same
 	// repository may be running, and its guard compares the git config the upstream is written to.
+	// A revise update's branch is not this run's: no upstream is written for it either.
 	storyTask := run.Task.Source != nil && run.Task.Source.Kind == domain.TaskSourceStory
 	push, byHand := s.operator.Push, "git push -u "
-	if storyTask {
+	if storyTask || update {
 		push, byHand = s.operator.PushWithoutUpstream, "git push "
 	}
 	stderr, err := push(ctx, remote, w.Branch, options)
@@ -142,6 +158,15 @@ func deliver(ctx context.Context, s *session, sha string) error {
 		return needsPerson("its branch was not pushed: " + mr.Error)
 	}
 	mr.State = domain.MRPushed
+	if updates {
+		m := run.Task.Source.Revise.MR
+		mr.State, mr.IID, mr.URL = domain.MRUpdated, m.IID, m.URL
+		recordMR(s, mr)
+		fmt.Fprintf(out, "Merge request !%d updated: %s\n", m.IID, m.URL)
+		writeJira(ctx, s, sha)
+		writeReviseDescription(ctx, s)
+		return nil
+	}
 	if !wantMR {
 		mr.Skipped = "declined at merge request"
 		recordMR(s, mr)
@@ -153,6 +178,7 @@ func deliver(ctx context.Context, s *session, sha string) error {
 		recordMR(s, mr)
 		s.reporter.MergeRequest(iid, found)
 		writeJira(ctx, s, sha)
+		writeReviseDescription(ctx, s)
 		return nil
 	}
 	mr.Error = "the remote reported no merge request"

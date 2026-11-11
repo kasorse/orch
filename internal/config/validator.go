@@ -144,6 +144,8 @@ func Validate(cfg Config) error {
 		}
 		if cfg.GitLab == nil {
 			problems = append(problems, "listener needs a gitlab section")
+		} else if cfg.GitLab.TokenEnv == "" {
+			problems = append(problems, "listener needs gitlab.token_env")
 		}
 	}
 	if cfg.Story != nil {

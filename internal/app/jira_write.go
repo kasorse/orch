@@ -63,7 +63,7 @@ func writeJira(ctx context.Context, s *session, sha string) {
 	opts, run := s.run.Options.JiraWrite, s.run
 	key := run.Task.Source.JiraKey()
 	if (!opts.Comment && opts.Transition == "") || key == "" || !domain.ValidTicketKey(key) ||
-		run.MR == nil || run.MR.State != domain.MRCreated {
+		!run.MR.HasMergeRequest() {
 		return
 	}
 	out := s.reporter.PausingWriter()
@@ -125,7 +125,8 @@ func mergeRequestComment(ctx context.Context, s *session, sha string) jira.Merge
 		title = s.worktree.Branch
 	}
 	outcome := domain.ComputeOutcome(*run, loadTrace(s.store, run.ID))
-	c := jira.MergeRequestComment{IID: run.MR.IID, URL: run.MR.URL, Title: title, Review: string(outcome.ReviewVerdict), RunID: run.ID}
+	c := jira.MergeRequestComment{IID: run.MR.IID, URL: run.MR.URL, Title: title, Review: string(outcome.ReviewVerdict), RunID: run.ID,
+		Updated: run.MR.State == domain.MRUpdated}
 	if p := outcome.TestsPassedFinal; p != nil {
 		c.Tests = map[bool]string{true: "passed", false: "failed"}[*p]
 	}
@@ -211,4 +212,63 @@ func saveJiraWrite(s *session, out io.Writer) bool {
 func firstLineOf(s string) string {
 	line, _, _ := strings.Cut(s, "\n")
 	return line
+}
+
+// writeReviseDescription appends the requirement to the revise task's Jira issue after its push
+// (specs/revise/SPEC.md §8, R2, R9): one GET of the description, then one PUT of it with
+// "Update <date>: <requirement>" at the end. The intent is saved before the PUT and the state
+// after; a write that may have reached Jira is never repeated, and a resume that finds the record
+// writes nothing again. A failure is a warning: the merge request is the result.
+//
+// shortcut: Jira has no conditional update, so an edit made between the GET and the PUT is lost;
+// the window is one round trip (A8). Upgrade if Jira ever offers an ETag on the issue.
+func writeReviseDescription(ctx context.Context, s *session) {
+	run := s.run
+	src := run.Task.Source
+	if src == nil || src.Kind != domain.TaskSourceRevise || src.Key == "" || !run.MR.HasMergeRequest() {
+		return
+	}
+	if run.JiraWrite != nil && run.JiraWrite.Description != nil {
+		return
+	}
+	key, out := src.Key, s.reporter.PausingWriter()
+	warn := func(format string, args ...any) {
+		fmt.Fprintf(out, "Warning: %s\n", oneLineText(fmt.Sprintf(format, args...), maxJiraWarningBytes))
+	}
+	client, err := newJiraWriteClient(s.cfg)
+	if err != nil {
+		warn("the requirement was not added to %s: %v", key, err)
+		return
+	}
+	old, err := client.Description(ctx, key)
+	if err != nil {
+		warn("cannot read the description of %s, so the requirement was not added: %s", key, firstLineOf(err.Error()))
+		return
+	}
+	requirement := reviseRequirement(run.Task.Description)
+	text := jira.AppendUpdate(old, run.Task.CreatedAt.UTC().Format("2006-01-02"), requirement)
+
+	if run.JiraWrite == nil {
+		run.JiraWrite = &domain.RunJiraWrite{}
+	}
+	run.JiraWrite.Description = &domain.RunJiraComment{State: domain.JiraCommentIntent}
+	if !saveJiraWrite(s, out) {
+		run.JiraWrite.Description = nil
+		if run.JiraWrite.Comment == nil && run.JiraWrite.Transition == nil {
+			run.JiraWrite = nil
+		}
+		warn("the requirement was not added to %s: run.json could not record the intent", key)
+		return
+	}
+	switch err := client.SetDescription(ctx, key, text); {
+	case err == nil:
+		run.JiraWrite.Description.State = domain.JiraCommentDone
+		fmt.Fprintf(out, "Added the requirement to the description of %s in Jira.\n", key)
+	case jira.MayExist(err):
+		warn("the description of %s may have been updated and is not written again: %s", key, firstLineOf(err.Error()))
+	default:
+		run.JiraWrite.Description.State = domain.JiraCommentFailed
+		warn("cannot update the description of %s: %s", key, firstLineOf(err.Error()))
+	}
+	saveJiraWrite(s, out)
 }

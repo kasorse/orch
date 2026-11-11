@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -185,6 +186,9 @@ func commitOffer(run *domain.Run, impl *domain.ImplementationArtifact) interacti
 	}
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceStory {
 		body.WriteString("Orchestrator-Story: " + src.StoryRef() + "\n")
+	}
+	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceRevise && src.Revise.MR != nil {
+		body.WriteString("Orchestrator-Revises: !" + strconv.Itoa(src.Revise.MR.IID) + "\n")
 	}
 
 	var warnings []string

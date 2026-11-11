@@ -272,6 +272,10 @@ type Run struct {
 	// §12.2); nil for every other run. Such a run executes in a detached worktree at its head,
 	// which has no branch.
 	ReviewTarget *ReviewTarget `json:"review_target,omitempty"`
+	// ReviewBase is the commit a revise update's review diff starts from: the merge base of the
+	// merge request's target and its tip, so the review sees the whole merge request
+	// (specs/revise/SPEC.md §6.2). Empty for every other run.
+	ReviewBase string `json:"review_base,omitempty"`
 	// JiraWrite is what the run wrote to its task's Jira issue after MR was created
 	// (specs/delivery/SPEC.md §10, §13). Nil unless options.jira_write asked for something and
 	// the task has a key; a record, never read back to decide anything.
@@ -372,6 +376,9 @@ func validJiraName(what, v string) error {
 type RunJiraWrite struct {
 	Comment    *RunJiraComment    `json:"comment,omitempty"`
 	Transition *RunJiraTransition `json:"transition,omitempty"`
+	// Description is a revise run's "Update <date>" appended to the issue's description after its
+	// push (specs/revise/SPEC.md §8): its State is a comment's (intent, done, failed), with no id.
+	Description *RunJiraComment `json:"description,omitempty"`
 }
 
 // RunJiraComment is the record of the comment: State is JiraCommentIntent until Jira answered,
@@ -391,8 +398,13 @@ type RunJiraTransition struct {
 // Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json,
 // against the options the run started with.
 func (j RunJiraWrite) Validate(opts JiraWriteOptions) error {
-	if j.Comment == nil && j.Transition == nil {
-		return fmt.Errorf("a record needs a comment or a transition")
+	if j.Comment == nil && j.Transition == nil && j.Description == nil {
+		return fmt.Errorf("a record needs a comment, a transition or a description")
+	}
+	if d := j.Description; d != nil {
+		if (d.State != JiraCommentIntent && d.State != JiraCommentDone && d.State != JiraCommentFailed) || d.ID != "" {
+			return fmt.Errorf("description.state %q is not intent, done or failed, or it has an id", d.State)
+		}
 	}
 	if c := j.Comment; c != nil {
 		switch {
@@ -432,7 +444,16 @@ const (
 	MRPushed = "pushed"
 	// MRCreated is a push whose answer named the merge request it opened.
 	MRCreated = "created"
+	// MRUpdated is a revise update's push to the branch of an open merge request, which GitLab
+	// then updates itself (specs/revise/SPEC.md §6.3); IID and URL are that merge request's.
+	MRUpdated = "updated"
 )
+
+// HasMergeRequest reports whether the push opened a merge request or updated one: IID and URL are
+// then set.
+func (m *RunMR) HasMergeRequest() bool {
+	return m != nil && (m.State == MRCreated || m.State == MRUpdated)
+}
 
 // Bounds of RunMR's text, in bytes.
 const (
@@ -448,7 +469,8 @@ type RunMR struct {
 	Remote string `json:"remote,omitempty"`
 	Source string `json:"source,omitempty"`
 	Target string `json:"target,omitempty"`
-	// IID and URL are set with MRCreated only; URL is https and ends /-/merge_requests/<iid>.
+	// IID and URL are set with MRCreated and MRUpdated only; URL is https and ends
+	// /-/merge_requests/<iid>.
 	IID     int    `json:"iid,omitempty"`
 	URL     string `json:"url,omitempty"`
 	Skipped string `json:"skipped,omitempty"`
@@ -458,9 +480,9 @@ type RunMR struct {
 // Validate applies the rules of specs/delivery/SPEC.md §13 to a record read back from run.json.
 func (m RunMR) Validate() error {
 	switch m.State {
-	case "", MRIntent, MRPushed, MRCreated:
+	case "", MRIntent, MRPushed, MRCreated, MRUpdated:
 	default:
-		return fmt.Errorf("state %q is not intent, pushed or created", m.State)
+		return fmt.Errorf("state %q is not intent, pushed, created or updated", m.State)
 	}
 	for name, v := range map[string]string{"skipped": m.Skipped, "error": m.Error} {
 		if len(v) > maxMRText || strings.ContainsFunc(v, func(r rune) bool { return r < ' ' || r == 0x7f }) {
@@ -472,19 +494,19 @@ func (m RunMR) Validate() error {
 		return fmt.Errorf("a record without a state needs skipped or error")
 	case m.State != "" && (m.Remote == "" || m.Source == "" || m.Target == ""):
 		return fmt.Errorf("state %s needs remote, source and target", m.State)
-	case m.State != MRCreated && (m.IID != 0 || m.URL != ""):
-		return fmt.Errorf("iid and url only go with state created")
-	case m.State == MRCreated && (m.IID <= 0 || m.URL == ""):
-		return fmt.Errorf("state created needs iid and url")
-	case m.State == MRCreated && (m.Skipped != "" || m.Error != ""):
-		return fmt.Errorf("state created has neither skipped nor error")
+	case !m.HasMergeRequest() && (m.IID != 0 || m.URL != ""):
+		return fmt.Errorf("iid and url only go with state created or updated")
+	case m.HasMergeRequest() && (m.IID <= 0 || m.URL == ""):
+		return fmt.Errorf("state %s needs iid and url", m.State)
+	case m.HasMergeRequest() && (m.Skipped != "" || m.Error != ""):
+		return fmt.Errorf("state %s has neither skipped nor error", m.State)
 	}
 	for name, v := range map[string]string{"remote": m.Remote, "source": m.Source, "target": m.Target} {
 		if strings.HasPrefix(v, "-") || strings.ContainsFunc(v, func(r rune) bool { return r <= ' ' || r == 0x7f }) {
 			return fmt.Errorf("%s %q is not a name git would take", name, v)
 		}
 	}
-	if m.State == MRCreated {
+	if m.HasMergeRequest() {
 		return validMRURL(m.URL, m.IID)
 	}
 	return nil
@@ -549,6 +571,9 @@ type RunWorktree struct {
 	SetupDone  bool     `json:"setup_done,omitempty"`
 	Conflicts  []string `json:"conflicts,omitempty"`
 	Removed    bool     `json:"removed,omitempty"`
+	// ExistingBranch is set on a revise update: the worktree is on the merge request's branch,
+	// which this run did not create and which outlives it (specs/revise/SPEC.md §6.1).
+	ExistingBranch bool `json:"existing_branch,omitempty"`
 }
 
 // RunOptions are the config choices that change how a run moves between steps. They are

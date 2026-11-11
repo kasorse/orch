@@ -58,7 +58,7 @@ func TestRun_AllowRedTestsOnlyWithRun(t *testing.T) {
 			args := append([]string{"--config", "/nonexistent.yaml", "--allow-red-tests"}, command...)
 			err := Run(context.Background(), args, strings.NewReader(""), &out, &out)
 			var cerr *apperr.ConfigError
-			if !errors.As(err, &cerr) || err.Error() != "--allow-red-tests is only valid with run" {
+			if !errors.As(err, &cerr) || err.Error() != "--allow-red-tests is only valid with run and revise" {
 				t.Fatalf("got %v, want the usage error", err)
 			}
 		})

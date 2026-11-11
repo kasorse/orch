@@ -2667,8 +2667,10 @@ Web UI
 REST API
 IDE plugin
 GitHub integration; GitLab beyond clone, fetch and the push of the run's branch, which opens
-  one merge request (§50.6): no API client, and a token only for the git credential helper of
-  the listener (§51.6, §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
+  one merge request (§50.6), and, for `orchestrator revise` only, a read-only API client (GET,
+  a token whose scopes are read-only, §54.3) and the fast-forward push to an open merge request's
+  branch (§54); a token otherwise only for the git credential helper of the listener (§51.6,
+  §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
   issues of an approved story (§48.7), a comment and a transition after a merge request
   (§39.12), and, for `jira listen` only (§51), a JQL search, reading comments and `/myself`,
   and comments and transitions without a merge request (no links or worklogs)
@@ -3751,9 +3753,11 @@ header shows the source line (§27).
 ## 39.10 Not covered
 
 * Writing to Jira other than the child issues of an approved story (§39.11, §48.7) and the
-  comment and transition after a merge request (§39.12) and, for the listener only, its
-  comments and transitions without a merge request (§51.8): worklogs, links, assigning a
-  ticket, a comment on a `run --jira` run without a merge request.
+  comment and transition after a merge request (§39.12), for the listener only, its
+  comments and transitions without a merge request (§51.8), and for `orchestrator revise` only
+  the `Update <date>` appended to the description after its push (§54.9): worklogs, links,
+  assigning a ticket, a comment on a `run --jira` run without a merge request. Reading an
+  issue's web links is `revise`'s alone (§54.4).
 * Linked issues, sub-tasks, attachments, images; boards, sprints. Comments and JQL belong to
   the listener alone (§51): `run --jira` reads neither.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
@@ -5147,6 +5151,8 @@ detached), `admin_dir`, `setup_done`, `conflicts`, `removed`. From then on every
 sandbox, scan, review diff and commit uses the worktree; the store, the run directory and its
 lock stay in the operator's repository. The restore point is `base_ref`, pinned as in §38.3.
 Console: `Worktree: <path> (<branch> from <base branch>@<short>)`.
+`orchestrator revise` is the one exception to "neither is reused": an update puts the worktree
+on the merge request's existing branch, fetched first (§54.6).
 
 ## 47.3 The `.git` pointer
 
@@ -6026,7 +6032,8 @@ From the operator's repository (the branch is shared with the worktree), after i
 fingerprint matched the one taken when the worktree was created (a pre-push hook runs) and `git
 ls-remote --heads <remote> <branch>` showed nothing. A branch of that name on the remote is
 never pushed to, even as a fast-forward: `mr.error: the branch <name> already exists on
-<remote>`, exit 6.
+<remote>`, exit 6. The one exception is `orchestrator revise` (§54.8): its update pushes to the
+merge request's existing branch, only when `ls-remote` shows it exactly at the run's `base_ref`.
 
 ```
 git push -u --no-follow-tags <remote> refs/heads/<branch>:refs/heads/<branch> \
@@ -6265,7 +6272,8 @@ All optional on load, strictly validated when present.
 * GitHub; `glab` and the GitLab API; draft, labels, assignees, reviewers, milestones, squash and
   auto-merge; waiting for the merge request pipeline.
 * A flag that keeps a worktree run but skips the push (an operator says no; CI uses `--inplace`).
-* Updating an existing merge request or pushing again to it; force-push after a story rebase.
+* Updating an existing merge request other than by `orchestrator revise`'s fast-forward push to its
+  branch (§54.8); changing its title or description; force-push after a story rebase.
 * `review --mr`, merge request notes from the orchestrator, inline review comments; reviewing a
   fork's merge request.
 * Jira comments on a failed run or without a merge request, outside the listener (§51); links
@@ -6729,3 +6737,201 @@ script; publishing the module (a tag, a proxy, the mirror's CI). Several `Listen
 process, or a host that is not the process's owner, are not supported (§53.2). The live check on
 the platform (the service built from `examples/embed/README.md`, deployed to dev, one ticket end
 to end) is the operator's gate, recorded in `specs/embed/README.md`.
+
+---
+
+# 54. Revise
+
+Normative as a summary; the design record, with the owner's answers R1–R9 and the defaults
+A1–A12, is `specs/revise/` (`SPEC.md`, `tasks/` RV01–RV06). Its §N below is that SPEC's section.
+
+`orchestrator revise <target> "<requirement>"` adds a requirement to work that already opened a
+merge request: Go finds the merge request and its branch from the target (a Jira key, a merge
+request URL, a run ID, a branch), makes the change on that branch in a worktree, pushes it back
+(fast-forward, the merge request updates itself) or, when the merge request is merged or closed,
+opens a new one, and appends the requirement to the ticket's description after the push.
+
+## 54.1 CLI (SPEC §1)
+
+```
+orchestrator revise <target> "<requirement>" [--mode M] [--allow-red-tests] [--claude-auth M] [--codex-auth M]
+  <target>: PAY-12 | https://<gitlab>/<group>/<project>/-/merge_requests/<iid> | <run-id> | <branch>
+```
+
+The target's kind comes from its form, in this order: a URL that `gitlab.ParseMergeRequestURL`
+accepts on `gitlab.base_url` (any other URL is refused); an upper-case Jira key (`pay-12` is a
+branch); a run ID (a lowercase UUID); a branch name `domain.CheckBranchName` accepts. The
+requirement is the rest of the arguments, or stdin for a single `-`: non-empty UTF-8 text without
+NUL, at most 8 KiB. A revise is always a worktree run whatever `execution.isolation` says;
+`--stage`, `--jira`, `--inplace`, `--worktree` and `--story-task` are refused. It needs
+`DependencyOptions{GitLab: true}` and, for a Jira target, `Jira: true`.
+
+## 54.2 Configuration (SPEC §2)
+
+```yaml
+gitlab:
+  base_url: https://gitlab.example.com
+  allowed_groups: [acme/payments]
+  api_token_env: GITLAB_READ_TOKEN   # the read-only API token, env-only
+```
+
+`gitlab.api_token_env` names the variable of a read-only GitLab API token (scope `read_api`). It is
+optional; the section needs `token_env` or `api_token_env` (the listener needs `token_env`, a
+listener without it is a config error), and the two must differ. Its value is a credential: it is
+in `Config.CredentialEnvNames`, so no child process inherits it, and a literal `api_token` in the
+file is refused. `ValidateDependencies` with `DependencyOptions{GitLab: true}` (`revise`, and
+`orchestrator validate` when the key is present) checks the section, the key and that the
+variable is set, naming the variable only.
+
+## 54.3 The GitLab client (SPEC §3)
+
+`internal/gitlab` imports only `domain`, `apperr` and the standard library, and sends only GET
+(both enforced by tests): the token in the `PRIVATE-TOKEN` header and nowhere else, requests only
+to `gitlab.base_url` and only for projects under `gitlab.allowed_groups` (whole path segments, no
+`.` or `..` segment; a project outside is refused before any request), no redirect followed, a
+30 s timeout per attempt, transient failures (timeout, connection, 429, 5xx) retried twice with
+`Retry-After` or a doubling backoff. Every error is an `apperr.GitLabError`, redacted before it is
+cut: auth, not found, redirect and scope are exit 2, cancelled 5, the rest 3.
+
+* `CheckReadOnly`: `GET /api/v4/personal_access_tokens/self`, once per run before any other call;
+  the token must be active, not revoked, with a non-empty set of scopes from `read_api`,
+  `read_repository`, `read_user`. Any other scope is a config error naming the scopes, never the
+  token.
+* `MergeRequest(project, iid)` and `LatestMergeRequest(project, branch)` (`source_branch`, the
+  newest by `created_at`) return a `domain.MergeRequest`, every field revise relies on checked:
+  iid, state (`opened|merged|closed|locked`), both branches, a full 40-hex `sha`, `created_at`,
+  a one-line title, and `web_url` equal to `<base_url>/<project>/-/merge_requests/<iid>`. `Fork`
+  is set when the source project is not the target project.
+* `ParseMergeRequestURL(base_url, url)`: the same scheme and host as `base_url`, under its path,
+  `<project>/-/merge_requests/<n>` with no query, fragment or userinfo.
+
+## 54.4 Resolving the target (SPEC §4)
+
+Before `store.NewRun`, with no model call (`app.resolveRevise`); a failure creates no run. First
+`CheckReadOnly`, then this repository's project: the path of `delivery.remote`'s URL (https,
+ssh or scp form, `.git` dropped, `base_url`'s context path dropped for https) on `base_url`'s
+host, under `allowed_groups`. Then by kind:
+
+| target | merge request | the original task |
+|---|---|---|
+| Jira key | `jira.Fetch` + `jira.Render` (printed, saved as `ticket.json`), then `RemoteLinks`: the links that are merge requests of **this project** (another project's are listed in the refusal), at most the 20 highest iids, each read; the latest `created_at` | the rendered ticket |
+| MR URL | that one; another project's is refused ("run revise in a checkout of it") | its title and description |
+| run ID | the run's `mr.url` (read with the persistence validators); a run whose push opened none: its branch, as a branch target | the run's task with its clarification |
+| branch | `LatestMergeRequest`; without one, the branch must be on the remote (`ls-remote`), its target the operator's current branch, else `delivery.target_branch` | the merge request's title and description, else none |
+
+The run's task text is the requirement, then `---`, a line naming the merge request (or branch),
+its state and where the change goes, and `The task it was opened for:` with the original (cut at
+32 KiB). The requirement's non-empty lines (at most 10, each at most 2 000 characters) are
+`task.acceptance`: the review's criteria. `task.source` is `{kind: revise, key?, url?,
+fetched_at?, revise: {target, target_kind, project, mode, mr?, branch?, base_ref?, base_branch,
+from_run?}}`, validated on load (a fork, a locked merge request, an update whose branch, base or
+target are not its merge request's are refused). The key is a Jira target's, or a run target's
+`task.source` key; none is guessed from a title.
+
+## 54.5 Update or new (SPEC §5)
+
+`opened` → **update**: `revise.branch` = the source branch, `base_ref` = the merge request's
+`sha`, `base_branch` = its target. `merged` or `closed` → **new**: a new branch from the target,
+named as any run's (§50.3), and a new merge request. A branch on the remote without a merge
+request → update, and the push opens one. A fork or a `locked` merge request is refused; a branch
+`domain.CheckBranchName` refuses (a story's `story/…`) cannot be updated. The decision runs as
+usual, clarify included, and development is forced on (reason `revise`, also after an edit on the
+review screen). Printed before the approval: `Revise !1294 (opened) on fix/PAY-31-round in
+acme/payments/billing`, or `!1290 is merged: a new branch from main and a new merge request`.
+
+## 54.6 The branch (SPEC §6.1)
+
+In `openWorktree`, before anything else of the worktree: the operator's git fingerprint, then
+`git fetch --quiet --no-tags --no-write-fetch-head <remote> +refs/heads/<target>:refs/orchestrator/
+revise/<run-id>-target` (argv, the full environment, 5 minutes) and, for an update, the same for the
+merge request's branch into `refs/orchestrator/revise/<run-id>`, which must be at the recorded
+`sha` (else "somebody pushed; run revise again", and no worktree); nothing under `refs/heads/` or
+`refs/remotes/` is written by a fetch; the fingerprint is compared again. An update's
+`run.json: review_base` is `merge-base(target, sha)`. Its local branch: absent → `git worktree add
+-b <branch> <path> <sha>`; at `sha` or behind it and checked out nowhere → moved by `git
+update-ref refs/heads/<branch> <sha> <old>`, then `git worktree add <path> <branch>`; diverged, or
+checked out in any worktree → refused, naming it. `worktree` records `existing_branch: true`,
+`branch_naming` is `{source: existing}` (no naming call), `base_ref` is the merge request's `sha`
+and `base_branch` its target; `run.json` refuses a revise run whose worktree is not on its merge
+request's branch at its sha, and `existing_branch`, `source: existing` or `review_base` on any other
+run. A new merge request starts from the fetched target's tip (not the operator's HEAD) on a branch
+named by §50.3. The worktree is then an ordinary one: the guard, the restore point, `pre_run_ref`,
+the secret-scan baseline and the pre-run test are taken at `base_ref`.
+
+## 54.7 The stages (SPEC §6.2, §7)
+
+The stages read the task text of §54.4 through `action.taskBlock` like any request (no prompt
+changes), and the review gets the requirement's lines as its criteria (`task.acceptance`). The
+review diff of an update starts at `review_base` (`Repository.ReviewDiff`'s base), so it is the
+whole merge request with the new change, not only the new commit; a new merge request's starts at
+`base_ref`, which is its target's tip.
+
+## 54.8 Delivery (SPEC §6.3)
+
+The §50.5 chain, with these differences for an update (`worktree.existing_branch`):
+
+1. The commit: a new commit on top of the merge request's tip, never amend or squash; the message
+   as §50.2, with the trailer `Orchestrator-Revises: !<iid>` after `Orchestrator-Run` (any revise
+   task with a merge request, a new one's too).
+2. The conflict check against the target, as today.
+3. Printed `This push updates !<iid> (<url>).`; the push question as §50.5, and **no merge request
+   question** when the branch has a merge request (a branch without one asks it, and the push opens
+   one with §50.6's options).
+4. Before the push, `ls-remote` must show the branch exactly at `worktree.base_ref`: gone, or
+   elsewhere, is `mr.error` (`… is at <short>, not at <short> where this run started: somebody
+   pushed`), nothing pushed, exit 6.
+5. `git push --no-follow-tags <remote> refs/heads/<b>:refs/heads/<b>`: no `-u` (the branch is not
+   the run's, its upstream is not written), no `-o`, never `--force` (git refuses a
+   non-fast-forward itself); the intent in `run.json: mr` first, never repeated.
+6. Success: `mr {state: updated, iid, url}` (the merge request's), printed `Merge request !<iid>
+   updated: <url>`, exit 0; `--output json` has that `mr`. The merge request's title and
+   description are never changed. `jira.write`'s comment reads `Merge request [!<iid>|<url>]
+   updated: <commit header>`, and its transition is made as after §39.12.
+7. The worktree is removed as after any commit; the local branch stays at the new commit.
+
+A new merge request is §50.5 unchanged.
+
+## 54.9 The ticket (SPEC §8)
+
+After the push opened or updated a merge request (`mr.state` `created` or `updated`, R9), once, for
+a revise task with a Jira key (`task.source.key`), and not gated by `jira.write`:
+`Description`, then `SetDescription` with `AppendUpdate(old, <the run's start date, UTC>,
+<the requirement>)`. `run.json: jira_write.description {state: intent|done|failed}` (no id): the
+intent before the PUT, the state after; a write that may have reached Jira, or a record already
+there (a resume), is never repeated. A failure is a warning; the exit code does not change. A push
+that failed or was declined writes nothing. Jira has no conditional update: an edit a person makes
+between the GET and the PUT is lost (one round trip, A8).
+
+
+The calls: `internal/jira` has three for `revise`, under the write-back's rules (§39.12: only
+`jira.base_url`, no redirect, strict answers, only a 429 or 503 with a usable `Retry-After`
+retried, a write never repeated once it may have reached Jira): `RemoteLinks` (`GET
+…/remotelink`, at most 500 links, each with an `object.url`; nothing follows them), `Description`
+(`GET …?fields=description`, `""` for null or absent; an ADF object is refused, the client
+speaks REST v2) and `SetDescription` (`PUT /rest/api/2/issue/{key}` `{"fields":{"description":…}}`,
+204; a text over Jira's 32 767 characters is refused before anything is sent). `AppendUpdate(old,
+date, text)` is the old description, trailing space dropped, an empty line, and `Update <date>:
+<text>`: the operator's requirement as typed, line endings normalized, cut at 8 KiB on a rune with
+`…`, not escaped (it is their own text in their own ticket).
+
+## 54.10 Resume and persistence (SPEC §9, §10)
+
+`orchestrator resume <id>` of a revise run reads `task.source.revise`, the decision, the workflow
+and the worktree as any worktree run's (§37, §47.5): it builds **no GitLab client** and makes no
+fetch; the check before the push is git's (`ls-remote` equals `base_ref`), and a Jira client only
+for the write-back and the description. New in `run.json`: `task.source` kind `revise` with
+`revise {…}`, `task.acceptance` on a revise task, `worktree.existing_branch`, `review_base`,
+`branch_naming.source: existing`, `mr.state: updated`, `jira_write.description`; each is
+validated on load against the others (§54.4, §54.6). `summary.md`'s merge request row reads
+`!<iid> <url>, updated`; `report.md` links the merge request as for `created`.
+
+## 54.11 Not covered (SPEC §12)
+
+The listener (a ticket re-queued with a revision comment, R1); changing a merge request's title,
+description, labels or reviewers, or a note on it; reading merge request discussions as task text;
+rebasing a stale branch, resolving conflicts, force-push; merge requests from forks, another GitLab
+than `gitlab.base_url`, GitHub; a key guessed from a merge request title; the Jira development panel
+(`dev-status`); several merge requests in one `revise` (one per service of a ticket: one call each).
+The live check (a real ticket on Jira Cloud and a real merge request on gitlab.com) is the
+operator's gate, recorded in `specs/revise/README.md`.
+

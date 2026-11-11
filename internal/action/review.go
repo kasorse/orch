@@ -42,6 +42,10 @@ func (d *Dispatcher) executeReview(ctx context.Context, run *domain.Run) (workfl
 	base := ""
 	if t := run.ReviewTarget; t != nil {
 		base = t.MergeBase
+	} else if run.ReviewBase != "" {
+		// A revise update reviews the whole merge request: from the merge base with its target to
+		// the worktree (specs/revise/SPEC.md §6.2).
+		base = run.ReviewBase
 	}
 	diff, err := d.Repo.ReviewDiff(ctx, repository.ReviewDiffOptions{
 		Exclude:   exclude,

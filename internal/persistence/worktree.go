@@ -140,6 +140,9 @@ func validateWorktree(run *domain.Run) error {
 	if w.BaseBranch != "" && !validBranchName(w.BaseBranch) {
 		return fmt.Errorf("worktree.base_branch %q is not a valid branch name", w.BaseBranch)
 	}
+	if err := validateReviseWorktree(run); err != nil {
+		return err
+	}
 	if len(w.Conflicts) > 0 && run.Status != domain.RunCompleted {
 		return fmt.Errorf("worktree.conflicts recorded on a %s run; only a completed run has them", run.Status)
 	}
@@ -183,8 +186,11 @@ func validateJiraWrite(run *domain.Run) error {
 	if err := j.Validate(run.Options.JiraWrite); err != nil {
 		return fmt.Errorf("jira_write: %w", err)
 	}
-	if run.MR == nil || run.MR.State != domain.MRCreated {
-		return fmt.Errorf("jira_write recorded on a run whose push did not create a merge request")
+	if !run.MR.HasMergeRequest() {
+		return fmt.Errorf("jira_write recorded on a run whose push did not create or update a merge request")
+	}
+	if j.Description != nil && (run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceRevise) {
+		return fmt.Errorf("jira_write.description recorded on a run that is not a revise run")
 	}
 	if run.Task.Source.JiraKey() == "" {
 		return fmt.Errorf("jira_write recorded on a task without a Jira key")
@@ -209,4 +215,31 @@ func validBranchName(name string) bool {
 		}
 	}
 	return true
+}
+
+// validateReviseWorktree ties a revise run's worktree to its task.source (specs/revise/SPEC.md
+// §10): an update is on the merge request's branch at its sha, a new one is not; both go to the
+// recorded target. existing_branch and branch_naming.source existing belong to an update only.
+func validateReviseWorktree(run *domain.Run) error {
+	w, src := run.Worktree, run.Task.Source
+	isRevise := src != nil && src.Kind == domain.TaskSourceRevise
+	existing := run.BranchNaming != nil && run.BranchNaming.Source == domain.BranchSourceExisting
+	if !isRevise {
+		if w.ExistingBranch || existing {
+			return fmt.Errorf("worktree.existing_branch or branch_naming.source existing on a run that is not a revise update")
+		}
+		return nil
+	}
+	r := src.Revise
+	if w.BaseBranch != r.BaseBranch {
+		return fmt.Errorf("worktree.base_branch is %q, but task.source.revise.base_branch is %q", w.BaseBranch, r.BaseBranch)
+	}
+	update := r.Mode == domain.ReviseUpdate
+	switch {
+	case w.ExistingBranch != update || existing != update:
+		return fmt.Errorf("worktree.existing_branch and branch_naming.source existing go with a revise update, and only with it")
+	case update && (w.Branch != r.Branch || w.BaseRef != r.BaseRef):
+		return fmt.Errorf("worktree is on %q at %q, but the revised merge request is %q at %q", w.Branch, w.BaseRef, r.Branch, r.BaseRef)
+	}
+	return nil
 }

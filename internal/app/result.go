@@ -124,7 +124,7 @@ func buildResult(rec *resultRecorder, err error) runResult {
 		res.Branch = run.Worktree.Branch
 	}
 	if mr := run.MR; mr != nil {
-		if mr.State == domain.MRCreated {
+		if mr.HasMergeRequest() {
 			res.MR = &resultMR{IID: mr.IID, URL: mr.URL}
 		}
 		res.MRSkipped, res.MRError = mr.Skipped, mr.Error

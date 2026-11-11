@@ -105,6 +105,16 @@ func TestLoad_GitLabLiteralTokenRejected(t *testing.T) {
 	}
 }
 
+func TestLoad_GitLabAPITokenEnv(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, listenerYAML+"  api_token_env: GITLAB_READ_TOKEN\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitLab.APITokenEnv != "GITLAB_READ_TOKEN" {
+		t.Fatalf("APITokenEnv = %q", cfg.GitLab.APITokenEnv)
+	}
+}
+
 func TestValidateListener(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -179,6 +189,9 @@ func TestValidateGitLab(t *testing.T) {
 		{"fragment", func(g *GitLabConfig) { g.BaseURL = "https://gitlab.corp#x" }, "must not have a query or fragment"},
 		{"token_env missing", func(g *GitLabConfig) { g.TokenEnv = "" }, "gitlab.token_env is required"},
 		{"token_env invalid", func(g *GitLabConfig) { g.TokenEnv = "GL-TOKEN" }, `gitlab.token_env "GL-TOKEN" is not a valid`},
+		{"api token only", func(g *GitLabConfig) { g.TokenEnv, g.APITokenEnv = "", "GITLAB_READ_TOKEN" }, ""},
+		{"api_token_env invalid", func(g *GitLabConfig) { g.APITokenEnv = "GL-READ" }, `gitlab.api_token_env "GL-READ" is not a valid`},
+		{"api_token_env same as token_env", func(g *GitLabConfig) { g.APITokenEnv = g.TokenEnv }, "must not be gitlab.token_env"},
 		{"literal token", func(g *GitLabConfig) { g.literalSecrets = []string{"token"} }, "gitlab.token must not be set in the configuration file"},
 		{"literal password", func(g *GitLabConfig) { g.literalSecrets = []string{"password"} }, "gitlab.password must not be set"},
 		{"username empty", func(g *GitLabConfig) { g.Username = "" }, "gitlab.username"},
@@ -227,9 +240,46 @@ func TestValidate_ListenerNeedsJiraAndGitLab(t *testing.T) {
 func TestConfig_CredentialEnvNames_GitLab(t *testing.T) {
 	cfg := validConfig()
 	g := validGitLab()
+	g.APITokenEnv = "GITLAB_READ_TOKEN"
 	cfg.GitLab = &g
-	if got := cfg.CredentialEnvNames(); !slices.Contains(got, "GITLAB_TOKEN") {
-		t.Errorf("CredentialEnvNames() = %q, lacks GITLAB_TOKEN", got)
+	if got := cfg.CredentialEnvNames(); !slices.Contains(got, "GITLAB_TOKEN") || !slices.Contains(got, "GITLAB_READ_TOKEN") {
+		t.Errorf("CredentialEnvNames() = %q, lacks GITLAB_TOKEN or GITLAB_READ_TOKEN", got)
+	}
+}
+
+func TestValidate_ListenerNeedsTheGitToken(t *testing.T) {
+	cfg := validConfig()
+	j, g, l := validJira(), validGitLab(), validListener()
+	g.TokenEnv, g.APITokenEnv = "", "GITLAB_READ_TOKEN"
+	cfg.Jira, cfg.GitLab, cfg.Listener = &j, &g, &l
+	if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), "listener needs gitlab.token_env") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestValidateDependencies_GitLabAPI(t *testing.T) {
+	cfg := validConfig()
+	t.Setenv("JEV_API_KEY", "k")
+	env := map[string]string{}
+	opts := DependencyOptions{GitLab: true, getenv: func(n string) string { return env[n] }}
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{}, opts); err == nil || !strings.Contains(err.Error(), "needs a gitlab section") {
+		t.Fatalf("no section: err = %v", err)
+	}
+	g := validGitLab()
+	cfg.GitLab = &g
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{}, opts); err == nil || !strings.Contains(err.Error(), "needs gitlab.api_token_env") {
+		t.Fatalf("no key: err = %v", err)
+	}
+	g.APITokenEnv = "GITLAB_READ_TOKEN"
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{}, opts); err == nil || !strings.Contains(err.Error(), "GITLAB_READ_TOKEN, which is not set") {
+		t.Fatalf("unset: err = %v", err)
+	}
+	env["GITLAB_READ_TOKEN"] = "v"
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{}, opts); err != nil {
+		t.Fatalf("set: err = %v", err)
+	}
+	if err := ValidateDependencies(cfg, FakeDependencyChecker{}, DependencyOptions{getenv: opts.getenv}); err != nil {
+		t.Fatalf("not asked: err = %v", err)
 	}
 }
 
