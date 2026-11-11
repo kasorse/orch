@@ -3753,9 +3753,11 @@ header shows the source line (§27).
 ## 39.10 Not covered
 
 * Writing to Jira other than the child issues of an approved story (§39.11, §48.7) and the
-  comment and transition after a merge request (§39.12) and, for the listener only, its
-  comments and transitions without a merge request (§51.8): worklogs, links, assigning a
-  ticket, a comment on a `run --jira` run without a merge request.
+  comment and transition after a merge request (§39.12), for the listener only, its
+  comments and transitions without a merge request (§51.8), and for `orchestrator revise` only
+  the `Update <date>` appended to the description after its push (§54.9): worklogs, links,
+  assigning a ticket, a comment on a `run --jira` run without a merge request. Reading an
+  issue's web links is `revise`'s alone (§54.4).
 * Linked issues, sub-tasks, attachments, images; boards, sprints. Comments and JQL belong to
   the listener alone (§51): `run --jira` reads neither.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
@@ -6783,4 +6785,17 @@ cut: auth, not found, redirect and scope are exit 2, cancelled 5, the rest 3.
   is set when the source project is not the target project.
 * `ParseMergeRequestURL(base_url, url)`: the same scheme and host as `base_url`, under its path,
   `<project>/-/merge_requests/<n>` with no query, fragment or userinfo.
+
+## 54.9 The ticket (SPEC §8)
+
+`internal/jira` has three calls for `revise`, under the write-back's rules (§39.12: only
+`jira.base_url`, no redirect, strict answers, only a 429 or 503 with a usable `Retry-After`
+retried, a write never repeated once it may have reached Jira): `RemoteLinks` (`GET
+…/remotelink`, at most 500 links, each with an `object.url`; nothing follows them), `Description`
+(`GET …?fields=description`, `""` for null or absent; an ADF object is refused, the client
+speaks REST v2) and `SetDescription` (`PUT /rest/api/2/issue/{key}` `{"fields":{"description":…}}`,
+204; a text over Jira's 32 767 characters is refused before anything is sent). `AppendUpdate(old,
+date, text)` is the old description, trailing space dropped, an empty line, and `Update <date>:
+<text>`: the operator's requirement as typed, line endings normalized, cut at 8 KiB on a rune with
+`…`, not escaped (it is their own text in their own ticket).
 

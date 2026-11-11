@@ -1,12 +1,12 @@
 # Revise: a new requirement for a merge request already opened
 
-Status: **approved** (1 of 6 tasks done; spec 2026-11-11, owner's answers R1–R9, defaults A1–A12
+Status: **approved** (2 of 6 tasks done; spec 2026-11-11, owner's answers R1–R9, defaults A1–A12
 confirmed 2026-11-11)
 
 | done | task | title | depends on |
 |---|---|---|---|
 | [x] | RV01 | `internal/gitlab`: the read-only client, `gitlab.api_token_env`, the scope check | — |
-| [ ] | RV02 | `internal/jira`: web links, read and write the description | — |
+| [x] | RV02 | `internal/jira`: web links, read and write the description | — |
 | [ ] | RV03 | `orchestrator revise`: the target, its resolution, `task.source: revise` | RV01, RV02 |
 | [ ] | RV04 | The worktree on the existing branch, the prompts, the review of the whole MR | RV03 |
 | [ ] | RV05 | Delivery: the push that updates the MR, new mode, the description, resume | RV04 |
