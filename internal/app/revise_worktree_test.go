@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -14,9 +15,9 @@ import (
 // reviseSession is a worktree session over a repository whose origin (a bare repository) has
 // main and the merge request's branch fix/x, one commit ahead; the local fix/x is deleted. The
 // run's task is a revise update of that branch.
-func reviseSession(t *testing.T) (s *session, dir, mainSHA, fixSHA string) {
+func reviseSession(t *testing.T) (s *session, dir, mainSHA, fixSHA string, out *bytes.Buffer) {
 	t.Helper()
-	s, dir, _ = worktreeSession(t, true, implementTest)
+	s, dir, out = worktreeSession(t, true, implementTest)
 	mainSHA = gitIn(t, dir, "rev-parse", "HEAD")
 	gitIn(t, dir, "push", "-q", "origin", "main")
 	gitIn(t, dir, "checkout", "-q", "-b", "fix/x")
@@ -34,11 +35,11 @@ func reviseSession(t *testing.T) (s *session, dir, mainSHA, fixSHA string) {
 		Target: "fix/x", TargetKind: domain.ReviseTargetBranch, Project: "acme/billing", Mode: domain.ReviseUpdate,
 		Branch: "fix/x", BaseRef: fixSHA, BaseBranch: "main",
 	}}
-	return s, dir, mainSHA, fixSHA
+	return s, dir, mainSHA, fixSHA, out
 }
 
 func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
-	s, dir, mainSHA, fixSHA := reviseSession(t)
+	s, dir, mainSHA, fixSHA, _ := reviseSession(t)
 	refsBefore := gitIn(t, dir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes")
 
 	wt, err := openWorktree(context.Background(), s)
@@ -75,7 +76,7 @@ func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
 }
 
 func TestOpenWorktree_ReviseLocalBranchBehindIsMovedForward(t *testing.T) {
-	s, dir, mainSHA, fixSHA := reviseSession(t)
+	s, dir, mainSHA, fixSHA, _ := reviseSession(t)
 	gitIn(t, dir, "branch", "fix/x", mainSHA)
 	if _, err := openWorktree(context.Background(), s); err != nil {
 		t.Fatal(err)
@@ -87,7 +88,7 @@ func TestOpenWorktree_ReviseLocalBranchBehindIsMovedForward(t *testing.T) {
 
 func TestOpenWorktree_ReviseRefusals(t *testing.T) {
 	t.Run("diverged", func(t *testing.T) {
-		s, dir, mainSHA, _ := reviseSession(t)
+		s, dir, mainSHA, _, _ := reviseSession(t)
 		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", mainSHA)
 		if err := os.WriteFile(filepath.Join(dir, "mine.go"), []byte("package main\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -100,14 +101,14 @@ func TestOpenWorktree_ReviseRefusals(t *testing.T) {
 		}
 	})
 	t.Run("checked out", func(t *testing.T) {
-		s, dir, _, fixSHA := reviseSession(t)
+		s, dir, _, fixSHA, _ := reviseSession(t)
 		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", fixSHA)
 		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "is checked out in") {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("moved", func(t *testing.T) {
-		s, _, mainSHA, _ := reviseSession(t)
+		s, _, mainSHA, _, _ := reviseSession(t)
 		s.run.Task.Source.Revise.BaseRef = mainSHA
 		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "somebody pushed") {
 			t.Fatalf("err = %v", err)
@@ -119,7 +120,7 @@ func TestOpenWorktree_ReviseRefusals(t *testing.T) {
 }
 
 func TestOpenWorktree_ReviseNewStartsFromTheTarget(t *testing.T) {
-	s, dir, mainSHA, _ := reviseSession(t)
+	s, dir, mainSHA, _, _ := reviseSession(t)
 	// The operator's main moves on locally; the new branch starts from the remote's main.
 	if err := os.WriteFile(filepath.Join(dir, "local.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)

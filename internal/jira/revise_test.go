@@ -120,3 +120,10 @@ func TestAppendUpdate(t *testing.T) {
 		t.Fatalf("cut: %d bytes, valid %v", len(long), utf8.ValidString(long))
 	}
 }
+
+func TestMergeRequestComment_Updated(t *testing.T) {
+	c := MergeRequestComment{IID: 7, URL: "https://gitlab.example.com/a/b/-/merge_requests/7", Title: "Round half up", RunID: "r", Updated: true}
+	if got, want := c.Wiki(), "Merge request [!7|https://gitlab.example.com/a/b/-/merge_requests/7] updated: Round half up\nRun r"; got != want {
+		t.Fatalf("Wiki() = %q, want %q", got, want)
+	}
+}

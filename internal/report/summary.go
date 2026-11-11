@@ -176,6 +176,8 @@ func mergeRequestLine(mr domain.RunMR) string {
 	switch mr.State {
 	case domain.MRCreated:
 		parts = append(parts, fmt.Sprintf("!%d %s", mr.IID, mr.URL))
+	case domain.MRUpdated:
+		parts = append(parts, fmt.Sprintf("!%d %s, updated", mr.IID, mr.URL))
 	case domain.MRPushed:
 		parts = append(parts, "pushed "+mr.Source+" to "+mr.Remote+", no merge request")
 	case domain.MRIntent:

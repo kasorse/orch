@@ -415,7 +415,9 @@ and review), without it, as the last read-only step, it writes the answer.
   mode asks before each, an empty answer is no and a no stops the chain. No commit, no push. The
   merge request is opened by the one `git push -u … -o merge_request.create -o
   merge_request.target=… -o merge_request.title=… -o merge_request.description=…` of the run's own
-  branch (explicit refspec, never `--force`, never to a branch that exists on the remote, an intent
+  branch (explicit refspec, never `--force`, never to a branch that exists on the remote but for
+  `orchestrator revise`'s update, a plain fast-forward push to the open merge request's branch only when
+  `ls-remote` shows it at the run's `base_ref`, MVP.md §54.8; an intent
   in `run.json: mr` before it, never repeated): the orchestrator holds no GitLab token and has no
   GitLab client, the operator's git credentials do the push, and the MR URL is only read from the
   push's answer. Go writes everything a person reads (commit message, `report.md`, title,

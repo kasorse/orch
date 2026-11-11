@@ -171,8 +171,8 @@ func TestValidateJiraWrite(t *testing.T) {
 		{"options only", func(r *domain.Run) { r.Options.JiraWrite = domain.JiraWriteOptions{Comment: true} }, ""},
 		{"a transition with a line feed", func(r *domain.Run) { r.Options.JiraWrite.Transition = "a\nb" }, "options.jira_write"},
 		{"a record for another transition", func(r *domain.Run) { written(r); r.JiraWrite.Transition.Name = "Done" }, "jira_write: transition.name"},
-		{"without a merge request", func(r *domain.Run) { written(r); r.MR.State = domain.MRPushed; r.MR.IID, r.MR.URL = 0, "" }, "did not create a merge request"},
-		{"without an mr record", func(r *domain.Run) { written(r); r.MR = nil }, "did not create a merge request"},
+		{"without a merge request", func(r *domain.Run) { written(r); r.MR.State = domain.MRPushed; r.MR.IID, r.MR.URL = 0, "" }, "did not create or update a merge request"},
+		{"without an mr record", func(r *domain.Run) { written(r); r.MR = nil }, "did not create or update a merge request"},
 		{"without a key", func(r *domain.Run) { written(r); r.Task.Source = nil }, "without a Jira key"},
 	}
 	for _, c := range cases {

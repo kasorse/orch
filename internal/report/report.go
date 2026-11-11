@@ -341,7 +341,7 @@ func writeFooter(b *strings.Builder, run domain.Run, out domain.Outcome) {
 	if run.Commit != "" {
 		parts = append(parts, "commit "+mdCode(shortCommit(run.Commit)))
 	}
-	if mr := run.MR; mr != nil && mr.State == domain.MRCreated {
+	if mr := run.MR; mr.HasMergeRequest() {
 		link := mdCode(mr.URL)
 		if linkable(mr.URL) {
 			link = fmt.Sprintf("[!%d](%s)", mr.IID, mr.URL)

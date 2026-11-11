@@ -28,7 +28,7 @@ func TestRunJiraWriteValidate(t *testing.T) {
 		{"missing", func(j *RunJiraWrite) { j.Transition.State = JiraTransitionMissing }, opts, ""},
 		{"failed", func(j *RunJiraWrite) { j.Transition.State = JiraTransitionFailed }, opts, ""},
 		{"unchanged", func(j *RunJiraWrite) { j.Transition.State = JiraTransitionUnchanged }, opts, ""},
-		{"empty", func(j *RunJiraWrite) { *j = RunJiraWrite{} }, opts, "needs a comment or a transition"},
+		{"empty", func(j *RunJiraWrite) { *j = RunJiraWrite{} }, opts, "needs a comment, a transition or a description"},
 		{"comment not asked for", func(*RunJiraWrite) {}, JiraWriteOptions{Transition: "In Review"}, "comment recorded"},
 		{"transition not asked for", func(*RunJiraWrite) {}, JiraWriteOptions{Comment: true}, "transition recorded"},
 		{"another transition", func(j *RunJiraWrite) { j.Transition.Name = "Done" }, opts, "transition.name"},

@@ -38,3 +38,23 @@ unchanged chain, the description appended after the push, §39.12's comment word
 - The ticket's description ends with `Update <date>: <requirement>` after a successful push, and is not touched when the push failed or was declined.
 - A resumed revise run builds no GitLab client (a test with the token unset).
 - `scripts/check.sh` passes.
+
+## As built (2026-11-11)
+
+- `deliver`: an update (`worktree.existing_branch`) prints `This push updates !N (url).`, asks the
+  push question and no merge request question (a branch without a merge request asks it and opens
+  one), requires `ls-remote` to show the branch at `base_ref`, pushes without `-u` and without
+  options, records `mr.state: updated` with the merge request's iid and url. The push question
+  keeps §50.5's wording; the line before it says what the push does (SPEC §6.3 had its own text).
+- `domain.MRUpdated` and `RunMR.HasMergeRequest()` (created or updated), used by the result line,
+  `report.md`, `jira.write` and the load checks; `summary.md` reads `!N url, updated`.
+- `writeReviseDescription` (`jira_write.go`): after `writeJira`, for a revise task with a key, once;
+  `run.json: jira_write.description` reuses the comment's record type (`{state}`, no id). The date is
+  the run's start date in UTC; the requirement is cut out of the task text at `reviseMarker`.
+- The trailer `Orchestrator-Revises: !N` goes on every revise commit with a merge request, a new
+  one's included.
+- Resume needs nothing new: it never calls `resolveRevise`, so it builds no GitLab client by
+  construction; a resume that finds `jira_write.description` writes nothing again. A process that
+  dies between the push and the description leaves the requirement out of the ticket (the push is
+  never repeated, and a completed run is not resumable); the operator adds it by hand.
+- MVP.md §50.6, §50.14, §54.8, §54.9, §54.10; CLAUDE.md's delivery invariant.

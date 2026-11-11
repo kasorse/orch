@@ -6032,7 +6032,8 @@ From the operator's repository (the branch is shared with the worktree), after i
 fingerprint matched the one taken when the worktree was created (a pre-push hook runs) and `git
 ls-remote --heads <remote> <branch>` showed nothing. A branch of that name on the remote is
 never pushed to, even as a fast-forward: `mr.error: the branch <name> already exists on
-<remote>`, exit 6.
+<remote>`, exit 6. The one exception is `orchestrator revise` (§54.8): its update pushes to the
+merge request's existing branch, only when `ls-remote` shows it exactly at the run's `base_ref`.
 
 ```
 git push -u --no-follow-tags <remote> refs/heads/<branch>:refs/heads/<branch> \
@@ -6271,7 +6272,8 @@ All optional on load, strictly validated when present.
 * GitHub; `glab` and the GitLab API; draft, labels, assignees, reviewers, milestones, squash and
   auto-merge; waiting for the merge request pipeline.
 * A flag that keeps a worktree run but skips the push (an operator says no; CI uses `--inplace`).
-* Updating an existing merge request or pushing again to it; force-push after a story rebase.
+* Updating an existing merge request other than by `orchestrator revise`'s fast-forward push to its
+  branch (§54.8); changing its title or description; force-push after a story rebase.
 * `review --mr`, merge request notes from the orchestrator, inline review comments; reviewing a
   fork's merge request.
 * Jira comments on a failed run or without a merge request, outside the listener (§51); links
@@ -6864,9 +6866,44 @@ review diff of an update starts at `review_base` (`Repository.ReviewDiff`'s base
 whole merge request with the new change, not only the new commit; a new merge request's starts at
 `base_ref`, which is its target's tip.
 
+## 54.8 Delivery (SPEC §6.3)
+
+The §50.5 chain, with these differences for an update (`worktree.existing_branch`):
+
+1. The commit: a new commit on top of the merge request's tip, never amend or squash; the message
+   as §50.2, with the trailer `Orchestrator-Revises: !<iid>` after `Orchestrator-Run` (any revise
+   task with a merge request, a new one's too).
+2. The conflict check against the target, as today.
+3. Printed `This push updates !<iid> (<url>).`; the push question as §50.5, and **no merge request
+   question** when the branch has a merge request (a branch without one asks it, and the push opens
+   one with §50.6's options).
+4. Before the push, `ls-remote` must show the branch exactly at `worktree.base_ref`: gone, or
+   elsewhere, is `mr.error` (`… is at <short>, not at <short> where this run started: somebody
+   pushed`), nothing pushed, exit 6.
+5. `git push --no-follow-tags <remote> refs/heads/<b>:refs/heads/<b>`: no `-u` (the branch is not
+   the run's, its upstream is not written), no `-o`, never `--force` (git refuses a
+   non-fast-forward itself); the intent in `run.json: mr` first, never repeated.
+6. Success: `mr {state: updated, iid, url}` (the merge request's), printed `Merge request !<iid>
+   updated: <url>`, exit 0; `--output json` has that `mr`. The merge request's title and
+   description are never changed. `jira.write`'s comment reads `Merge request [!<iid>|<url>]
+   updated: <commit header>`, and its transition is made as after §39.12.
+7. The worktree is removed as after any commit; the local branch stays at the new commit.
+
+A new merge request is §50.5 unchanged.
+
 ## 54.9 The ticket (SPEC §8)
 
-`internal/jira` has three calls for `revise`, under the write-back's rules (§39.12: only
+After the push opened or updated a merge request (`mr.state` `created` or `updated`, R9), once, for
+a revise task with a Jira key (`task.source.key`), and not gated by `jira.write`:
+`Description`, then `SetDescription` with `AppendUpdate(old, <the run's start date, UTC>,
+<the requirement>)`. `run.json: jira_write.description {state: intent|done|failed}` (no id): the
+intent before the PUT, the state after; a write that may have reached Jira, or a record already
+there (a resume), is never repeated. A failure is a warning; the exit code does not change. A push
+that failed or was declined writes nothing. Jira has no conditional update: an edit a person makes
+between the GET and the PUT is lost (one round trip, A8).
+
+
+The calls: `internal/jira` has three for `revise`, under the write-back's rules (§39.12: only
 `jira.base_url`, no redirect, strict answers, only a 429 or 503 with a usable `Retry-After`
 retried, a write never repeated once it may have reached Jira): `RemoteLinks` (`GET
 …/remotelink`, at most 500 links, each with an `object.url`; nothing follows them), `Description`
@@ -6876,4 +6913,15 @@ speaks REST v2) and `SetDescription` (`PUT /rest/api/2/issue/{key}` `{"fields":{
 date, text)` is the old description, trailing space dropped, an empty line, and `Update <date>:
 <text>`: the operator's requirement as typed, line endings normalized, cut at 8 KiB on a rune with
 `…`, not escaped (it is their own text in their own ticket).
+
+## 54.10 Resume and persistence (SPEC §9, §10)
+
+`orchestrator resume <id>` of a revise run reads `task.source.revise`, the decision, the workflow
+and the worktree as any worktree run's (§37, §47.5): it builds **no GitLab client** and makes no
+fetch; the check before the push is git's (`ls-remote` equals `base_ref`), and a Jira client only
+for the write-back and the description. New in `run.json`: `task.source` kind `revise` with
+`revise {…}`, `task.acceptance` on a revise task, `worktree.existing_branch`, `review_base`,
+`branch_naming.source: existing`, `mr.state: updated`, `jira_write.description`; each is
+validated on load against the others (§54.4, §54.6). `summary.md`'s merge request row reads
+`!<iid> <url>, updated`; `report.md` links the merge request as for `created`.
 

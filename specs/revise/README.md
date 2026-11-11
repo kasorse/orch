@@ -1,6 +1,6 @@
 # Revise: a new requirement for a merge request already opened
 
-Status: **approved** (4 of 6 tasks done; spec 2026-11-11, owner's answers R1–R9, defaults A1–A12
+Status: **approved** (5 of 6 tasks done; spec 2026-11-11, owner's answers R1–R9, defaults A1–A12
 confirmed 2026-11-11)
 
 | done | task | title | depends on |
@@ -9,7 +9,7 @@ confirmed 2026-11-11)
 | [x] | RV02 | `internal/jira`: web links, read and write the description | — |
 | [x] | RV03 | `orchestrator revise`: the target, its resolution, `task.source: revise` | RV01, RV02 |
 | [x] | RV04 | The worktree on the existing branch, the prompts, the review of the whole MR | RV03 |
-| [ ] | RV05 | Delivery: the push that updates the MR, new mode, the description, resume | RV04 |
+| [x] | RV05 | Delivery: the push that updates the MR, new mode, the description, resume | RV04 |
 | [ ] | RV06 | Integration scenarios and the changed invariants | RV05 |
 
 ## Ground rules

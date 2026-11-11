@@ -186,8 +186,11 @@ func validateJiraWrite(run *domain.Run) error {
 	if err := j.Validate(run.Options.JiraWrite); err != nil {
 		return fmt.Errorf("jira_write: %w", err)
 	}
-	if run.MR == nil || run.MR.State != domain.MRCreated {
-		return fmt.Errorf("jira_write recorded on a run whose push did not create a merge request")
+	if !run.MR.HasMergeRequest() {
+		return fmt.Errorf("jira_write recorded on a run whose push did not create or update a merge request")
+	}
+	if j.Description != nil && (run.Task.Source == nil || run.Task.Source.Kind != domain.TaskSourceRevise) {
+		return fmt.Errorf("jira_write.description recorded on a run that is not a revise run")
 	}
 	if run.Task.Source.JiraKey() == "" {
 		return fmt.Errorf("jira_write recorded on a task without a Jira key")

@@ -348,16 +348,16 @@ func mrText(mr domain.MergeRequest) string {
 func reviseDescription(requirement string, src domain.ReviseSource, original string) string {
 	var b strings.Builder
 	b.WriteString(strings.TrimSpace(requirement))
-	b.WriteString("\n\n---\n")
+	b.WriteString(reviseMarker)
 	switch {
 	case src.MR != nil && src.Mode == domain.ReviseUpdate:
-		fmt.Fprintf(&b, "This requirement revises merge request !%d (%s) of %s, %q, on its branch %s: the change is a new commit on that branch.\n",
+		fmt.Fprintf(&b, "merge request !%d (%s) of %s, %q, on its branch %s: the change is a new commit on that branch.\n",
 			src.MR.IID, src.MR.URL, src.Project, src.MR.Title, src.Branch)
 	case src.MR != nil:
-		fmt.Fprintf(&b, "This requirement revises merge request !%d (%s) of %s, %q, which is %s: the change starts from %s and opens a new merge request.\n",
+		fmt.Fprintf(&b, "merge request !%d (%s) of %s, %q, which is %s: the change starts from %s and opens a new merge request.\n",
 			src.MR.IID, src.MR.URL, src.Project, src.MR.Title, src.MR.State, src.BaseBranch)
 	default:
-		fmt.Fprintf(&b, "This requirement revises the branch %s of %s: the change is a new commit on it.\n", src.Branch, src.Project)
+		fmt.Fprintf(&b, "the branch %s of %s: the change is a new commit on it.\n", src.Branch, src.Project)
 	}
 	if o := strings.TrimSpace(original); o != "" {
 		if len(o) > maxReviseOriginal {
@@ -371,6 +371,15 @@ func reviseDescription(requirement string, src domain.ReviseSource, original str
 		b.WriteString(o)
 	}
 	return b.String()
+}
+
+// reviseMarker starts what reviseDescription adds after the requirement.
+const reviseMarker = "\n\n---\nThis requirement revises "
+
+// reviseRequirement is the requirement out of a revise task's text: what comes before the marker.
+func reviseRequirement(description string) string {
+	requirement, _, _ := strings.Cut(description, reviseMarker)
+	return requirement
 }
 
 // reviseCriteria are the requirement's lines as review criteria, within a story task's bounds.
