@@ -27,9 +27,18 @@ const reviseMRURL = "https://gitlab.test/group/project/-/merge_requests/7"
 // finishedReviseRun is a revise update of !7 whose implement step changed main.go in the
 // worktree on fix/x, completed under mode.
 func finishedReviseRun(t *testing.T, mode domain.RunMode) (*session, string, string, *bytes.Buffer) {
+	return finishedReviseRunAfter(t, mode, nil)
+}
+
+// finishedReviseRunAfter is finishedReviseRun with prep run in the operator's repository before the
+// worktree is created.
+func finishedReviseRunAfter(t *testing.T, mode domain.RunMode, prep func(dir, fixSHA string)) (*session, string, string, *bytes.Buffer) {
 	t.Helper()
 	ctx := context.Background()
 	s, dir, _, fixSHA, out := reviseSession(t)
+	if prep != nil {
+		prep(dir, fixSHA)
+	}
 	r := s.run.Task.Source.Revise
 	r.MR = &domain.MergeRequest{Project: "acme/billing", IID: 7, URL: reviseMRURL, State: domain.MRStateOpened,
 		SourceBranch: "fix/x", TargetBranch: "main", SHA: fixSHA, Title: "Fix x"}
@@ -56,7 +65,13 @@ func finishedReviseRun(t *testing.T, mode domain.RunMode) (*session, string, str
 }
 
 func TestDeliver_ReviseUpdatePushesToTheMergeRequestsBranch(t *testing.T) {
-	s, dir, fixSHA, out := finishedReviseRun(t, domain.ModeAuto)
+	// The repository's hook wants a branch named like the merge request's (a ticket first).
+	s, dir, fixSHA, out := finishedReviseRunAfter(t, domain.ModeAuto, func(dir, _ string) {
+		hook := "#!/bin/sh\ncase \"$(git symbolic-ref --short HEAD)\" in fix/x*) ;; *) echo 'ERROR: Branch name should begin with a ticket' >&2; exit 1;; esac\n"
+		if err := os.WriteFile(filepath.Join(dir, ".git", "hooks", "pre-commit"), []byte(hook), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	})
 	ctx := context.Background()
 	sha := offerCommit(ctx, s, false)
 	if sha == "" {
@@ -88,11 +103,73 @@ func TestDeliver_ReviseUpdatePushesToTheMergeRequestsBranch(t *testing.T) {
 	if err := exec.Command("git", "-C", dir, "config", "branch.fix/x.remote").Run(); err == nil {
 		t.Error("an upstream was written for the merge request's branch")
 	}
+	if got := gitIn(t, dir, "rev-parse", "fix/x"); got != sha {
+		t.Errorf("the local fix/x = %s, want the run's commit %s", got, sha)
+	}
+	if err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", "refs/heads/"+domain.ReviseBranch("fix/x", s.run.ID)).Run(); err == nil {
+		t.Error("the run's branch was not deleted after it landed")
+	}
 	if !s.worktree.Removed {
 		t.Error("the worktree was not removed")
 	}
 	if got := buildResult(&resultRecorder{run: s.run, store: s.store}, nil).MR; got == nil || got.IID != 7 {
 		t.Errorf("--output json mr = %+v", got)
+	}
+}
+
+// The operator has the merge request's branch checked out, with a commit of their own not pushed
+// yet: the run starts from it, merges into it and pushes both.
+func TestDeliver_ReviseUpdateMergesIntoTheCheckedOutBranch(t *testing.T) {
+	var mine string
+	s, dir, fixSHA, out := finishedReviseRunAfter(t, domain.ModeAuto, func(dir, fixSHA string) {
+		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", fixSHA)
+		mine = commitFile(t, dir, "mine.go")
+	})
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if err := finishWorktree(ctx, s, sha); err != nil {
+		t.Fatalf("finishWorktree = %v\n%s", err, out)
+	}
+	if got := gitIn(t, dir, "rev-parse", sha+"^"); got != mine {
+		t.Errorf("the run's commit's parent = %s, want the operator's %s", got, mine)
+	}
+	if gitIn(t, dir, "symbolic-ref", "--short", "HEAD") != "fix/x" || gitIn(t, dir, "rev-parse", "HEAD") != sha {
+		t.Errorf("the operator's checkout is not fast-forwarded to %s", sha)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "main.go")); err != nil || !strings.Contains(string(b), "func main() {}") {
+		t.Errorf("the operator's tree lacks the run's change: %q %v", b, err)
+	}
+	remote := remoteDir(t, dir)
+	if got := gitIn(t, remote, "rev-parse", "fix/x"); got != sha {
+		t.Fatalf("the remote's fix/x = %s, want %s", got, sha)
+	}
+	if !strings.Contains(out.String(), "updated: "+reviseMRURL) || fixSHA == mine {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+// A change in the operator's checkout that the merge would overwrite stops it before the push.
+func TestDeliver_ReviseUpdateRefusesALocalChange(t *testing.T) {
+	s, dir, fixSHA, out := finishedReviseRunAfter(t, domain.ModeAuto, func(dir, fixSHA string) {
+		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", fixSHA)
+	})
+	ctx := context.Background()
+	sha := offerCommit(ctx, s, false)
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main // mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := finishWorktree(ctx, s, sha)
+	if exitcode.FromError(err) != exitcode.NeedsPerson {
+		t.Fatalf("finishWorktree = %v, want exit 6\n%s", err, out)
+	}
+	if got := gitIn(t, remoteDir(t, dir), "rev-parse", "fix/x"); got != fixSHA {
+		t.Errorf("the remote's fix/x = %s, want it untouched at %s", got, fixSHA)
+	}
+	if mr := savedMR(t, s); mr == nil || !strings.Contains(mr.Error, "was not merged into fix/x") {
+		t.Errorf("mr = %+v", mr)
+	}
+	if gitIn(t, dir, "rev-parse", domain.ReviseBranch("fix/x", s.run.ID)) != sha {
+		t.Error("the run's branch does not keep the commit")
 	}
 }
 

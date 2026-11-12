@@ -86,3 +86,22 @@ func SkipPlanning(dec domain.Decision, reason string) domain.Decision {
 	dec.Stages.Stages = stages
 	return dec
 }
+
+// ForceReview turns review on, recorded as forced with reason, for a task whose change is always
+// reviewed: orchestrator revise, whose review reads the whole merge request (MVP.md §54.7). It
+// goes with ForceDevelopment (a workflow reviews only a change). A review already on is kept as it
+// was; a decision without a review entry gets one. dec is not modified.
+func ForceReview(dec domain.Decision, reason string) domain.Decision {
+	stages := slices.Clone(dec.Stages.Stages)
+	i := slices.IndexFunc(stages, func(so domain.StageOutcome) bool { return so.Stage == domain.StageReview })
+	if i < 0 {
+		stages = append(stages, domain.StageOutcome{Stage: domain.StageReview})
+		i = len(stages) - 1
+	}
+	if stages[i].Enabled {
+		return dec
+	}
+	stages[i].Enabled, stages[i].Forced, stages[i].Explored, stages[i].Reason = true, true, false, reason
+	dec.Stages.Stages = stages
+	return dec
+}

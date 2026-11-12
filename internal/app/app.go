@@ -1643,9 +1643,12 @@ func runTask(ctx context.Context, dir, configPath, text, jiraRef, storyTaskFile 
 				if reviseIn != nil {
 					reason, what = reviseReason, "A revision"
 				}
-				kept := policy.ForceDevelopment(d, reason)
+				kept, always := policy.ForceDevelopment(d, reason), "implements and tests: development stays on."
+				if reviseIn != nil {
+					kept, always = policy.ForceReview(kept, reason), "implements, tests and reviews: development and review stay on."
+				}
 				if !slices.Equal(kept.Stages.EnabledStages(), d.Stages.EnabledStages()) {
-					fmt.Fprintln(stderr, what+" always implements and tests: development stays on.")
+					fmt.Fprintln(stderr, what+" always "+always)
 				}
 				d = kept
 			}

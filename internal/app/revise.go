@@ -27,7 +27,7 @@ import (
 // model call; a failure creates no run.
 
 const (
-	reviseUsage = `usage: orchestrator revise <KEY|merge-request-URL|run-id|branch> "<requirement>"   (- reads the requirement from stdin)`
+	reviseUsage = `usage: orchestrator revise <KEY|issue-URL|merge-request-URL|run-id|branch> "<requirement>"   (- reads the requirement from stdin)`
 	// reviseReason is what decision.json gives development, forced on for a revise task.
 	reviseReason = "revise"
 	// maxReviseOriginal bounds the original task carried into the revision's text.
@@ -85,7 +85,13 @@ func reviseTargetKind(cfg config.Config, target string) (string, error) {
 				return domain.ReviseTargetMR, nil
 			}
 		}
-		return "", &apperr.ConfigError{Msg: "the revise target is a URL but not a merge request of gitlab.base_url: pass <base_url>/<group>/<project>/-/merge_requests/<n>"}
+		if reviseJiraTarget(t) && cfg.Jira != nil {
+			if _, err := jira.ParseRef(t, cfg.Jira.BaseURL); err != nil {
+				return "", err
+			}
+			return domain.ReviseTargetJira, nil
+		}
+		return "", &apperr.ConfigError{Msg: "the revise target is a URL but neither a merge request of gitlab.base_url nor an issue of jira.base_url: pass <base_url>/<group>/<project>/-/merge_requests/<n> or <jira.base_url>/browse/<KEY>"}
 	case t == strings.ToUpper(t) && domain.ValidTicketKey(t):
 		return domain.ReviseTargetJira, nil
 	case persistence.IsRunID(t):
@@ -132,6 +138,13 @@ func resolveRevise(ctx context.Context, d reviseDeps, req reviseRequest) (resolv
 		}
 		mr, original = &got, mrText(got)
 	case domain.ReviseTargetJira:
+		if strings.Contains(target, "://") {
+			// A /browse/<KEY> URL, which reviseTargetKind checked against jira.base_url.
+			if target, err = jira.ParseRef(target, d.cfg.Jira.BaseURL); err != nil {
+				return resolvedRevise{}, err
+			}
+			src.Target = target
+		}
 		client, err := d.jira()
 		if err != nil {
 			return resolvedRevise{}, err
@@ -478,8 +491,13 @@ func reviseArgs(rest []string, stdin io.Reader) (reviseRequest, error) {
 	return req, nil
 }
 
-// reviseJiraTarget reports whether the target is a Jira key, the form reviseTargetKind gives it.
+// reviseJiraTarget reports whether the target is a Jira key or a /browse/<KEY> URL, the forms
+// reviseTargetKind takes for an issue; it needs no config, so the Jira section is required for it.
 func reviseJiraTarget(target string) bool {
 	t := strings.TrimSpace(target)
-	return !strings.Contains(t, "://") && t == strings.ToUpper(t) && domain.ValidTicketKey(t)
+	if strings.Contains(t, "://") {
+		u, err := url.Parse(t)
+		return err == nil && strings.Contains(u.Path, "/browse/")
+	}
+	return t == strings.ToUpper(t) && domain.ValidTicketKey(t)
 }

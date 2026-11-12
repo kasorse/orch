@@ -224,10 +224,10 @@ func decideWithProvider(ctx, userCtx context.Context, cfg config.Config, registr
 		// The task file is the plan: research and investigation are not run again.
 		res.Decision = policy.SkipPlanning(res.Decision, storyTaskPlannedReason)
 	}
-	// A revision is a code change too (specs/revise/SPEC.md §6.2); research and investigation stay
-	// the policy's.
+	// A revision is a code change too, always reviewed over the whole merge request (MVP.md §54.7);
+	// research and investigation stay the policy's.
 	if revise {
-		res.Decision = policy.ForceDevelopment(res.Decision, reviseReason)
+		res.Decision = policy.ForceReview(policy.ForceDevelopment(res.Decision, reviseReason), reviseReason)
 	}
 	return decisionOutcome{
 		decision:     res.Decision,

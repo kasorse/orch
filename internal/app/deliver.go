@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,7 +12,9 @@ import (
 	"github.com/kasorse/orch/internal/apperr"
 	"github.com/kasorse/orch/internal/domain"
 	"github.com/kasorse/orch/internal/interaction"
+	"github.com/kasorse/orch/internal/persistence"
 	"github.com/kasorse/orch/internal/report"
+	"github.com/kasorse/orch/internal/repository"
 	"github.com/kasorse/orch/internal/secretscan"
 )
 
@@ -76,10 +79,15 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	}
 	target := firstNonEmpty(w.BaseBranch, s.cfg.Delivery.TargetBranch)
 	out := s.reporter.PausingWriter()
-	// A revise update pushes to the merge request's own branch: GitLab updates the merge request
-	// itself, so no merge request is opened, and the branch must be where the run found it
-	// (specs/revise/SPEC.md §6.3). A branch without one gets one, opened by the same push.
+	// A revise update lands the run's branch on the merge request's own branch and pushes that:
+	// GitLab updates the merge request itself, so no merge request is opened, and the remote branch
+	// must be where the run found it (MVP.md §54.8). A branch without one gets one, opened by the
+	// same push.
 	update := w.ExistingBranch
+	branch, remoteAt := w.Branch, w.BaseRef
+	if update {
+		branch, remoteAt = run.Task.Source.Revise.Branch, run.Task.Source.Revise.BaseRef
+	}
 	updates := update && run.Task.Source.Revise.MR != nil
 	if updates {
 		fmt.Fprintf(out, "This push updates !%d (%s).\n", run.Task.Source.Revise.MR.IID, run.Task.Source.Revise.MR.URL)
@@ -87,7 +95,7 @@ func deliver(ctx context.Context, s *session, sha string) error {
 
 	wantMR := !updates
 	if run.Mode != domain.ModeAuto {
-		ok, err := interaction.AskPush(s.prompter, out, w.Branch, remote)
+		ok, err := interaction.AskPush(s.prompter, out, branch, remote)
 		if err != nil {
 			fmt.Fprintf(out, "No answer (%v); nothing pushed.\n", err)
 		}
@@ -97,7 +105,7 @@ func deliver(ctx context.Context, s *session, sha string) error {
 			return nil
 		}
 		if !updates {
-			if wantMR, err = interaction.AskMergeRequest(s.prompter, out, w.Branch, target); err != nil {
+			if wantMR, err = interaction.AskMergeRequest(s.prompter, out, branch, target); err != nil {
 				fmt.Fprintf(out, "No answer (%v); no merge request.\n", err)
 			}
 		}
@@ -120,22 +128,28 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	}
 	// A branch of that name on the remote is somebody else's, even an ancestor of this one. A revise
 	// update's is the merge request's, and must still be at the commit the run started from.
-	switch sha, present, err := s.operator.LsRemoteHeadSHA(ctx, remote, w.Branch); {
+	switch sha, present, err := s.operator.LsRemoteHeadSHA(ctx, remote, branch); {
 	case err != nil:
-		return stopBeforePush(s, "error", fmt.Sprintf("cannot ask %s whether it has %s: %v", remote, w.Branch, err))
+		return stopBeforePush(s, "error", fmt.Sprintf("cannot ask %s whether it has %s: %v", remote, branch, err))
 	case update && !present:
-		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s is gone from %s; it is not pushed again", w.Branch, remote))
-	case update && sha != w.BaseRef:
-		return stopBeforePush(s, "error", fmt.Sprintf("%s on %s is at %s, not at %s where this run started: somebody pushed", w.Branch, remote, shortSHA(sha), shortSHA(w.BaseRef)))
+		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s is gone from %s; it is not pushed again", branch, remote))
+	case update && sha != remoteAt:
+		return stopBeforePush(s, "error", fmt.Sprintf("%s on %s is at %s, not at %s where this run started: somebody pushed", branch, remote, shortSHA(sha), shortSHA(remoteAt)))
 	case !update && present:
-		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s already exists on %s; it is not pushed over", w.Branch, remote))
+		return stopBeforePush(s, "error", fmt.Sprintf("the branch %s already exists on %s; it is not pushed over", branch, remote))
+	}
+	if update {
+		if err := landRevise(ctx, s, branch, sha); err != nil {
+			return stopBeforePush(s, "error", fmt.Sprintf("the commit stays on %s and was not merged into %s: %v", w.Branch, branch, err))
+		}
+		fmt.Fprintf(out, "Merged %s into %s (fast-forward to %s).\n", w.Branch, branch, shortSHA(sha))
 	}
 
 	var options []string
 	if wantMR {
 		options = mergeRequestOptions(ctx, s, sha, target)
 	}
-	mr := domain.RunMR{State: domain.MRIntent, Remote: remote, Source: w.Branch, Target: target}
+	mr := domain.RunMR{State: domain.MRIntent, Remote: remote, Source: branch, Target: target}
 	run.MR = &mr
 	if err := s.store.SaveRun(run); err != nil {
 		run.MR = nil
@@ -150,11 +164,11 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	if storyTask || update {
 		push, byHand = s.operator.PushWithoutUpstream, "git push "
 	}
-	stderr, err := push(ctx, remote, w.Branch, options)
+	stderr, err := push(ctx, remote, branch, options)
 	if err != nil {
 		mr.Error = pushFailure(stderr, err)
 		recordMR(s, mr)
-		s.reporter.DeliveryFailed(mr.Error, byHand+shellWord(remote)+" "+shellWord(w.Branch), "")
+		s.reporter.DeliveryFailed(mr.Error, byHand+shellWord(remote)+" "+shellWord(branch), "")
 		return needsPerson("its branch was not pushed: " + mr.Error)
 	}
 	mr.State = domain.MRPushed
@@ -170,7 +184,7 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	if !wantMR {
 		mr.Skipped = "declined at merge request"
 		recordMR(s, mr)
-		s.reporter.Pushed(w.Branch, remote)
+		s.reporter.Pushed(branch, remote)
 		return nil
 	}
 	if found, iid, ok := mergeRequestURL(stderr, remoteURL); ok {
@@ -184,7 +198,40 @@ func deliver(ctx context.Context, s *session, sha string) error {
 	mr.Error = "the remote reported no merge request"
 	recordMR(s, mr)
 	s.reporter.DeliveryFailed(mr.Error, "", createLink(stderr, remoteURL))
-	return needsPerson("the branch " + w.Branch + " was pushed, but " + mr.Error)
+	return needsPerson("the branch " + branch + " was pushed, but " + mr.Error)
+}
+
+// landRevise fast-forwards the operator's copy of a revise update's branch to the run's commit
+// (MVP.md §54.8): by git merge --ff-only in the checkout that has it (which refuses rather than
+// overwrite a local change), else by update-ref against its tip; an absent branch is created. A
+// local branch that moved off the run's history is refused. git worktree list holds the lock.
+func landRevise(ctx context.Context, s *session, branch, sha string) error {
+	repo := s.operator
+	tip, ok, err := repo.BranchTip(ctx, branch)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return repo.UpdateRef(ctx, "refs/heads/"+branch, sha, "")
+	}
+	if ff, err := repo.IsAncestor(ctx, tip, sha); err != nil {
+		return err
+	} else if !ff {
+		return fmt.Errorf("your local %s moved to %s while the run worked", branch, shortSHA(tip))
+	}
+	unlock, err := persistence.LockWorktrees(filepath.Dir(s.worktree.Path))
+	if err != nil {
+		return err
+	}
+	at, err := repo.CheckedOutAt(ctx, branch)
+	unlock()
+	if err != nil {
+		return err
+	}
+	if at != "" {
+		return (&repository.Repository{Dir: at, Executor: repo.Executor}).MergeFastForward(ctx, sha)
+	}
+	return repo.UpdateRef(ctx, "refs/heads/"+branch, sha, tip)
 }
 
 // stopBeforePush ends the chain before anything was pushed: kind "skipped" records mr.skipped

@@ -52,7 +52,7 @@ directory, no child mode, no `run --listener-task`): MVP.md §51.7, with its des
 `specs/embed/`; the listener as a library (the public package `orchestrator` at the module root,
 `embed.go`: `Listen` and `Embedded`, importing only `internal/app`, `internal/exitcode` and the
 standard library): MVP.md §53, with its design record in `specs/embed/`;
-revise (`orchestrator revise <KEY|MR-URL|run-id|branch> "<requirement>"`: the merge request found
+revise (`orchestrator revise <KEY|issue-URL|MR-URL|run-id|branch> "<requirement>"`: the merge request found
 from the target by Go, the read-only GitLab client `internal/gitlab`, the update pushed to the open
 merge request's branch or a new merge request for a merged one, the review over the whole merge
 request, `Update <date>` appended to the ticket's description after the push): MVP.md §54 (with
@@ -421,8 +421,9 @@ and review), without it, as the last read-only step, it writes the answer.
   merge request is opened by the one `git push -u … -o merge_request.create -o
   merge_request.target=… -o merge_request.title=… -o merge_request.description=…` of the run's own
   branch (explicit refspec, never `--force`, never to a branch that exists on the remote but for
-  `orchestrator revise`'s update, a plain fast-forward push to the open merge request's branch only when
-  `ls-remote` shows it at the run's `base_ref`, MVP.md §54.8; an intent
+  `orchestrator revise`'s update: the run's own branch fast-forwarded into the operator's copy of the
+  open merge request's branch (`git merge --ff-only` where it is checked out), then a plain push of that
+  branch only when `ls-remote` shows it at `task.source.revise.base_ref`, MVP.md §54.8; an intent
   in `run.json: mr` before it, never repeated): the orchestrator holds no GitLab token and has no
   GitLab client, the operator's git credentials do the push, and the MR URL is only read from the
   push's answer. Go writes everything a person reads (commit message, `report.md`, title,

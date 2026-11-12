@@ -124,6 +124,8 @@ func newReviseFixture(t *testing.T, state string) reviseFixture {
 		o.jira = &jiraOptions{baseURL: j.URL()}
 		o.extraYAML += fmt.Sprintf("\ngitlab:\n  base_url: https://%s\n  allowed_groups: [%s]\n  api_token_env: GITLAB_READ_TOKEN\n", fakeexec.GitLabHost, group)
 	})
+	// Simple: no template turns review on, so the review every scenario runs is revise's own.
+	r.jev.script = scriptBugfixLow()
 	// The requirement's one line is the review's one criterion.
 	writeResponse(t, os.Getenv("FAKE_RESPONSES_DIR"), "review",
 		reviewJSON("pass", "[]", `[{"index": 1, "met": true, "evidence": "fixture.go:4"}]`))
@@ -157,6 +159,7 @@ func mustGit(t *testing.T, dir string, args ...string) {
 
 // reviseRunJSON is the part of run.json the revise scenarios assert on.
 type reviseRunJSON struct {
+	ID     string `json:"id"`
 	Status string `json:"status"`
 	Commit string `json:"commit"`
 	Task   struct {
@@ -225,8 +228,8 @@ func assertDescriptionUpdated(t *testing.T, j *fakeJira, run reviseRunJSON) {
 	}
 }
 
-// 80: a Jira key whose latest merge request is open: a new commit on its branch, pushed without
-// options, the merge request recorded as updated, the review over the whole merge request, and the
+// 80: a Jira key whose latest merge request is open: a new commit on the run's branch from its
+// branch, merged into the local copy of that branch and pushed without options, the merge request recorded as updated, the review over the whole merge request, and the
 // requirement appended to the ticket's description after the push.
 func TestRevise80_JiraKeyUpdatesTheOpenMergeRequest(t *testing.T) {
 	f := newReviseFixture(t, "opened")
@@ -237,7 +240,7 @@ func TestRevise80_JiraKeyUpdatesTheOpenMergeRequest(t *testing.T) {
 
 	run := loadReviseRun(t, f.repoDir)
 	if run.Status != "completed" || run.Task.Source.Kind != "revise" || run.Task.Source.Key != "PAY-31" ||
-		run.Task.Source.Revise.Mode != "update" || !run.Worktree.ExistingBranch || run.Worktree.Branch != "fix/PAY-31" || run.Worktree.BaseRef != f.fixSHA {
+		run.Task.Source.Revise.Mode != "update" || !run.Worktree.ExistingBranch || run.Worktree.Branch != "fix/PAY-31-revise-"+run.ID[:8] || run.Worktree.BaseRef != f.fixSHA {
 		t.Fatalf("run = %+v", run)
 	}
 	if !strings.HasPrefix(run.Task.Description, "Round half up\n\n---\n") || !strings.Contains(run.Task.Description, "Add must add.") ||
@@ -249,6 +252,9 @@ func TestRevise80_JiraKeyUpdatesTheOpenMergeRequest(t *testing.T) {
 	}
 	if tip, _ := gitOutput(f.r.remote, "rev-parse", "fix/PAY-31"); tip != run.Commit {
 		t.Errorf("the remote's fix/PAY-31 = %s, want the run's commit %s", tip, run.Commit)
+	}
+	if tip, _ := gitOutput(f.repoDir, "rev-parse", "fix/PAY-31"); tip != run.Commit {
+		t.Errorf("the local fix/PAY-31 = %s, want the run's commit %s merged into it", tip, run.Commit)
 	}
 	if parent, _ := gitOutput(f.r.remote, "rev-parse", run.Commit+"^"); parent != f.fixSHA {
 		t.Errorf("the commit's parent = %s, want the merge request's tip %s", parent, f.fixSHA)
@@ -269,6 +275,29 @@ func TestRevise80_JiraKeyUpdatesTheOpenMergeRequest(t *testing.T) {
 	data, _ := os.ReadFile(reviews[0])
 	// The whole merge request: its first commit's file is in the diff the review read.
 	assertContains(t, "the review prompt", string(data), "first.txt")
+	decisions, _ := filepath.Glob(filepath.Join(f.repoDir, ".orchestrator", "runs", "*", "decision.json"))
+	if len(decisions) != 1 {
+		t.Fatalf("decision.json files = %q", decisions)
+	}
+	decision, _ := os.ReadFile(decisions[0])
+	var trace struct {
+		Stages []struct {
+			Stage   string `json:"stage"`
+			Enabled bool   `json:"enabled"`
+			Forced  bool   `json:"forced"`
+			Reason  string `json:"reason"`
+		} `json:"stages"`
+	}
+	if err := json.Unmarshal(decision, &trace); err != nil {
+		t.Fatal(err)
+	}
+	forced := false
+	for _, st := range trace.Stages {
+		forced = forced || st.Stage == "review" && st.Enabled && st.Forced && st.Reason == "revise"
+	}
+	if !forced {
+		t.Errorf("decision.json stages = %+v, want review forced on by revise", trace.Stages)
+	}
 	assertContains(t, "stdout", stdout, "Merge request !7 updated: ")
 	assertDescriptionUpdated(t, f.jira, run)
 	for _, p := range f.gitlab.Paths() {

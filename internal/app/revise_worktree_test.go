@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,7 +39,7 @@ func reviseSession(t *testing.T) (s *session, dir, mainSHA, fixSHA string, out *
 	return s, dir, mainSHA, fixSHA, out
 }
 
-func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
+func TestOpenWorktree_ReviseUpdateStartsFromTheMergeRequestsBranch(t *testing.T) {
 	s, dir, mainSHA, fixSHA, _ := reviseSession(t)
 	refsBefore := gitIn(t, dir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes")
 
@@ -47,7 +48,7 @@ func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	w := s.run.Worktree
-	if w.Branch != "fix/x" || w.BaseRef != fixSHA || w.BaseBranch != "main" || !w.ExistingBranch {
+	if w.Branch != domain.ReviseBranch("fix/x", s.run.ID) || w.BaseRef != fixSHA || w.BaseBranch != "main" || !w.ExistingBranch {
 		t.Fatalf("worktree = %+v", w)
 	}
 	if s.run.ReviewBase != mainSHA || s.run.BranchNaming.Source != domain.BranchSourceExisting {
@@ -59,9 +60,9 @@ func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(wt.Dir, "first.go")); err != nil {
 		t.Fatalf("the merge request's file is missing: %v", err)
 	}
-	// Only refs/heads/fix/x (created by the worktree) and refs/orchestrator/ are new.
+	// Only the run's branch (created by the worktree) and refs/orchestrator/ are new.
 	refsAfter := gitIn(t, dir, "for-each-ref", "--format=%(refname) %(objectname)", "refs/heads", "refs/remotes")
-	if want := refsBefore + "\nrefs/heads/fix/x " + fixSHA; refsAfter != strings.TrimSpace(want) && refsAfter != "refs/heads/fix/x "+fixSHA+"\n"+refsBefore {
+	if want := strings.Split(refsBefore+"\nrefs/heads/"+w.Branch+" "+fixSHA, "\n"); !sameLines(strings.Split(refsAfter, "\n"), want) {
 		t.Errorf("refs changed:\nbefore\n%s\nafter\n%s", refsBefore, refsAfter)
 	}
 	if got := gitIn(t, dir, "rev-parse", repository.ReviseRef(s.run.ID, "-target")); got != mainSHA {
@@ -75,35 +76,58 @@ func TestOpenWorktree_ReviseUpdateOnTheMergeRequestsBranch(t *testing.T) {
 	}
 }
 
-func TestOpenWorktree_ReviseLocalBranchBehindIsMovedForward(t *testing.T) {
-	s, dir, mainSHA, fixSHA, _ := reviseSession(t)
-	gitIn(t, dir, "branch", "fix/x", mainSHA)
-	if _, err := openWorktree(context.Background(), s); err != nil {
+func sameLines(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
+func TestOpenWorktree_ReviseLocalBranch(t *testing.T) {
+	t.Run("behind: the fetched tip, the local branch untouched", func(t *testing.T) {
+		s, dir, mainSHA, fixSHA, _ := reviseSession(t)
+		gitIn(t, dir, "branch", "fix/x", mainSHA)
+		if _, err := openWorktree(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		if s.run.Worktree.BaseRef != fixSHA || gitIn(t, dir, "rev-parse", "fix/x") != mainSHA {
+			t.Fatalf("base = %s, fix/x = %s", s.run.Worktree.BaseRef, gitIn(t, dir, "rev-parse", "fix/x"))
+		}
+	})
+	t.Run("ahead and checked out: the local tip", func(t *testing.T) {
+		s, dir, _, fixSHA, _ := reviseSession(t)
+		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", fixSHA)
+		mine := commitFile(t, dir, "mine.go")
+		if _, err := openWorktree(context.Background(), s); err != nil {
+			t.Fatal(err)
+		}
+		if s.run.Worktree.BaseRef != mine {
+			t.Fatalf("base = %s, want the local tip %s", s.run.Worktree.BaseRef, mine)
+		}
+		if gitIn(t, dir, "symbolic-ref", "--short", "HEAD") != "fix/x" || gitIn(t, dir, "rev-parse", "HEAD") != mine {
+			t.Error("the operator's checkout changed")
+		}
+	})
+}
+
+// commitFile commits a new file name in dir and returns the commit.
+func commitFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("package main\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := gitIn(t, dir, "rev-parse", "fix/x"); got != fixSHA {
-		t.Fatalf("fix/x = %s, want %s", got, fixSHA)
-	}
+	gitIn(t, dir, "add", "-A")
+	gitIn(t, dir, "commit", "-qm", name)
+	return gitIn(t, dir, "rev-parse", "HEAD")
 }
 
 func TestOpenWorktree_ReviseRefusals(t *testing.T) {
 	t.Run("diverged", func(t *testing.T) {
 		s, dir, mainSHA, _, _ := reviseSession(t)
 		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", mainSHA)
-		if err := os.WriteFile(filepath.Join(dir, "mine.go"), []byte("package main\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		gitIn(t, dir, "add", "-A")
-		gitIn(t, dir, "commit", "-qm", "mine")
+		commitFile(t, dir, "mine.go")
 		gitIn(t, dir, "checkout", "-q", "main")
-		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "has commits that are not in the merge request") {
-			t.Fatalf("err = %v", err)
-		}
-	})
-	t.Run("checked out", func(t *testing.T) {
-		s, dir, _, fixSHA, _ := reviseSession(t)
-		gitIn(t, dir, "checkout", "-q", "-b", "fix/x", fixSHA)
-		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "is checked out in") {
+		if _, err := openWorktree(context.Background(), s); err == nil || !strings.Contains(err.Error(), "have diverged") {
 			t.Fatalf("err = %v", err)
 		}
 	})

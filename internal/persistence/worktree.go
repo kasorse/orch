@@ -162,6 +162,14 @@ func validateMR(run *domain.Run) error {
 	if err := m.Validate(); err != nil {
 		return fmt.Errorf("mr: %w", err)
 	}
+	// A revise update pushes the merge request's branch, which its own branch was landed on.
+	pushed := ""
+	if run.Worktree != nil {
+		pushed = run.Worktree.Branch
+		if src := run.Task.Source; run.Worktree.ExistingBranch && src != nil && src.Revise != nil {
+			pushed = src.Revise.Branch
+		}
+	}
 	switch {
 	case run.Status != domain.RunCompleted:
 		return fmt.Errorf("mr recorded on a %s run; only a completed run has one", run.Status)
@@ -169,8 +177,8 @@ func validateMR(run *domain.Run) error {
 		return fmt.Errorf("mr recorded on a run without a worktree")
 	case m.State != "" && run.Commit == "":
 		return fmt.Errorf("mr.state %s on a run without a commit", m.State)
-	case m.Source != "" && m.Source != run.Worktree.Branch:
-		return fmt.Errorf("mr.source is %q, but worktree.branch is %q", m.Source, run.Worktree.Branch)
+	case m.Source != "" && m.Source != pushed:
+		return fmt.Errorf("mr.source is %q, but the pushed branch is %q", m.Source, pushed)
 	}
 	return nil
 }
@@ -217,9 +225,10 @@ func validBranchName(name string) bool {
 	return true
 }
 
-// validateReviseWorktree ties a revise run's worktree to its task.source (specs/revise/SPEC.md
-// §10): an update is on the merge request's branch at its sha, a new one is not; both go to the
-// recorded target. existing_branch and branch_naming.source existing belong to an update only.
+// validateReviseWorktree ties a revise run's worktree to its task.source (MVP.md §54.10): an
+// update's worktree is on <branch>-revise-<run-id prefix>, landed on the merge request's branch at the end
+// (its base_ref is that branch's tip or the operator's copy ahead of it), a new one is not; both go
+// to the recorded target. existing_branch and branch_naming.source existing belong to an update only.
 func validateReviseWorktree(run *domain.Run) error {
 	w, src := run.Worktree, run.Task.Source
 	isRevise := src != nil && src.Kind == domain.TaskSourceRevise
@@ -238,8 +247,8 @@ func validateReviseWorktree(run *domain.Run) error {
 	switch {
 	case w.ExistingBranch != update || existing != update:
 		return fmt.Errorf("worktree.existing_branch and branch_naming.source existing go with a revise update, and only with it")
-	case update && (w.Branch != r.Branch || w.BaseRef != r.BaseRef):
-		return fmt.Errorf("worktree is on %q at %q, but the revised merge request is %q at %q", w.Branch, w.BaseRef, r.Branch, r.BaseRef)
+	case update && w.Branch != domain.ReviseBranch(r.Branch, run.ID):
+		return fmt.Errorf("a revise update's worktree is on %q, not on %q", w.Branch, domain.ReviseBranch(r.Branch, run.ID))
 	}
 	return nil
 }

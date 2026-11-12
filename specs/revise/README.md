@@ -4,6 +4,13 @@ Status: **completed** (6 of 6 tasks done, 2026-11-11; spec 2026-11-11, owner's a
 A1–A12 confirmed 2026-11-11). Left to the operator: the live check on Jira Cloud and gitlab.com,
 and the four `bench/` tests that skip under bwrap (nothing under `bench/` changed).
 
+Changed after the build (owner, 2026-11-12), MVP.md §54.1, §54.6, §54.8 hold the result: the target
+may be the ticket's `/browse/<KEY>` URL; an update no longer puts its worktree on the merge request's
+branch (which refused a branch checked out in the operator's tree) but on `<branch>-revise-<run-id[:8]>` (a name the repository's branch hooks accept) from
+the operator's local copy of it (its unpushed commits included, a diverged one refused), and at the
+end fast-forwards that copy (`git merge --ff-only` where it is checked out) and pushes it (R10, R11);
+review is forced on like development, so R5's review of the whole merge request always runs (R12).
+
 | done | task | title | depends on |
 |---|---|---|---|
 | [x] | RV01 | `internal/gitlab`: the read-only client, `gitlab.api_token_env`, the scope check | — |

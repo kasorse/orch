@@ -6755,12 +6755,13 @@ opens a new one, and appends the requirement to the ticket's description after t
 
 ```
 orchestrator revise <target> "<requirement>" [--mode M] [--allow-red-tests] [--claude-auth M] [--codex-auth M]
-  <target>: PAY-12 | https://<gitlab>/<group>/<project>/-/merge_requests/<iid> | <run-id> | <branch>
+  <target>: PAY-12 | https://<jira>/browse/PAY-12 | https://<gitlab>/<group>/<project>/-/merge_requests/<iid> | <run-id> | <branch>
 ```
 
 The target's kind comes from its form, in this order: a URL that `gitlab.ParseMergeRequestURL`
-accepts on `gitlab.base_url` (any other URL is refused); an upper-case Jira key (`pay-12` is a
-branch); a run ID (a lowercase UUID); a branch name `domain.CheckBranchName` accepts. The
+accepts on `gitlab.base_url`; a URL whose path has `/browse/`, which `jira.ParseRef` must accept
+on `jira.base_url` like `run --jira`'s, and which becomes its key (`revise.target` records the key);
+any other URL is refused; an upper-case Jira key (`pay-12` is a branch); a run ID (a lowercase UUID); a branch name `domain.CheckBranchName` accepts. The
 requirement is the rest of the arguments, or stdin for a single `-`: non-empty UTF-8 text without
 NUL, at most 8 KiB. A revise is always a worktree run whatever `execution.isolation` says;
 `--stage`, `--jira`, `--inplace`, `--worktree` and `--story-task` are refused. It needs
@@ -6835,8 +6836,9 @@ target are not its merge request's are refused). The key is a Jira target's, or 
 named as any run's (§50.3), and a new merge request. A branch on the remote without a merge
 request → update, and the push opens one. A fork or a `locked` merge request is refused; a branch
 `domain.CheckBranchName` refuses (a story's `story/…`) cannot be updated. The decision runs as
-usual, clarify included, and development is forced on (reason `revise`, also after an edit on the
-review screen). Printed before the approval: `Revise !1294 (opened) on fix/PAY-31-round in
+usual, clarify included, and development and review are forced on (reason `revise`, also after an
+edit on the review screen; `policy.ForceDevelopment`, `policy.ForceReview`: review since 2026-11-12,
+when a revise pushed a 450-line migration nobody reviewed). Printed before the approval: `Revise !1294 (opened) on fix/PAY-31-round in
 acme/payments/billing`, or `!1290 is merged: a new branch from main and a new merge request`.
 
 ## 54.6 The branch (SPEC §6.1)
@@ -6847,14 +6849,18 @@ revise/<run-id>-target` (argv, the full environment, 5 minutes) and, for an upda
 merge request's branch into `refs/orchestrator/revise/<run-id>`, which must be at the recorded
 `sha` (else "somebody pushed; run revise again", and no worktree); nothing under `refs/heads/` or
 `refs/remotes/` is written by a fetch; the fingerprint is compared again. An update's
-`run.json: review_base` is `merge-base(target, sha)`. Its local branch: absent → `git worktree add
--b <branch> <path> <sha>`; at `sha` or behind it and checked out nowhere → moved by `git
-update-ref refs/heads/<branch> <sha> <old>`, then `git worktree add <path> <branch>`; diverged, or
-checked out in any worktree → refused, naming it. `worktree` records `existing_branch: true`,
-`branch_naming` is `{source: existing}` (no naming call), `base_ref` is the merge request's `sha`
-and `base_branch` its target; `run.json` refuses a revise run whose worktree is not on its merge
-request's branch at its sha, and `existing_branch`, `source: existing` or `review_base` on any other
-run. A new merge request starts from the fetched target's tip (not the operator's HEAD) on a branch
+`run.json: review_base` is `merge-base(target, base_ref)`. An update starts from the operator's
+local copy of the merge request's branch when that holds `sha` and more (the operator's own commits
+go into the merge request with the run's), else from `sha` (no local branch, or one at it or behind
+it); a local branch that diverged from `sha` is refused, naming both. The worktree is `git worktree
+add -b <b>-revise-<run-id[:8]> <path> <base_ref>` (named after the merge request's branch `<b>`, so
+a hook that checks branch names accepts it as it accepts `<b>`): the merge request's branch is never checked out by
+the run, so it may stay checked out in the operator's tree (changed 2026-11-12; the first build put
+the worktree on that branch and refused one checked out anywhere). `worktree` records
+`existing_branch: true`, `branch_naming` is `{source: existing}` (no naming call), `base_ref` is
+where it started and `base_branch` the target; `run.json` refuses a revise update whose worktree is
+not on `<b>-revise-<run-id[:8]>` (`domain.ReviseBranch`), and `existing_branch`, `source: existing` or `review_base` on any
+other run. A new merge request starts from the fetched target's tip (not the operator's HEAD) on a branch
 named by §50.3. The worktree is then an ordinary one: the guard, the restore point, `pre_run_ref`,
 the secret-scan baseline and the pre-run test are taken at `base_ref`.
 
@@ -6870,24 +6876,31 @@ whole merge request with the new change, not only the new commit; a new merge re
 
 The §50.5 chain, with these differences for an update (`worktree.existing_branch`):
 
-1. The commit: a new commit on top of the merge request's tip, never amend or squash; the message
+1. The commit: a new commit on the run's branch on top of `base_ref`, never amend or squash; the message
    as §50.2, with the trailer `Orchestrator-Revises: !<iid>` after `Orchestrator-Run` (any revise
    task with a merge request, a new one's too).
 2. The conflict check against the target, as today.
 3. Printed `This push updates !<iid> (<url>).`; the push question as §50.5, and **no merge request
    question** when the branch has a merge request (a branch without one asks it, and the push opens
    one with §50.6's options).
-4. Before the push, `ls-remote` must show the branch exactly at `worktree.base_ref`: gone, or
-   elsewhere, is `mr.error` (`… is at <short>, not at <short> where this run started: somebody
-   pushed`), nothing pushed, exit 6.
-5. `git push --no-follow-tags <remote> refs/heads/<b>:refs/heads/<b>`: no `-u` (the branch is not
-   the run's, its upstream is not written), no `-o`, never `--force` (git refuses a
+4. Before the push, `ls-remote` must show the merge request's branch exactly at
+   `task.source.revise.base_ref` (the `sha` the run fetched): gone, or elsewhere, is `mr.error`
+   (`… is at <short>, not at <short> where this run started: somebody pushed`), nothing pushed,
+   exit 6.
+5. The land (`landRevise`): the operator's local branch is fast-forwarded to the commit, by `git
+   merge --ff-only` in the checkout that has it (which refuses rather than overwrite a local
+   change) or by `git update-ref` against its tip, and created when absent; a local branch that
+   moved off the run's history, or a refused merge, is `mr.error` (`the commit stays on
+   <b>-revise-<id> and was not merged into <b>: …`), nothing pushed, exit 6.
+6. `git push --no-follow-tags <remote> refs/heads/<b>:refs/heads/<b>` of the merge request's branch
+   (`mr.source`): no `-u` (its upstream is not written), no `-o`, never `--force` (git refuses a
    non-fast-forward itself); the intent in `run.json: mr` first, never repeated.
-6. Success: `mr {state: updated, iid, url}` (the merge request's), printed `Merge request !<iid>
+7. Success: `mr {state: updated, iid, url}` (the merge request's), printed `Merge request !<iid>
    updated: <url>`, exit 0; `--output json` has that `mr`. The merge request's title and
    description are never changed. `jira.write`'s comment reads `Merge request [!<iid>|<url>]
    updated: <commit header>`, and its transition is made as after §39.12.
-7. The worktree is removed as after any commit; the local branch stays at the new commit.
+8. The worktree is removed as after any commit, then `<b>-revise-<id>` is deleted once the
+   merge request's local branch holds the commit (a refused land keeps it: the commit is there).
 
 A new merge request is §50.5 unchanged.
 
@@ -6918,7 +6931,7 @@ date, text)` is the old description, trailing space dropped, an empty line, and 
 
 `orchestrator resume <id>` of a revise run reads `task.source.revise`, the decision, the workflow
 and the worktree as any worktree run's (§37, §47.5): it builds **no GitLab client** and makes no
-fetch; the check before the push is git's (`ls-remote` equals `base_ref`), and a Jira client only
+fetch; the check before the push is git's (`ls-remote` equals `revise.base_ref`), and a Jira client only
 for the write-back and the description. New in `run.json`: `task.source` kind `revise` with
 `revise {…}`, `task.acceptance` on a revise task, `worktree.existing_branch`, `review_base`,
 `branch_naming.source: existing`, `mr.state: updated`, `jira_write.description`; each is

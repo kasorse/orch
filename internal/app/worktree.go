@@ -78,7 +78,8 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return openReviewWorktree(ctx, s)
 	}
 	var base, baseBranch string
-	// existing is a revise update: the worktree goes on the merge request's own branch.
+	// existing is a revise update: the run's branch starts from the merge request's branch and is
+	// landed on it at the end (deliver, landRevise).
 	existing := false
 	if src := run.Task.Source; src != nil && src.Kind == domain.TaskSourceRevise {
 		var err error
@@ -131,7 +132,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	}
 	var branch string
 	if existing {
-		branch, run.BranchNaming = run.Task.Source.Revise.Branch, &domain.BranchNaming{Source: domain.BranchSourceExisting}
+		branch, run.BranchNaming = domain.ReviseBranch(run.Task.Source.Revise.Branch, run.ID), &domain.BranchNaming{Source: domain.BranchSourceExisting}
 	} else {
 		var naming *domain.BranchNaming
 		if branch, naming, err = nameBranch(ctx, s, in); err != nil {
@@ -145,14 +146,8 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 		return nil, &apperr.WorkflowError{Msg: "cannot create the run's worktree", Err: err}
 	}
 	defer unlock()
-	// Neither is ever reused: an existing one belongs to something else. A revise update's branch
-	// is the merge request's: a local copy of it is moved forward to base, or refused.
-	onLocal := false
-	if existing {
-		if onLocal, err = localReviseBranch(ctx, repo, branch, base); err != nil {
-			return nil, err
-		}
-	} else if exists, err := repo.BranchExists(ctx, branch); err != nil {
+	// Neither is ever reused: an existing one belongs to something else.
+	if exists, err := repo.BranchExists(ctx, branch); err != nil {
 		return nil, err
 	} else if exists {
 		return nil, branchExistsError(branch, nil)
@@ -172,12 +167,7 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	if err != nil {
 		return nil, err
 	}
-	var admin string
-	if onLocal {
-		admin, err = repo.AddWorktreeOnBranch(ctx, path, branch)
-	} else {
-		admin, err = repo.AddWorktree(ctx, path, branch, base)
-	}
+	admin, err := repo.AddWorktree(ctx, path, branch, base)
 	if err != nil {
 		// git refuses an existing branch too, when one appeared after the check above; or it made
 		// the branch and then failed. git's own error says which.
@@ -215,11 +205,13 @@ func openWorktree(ctx context.Context, s *session) (*repository.Repository, erro
 	return &repository.Repository{Dir: path, Executor: repo.Executor}, nil
 }
 
-// reviseBase fetches what a revise run starts from (specs/revise/SPEC.md §6.1): the target branch,
-// always, into refs/orchestrator/revise/<id>-target, and for an update the merge request's branch
-// into refs/orchestrator/revise/<id>, which must still be at the merge request's sha. For an update
-// it records run.review_base, the merge base the review diff starts from. The fetch runs the
-// operator's credential helper, so the git config and hooks are compared around it.
+// reviseBase fetches what a revise run starts from (MVP.md §54.6): the target branch, always, into
+// refs/orchestrator/revise/<id>-target, and for an update the merge request's branch into
+// refs/orchestrator/revise/<id>, which must still be at the merge request's sha. An update starts
+// from the operator's local copy of that branch when it is ahead (its own commits go into the
+// merge request with the run's), else from the fetched tip; a local copy that diverged is refused.
+// For an update it records run.review_base, the merge base the review diff starts from. The fetch
+// runs the operator's credential helper, so the git config and hooks are compared around it.
 func reviseBase(ctx context.Context, s *session) (base, baseBranch string, existing bool, err error) {
 	repo, run := s.repo, s.run
 	r := run.Task.Source.Revise
@@ -242,6 +234,9 @@ func reviseBase(ctx context.Context, s *session) (base, baseBranch string, exist
 			return "", "", false, &apperr.WorkflowError{Msg: fmt.Sprintf("%s on %s is at %s, not at %s as when the merge request was read: somebody pushed; run revise again",
 				r.Branch, remote, shortSHA(got), shortSHA(r.BaseRef))}
 		}
+		if got, err = localReviseTip(ctx, repo, r.Branch, got); err != nil {
+			return "", "", false, err
+		}
 		mb, ok, err := repo.MergeBase(ctx, target, got)
 		if err != nil {
 			return "", "", false, err
@@ -261,33 +256,22 @@ func reviseBase(ctx context.Context, s *session) (base, baseBranch string, exist
 	return base, r.BaseBranch, existing, nil
 }
 
-// localReviseBranch checks the operator's own copy of a revise update's branch (SPEC.md §6.1.3):
-// absent (false: the worktree creates it at base), at base or behind it and checked out nowhere
-// (moved to base by update-ref with its old value; true), or refused: diverged, or checked out.
-func localReviseBranch(ctx context.Context, repo *repository.Repository, branch, base string) (bool, error) {
+// localReviseTip is where a revise update starts: the operator's local branch when it holds the
+// fetched tip and more, else the fetched tip (no local branch, or one at it or behind it). A local
+// branch that has commits of its own and lacks some of the remote's is refused.
+func localReviseTip(ctx context.Context, repo *repository.Repository, branch, fetched string) (string, error) {
 	tip, ok, err := repo.BranchTip(ctx, branch)
-	if err != nil || !ok {
-		return false, err
+	if err != nil || !ok || tip == fetched {
+		return fetched, err
 	}
-	if at, err := repo.CheckedOutAt(ctx, branch); err != nil {
-		return false, err
-	} else if at != "" {
-		return false, &apperr.ConfigError{Msg: fmt.Sprintf("%s is checked out in %s; switch that checkout to another branch, then run revise again", branch, at)}
+	if ahead, err := repo.IsAncestor(ctx, fetched, tip); err != nil || ahead {
+		return tip, err
 	}
-	if tip == base {
-		return true, nil
+	if behind, err := repo.IsAncestor(ctx, tip, fetched); err != nil || behind {
+		return fetched, err
 	}
-	behind, err := repo.IsAncestor(ctx, tip, base)
-	if err != nil {
-		return false, err
-	}
-	if !behind {
-		return false, &apperr.ConfigError{Msg: fmt.Sprintf("your local %s has commits that are not in the merge request (%s); push or drop them, then run revise again", branch, shortSHA(tip))}
-	}
-	if err := repo.UpdateRef(ctx, "refs/heads/"+branch, base, tip); err != nil {
-		return false, err
-	}
-	return true, nil
+	return "", &apperr.ConfigError{Msg: fmt.Sprintf("your local %s (%s) and the merge request's branch (%s) have diverged; pull or reset yours, then run revise again",
+		branch, shortSHA(tip), shortSHA(fetched))}
 }
 
 // openReviewWorktree creates the worktree of a review run (specs/delivery/SPEC.md §12.2): at the
@@ -547,7 +531,8 @@ func verifyRunWorktree(ctx context.Context, repo *repository.Repository, run *do
 // the push and the merge request) and removes the worktree, whatever the delivery did; without
 // one the worktree stays, its path is printed and the chain ends there (skipDelivery). Nothing
 // here fails a run that already completed: what goes wrong is reported and the worktree is
-// kept. The branch is never deleted: it is the result. The error is the delivery's: a
+// kept. The branch is never deleted: it is the result, but for a revise update's, once the merge
+// request's branch holds its commit (landRevise). The error is the delivery's: a
 // NeedsPersonError when the branch did not become a merge request and nobody declined that.
 func finishWorktree(ctx context.Context, s *session, sha string) error {
 	w := s.worktree
@@ -569,6 +554,14 @@ func finishWorktree(ctx context.Context, s *session, sha string) error {
 	w.Removed = true
 	if err := s.store.SaveRun(s.run); err != nil {
 		fmt.Fprintf(s.reporter.PausingWriter(), "Removed the worktree %s, but run.json could not record it: %v\n", w.Path, err)
+	}
+	if w.ExistingBranch {
+		// shortcut: a branch left by a failed deletion is only clutter, so the error is not reported.
+		if tip, ok, _ := s.operator.BranchTip(ctx, s.run.Task.Source.Revise.Branch); ok {
+			if landed, _ := s.operator.IsAncestor(ctx, sha, tip); landed {
+				_ = s.operator.DeleteBranch(ctx, w.Branch, sha)
+			}
+		}
 	}
 	return deliveryErr
 }

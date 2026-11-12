@@ -87,9 +87,10 @@ func reviseFixture(t *testing.T, gl *fakeGitLab, links []jira.RemoteLink) (revis
 }
 
 func TestReviseTargetKind(t *testing.T) {
-	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseGitLabBase}}
+	cfg := config.Config{GitLab: &config.GitLabConfig{BaseURL: reviseGitLabBase}, Jira: &config.JiraConfig{BaseURL: "https://jira.example"}}
 	for target, want := range map[string]string{
-		"PAY-31": domain.ReviseTargetJira,
+		"PAY-31":                             domain.ReviseTargetJira,
+		"https://jira.example/browse/PAY-31": domain.ReviseTargetJira,
 		reviseGitLabBase + "/acme/payments/billing/-/merge_requests/1294": domain.ReviseTargetMR,
 		"0f8fad5b-d9cb-469f-a165-70867728950e":                            domain.ReviseTargetRun,
 		"fix/PAY-31-round":                                                domain.ReviseTargetBranch,
@@ -100,7 +101,8 @@ func TestReviseTargetKind(t *testing.T) {
 			t.Errorf("%s: %q, %v; want %q", target, got, err, want)
 		}
 	}
-	for _, bad := range []string{"https://evil.example/a/b/-/merge_requests/1", "a b", "-x", reviseGitLabBase + "/a/b/-/issues/1"} {
+	for _, bad := range []string{"https://evil.example/a/b/-/merge_requests/1", "a b", "-x", reviseGitLabBase + "/a/b/-/issues/1",
+		"https://evil.example/browse/PAY-31", "https://jira.example/browse/not-a-key"} {
 		if _, err := reviseTargetKind(cfg, bad); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
@@ -165,16 +167,19 @@ func TestResolveRevise_JiraTakesTheLatestOfThisProject(t *testing.T) {
 		{URL: reviseGitLabBase + "/acme/payments/other/-/merge_requests/9"},
 		{URL: "https://confluence.example/page"},
 	}
-	d, _, _ := reviseFixture(t, gl, links)
-	res, err := resolveRevise(context.Background(), d, reviseRequest{Target: "PAY-31", Requirement: "Round half up"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r := res.source.Revise; r.MR.IID != 1293 || r.Mode != domain.ReviseUpdate || res.source.Key != "PAY-31" || res.ticket == nil {
-		t.Fatalf("revise = %+v, key %q", r, res.source.Key)
-	}
-	if !strings.Contains(res.description, "The ticket.") {
-		t.Fatalf("description = %q", res.description)
+	for _, target := range []string{"PAY-31", "https://jira.example/browse/PAY-31"} {
+		d, _, _ := reviseFixture(t, gl, links)
+		d.cfg.Jira = &config.JiraConfig{BaseURL: "https://jira.example"}
+		res, err := resolveRevise(context.Background(), d, reviseRequest{Target: target, Requirement: "Round half up"})
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		if r := res.source.Revise; r.MR.IID != 1293 || r.Mode != domain.ReviseUpdate || res.source.Key != "PAY-31" || r.Target != "PAY-31" || res.ticket == nil {
+			t.Fatalf("%s: revise = %+v, key %q", target, r, res.source.Key)
+		}
+		if !strings.Contains(res.description, "The ticket.") {
+			t.Fatalf("description = %q", res.description)
+		}
 	}
 }
 
@@ -298,5 +303,16 @@ func TestReviseCriteria(t *testing.T) {
 	got := reviseCriteria("one\n\n  two  \r\n" + strings.Repeat("x\n", 20))
 	if len(got) != 10 || got[0] != "one" || got[1] != "two" {
 		t.Fatalf("%q", got)
+	}
+}
+
+func TestReviseJiraTarget(t *testing.T) {
+	for target, want := range map[string]bool{
+		"PAY-31": true, "https://jira.example/browse/PAY-31": true,
+		"pay-31": false, reviseGitLabBase + "/a/b/-/merge_requests/1": false, "fix/PAY-31": false,
+	} {
+		if got := reviseJiraTarget(target); got != want {
+			t.Errorf("%s: %v, want %v", target, got, want)
+		}
 	}
 }

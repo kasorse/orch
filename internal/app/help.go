@@ -16,7 +16,7 @@ Commands:
   resume <run-id>              continue a failed, stopped or planned run where it stopped
                                (the full ID or a unique prefix of 8+ characters)
   review --base <ref>          review a change someone else wrote (test and review only)
-  revise <KEY|MR-URL|run-id|branch> "<requirement>"
+  revise <KEY|issue-URL|MR-URL|run-id|branch> "<requirement>"
                                add a requirement to work that opened a merge request: push a
                                commit to its branch, or open a new one when it was merged
   story plan "<task>"          split a task that spans services into a spec of ordered tasks

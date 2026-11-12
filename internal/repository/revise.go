@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/kasorse/orch/internal/apperr"
@@ -38,24 +37,16 @@ func (r *Repository) FetchBranch(ctx context.Context, remote, branch, ref string
 	return strings.TrimSpace(out), nil
 }
 
-// AddWorktreeOnBranch creates a linked worktree at path (absolute) on the existing local branch
-// and returns its administrative directory. Git refuses a branch checked out elsewhere.
-func (r *Repository) AddWorktreeOnBranch(ctx context.Context, path, branch string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("cannot add a worktree: %q is not an absolute path", path)}
-	}
+// DeleteBranch deletes the local branch, but only while it is at sha (git update-ref -d).
+func (r *Repository) DeleteBranch(ctx context.Context, branch, sha string) error {
 	if !validBranchName(branch) {
-		return "", &apperr.RepositoryError{Msg: fmt.Sprintf("cannot add a worktree: %q is not a valid branch name", branch)}
+		return &apperr.RepositoryError{Msg: fmt.Sprintf("cannot delete %q: not a valid branch name", branch)}
 	}
-	if _, err := r.git(ctx, "worktree", "add", "--quiet", path, branch); err != nil {
-		return "", err
+	if err := checkRefs("delete a branch", sha); err != nil {
+		return err
 	}
-	wt := &Repository{Dir: path, Executor: r.Executor}
-	out, err := wt.git(ctx, "rev-parse", "--path-format=absolute", "--git-dir")
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(out), nil
+	_, err := r.git(ctx, "update-ref", "-d", "refs/heads/"+branch, sha)
+	return err
 }
 
 // CheckedOutAt is the worktree the local branch is checked out in, "" for none.

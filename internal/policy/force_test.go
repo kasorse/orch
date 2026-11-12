@@ -136,3 +136,22 @@ func TestSkipPlanning_TurnsTheReadOnlyStagesOff(t *testing.T) {
 		t.Errorf("input changed: %+v", dec)
 	}
 }
+
+func TestForceReview(t *testing.T) {
+	in := ForceDevelopment(belowDevelopment(0.1, false), "revise")
+	got := ForceReview(in, "revise")
+	review := got.Stages.Stages[3]
+	if !review.Enabled || !review.Forced || review.Reason != "revise" {
+		t.Fatalf("review = %+v", review)
+	}
+	if in.Stages.Stages[3].Enabled {
+		t.Fatal("the input was modified")
+	}
+	if again := ForceReview(got, "other"); !reflect.DeepEqual(again, got) {
+		t.Fatalf("a review already on changed: %+v", again.Stages.Stages[3])
+	}
+	none := domain.Decision{Stages: domain.StageSelection{Stages: []domain.StageOutcome{{Stage: domain.StageDevelopment, Enabled: true}}}}
+	if s := ForceReview(none, "revise").Stages.Stages; len(s) != 2 || s[1].Stage != domain.StageReview || !s[1].Enabled {
+		t.Fatalf("stages = %+v", s)
+	}
+}

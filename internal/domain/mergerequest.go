@@ -71,3 +71,10 @@ func (r ReviseSource) Label() string {
 	}
 	return r.Branch
 }
+
+// ReviseBranch is a revise update's own branch: the merge request's branch with a suffix, so the
+// repository's rules for branch names (a hook that wants it to start with the ticket) accept it as
+// they accept that branch (MVP.md §54.6).
+func ReviseBranch(mrBranch, runID string) string {
+	return mrBranch + "-revise-" + runID[:min(8, len(runID))]
+}
