@@ -365,16 +365,19 @@ security:
 #     transition: In Review        # move the issue by the transition of this name, or leading to this status; case does not matter
 #                                  # the run needs the credential variables when this is set; a failure here is a warning, never the run's result
 
-# Optional: `orchestrator jira listen` (MVP.md §51) takes the tickets labelled ai-run, one at a
-# time, and runs each as a child run in its service's directory. It needs the jira section above
-# (credentials only; jira.write is off in the child) and the gitlab section below. Run it in a
-# working directory that is a volume. The lines are commented so a plain run is unchanged.
+# Optional: `orchestrator jira listen` (MVP.md §51) takes the tickets labelled ai-run and runs each
+# in its service's directory, in the listener's own process: up to max_parallel at once, at most
+# one per service. It needs the jira section above (credentials only; jira.write is off in the
+# runs) and the gitlab section below. Run it in a working directory that is a volume. The lines
+# are commented so a plain run is unchanged.
 # listener:
-#   poll_interval: 1m              # 30s..1h; waited while no ticket is dispatched
+#   poll_interval: 1m              # 30s..1h; waited while a slot is free and no run ends
 #   services_dir: .                # relative to the working directory; one directory per service
 #   default_config: service.yaml   # optional; --config for a service without its own orchestrator.yaml
 #   max_attempts: 3                # 1..10 finished runs per ticket
 #   clone_timeout: 10m             # 1m..1h
+#   max_parallel: 1                # 1..8 runs at once, at most one per service; above 1 each run logs to
+#                                  # .orchestrator/listener/logs/<KEY>.<attempt>.log; size the pod for them
 #   query:
 #     projects: [PAY]              # required, at least one
 #     label: ai-run
@@ -384,19 +387,35 @@ security:
 #     service_prefix: "service:"   # a label service:billing names the service
 #     project_prefix: "gitlab:"    # a label gitlab:backend/billing names the GitLab project
 #     restart: ai-restart          # a re-queued ticket with it starts a new run; the listener removes it
+#     ref_prefix: "ref:"           # on an Epic, ref:backend/catalog is a reference repository, only read
 #   transitions:                   # a transition's name or its target status, as jira.write.transition
 #     start: In Progress           # the claim; the workflow must allow it from the statuses above
 #     blocked: Blocked
 #     failed: Failed
 #     done: Ready to Review
 #     retry: To Do                 # back to the queue after an infrastructure failure
+#   blockers:                      # optional: a ticket blocked by an unfinished one waits, unclaimed
+#     link_type: Blocks            # the link type's name; its inward side is "is blocked by"
+#     done_statuses: [Done]        # a blocker in one of these is finished; case does not matter
+#   # Optional (MVP.md §51.13): an Epic labelled ai-run (story.jira_issue_types, default [Epic]) is
+#   # planned into child tickets in the queue's status, linked within a service, which the listener
+#   # then runs like any other; the Epic stays at start. Absent: an Epic is refused. It needs
+#   # jira.create (above), gitlab.api_token_env and listener.blockers, and the listener's own Jira
+#   # account in query.reporters. Services: the Epic's gitlab: labels, else a model's choice from the
+#   # allowed groups' projects, on this file's actions.investigate route.
+#   # story:
+#   #   max_services: 5            # 1..20 services one Epic may target
+#   #   max_refs: 3                # 0..10 ref: labels on one Epic
+#   #   max_tasks: 12              # 1..30
+#   #   max_catalog: 500           # 1..2000 projects listed for the choice
+#   #   max_cost_usd: 5            # optional; every planning call of one Epic
 # gitlab:
 #   base_url: https://gitlab.corp  # https, no userinfo
 #   token_env: GITLAB_TOKEN        # env only, reaches git through a credential helper; a literal token is refused
 #   username: oauth2
 #   allowed_groups: [backend, platform/payments]   # required; clone only from under these
-#   api_token_env: GITLAB_READ_TOKEN   # orchestrator revise only: a read-only API token (scope read_api;
-#                                      # a token that can write is refused), never token_env
+#   api_token_env: GITLAB_READ_TOKEN   # orchestrator revise and the listener's Epic catalog: a read-only
+#                                      # API token (scope read_api; a token that can write is refused), never token_env
 #   # With this section every investigate step may fetch a repository the task links from under
 #   # these groups (mcp__orch__fetch_repository, MVP.md §44.3): a shallow clone into
 #   # .orchestrator/deps/<name>, read-only, with your own git credentials.

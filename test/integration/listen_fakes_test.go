@@ -44,6 +44,8 @@ type listenIssue struct {
 	// blockedBy are the keys of the issues that block this one (link type Blocks, inward side);
 	// the search gives each with its current status in the fake.
 	blockedBy []string
+	// parent is the Epic an issue the listener created is under: a search "parent = <key>" finds it.
+	parent string
 }
 
 // listenJira is a Jira Cloud with the endpoints the listener uses. Its search returns every issue
@@ -65,6 +67,11 @@ type listenJira struct {
 	// beforeTransition runs when a transition is posted, before it is made, without the lock held:
 	// another listener's claim landing between the listener's GET and its POST.
 	beforeTransition func(key, id string)
+	// afterTransition runs once a transition was made, with the status it led to, without the lock
+	// held: a person acting on the ticket right after the listener moved it.
+	afterTransition func(key, status string)
+	// created and links are the bodies of the issues and the issue links the listener created, in order.
+	created, links []string
 }
 
 // listenTransitions is what each status offers: the ids are the fake's own. The queue offers the
@@ -196,14 +203,28 @@ func (j *listenJira) handle(w http.ResponseWriter, r *http.Request) {
 		writeJSON(map[string]string{"accountId": listenBot})
 		return
 	case r.URL.Path == "/rest/api/2/search/jql":
+		jql := r.URL.Query().Get("jql")
+		// The children search of an Epic's plan finds the issues under it; any other search, every issue.
+		parent := ""
+		if rest, ok := strings.CutPrefix(jql, "parent = "); ok {
+			parent, _, _ = strings.Cut(rest, " ")
+		}
 		j.mu.Lock()
-		j.jqls = append(j.jqls, r.URL.Query().Get("jql"))
+		j.jqls = append(j.jqls, jql)
 		issues := []any{}
 		for _, k := range j.order {
-			issues = append(issues, j.issueJSON(j.issues[k], false))
+			if parent == "" || j.issues[k].parent == parent {
+				issues = append(issues, j.issueJSON(j.issues[k], false))
+			}
 		}
 		j.mu.Unlock()
 		writeJSON(map[string]any{"issues": issues, "isLast": true})
+		return
+	case r.URL.Path == "/rest/api/2/issue" && r.Method == http.MethodPost:
+		j.create(w, req.Body)
+		return
+	case r.URL.Path == "/rest/api/2/issueLink" && r.Method == http.MethodPost:
+		j.link(w, req.Body)
 		return
 	}
 	rest, ok := strings.CutPrefix(r.URL.Path, "/rest/api/2/issue/")
@@ -280,11 +301,15 @@ func (j *listenJira) handle(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		status, after := is.status, j.afterTransition
 		j.mu.Unlock()
 		if !moved {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"errorMessages":["Transition is not valid for this issue."]}`))
 			return
+		}
+		if after != nil {
+			after(key, status)
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case sub == "comment" && r.Method == http.MethodGet:
@@ -316,6 +341,67 @@ func (j *listenJira) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+// create is POST /rest/api/2/issue: the issue goes in the queue's status, reported by the listener's
+// account, with the next key of its project.
+func (j *listenJira) create(w http.ResponseWriter, body string) {
+	var in struct {
+		Fields struct {
+			Project     struct{ Key string }  `json:"project"`
+			IssueType   struct{ Name string } `json:"issuetype"`
+			Parent      struct{ Key string }  `json:"parent"`
+			Summary     string                `json:"summary"`
+			Description string                `json:"description"`
+			Labels      []string              `json:"labels"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal([]byte(body), &in); err != nil || in.Fields.Project.Key == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	f := in.Fields
+	j.mu.Lock()
+	n := 0
+	for k := range j.issues {
+		if num, ok := strings.CutPrefix(k, f.Project.Key+"-"); ok {
+			if v, err := strconv.Atoi(num); err == nil && v > n {
+				n = v
+			}
+		}
+	}
+	key := fmt.Sprintf("%s-%d", f.Project.Key, n+1)
+	j.issues[key] = &listenIssue{key: key, summary: f.Summary, description: f.Description, status: "To Do",
+		issueType: f.IssueType.Name, reporter: listenBot, labels: f.Labels, parent: f.Parent.Key}
+	j.order = append(j.order, key)
+	j.created = append(j.created, body)
+	j.nextID++
+	id := j.nextID
+	j.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = fmt.Fprintf(w, `{"id":"%d","key":%q,"self":"https://ignored"}`, id, key)
+}
+
+// link is POST /rest/api/2/issueLink: a link of type Blocks makes the inward issue blocked by the
+// outward one.
+func (j *listenJira) link(w http.ResponseWriter, body string) {
+	var in struct {
+		Type         struct{ Name string } `json:"type"`
+		InwardIssue  struct{ Key string }  `json:"inwardIssue"`
+		OutwardIssue struct{ Key string }  `json:"outwardIssue"`
+	}
+	_ = json.Unmarshal([]byte(body), &in)
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	inward, outward := j.issues[in.InwardIssue.Key], j.issues[in.OutwardIssue.Key]
+	if in.Type.Name != "Blocks" || inward == nil || outward == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	inward.blockedBy = append(inward.blockedBy, outward.key)
+	j.links = append(j.links, body)
+	w.WriteHeader(http.StatusCreated)
 }
 
 // issueJSON is the issue as Jira answers; the caller holds the lock.

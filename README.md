@@ -1257,9 +1257,9 @@ stops the next start until you set `jira: <KEY>` (or `none`) in the task file. D
 
 ### Running the Jira listener (`orchestrator jira listen`)
 
-The listener takes the Jira tickets labelled `ai-run`, one at a time, and runs each as an
-ordinary worktree run in its service's checkout (MVP.md §51, design record
-`specs/jira-listener/`). The run is a call inside the listener's own process, not a child process
+The listener takes the Jira tickets labelled `ai-run` and runs each as an ordinary worktree run in
+its service's checkout (MVP.md §51, design record `specs/jira-listener/`): one at a time, or up to
+`listener.max_parallel` at once, at most one per service (MVP.md §51.14). The run is a call inside the listener's own process, not a child process
 (`specs/embed/`): the listener's process environment is the one thing it shapes, once, at start
 (the Jira variables are removed from it after the Jira client is built). Add the `listener` and
 `gitlab` sections to its configuration file
@@ -1286,15 +1286,37 @@ comment alone does not count, it is not read by the resumed run), or when the ti
 `ai-restart` (`listener.labels.restart`), which the listener then removes: its account needs the
 permission to edit the issue.
 
+With `listener.blockers`, a ticket with an "is blocked by" link (`blockers.link_type`) to one not
+in `done_statuses` waits, unclaimed, and is picked by a later poll once its blockers are done
+(MVP.md §51.3). With `listener.max_parallel` above 1, each run's progress goes to
+`.orchestrator/listener/logs/<KEY>.<attempt>.log` and stderr has one line per start and end.
+
+**An Epic becomes child tickets** with `listener.story` (MVP.md §51.13, design record
+`specs/listener-story/`). Label the Epic `ai-run`; name the services with `gitlab:<group>/<path>`
+labels, or let a model choose them from the allowed groups' projects (a read-only API token in
+`gitlab.api_token_env`); add `ref:<group>/<path>` for a repository the work reads from but does not
+change. The listener moves the Epic to `start`, surveys each repository, specifies the tasks,
+creates one child per task (`jira.create`) in the queue's status with the labels the poll picks,
+links the tasks of one service so that each waits for the previous one (`listener.blockers`), and
+comments on the Epic, which stays at `start`: moving it to done is yours. The children then run as
+any ticket, those of different services in parallel. The listener's own account must be in
+`listener.query.reporters`, or it would never pick the children it made. An Epic that already has
+children the listener made is `blocked`; `ai-restart` plans it again with new children. Without
+`listener.story` an Epic is refused as before.
+
 In Docker:
 
 * **The working directory is a volume.** The clones (`listener.services_dir`) and
-  `.orchestrator/listener/` (the state, the lock, the task files) must survive a restart; that is
-  how a ticket interrupted by `docker stop` is resumed. Run one listener per volume.
+  `.orchestrator/listener/` (the state, the lock, the task files, the run logs, the Epics' plans)
+  must survive a restart; that is how a ticket interrupted by `docker stop` is resumed. Run one
+  listener per volume.
+* **Size the container for `max_parallel`**: each slot is a compile and a test run of a service
+  (a Go service's compile peaks near 1 GB); the listener checks nothing about it.
 * **Give the stop timeout enough for a step to end** (`docker stop --time` or
-  `stop_grace_period`): on SIGTERM the listener cancels the run in progress (the provider call
-  aborts, the test process is killed) and waits for the call to return; a SIGKILL before that
-  leaves the ticket in the start status for the next start, which resumes it.
+  `stop_grace_period`): on SIGTERM the listener cancels every run in progress (the provider call
+  aborts, the test process is killed) and waits for the calls to return; a SIGKILL before that
+  leaves the tickets in the start status for the next start, which resumes them. An Epic's plan cut
+  off by a stop is planned again from the start.
 * **Check the Jira workflow first.** The `start` transition must be allowed from the status in
   `query.statuses` (it is the only lock: a second listener's claim fails), and `start`,
   `blocked`, `failed`, `done` and `retry` must exist as transitions from the statuses the ticket

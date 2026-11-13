@@ -44,10 +44,14 @@ review`: MVP.md §50 (with §4, §39.12, §42, §43, §47, §48), with its desig
 `specs/delivery/`; `story.push: false`, the story whose tasks end at the commit: MVP.md
 §50.5, §50.8, with its design record in `specs/delivery-push/`; the land of such a story on its
 base branch: MVP.md §50.8, with its design record in `specs/story-land/`;
-the Jira listener (`orchestrator jira listen`: tickets labelled `ai-run` become runs, one at a
-time, the `listener` and `gitlab` sections, the git credential helper, the run called in the
+the Jira listener (`orchestrator jira listen`: tickets labelled `ai-run` become runs, the
+`listener` and `gitlab` sections, the git credential helper, the run called in the
 listener's own process, `failure_kind`): MVP.md §51 (with §30, §39, §50.10, §50.13), with its design
-record in `specs/jira-listener/`; the listener's run in process (`runTask`/`resumeRun` take a
+record in `specs/jira-listener/`; the listener's slots (`listener.max_parallel`, at most one run per
+service), blockers (`listener.blockers`: a ticket blocked by an unfinished one waits) and the plan of
+an Epic into child tickets (`listener.story`, `ref:` labels, the GitLab catalog): MVP.md §51.3,
+§51.13, §51.14 (with §39.3, §39.11, §48.1), with its design record in `specs/listener-story/`; the
+listener's run in process (`runTask`/`resumeRun` take a
 directory, no child mode, no `run --listener-task`): MVP.md §51.7, with its design record in
 `specs/embed/`; the listener as a library (the public package `orchestrator` at the module root,
 `embed.go`: `Listen` and `Embedded`, importing only `internal/app`, `internal/exitcode` and the
@@ -90,8 +94,9 @@ the standard library, never `os/exec` or `net` (enforced by a test). Their MCP c
 `internal/provider/mcp` (stdio servers of the call's `--mcp-config`, standard library only):
 `orch` reaches an implement over the API transport through it, unchanged. Jev's
 wire format is isolated in `internal/decision/jev`: its transport types and `Client` methods
-are unexported. GitLab's API is isolated in `internal/gitlab` (`orchestrator revise` only: GET only, a
-token whose scopes are read-only, projects under `gitlab.allowed_groups`; it imports only `domain`,
+are unexported. GitLab's API is isolated in `internal/gitlab` (`orchestrator revise` and, for an Epic's catalog,
+the listener's `GroupProjects`: GET only, a token whose scopes are read-only, projects and groups
+under `gitlab.allowed_groups`; it imports only `domain`,
 `apperr` and the standard library, both enforced by tests). Jira's is isolated in `internal/jira` (unexported wire types; it imports only
 `domain`, `apperr` and the standard library, never `config`).
 
@@ -480,9 +485,20 @@ fallback: stacked on the same-repository task it
   variable. Only allowlisted
   groups (`gitlab.allowed_groups`) are cloned, and only reporters in `listener.query.reporters`
   start a run (the label alone is not enough). A cloned repository's `orchestrator.yaml` is
-  trusted because its group is. `internal/listener` is pure (domain and the standard library);
-  HTTP stays in `internal/jira`, git in `internal/repository`, processes in `app`. One listener
-  per working directory (flock), one ticket at a time.
+  trusted because its group is. `internal/listener` is pure (domain and the standard library:
+  the blockers, the chain of one service's tasks, the child's labels, the comments); HTTP stays in
+  `internal/jira` and `internal/gitlab`, git in `internal/repository`, goroutines and processes in
+  `app`. One listener per working directory (flock); up to `listener.max_parallel` runs at once
+  (1..8, default 1), at most one per service, each a goroutine with its own slot and, above one, its
+  own log file; the state changes under one mutex (MVP.md §51.14). With `listener.blockers` a
+  ticket with an unfinished "is blocked by" link is skipped, unclaimed (§51.3). With
+  `listener.story` an Epic is planned, exclusively (no run in progress, none starts meanwhile):
+  **Go plans, the model only proposes** - Go fixes the catalog (the allowed groups' projects), the
+  services (`gitlab:` labels, else a tool-less `select` call validated against the catalog), the
+  references (`ref:` labels, read-only, never a task), the chain of each service's tasks, the
+  labels and the order of the writes; the children are created and then linked with an intent
+  before each write, never repeated, never deleted, and the Epic stays at `start` (§51.13). The
+  children are ordinary tickets; nothing in their runs knows the Epic.
 - Stages always get the user's original request (through `action.taskBlock`); the translation
   is only for the decision provider and relevant-file search. After a clarify step the stages
   that take the task (research, investigate, implement, review) get, after it, the rendered
@@ -495,15 +511,17 @@ No HTTP provider APIs/OpenRouter/LiteLLM for the AI steps beyond claude's and co
 integrations are the Jev decision API, reading one Jira issue for `run --jira` and the listener's
 Jira calls), no model benchmarking in the core
 (it lives in `bench/`, outside it, and never selects models) and no automatic
-model selection/routing/fallback, no parallel or multi-agent workflows (the one exception: a
-story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6), no Web UI/REST
+model selection/routing/fallback, no parallel or multi-agent workflows (the two exceptions: a
+story's ready tasks run at once, each its own run with its own sequential workflow, MVP.md §48.6,
+and the listener's tickets of different services, MVP.md §51.14), no Web UI/REST
 API/IDE plugin, no GitHub integration and for GitLab only git's clone, fetch and the push that opens
-a merge request, and for `orchestrator revise` only a read-only API client (GET, a read-only token,
-MVP.md §54.3) and the fast-forward push to an open merge request's branch (a write token only for the
+a merge request, and for `orchestrator revise` and the listener's Epic catalog only a read-only API
+client (GET, a read-only token, MVP.md §54.3, §51.13) and the fast-forward push to an open merge request's branch (a write token only for the
 listener's git credential helper, MVP.md §50.13),
 no Jira beyond reading one issue, creating the child issues of an approved story, the comment and
-transition after a merge request and, for `jira listen` only, a JQL search, comments, `/myself` and
-comments and transitions without a merge request (no links or worklogs), the listener as a library only
+transition after a merge request and, for `jira listen` only, a JQL search (with the issues' links),
+comments, `/myself`, comments and transitions without a merge request, and with `listener.story` an
+Epic's children and their "is blocked by" links (no other links, no worklogs), the listener as a library only
 as `Listen` and `Embedded` (MVP.md §53: no `Source` interface for Slack or another origin of tasks, one
 `Listen` per process and per working directory, no `transport` floor in the org layer, no published
 module), no remote repository execution, no RAG or persistent
@@ -632,8 +650,11 @@ holds `state.json` (per ticket: attempts, service, phase, run id, outcome, the w
 `lock` (flocked, one listener per directory) and `tasks/<KEY>.<attempt>.json` (the run's input: the
 listener writes it, validates it as the run will, and passes the validated task to `runTask` as a
 value, in its own process; the file stays as the record, which `readListenerTask` reads back; the run's `run.json` has
-`task.source.listener: true`); the clones live in `listener.services_dir` (`.clone-*` is a clone
-in progress).
+`task.source.listener: true`); `logs/<KEY>.<attempt>.log` (a run's progress when
+`listener.max_parallel` is above 1); `plans/<KEY>.<attempt>/` (an Epic's plan: `ticket.json`, the
+select, survey and specify calls' artifacts and logs, `plan.json`; the Epic's state entry has `kind:
+plan`, `plan_dir`, `children` and `links`); the clones, references included, live in
+`listener.services_dir` (`.clone-*` is a clone in progress).
 
 A story run adds `task.source` (`kind: story`: story, task, attempt, jira), `task.acceptance` and
 the branch, base and base branch it was asked for to a child's `run.json`, and the `story task`

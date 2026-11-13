@@ -953,7 +953,7 @@ fast-forward или merge-коммит, сделанный Go (`merge-tree`/`com
 отказ git — exit 6, следующий `story run` пробует снова. Спека:
 [`specs/story-land/`](specs/story-land/README.md).
 
-### [x] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы по одному — P1 · L · ⚠ спека
+### [x] JL. Jira listener: тикеты с лейблом `ai-run` → run'ы (с D18 — до `max_parallel` сразу) — P1 · L · ⚠ спека
 **Сделано (2026-10-29, JL01–JL06; MVP.md §51, §30, §39, §50.10, §50.13):** `orchestrator jira listen`
 в рабочей директории (Docker-volume): опрос Jira по JQL, claim переходом в In Progress, сервис и
 проект из лейблов/компонентов, clone из allowlist-групп GitLab (токен только через git credential
@@ -962,11 +962,21 @@ helper), дочерний `run --listener-task --mode auto`, исход → ко
 [`specs/jira-listener/`](specs/jira-listener/README.md), решения D1–D21. Живой прогон на Jira и
 GitLab — за оператором.
 
-### [ ] D18. Listener: story-режим для эпиков и мультисервисных тикетов — P2 · L · ⚠ спека
-Сейчас тикет типа из `story.jira_issue_types` получает комментарий «plan it as a story» и `blocked`;
-тикет с несколькими `service:` — `blocked`. **Как сделать:** listener запускает `story plan --jira` и
-`story run` для таких тикетов (решение D18 в `specs/jira-listener/`), с теми же claim, исходами и
-состоянием. **Готово, когда:** эпик с двумя сервисами доходит до merge request в каждом.
+### [x] D18. Listener: эпик → дочерние тикеты, дети идут параллельно — P2 · L · ⚠ спека
+**Сделано (2026-11-13, LS01–LS07; MVP.md §51.2, §51.3, §51.13, §51.14, §39.3, §39.11, §48.1):**
+вместо `story plan`/`story run` внутри listener'а — свой план эпика (спека
+[`specs/listener-story/`](specs/listener-story/README.md), ответы владельца L1–L7, умолчания A1–A16).
+С `listener.story` эпик с `ai-run` переводится в `start`; сервисы — из лейблов `gitlab:` или выбор
+модели (`select`, без инструментов) из каталога проектов `allowed_groups` (GitLab API, read-only
+токен); `ref:`-репозитории только читаются; survey каждого, specify, валидация; Go создаёт дочерние
+тикеты (`jira.create`) в статусе очереди с лейблами listener'а и связывает задачи одного сервиса
+«is blocked by» по порядку story; комментарий на эпике, эпик остаётся в `start`. Дети — обычные
+тикеты: `listener.blockers` держит тикет с незавершённым блокером, `listener.max_parallel` (1..8)
+запускает до N run'ов одновременно, не больше одного на сервис. Сценарий от эпика до трёх merge
+request'ов — `test/integration/listen_story_test.go`. Мультисервисный тикет, который не эпик,
+по-прежнему `blocked`. Живая проверка на Jira Cloud и gitlab.com (переход `start` у эпика, имя типа
+связи, начальный статус детей, read-only токен со списком групп) и ресурсы пода под `max_parallel`
+— за оператором.
 
 ### [ ] D19. Listener: любой репортёр, не только список — P2 · M · ⚠ спека
 Сейчас `listener.query.reporters` обязателен, и только перечисленные репортёры запускают run
