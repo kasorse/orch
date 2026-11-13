@@ -31,3 +31,10 @@ Nothing reads them yet.
 - `listener.story` without `listener.blockers` is a config error naming both keys.
 - A listener config of today validates unchanged, with `MaxParallel` 1.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `def1c1f8-db72-4716-ab4e-cf39e95c1495` in orch: completed, 0 fix iterations, tests passed, no review.
+Branch `story/listener-story/LS02` on `story/listener-story/LS01` @ ec5c381, commit cff59c2.
+Cost $1.55. Implementation summary: Add listener max_parallel, ref_prefix, blockers and story config keys.
+Conflicts with spec/listener-story: none.

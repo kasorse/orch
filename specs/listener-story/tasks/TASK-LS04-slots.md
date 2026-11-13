@@ -35,3 +35,10 @@ behaviour and output are those of today.
 - With `max_parallel: 1` the existing listener tests pass unchanged.
 - No two runs of one service are ever in progress at once, under `-race`.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `d8d1a023-e5e8-48ee-90b0-346563fb2454` in orch: completed, 1 fix iteration, tests passed, review pass.
+Branch `story/listener-story/LS04` on `story/listener-story/LS03` @ 5dc603a, commit e455f3b.
+Cost $5.38. Implementation summary: Run listener tickets in max_parallel slots, one per service.
+Conflicts with spec/listener-story: none.

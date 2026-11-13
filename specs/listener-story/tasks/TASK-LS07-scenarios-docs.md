@@ -30,3 +30,10 @@ requests, and every shared document brought up to date.
 - The scenario passes under `-race`.
 - `grep -n "several tickets at once" MVP.md` finds nothing under "Not covered".
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `259dd84b-219b-4474-a6d3-a457bcdad608` in orch: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/listener-story/LS07` on `story/listener-story/LS06` @ 200240b, commit dc5662c.
+Cost $7.07. Implementation summary: Add the Epic-to-merge-requests listener scenario and document it.
+Conflicts with spec/listener-story: none.

@@ -37,3 +37,10 @@ Jira yet: the Epic ends `failed` with "creating the children is not built yet" u
 - A plan never starts while a run is in progress, and no run starts while it plans.
 - Every call's prompt and answer is in the plan's directory, also when it failed.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `d4b4a77d-f45e-4b68-bd4c-25dc239e97f8` in orch: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/listener-story/LS05` on `story/listener-story/LS04` @ e455f3b, commit ccd7108.
+Cost $5.28. Implementation summary: Plan an Epic in the listener up to a validated plan.
+Conflicts with spec/listener-story: none.

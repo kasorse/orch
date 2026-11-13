@@ -35,3 +35,10 @@ of each service's chain, and a comment on the Epic, which stays at `start`.
 - A child created by the plan is picked by the next poll as an ordinary ticket (the reporter check
   passes).
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `18395e81-cd9f-487a-92ce-18c76f7676a8` in orch: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/listener-story/LS06` on `story/listener-story/LS05` @ ccd7108, commit 200240b.
+Cost $4.24. Implementation summary: Create an Epic's child tickets, links and comment from the plan.
+Conflicts with spec/listener-story: none.

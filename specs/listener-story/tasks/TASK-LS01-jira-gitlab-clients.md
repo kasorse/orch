@@ -35,3 +35,10 @@ search): the client calls. Nothing calls them yet.
 - `Link` is never sent twice in one call, and a 5xx after sending is not retried.
 - `GroupProjects` follows the next page only within `gitlab.base_url`.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `093499ef-879a-4d8c-9fb0-b98aab6c045e` in orch: completed, 0 fix iterations, tests passed, no review.
+Branch `story/listener-story/LS01` on `spec/listener-story` @ c1987cb, commit ec5c381.
+Cost $1.48. Implementation summary: Add Jira issue links, link write, children search and GitLab group projects.
+Conflicts with spec/listener-story: none.

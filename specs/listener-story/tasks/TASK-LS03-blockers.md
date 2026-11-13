@@ -29,3 +29,10 @@ in `done_statuses`. Still one ticket at a time.
 - A waiting ticket is never claimed and its state entry is not created.
 - The log line names the ticket, the blocker and the blocker's status.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-13)
+
+Run `d5631645-51b1-49b4-b3a9-08d536aa5cbc` in orch: completed, 0 fix iterations, tests passed, no review.
+Branch `story/listener-story/LS03` on `story/listener-story/LS02` @ cff59c2, commit 5dc603a.
+Cost $1.09. Implementation summary: Skip a listener ticket blocked by an unfinished one.
+Conflicts with spec/listener-story: none.
