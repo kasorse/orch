@@ -387,6 +387,8 @@ type listenOptions struct {
 	childOpts []func(*configOptions)
 	// blockers sets listener.blockers: link type Blocks, done statuses [Done].
 	blockers bool
+	// maxParallel sets listener.max_parallel; 0 leaves the default, one run at a time.
+	maxParallel int
 }
 
 func newListenEnv(t *testing.T, o listenOptions) *listenEnv {
@@ -425,6 +427,9 @@ func newListenEnv(t *testing.T, o listenOptions) *listenEnv {
   blockers:
     link_type: Blocks
     done_statuses: [Done]`
+	}
+	if o.maxParallel > 0 {
+		blockers += fmt.Sprintf("\n  max_parallel: %d", o.maxParallel)
 	}
 	cfg := clarifyConfig(t, func(c *configOptions) {
 		c.isolation = isolationAbsent
@@ -564,10 +569,26 @@ func (e *listenEnv) state() listenerState {
 	return st
 }
 
-// runs are the run.json files of the service's runs, oldest first.
-func (e *listenEnv) runs() []listenerRun {
+// addService makes another service of the listener, as newListenEnv made billing: a clone of the
+// same bare repository, whose origin names the project on the fake GitLab's host. It returns its
+// directory.
+func (e *listenEnv) addService(name string) string {
 	e.t.Helper()
-	dirs, _ := filepath.Glob(filepath.Join(e.svc, ".orchestrator", "runs", "*", "run.json"))
+	gitRun(e.t, e.wd, "clone", "-q", e.bare, name)
+	dir := filepath.Join(e.wd, name)
+	gitRun(e.t, dir, "config", "user.email", "fixture@example.com")
+	gitRun(e.t, dir, "config", "user.name", "Fixture")
+	gitRun(e.t, dir, "remote", "set-url", "origin", "file://"+fakeexec.GitLabHost+e.bare)
+	return dir
+}
+
+// runs are the run.json files of the service's runs, oldest first.
+func (e *listenEnv) runs() []listenerRun { return e.runsIn(e.svc) }
+
+// runsIn are the run.json files of the runs in the service directory dir, oldest first.
+func (e *listenEnv) runsIn(dir string) []listenerRun {
+	e.t.Helper()
+	dirs, _ := filepath.Glob(filepath.Join(dir, ".orchestrator", "runs", "*", "run.json"))
 	var out []listenerRun
 	for _, f := range dirs {
 		data, err := os.ReadFile(f)
