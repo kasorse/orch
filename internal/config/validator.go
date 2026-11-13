@@ -147,6 +147,7 @@ func Validate(cfg Config) error {
 		} else if cfg.GitLab.TokenEnv == "" {
 			problems = append(problems, "listener needs gitlab.token_env")
 		}
+		problems = append(problems, listenerStoryProblems(cfg)...)
 	}
 	if cfg.Story != nil {
 		problems = append(problems, validateStory(*cfg.Story)...)

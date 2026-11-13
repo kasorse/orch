@@ -13,11 +13,38 @@ func validListener() ListenerConfig {
 		Query: ListenerQuery{
 			Projects: []string{"PAY"}, Label: "ai-run", Statuses: []string{"To Do"}, Reporters: []string{"5b10a2844c20165700ede21g"},
 		},
-		Labels: ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:", Restart: "ai-restart"},
+		Labels: ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:", Restart: "ai-restart", RefPrefix: "ref:"},
 		Transitions: ListenerTransitions{
 			Start: "In Progress", Blocked: "Blocked", Failed: "Failed", Done: "Ready to Review", Retry: "To Do",
 		},
+		MaxParallel: 1,
 	}
+}
+
+func validListenerStory() ListenerStory {
+	return ListenerStory{MaxServices: 5, MaxRefs: 3, MaxTasks: 12, MaxCatalog: 500}
+}
+
+// withStory sets a valid listener.story changed by mutate.
+func withStory(mutate func(*ListenerStory)) func(*ListenerConfig) {
+	return func(l *ListenerConfig) {
+		s := validListenerStory()
+		mutate(&s)
+		l.Story = &s
+	}
+}
+
+// withBlockers sets listener.blockers to the link type and the done statuses.
+func withBlockers(linkType string, done ...string) func(*ListenerConfig) {
+	return func(l *ListenerConfig) {
+		l.Blockers = &ListenerBlockers{LinkType: linkType, DoneStatuses: done}
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
+
+func validListenerBlockers() ListenerBlockers {
+	return ListenerBlockers{LinkType: "Blocks", DoneStatuses: []string{"Done"}}
 }
 
 func validGitLab() GitLabConfig {
@@ -58,6 +85,13 @@ func TestLoad_ListenerDefaults(t *testing.T) {
 		l.Query.Label != "ai-run" || l.Labels.ServicePrefix != "service:" || l.Labels.ProjectPrefix != "gitlab:" || l.Labels.Restart != "ai-restart" ||
 		g.Username != "oauth2" || g.BaseURL != "https://gitlab.corp" {
 		t.Errorf("defaults: %+v %+v", l, g)
+	}
+	if l.MaxParallel != 1 || l.Labels.RefPrefix != "ref:" || l.Blockers != nil || l.Story != nil {
+		t.Errorf("listener-story defaults: max_parallel %d, ref_prefix %q, blockers %v, story %v",
+			l.MaxParallel, l.Labels.RefPrefix, l.Blockers, l.Story)
+	}
+	if err := Validate(withListenerSections(cfg)); err != nil {
+		t.Errorf("today's listener config: %v", err)
 	}
 	if p := validateListener(*l); len(p) != 0 {
 		t.Errorf("listener problems: %v", p)
@@ -153,6 +187,31 @@ func TestValidateListener(t *testing.T) {
 		{"retry missing", func(l *ListenerConfig) { l.Transitions.Retry = "" }, "listener.transitions.retry is required"},
 		{"transition padded", func(l *ListenerConfig) { l.Transitions.Done = " Done" }, "listener.transitions.done"},
 		{"transition control", func(l *ListenerConfig) { l.Transitions.Retry = "To\nDo" }, "listener.transitions.retry must be a single line"},
+		{"max_parallel zero", func(l *ListenerConfig) { l.MaxParallel = 0 }, "listener.max_parallel must be between 1 and 8, got 0"},
+		{"max_parallel nine", func(l *ListenerConfig) { l.MaxParallel = 9 }, "listener.max_parallel must be between 1 and 8, got 9"},
+		{"max_parallel eight", func(l *ListenerConfig) { l.MaxParallel = 8 }, ""},
+		{"ref prefix empty", func(l *ListenerConfig) { l.Labels.RefPrefix = "" }, "listener.labels.ref_prefix"},
+		{"ref prefix space", func(l *ListenerConfig) { l.Labels.RefPrefix = "r ef:" }, "listener.labels.ref_prefix"},
+		{"ref prefix is service", func(l *ListenerConfig) { l.Labels.RefPrefix = "service:" }, "listener.labels.ref_prefix must differ"},
+		{"ref prefix is project", func(l *ListenerConfig) { l.Labels.RefPrefix = "gitlab:" }, "listener.labels.ref_prefix must differ"},
+		{"blockers valid", withBlockers("Blocks", "Done"), ""},
+		{"blockers link type missing", withBlockers("", "Done"), "listener.blockers.link_type is required"},
+		{"blockers link type padded", withBlockers(" Blocks", "Done"), "listener.blockers.link_type"},
+		{"blockers done missing", withBlockers("Blocks"), "listener.blockers.done_statuses is required"},
+		{"blockers done empty item", withBlockers("Blocks", " "), "listener.blockers.done_statuses[0]"},
+		{"story valid", withStory(func(*ListenerStory) {}), ""},
+		{"story bounds low", withStory(func(s *ListenerStory) { *s = ListenerStory{MaxServices: 1, MaxTasks: 1, MaxCatalog: 1} }), ""},
+		{"story bounds high", withStory(func(s *ListenerStory) { *s = ListenerStory{20, 10, 30, 2000, nil} }), ""},
+		{"story services zero", withStory(func(s *ListenerStory) { s.MaxServices = 0 }), "listener.story.max_services must be between 1 and 20, got 0"},
+		{"story services 21", withStory(func(s *ListenerStory) { s.MaxServices = 21 }), "listener.story.max_services must be between 1 and 20, got 21"},
+		{"story refs negative", withStory(func(s *ListenerStory) { s.MaxRefs = -1 }), "listener.story.max_refs must be between 0 and 10, got -1"},
+		{"story refs 11", withStory(func(s *ListenerStory) { s.MaxRefs = 11 }), "listener.story.max_refs must be between 0 and 10, got 11"},
+		{"story tasks zero", withStory(func(s *ListenerStory) { s.MaxTasks = 0 }), "listener.story.max_tasks must be between 1 and 30, got 0"},
+		{"story tasks 31", withStory(func(s *ListenerStory) { s.MaxTasks = 31 }), "listener.story.max_tasks must be between 1 and 30, got 31"},
+		{"story catalog zero", withStory(func(s *ListenerStory) { s.MaxCatalog = 0 }), "listener.story.max_catalog must be between 1 and 2000, got 0"},
+		{"story catalog 2001", withStory(func(s *ListenerStory) { s.MaxCatalog = 2001 }), "listener.story.max_catalog must be between 1 and 2000, got 2001"},
+		{"story cost zero", withStory(func(s *ListenerStory) { s.MaxCostUSD = new(float64) }), "listener.story.max_cost_usd must be positive"},
+		{"story cost set", withStory(func(s *ListenerStory) { s.MaxCostUSD = ptrFloat(5) }), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -234,6 +293,122 @@ func TestValidate_ListenerNeedsJiraAndGitLab(t *testing.T) {
 	cfg.Jira, cfg.GitLab = &j, &g
 	if err := Validate(cfg); err != nil {
 		t.Fatalf("expected valid, got %v", err)
+	}
+}
+
+// withListenerSections puts the loaded jira, gitlab and listener sections into validConfig, so
+// Validate sees them without the rest of a loaded file's requirements.
+func withListenerSections(loaded Config) Config {
+	cfg := validConfig()
+	cfg.Jira, cfg.GitLab, cfg.Listener, cfg.Story = loaded.Jira, loaded.GitLab, loaded.Listener, loaded.Story
+	return cfg
+}
+
+const listenerStoryYAML = `  max_parallel: 2
+  labels:
+    ref_prefix: "src:"
+  blockers:
+    link_type: Blocks
+    done_statuses: [Done]
+  story:
+    max_refs: 0
+    max_cost_usd: 5
+`
+
+func TestLoad_ListenerStoryKeys(t *testing.T) {
+	src := strings.Replace(listenerYAML, "listener:\n", "listener:\n"+listenerStoryYAML, 1)
+	cfg, err := Load(writeTempConfig(t, src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := cfg.Listener
+	if l.MaxParallel != 2 || l.Labels.RefPrefix != "src:" || l.Labels.ServicePrefix != "service:" {
+		t.Errorf("listener = %+v", l)
+	}
+	if l.Blockers == nil || l.Blockers.LinkType != "Blocks" || !slices.Equal(l.Blockers.DoneStatuses, []string{"Done"}) {
+		t.Errorf("blockers = %+v", l.Blockers)
+	}
+	s := l.Story
+	if s == nil || s.MaxServices != 5 || s.MaxRefs != 0 || s.MaxTasks != 12 || s.MaxCatalog != 500 ||
+		s.MaxCostUSD == nil || *s.MaxCostUSD != 5 {
+		t.Errorf("story = %+v", s)
+	}
+	if p := validateListener(*l); len(p) != 0 {
+		t.Errorf("listener problems: %v", p)
+	}
+}
+
+func TestLoad_ListenerStoryUnknownKeys(t *testing.T) {
+	for name, extra := range map[string]string{
+		"listener.blockers": "  blockers:\n    link_type: Blocks\n    done_statuses: [Done]\n    inward: x\n",
+		"listener.story":    "  story:\n    max_children: 3\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := strings.Replace(listenerYAML, "listener:\n", "listener:\n"+extra, 1)
+			if _, err := Load(writeTempConfig(t, src)); err == nil {
+				t.Fatal("expected a schema error")
+			}
+		})
+	}
+}
+
+func TestLoad_StoryIssueTypesAlone(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, listenerYAML+"story:\n  jira_issue_types: [Epic, Initiative]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Story == nil || !slices.Equal(cfg.Story.JiraIssueTypes, []string{"Epic", "Initiative"}) {
+		t.Fatalf("story = %+v", cfg.Story)
+	}
+	if err := Validate(withListenerSections(cfg)); err != nil {
+		t.Fatalf("a story section with only jira_issue_types: %v", err)
+	}
+}
+
+func TestValidate_ListenerStoryCrossChecks(t *testing.T) {
+	full := func() Config {
+		cfg := validConfig()
+		j, g, l := validJira(), validGitLab(), validListener()
+		j.Create = &JiraCreateConfig{IssueType: "Task", Link: "parent"}
+		g.APITokenEnv = "GITLAB_READ_TOKEN"
+		s, b := validListenerStory(), validListenerBlockers()
+		l.Story, l.Blockers = &s, &b
+		cfg.Jira, cfg.GitLab, cfg.Listener = &j, &g, &l
+		return cfg
+	}
+	if err := Validate(full()); err != nil {
+		t.Fatalf("expected valid, got %v", err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   []string
+	}{
+		{"no jira.create", func(c *Config) { c.Jira.Create = nil }, []string{"listener.story needs jira.create"}},
+		{"no api_token_env", func(c *Config) { c.GitLab.APITokenEnv = "" }, []string{"listener.story needs gitlab.api_token_env"}},
+		{"no blockers", func(c *Config) { c.Listener.Blockers = nil }, []string{"listener.story needs listener.blockers"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := full()
+			tt.mutate(&cfg)
+			err := Validate(cfg)
+			if err == nil {
+				t.Fatal("expected a config error")
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(err.Error(), w) {
+					t.Errorf("err = %v, lacks %q", err, w)
+				}
+			}
+		})
+	}
+
+	// Without listener.story none of the three is required.
+	cfg := full()
+	cfg.Listener.Story, cfg.Listener.Blockers, cfg.Jira.Create, cfg.GitLab.APITokenEnv = nil, nil, nil, ""
+	if err := Validate(cfg); err != nil {
+		t.Fatalf("no listener.story: %v", err)
 	}
 }
 
