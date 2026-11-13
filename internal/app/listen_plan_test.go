@@ -43,11 +43,76 @@ type epicJira struct {
 	labels   []string
 	comments []string
 	posts    []string
+
+	// The children: the bodies of the creations and of the links the fake received, the keys the
+	// search finds under the Epic already, the status a child is created in, and what the n-th
+	// creation or link (from 1) answers: "" for success, "hang" for no answer at all, else a status code.
+	issues      []string
+	links       []string
+	existing    []string
+	jqls        []string
+	childStatus string
+	createMode  func(n int) string
+	linkMode    func(n int) string
+	timeout     time.Duration
+}
+
+// nameKey is a Jira reference by key or by name.
+type nameKey struct{ Key, Name string }
+
+// childIssue is the fields of a creation the tests read.
+type childIssue struct {
+	Fields struct {
+		Project     nameKey   `json:"project"`
+		IssueType   nameKey   `json:"issuetype"`
+		Parent      nameKey   `json:"parent"`
+		Summary     string    `json:"summary"`
+		Description string    `json:"description"`
+		Labels      []string  `json:"labels"`
+		Components  []nameKey `json:"components"`
+	} `json:"fields"`
+}
+
+func (j *epicJira) createdIssues() []childIssue {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	out := make([]childIssue, len(j.issues))
+	for i, body := range j.issues {
+		if err := json.Unmarshal([]byte(body), &out[i]); err != nil {
+			panic(err)
+		}
+	}
+	return out
+}
+
+func (j *epicJira) linkBodies() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.links)
+}
+
+// childKey is the key the n-th creation (from 0) is answered with: PMC-2, PMC-3, ...
+func childKey(n int) string { return fmt.Sprintf("PMC-%d", n+2) }
+
+// answerWrite makes the fake's answer to a write by its mode: true when the handler has answered.
+func answerWrite(w http.ResponseWriter, req *http.Request, mode string) bool {
+	switch mode {
+	case "":
+		return false
+	case "hang":
+		<-req.Context().Done()
+	default:
+		code := 500
+		_, _ = fmt.Sscanf(mode, "%d", &code)
+		w.WriteHeader(code)
+		fmt.Fprint(w, `{"errorMessages":["refused by the fake"],"errors":{}}`)
+	}
+	return true
 }
 
 func newEpicJira(t *testing.T, status string, labels ...string) *epicJira {
 	t.Helper()
-	j := &epicJira{status: status, labels: append([]string{"ai-run"}, labels...)}
+	j := &epicJira{status: status, labels: append([]string{"ai-run"}, labels...), childStatus: "To Do", timeout: 10 * time.Second}
 	j.srv = httptest.NewServer(http.HandlerFunc(j.handle))
 	t.Cleanup(j.srv.Close)
 	return j
@@ -55,9 +120,41 @@ func newEpicJira(t *testing.T, status string, labels ...string) *epicJira {
 
 func (j *epicJira) handle(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	// The writes that may never answer must not hold the lock: the test reads the fake meanwhile.
+	if req.Method == http.MethodPost && (req.URL.Path == "/rest/api/2/issue" || req.URL.Path == "/rest/api/2/issueLink") {
+		j.handleWrite(w, req)
+		return
+	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	switch {
+	case req.Method == http.MethodGet && strings.HasPrefix(req.URL.Path, "/rest/api/2/search"):
+		j.jqls = append(j.jqls, req.URL.Query().Get("jql"))
+		var found []string
+		keys := slices.Clone(j.existing)
+		for n := range j.issues {
+			keys = append(keys, childKey(n))
+		}
+		for _, k := range keys {
+			found = append(found, fmt.Sprintf(`{"key":%q,"fields":{"summary":"child","issuetype":{"name":"Task"},"status":{"name":"To Do"},`+
+				`"labels":["ai-run"],"components":[],"reporter":{"accountId":"bot-1"}}}`, k))
+		}
+		fmt.Fprintf(w, `{"issues":[%s],"isLast":true}`, strings.Join(found, ","))
+	case req.Method == http.MethodGet && req.URL.RawQuery == "fields=status" && !strings.HasSuffix(req.URL.Path, "/PMC-1"):
+		fmt.Fprintf(w, `{"key":"PMC-2","fields":{"status":{"name":%q}}}`, j.childStatus)
+	case req.Method == http.MethodPut && strings.HasSuffix(req.URL.Path, "/PMC-1"):
+		body, _ := io.ReadAll(req.Body)
+		var in struct {
+			Update struct {
+				Labels []map[string]string `json:"labels"`
+			} `json:"update"`
+		}
+		_ = json.Unmarshal(body, &in)
+		for _, op := range in.Update.Labels {
+			j.labels = slices.DeleteFunc(j.labels, func(l string) bool { return l == op["remove"] })
+		}
+		j.posts = append(j.posts, "PUT "+req.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
 	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/transitions"):
 		var list []string
 		for _, m := range epicMoves[j.status] {
@@ -104,8 +201,39 @@ func (j *epicJira) handle(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+// handleWrite is a creation or a link: it records the body, then answers by the mode of its number.
+func (j *epicJira) handleWrite(w http.ResponseWriter, req *http.Request) {
+	body, _ := io.ReadAll(req.Body)
+	isLink := req.URL.Path == "/rest/api/2/issueLink"
+	j.mu.Lock()
+	var mode string
+	n := 0
+	if isLink {
+		j.links = append(j.links, string(body))
+		n = len(j.links)
+		if j.linkMode != nil {
+			mode = j.linkMode(n)
+		}
+	} else {
+		j.issues = append(j.issues, string(body))
+		n = len(j.issues)
+		if j.createMode != nil {
+			mode = j.createMode(n)
+		}
+	}
+	j.posts = append(j.posts, "POST "+req.URL.Path)
+	j.mu.Unlock()
+	if answerWrite(w, req, mode) {
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+	if !isLink {
+		fmt.Fprintf(w, `{"id":"%d","key":%q,"self":"https://ignored"}`, 20000+n, childKey(n-1))
+	}
+}
+
 func (j *epicJira) client() *jira.Client {
-	return jira.NewHTTPClient(jira.Options{BaseURL: j.srv.URL, Auth: jira.AuthBasic, Timeout: 10 * time.Second},
+	return jira.NewHTTPClient(jira.Options{BaseURL: j.srv.URL, Auth: jira.AuthBasic, Timeout: j.timeout},
 		jira.NewCredentials(jira.AuthBasic, "bot@example.com", "token"))
 }
 
@@ -277,7 +405,10 @@ func newEpicEnv(t *testing.T, status string, labels ...string) *epicEnv {
 	r := newSlotRunner(t, 2, out)
 	j := newEpicJira(t, status, labels...)
 	r.jira, r.bot = j.client(), "bot-1"
-	r.cfg = config.Config{Jira: &config.JiraConfig{MaxBytes: 1 << 16}}
+	create := &config.JiraCreateConfig{IssueType: "Task", Link: config.JiraLinkParent, Labels: []string{"pim"}, Components: map[string]string{"sku-master": "SKU"}}
+	r.cfg = config.Config{Jira: &config.JiraConfig{MaxBytes: 1 << 16, Create: create}, GitLab: &config.GitLabConfig{BaseURL: "https://gitlab.example"}}
+	r.lc.Query = config.ListenerQuery{Projects: []string{"PMC"}, Label: "ai-run", Statuses: []string{"To Do"}, Reporters: []string{"bot-1"}}
+	r.lc.Blockers = &config.ListenerBlockers{LinkType: "Blocks", DoneStatuses: []string{"Done"}}
 	r.cfg.Actions.Investigate = config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}}
 	r.lc.MaxAttempts = 3
 	r.lc.Labels = config.ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:", Restart: "ai-restart", RefPrefix: "ref:"}
@@ -434,21 +565,20 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	if want := []listener.Link{{Blocked: "PM03", Blocker: "PM01"}}; !slices.Equal(rec.Chain, want) {
 		t.Errorf("chain = %v, want %v: the second task of sku-master waits for the first, sku-master-fe is not linked", rec.Chain, want)
 	}
-	if len(rec.Tasks) != 3 || rec.Tasks[2].ID != "PM03" || rec.Tasks[2].BlockedBy != "PM01" || len(rec.Children) != 0 {
+	if len(rec.Tasks) != 3 || rec.Tasks[2].ID != "PM03" || rec.Tasks[2].BlockedBy != "PM01" || len(rec.Children) != 3 {
 		t.Errorf("tasks = %+v, children = %v", rec.Tasks, rec.Children)
 	}
 
-	// Nothing is created in Jira yet: the Epic ends failed, with a comment that says so.
+	// The plan became its children: the Epic is planned, commented on, and stays where the claim put it.
 	e := env.r.entryOf("PMC-1")
-	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultFailed || e.Kind != listener.KindPlan || e.PlanDir != "plans/PMC-1.1" || e.Attempts != 1 {
+	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultPlanned || e.Kind != listener.KindPlan || e.PlanDir != "plans/PMC-1.1" || e.Attempts != 1 {
 		t.Errorf("entry = %+v", e)
 	}
-	comments := env.jira.commentBodies()
-	if len(comments) != 1 || !strings.Contains(comments[0], "creating the children is not built yet") {
+	if comments := env.jira.commentBodies(); len(comments) != 1 || !strings.Contains(comments[0], "Planned: 3 child tickets created under PMC-1.") {
 		t.Errorf("comments = %q", comments)
 	}
-	if got := env.jira.statusNow(); got != "Failed" {
-		t.Errorf("status = %q, want Failed", got)
+	if got := env.jira.statusNow(); got != "In Progress" {
+		t.Errorf("status = %q, want In Progress: the Epic is not moved", got)
 	}
 	if st := env.stateIsValid(); st.Tickets["PMC-1"].PlanDir != "plans/PMC-1.1" {
 		t.Errorf("saved entry = %+v", st.Tickets["PMC-1"])
@@ -665,7 +795,7 @@ func TestPlan_ACutOffPlanIsMadeAgainOnRestart(t *testing.T) {
 	env.r.wg.Wait()
 
 	e := env.r.entryOf("PMC-1")
-	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultFailed || e.PlanDir != "plans/PMC-1.1" {
+	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultPlanned || e.PlanDir != "plans/PMC-1.1" {
 		t.Errorf("entry = %+v, want the plan made again to its end", e)
 	}
 	if got := env.prov.actions(); !slices.Equal(got, []string{"survey", "survey", "specify"}) {

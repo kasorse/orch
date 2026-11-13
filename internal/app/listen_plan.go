@@ -24,15 +24,13 @@ import (
 // claimed and planned, alone (§3), up to a validated plan saved in
 // .orchestrator/listener/plans/<KEY>.<n>/. The model only proposes: Go fixes the catalog it chooses
 // from, the services it may target, the order of the tasks of one service, and what each call costs.
-// Creating the children in Jira is not built yet (a later task of the story): the Epic ends failed.
+// The validated plan becomes the Epic's children, their links and its comment in listen_children.go.
 
 const (
 	// listenerPlansDir is the plans' directory in the listener's own, listenerStateDir.
 	listenerPlansDir = "plans"
 	// planRecordVersion is the "v" of plan.json.
 	planRecordVersion = 1
-	// planNotBuilt is why an Epic whose plan is ready still ends failed.
-	planNotBuilt = "creating the children is not built yet"
 )
 
 // planGitLab is what the plan needs of internal/gitlab; tests replace it.
@@ -66,6 +64,8 @@ type planTask struct {
 	DependsOn []string `json:"depends_on,omitempty"`
 	// BlockedBy is the previous task of the same service (SPEC §7.2), "" for the first.
 	BlockedBy string `json:"blocked_by,omitempty"`
+	// Key is the issue created for the task, once there is one.
+	Key string `json:"key,omitempty"`
 }
 
 // planRecord is plan.json: what the plan came to, in the plan's directory, also when it failed.
@@ -89,6 +89,10 @@ type planRecord struct {
 	// Children are the issues the plan created, in the story's order (empty until they are built).
 	Children []string `json:"children"`
 	CostUSD  float64  `json:"cost_usd"`
+	// ChildStatus is the status one child was read back in, StatusWarning what the Epic's comment says
+	// when it is not one the poll picks (SPEC §8.1).
+	ChildStatus   string `json:"child_status,omitempty"`
+	StatusWarning string `json:"status_warning,omitempty"`
 }
 
 // planEnd is how a stage of the plan ends it before its end: the outcome of SPEC §9, or quiet when
@@ -144,6 +148,13 @@ func (r *listenRunner) plan(key string) error {
 	if err != nil {
 		return r.endBefore(key, listener.ResultBlocked,
 			fmt.Sprintf("The Epic and its discussion are longer than %d bytes; shorten it.", r.cfg.Jira.MaxBytes))
+	}
+
+	// What the plan wrote before, and the children the listener reported under the Epic already, come
+	// before the catalog (SPEC §9).
+	end, restart := p.existing(ticket)
+	if end != nil {
+		return p.finish(end)
 	}
 
 	// The plan's directory: every call's prompt and answer goes in it, and plan.json at the end.
@@ -213,8 +224,7 @@ func (r *listenRunner) plan(key string) error {
 		}
 	}
 	r.logf("%s: the plan has %d tasks in %d services", key, len(tasks), len(targets))
-	return p.finish(failedBy(fmt.Sprintf("The plan is ready (%d tasks in %s, saved in %s) but %s: nothing was created in Jira.",
-		len(tasks), describeTargets(targets), ".orchestrator/listener/"+listener.PlanDir(key, n), planNotBuilt)))
+	return p.createChildren(ticket, answer, tasks, targets, refs, restart)
 }
 
 // labels reads the Epic's labels (SPEC §5.2, §5.3): the references, and the services the gitlab:

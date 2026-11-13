@@ -193,6 +193,11 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 		return err
 	}
 	r.bot = bot
+	// The children a plan creates are reported by this account: before the first poll, it must be one
+	// the poll accepts (specs/listener-story/SPEC.md §2, A15).
+	if err := checkStoryReporter(cfg.Listener, bot); err != nil {
+		return err
+	}
 
 	if err := r.loadState(); err != nil {
 		return err
@@ -1508,6 +1513,10 @@ func (r *listenRunner) commentBody(key string, e listener.Entry, d listener.Deci
 		// Before any run: the reason the entry recorded, or the spent notice.
 		if e.Outcome == listener.ResultSpent {
 			return listener.Spent(jira.Escape, key, e.Attempts), ""
+		}
+		// An Epic's plan says what it created, from its plan.json (SPEC §9).
+		if body, ok := r.planBody(e); ok {
+			return body, ""
 		}
 		return listener.Blocked(jira.Escape, e.Reason), ""
 	}

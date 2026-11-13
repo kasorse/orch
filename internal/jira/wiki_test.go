@@ -110,6 +110,97 @@ func TestWiki_EmptyBody(t *testing.T) {
 	}
 }
 
+// listenerTask is the description of a child of an Epic's plan (specs/listener-story/SPEC.md §8.2).
+func listenerTask() WikiTask {
+	return WikiTask{
+		Body:        "## Goal\n\nDo it.",
+		Epic:        "PMC-1",
+		EpicSummary: "Big [thing]",
+		Service:     "sku-master",
+		ServicePath: "g/pim/sku-master",
+		References:  []string{"https://gitlab.example/g/pim/product-master"},
+		Needs:       []WikiNeed{{Key: "PMC-3", Service: "sku-fe"}},
+		Approach:    "Use the dictionary.",
+		Contracts:   "GET /x",
+	}
+}
+
+func TestWiki_ListenerChild(t *testing.T) {
+	want := "h2. Goal\n\nDo it.\n\n----\n" +
+		`Story: PMC-1 — Big \[thing\]` + "\n" +
+		`Service: sku\-master (g/pim/sku\-master)` + "\n\n" +
+		"References:\n* [https://gitlab.example/g/pim/product-master]\n\n" +
+		`Needs:` + "\n" + `* PMC-3 (sku\-fe), not linked` + "\n\n" +
+		"h3. From the plan\nh4. Approach\n\nUse the dictionary.\n\nh4. Contracts\n\nGET /x\n"
+	if got := Wiki(listenerTask()); got != want {
+		t.Errorf("Wiki =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestWiki_ListenerChildWithoutReferencesNeedsOrPlan(t *testing.T) {
+	got := Wiki(WikiTask{Body: "## Goal\n\nx", Epic: "PMC-1", Service: "svc"})
+	want := "h2. Goal\n\nx\n\n----\nStory: PMC-1\nService: svc\n"
+	if got != want {
+		t.Errorf("Wiki =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestWiki_ListenerChildEscapesAReferenceThatIsNotASafeURL(t *testing.T) {
+	task := listenerTask()
+	task.References = []string{"https://x.example/a|b]{c}"}
+	got := Wiki(task)
+	if strings.Contains(got, "[https://x.example/a|b]") || !strings.Contains(got, `* https://x.example/a\|b\]\{c\}`) {
+		t.Errorf("an unsafe URL is a live link:\n%s", got)
+	}
+}
+
+func TestWiki_ListenerChildIsCutToMaxBytesAndNeverLeavesACodeBlockOpen(t *testing.T) {
+	var approach strings.Builder
+	for i := 0; i < 40; i++ {
+		approach.WriteString("A line of the approach that goes on for a while.\n\n")
+	}
+	approach.WriteString("```go\n")
+	for i := 0; i < 40; i++ {
+		approach.WriteString("code line of the contract\n")
+	}
+	approach.WriteString("```\n")
+	task := listenerTask()
+	task.Approach = approach.String()
+
+	whole := Wiki(task)
+	if strings.Contains(whole, "(cut;") {
+		t.Fatal("a description without a limit is cut")
+	}
+	cut := false
+	for limit := 400; limit < len(whole); limit += 13 {
+		task.MaxBytes = limit
+		got := Wiki(task)
+		if len(got) > limit {
+			t.Fatalf("MaxBytes %d: the description is %d bytes", limit, len(got))
+		}
+		if !strings.HasSuffix(got, "… (cut; the whole plan is in PMC-1 comment)\n") {
+			t.Fatalf("MaxBytes %d: a cut description does not say so:\n%s", limit, got)
+		}
+		cut = true
+		opens := 0
+		for _, l := range strings.Split(got, "\n") {
+			if strings.HasPrefix(l, "{code") {
+				opens++
+			}
+		}
+		if opens%2 != 0 {
+			t.Fatalf("MaxBytes %d: a code block is left open:\n%s", limit, got)
+		}
+	}
+	if !cut {
+		t.Fatal("no description was cut")
+	}
+	task.MaxBytes = len(whole)
+	if got := Wiki(task); got != whole {
+		t.Errorf("a description that fits is changed:\n%s", got)
+	}
+}
+
 func TestWiki_IsDeterministic(t *testing.T) {
 	md := "## Goal\n\n- a `b` **c**\n\n```\nx\n```\n"
 	if wikiOf(md) != wikiOf(md) {

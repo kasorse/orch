@@ -2,8 +2,11 @@ package jira
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/kasorse/orch/internal/domain"
 )
 
 // zeroWidth is a zero-width space. It sits after a literal backslash, so that backslash can
@@ -33,7 +36,28 @@ type WikiTask struct {
 	Repo, SpecPath string
 	// DependencyKeys are the Jira keys of the tasks this one depends on, those that have one.
 	DependencyKeys []string
+
+	// The fields below are the listener's (specs/listener-story/SPEC.md §8.2). With Epic set the
+	// description ends with the story's lines instead of the one-line trailer above, which Repo,
+	// SpecPath and DependencyKeys then do not feed.
+
+	// Epic and EpicSummary are the Epic the plan was made for: "Story: <Epic> — <summary>".
+	Epic, EpicSummary string
+	// Service and ServicePath are the service the task changes and its project path.
+	Service, ServicePath string
+	// References are the URLs of the reference repositories, which the child's text links so that its
+	// investigation can fetch them.
+	References []string
+	// Needs are the tasks of other services this one needs, which no link chains.
+	Needs []WikiNeed
+	// Approach and Contracts are the plan's, in Markdown, under "From the plan"; they are cut so that
+	// the whole description stays within MaxBytes (no cut when it is 0).
+	Approach, Contracts string
+	MaxBytes            int
 }
+
+// WikiNeed is a task of another service that a task needs: its Jira key and its service.
+type WikiNeed struct{ Key, Service string }
 
 // Wiki renders the task as Jira wiki markup. The Markdown structure is kept - headings, bullet
 // and numbered lists with their nesting, code blocks, inline code, bold - and every other
@@ -42,6 +66,23 @@ type WikiTask struct {
 // carried verbatim. It ends with a line naming the repository, the spec file and the
 // dependencies (specs/story/SPEC.md §12.2). The same input always gives the same bytes.
 func Wiki(t WikiTask) string {
+	out := markdown(t.Body)
+	if t.Epic != "" {
+		return listenerWiki(t, out)
+	}
+	deps := "—"
+	if len(t.DependencyKeys) > 0 {
+		deps = strings.Join(t.DependencyKeys, ", ")
+	}
+	trailer := "Repository: " + escape(t.Repo) + " · Spec: " + escape(t.SpecPath) + " · Depends on: " + escape(deps)
+	if len(out) == 0 {
+		return trailer + "\n"
+	}
+	return strings.Join(out, "\n") + "\n\n----\n" + trailer + "\n"
+}
+
+// markdown renders Markdown text as the lines of wiki markup (see Wiki), without a trailing blank line.
+func markdown(src string) []string {
 	type level struct {
 		indent int
 		marker byte
@@ -58,7 +99,7 @@ func Wiki(t WikiTask) string {
 		}
 	}
 
-	for _, raw := range strings.Split(strings.ReplaceAll(t.Body, "\r\n", "\n"), "\n") {
+	for _, raw := range strings.Split(strings.ReplaceAll(src, "\r\n", "\n"), "\n") {
 		line := strings.TrimRight(raw, " \t\r")
 		trimmed := strings.TrimSpace(line)
 
@@ -137,16 +178,99 @@ func Wiki(t WikiTask) string {
 	for len(out) > 0 && out[len(out)-1] == "" {
 		out = out[:len(out)-1]
 	}
+	return out
+}
 
-	deps := "—"
-	if len(t.DependencyKeys) > 0 {
-		deps = strings.Join(t.DependencyKeys, ", ")
+// safeURLRE is a URL that can stand in a wiki link as it is: no character wiki markup reads.
+var safeURLRE = regexp.MustCompile(`^https?://[A-Za-z0-9._~:/-]+$`)
+
+// plainKey is an issue key as it is, so that Jira links it, or any other text escaped.
+func plainKey(s string) string {
+	if domain.ValidTicketKey(s) {
+		return s
 	}
-	trailer := "Repository: " + escape(t.Repo) + " · Spec: " + escape(t.SpecPath) + " · Depends on: " + escape(deps)
-	if len(out) == 0 {
-		return trailer + "\n"
+	return escape(s)
+}
+
+// listenerWiki is the description of a child the listener creates (specs/listener-story/SPEC.md
+// §8.2): the task's body, then the story and the service, the references, the tasks it needs, and the
+// plan's approach and contracts, cut so that the whole description is at most t.MaxBytes.
+func listenerWiki(t WikiTask, body []string) string {
+	lines := slices.Clone(body)
+	if len(lines) > 0 {
+		lines = append(lines, "")
 	}
-	return strings.Join(out, "\n") + "\n\n----\n" + trailer + "\n"
+	story := "Story: " + plainKey(t.Epic)
+	if strings.TrimSpace(t.EpicSummary) != "" {
+		story += " — " + escape(t.EpicSummary)
+	}
+	service := "Service: " + escape(t.Service)
+	if t.ServicePath != "" {
+		service += " (" + escape(t.ServicePath) + ")"
+	}
+	lines = append(lines, "----", story, service)
+	if len(t.References) > 0 {
+		lines = append(lines, "", "References:")
+		for _, u := range t.References {
+			if safeURLRE.MatchString(u) {
+				lines = append(lines, "* ["+u+"]")
+			} else {
+				lines = append(lines, "* "+escape(u))
+			}
+		}
+	}
+	if len(t.Needs) > 0 {
+		lines = append(lines, "", "Needs:")
+		for _, n := range t.Needs {
+			lines = append(lines, "* "+plainKey(n.Key)+" ("+escape(n.Service)+"), not linked")
+		}
+	}
+
+	var md []string
+	if a := strings.TrimSpace(t.Approach); a != "" {
+		md = append(md, "#### Approach", "", a, "")
+	}
+	if c := strings.TrimSpace(t.Contracts); c != "" {
+		md = append(md, "#### Contracts", "", c, "")
+	}
+	if len(md) > 0 {
+		lines = append(lines, "", "h3. From the plan")
+		plan := markdown(strings.Join(md, "\n"))
+		note := "… (cut; the whole plan is in " + plainKey(t.Epic) + " comment)"
+		lines = appendWithin(lines, plan, note, t.MaxBytes)
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// appendWithin adds the lines of extra to lines while the whole stays within limit bytes (with its
+// final newline), and the note when some were left out. A cut inside a code block closes it. With
+// limit 0 nothing is cut.
+func appendWithin(lines, extra []string, note string, limit int) []string {
+	size := func(ls []string) int { return len(strings.Join(ls, "\n")) + 1 }
+	if limit <= 0 || size(append(slices.Clone(lines), extra...)) <= limit {
+		return append(lines, extra...)
+	}
+	out := slices.Clone(lines)
+	open := false
+	for _, l := range extra {
+		nowOpen := open
+		if strings.HasPrefix(l, "{code") {
+			nowOpen = !open
+		}
+		// What the note, and the line closing a code block that stays open, would add.
+		reserve := len(note) + 1
+		if nowOpen {
+			reserve += len("{code}") + 1
+		}
+		if size(append(slices.Clone(out), l))+reserve > limit {
+			break
+		}
+		out, open = append(out, l), nowOpen
+	}
+	if open {
+		out = append(out, "{code}")
+	}
+	return append(out, note)
 }
 
 // blankLineIfText separates a block from the text above it.

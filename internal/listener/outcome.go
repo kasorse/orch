@@ -35,6 +35,8 @@ const (
 	CommentFailure CommentKind = "failure"
 	// CommentError gives the error a child printed.
 	CommentError CommentKind = "error"
+	// CommentPlan is the comment of an Epic's plan (specs/listener-story/SPEC.md §9): what it created.
+	CommentPlan CommentKind = "plan"
 )
 
 // RunOutcome is what the listener knows of a finished child: its exit code, the one JSON line it
@@ -117,6 +119,12 @@ func Before(blocked bool) Decision {
 		return Decision{Comment: CommentError, Transition: ResultBlocked}
 	}
 	return Decision{Comment: CommentError, Transition: ResultFailed}
+}
+
+// Planned is the decision for an Epic whose children were created (SPEC §9): the comment, no
+// transition (the Epic stays at start), and an attempt used.
+func Planned() Decision {
+	return Decision{Comment: CommentPlan, Transition: ResultPlanned, Counted: true}
 }
 
 // ExitFromRun is the exit code and the failure kind a child of a run that ended without anyone

@@ -23,7 +23,12 @@ const (
 	maxStateAttempts = 1000
 	maxStateReason   = 1000
 	maxStateRetries  = 64
+	// maxStateChildren bounds the children and the links of one plan (listener.story.max_tasks is at most 30).
+	maxStateChildren = 64
 )
+
+// taskIDPattern is a task of a plan: two capital letters and two digits.
+var taskIDPattern = regexp.MustCompile(`^[A-Z]{2}[0-9]{2}$`)
 
 // Phase is how far a ticket got in its cycle (specs/jira-listener/SPEC.md §9).
 type Phase string
@@ -79,12 +84,15 @@ const (
 	ResultNone Result = "none"
 	// ResultSpent is a ticket whose attempts were used up: one comment and the failed transition.
 	ResultSpent Result = "spent"
+	// ResultPlanned is an Epic whose children were created: one comment, and no transition, the Epic
+	// stays where the claim put it (specs/listener-story/SPEC.md §9).
+	ResultPlanned Result = "planned"
 )
 
 // Valid reports whether r is a result a state may hold; "" is no result yet.
 func (r Result) Valid() bool {
 	switch r {
-	case "", ResultDone, ResultBlocked, ResultFailed, ResultRetry, ResultNone, ResultSpent:
+	case "", ResultDone, ResultBlocked, ResultFailed, ResultRetry, ResultNone, ResultSpent, ResultPlanned:
 		return true
 	}
 	return false
@@ -146,6 +154,64 @@ type Entry struct {
 	// PlanDir is the directory of the plan's artifacts, PlanDir(key, n), checked on load and never
 	// trusted as a path.
 	PlanDir string `json:"plan_dir,omitempty"`
+	// Children and Links are the writes of a plan to Jira, each with its intent saved before the
+	// request (specs/listener-story/SPEC.md §8.3): a creation or a link that may have reached Jira is
+	// never made again.
+	Children []Child     `json:"children,omitempty"`
+	Links    []ChildLink `json:"links,omitempty"`
+}
+
+// Child is the creation of one child issue: the plan's task, and the issue's key once Jira answered.
+// Intent says the creation was requested and no answer is known: the issue may exist.
+type Child struct {
+	Task   string `json:"task"`
+	Key    string `json:"key,omitempty"`
+	Intent bool   `json:"intent,omitempty"`
+}
+
+// ChildLink is the link between two children: task Blocked waits for task Blocker. State is
+// WriteIntent before the request and WriteDone after Jira answered.
+type ChildLink struct {
+	Blocked string `json:"blocked"`
+	Blocker string `json:"blocker"`
+	State   string `json:"state"`
+}
+
+// ChildKey is the key of the issue created for task, "" when there is none.
+func (e Entry) ChildKey(task string) string {
+	for _, c := range e.Children {
+		if c.Task == task {
+			return c.Key
+		}
+	}
+	return ""
+}
+
+// CreatedKeys are the keys of the children created, in the order they were made.
+func (e Entry) CreatedKeys() []string {
+	var keys []string
+	for _, c := range e.Children {
+		if c.Key != "" {
+			keys = append(keys, c.Key)
+		}
+	}
+	return keys
+}
+
+// InDoubt is what a plan wrote that may have reached Jira without an answer: the tasks whose
+// creation has an intent and no key, and the links with an intent.
+func (e Entry) InDoubt() (tasks []string, links []Link) {
+	for _, c := range e.Children {
+		if c.Intent && c.Key == "" {
+			tasks = append(tasks, c.Task)
+		}
+	}
+	for _, l := range e.Links {
+		if l.State == WriteIntent {
+			links = append(links, Link{Blocked: l.Blocked, Blocker: l.Blocker})
+		}
+	}
+	return tasks, links
 }
 
 // State is state.json: per ticket key, the Entry.
@@ -262,7 +328,7 @@ func (e Entry) validate() error {
 	case len(e.Status) > 255 || strings.ContainsFunc(e.Status, func(r rune) bool { return r < ' ' || r == 0x7f }):
 		return errors.New("status must be one line of at most 255 bytes")
 	case !e.Outcome.Valid():
-		return fmt.Errorf("outcome %q is not done, blocked, failed, retry, none or spent", e.Outcome)
+		return fmt.Errorf("outcome %q is not done, blocked, failed, retry, none, spent or planned", e.Outcome)
 	case len(e.Reason) > maxStateReason || strings.ContainsFunc(e.Reason, func(r rune) bool { return r < ' ' || r == 0x7f }):
 		return fmt.Errorf("reason must be one line of at most %d bytes", maxStateReason)
 	case e.Interrupted && e.Phase != PhaseRunning:
@@ -281,6 +347,30 @@ func (e Entry) validate() error {
 		return errors.New("plan_dir goes with kind plan only")
 	case e.Kind == KindPlan && (e.Phase == PhaseRunning || e.Service != "" || e.RunID != ""):
 		return errors.New("a plan has no run and no service")
+	case (len(e.Children) > 0 || len(e.Links) > 0) && e.Kind != KindPlan:
+		return errors.New("children and links go with kind plan only")
+	case len(e.Children) > maxStateChildren || len(e.Links) > maxStateChildren:
+		return fmt.Errorf("a plan has at most %d children and %d links", maxStateChildren, maxStateChildren)
+	}
+	for i, c := range e.Children {
+		switch {
+		case !taskIDPattern.MatchString(c.Task):
+			return fmt.Errorf("children[%d]: task %q is not a task ID", i, c.Task)
+		case c.Key != "" && !domain.ValidTicketKey(c.Key):
+			return fmt.Errorf("children[%d]: key %q is not an issue key", i, c.Key)
+		case c.Key == "" && !c.Intent:
+			return fmt.Errorf("children[%d]: a child needs its key or its intent", i)
+		case c.Key != "" && c.Intent:
+			return fmt.Errorf("children[%d]: a child with a key has no intent", i)
+		}
+	}
+	for i, l := range e.Links {
+		switch {
+		case !taskIDPattern.MatchString(l.Blocked) || !taskIDPattern.MatchString(l.Blocker) || l.Blocked == l.Blocker:
+			return fmt.Errorf("links[%d]: %q and %q are not two task IDs", i, l.Blocked, l.Blocker)
+		case l.State != WriteIntent && l.State != WriteDone:
+			return fmt.Errorf("links[%d]: state %q is not intent or done", i, l.State)
+		}
 	}
 	if e.RunID != "" {
 		switch {
