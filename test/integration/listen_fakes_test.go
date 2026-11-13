@@ -41,6 +41,9 @@ type listenIssue struct {
 	key, summary, description, status, issueType, reporter string
 	labels, components                                     []string
 	comments                                               []listenComment
+	// blockedBy are the keys of the issues that block this one (link type Blocks, inward side);
+	// the search gives each with its current status in the fake.
+	blockedBy []string
 }
 
 // listenJira is a Jira Cloud with the endpoints the listener uses. Its search returns every issue
@@ -328,6 +331,19 @@ func (j *listenJira) issueJSON(is *listenIssue, full bool) map[string]any {
 	}
 	if full {
 		fields["description"] = is.description
+	} else if len(is.blockedBy) > 0 {
+		links := []any{}
+		for _, k := range is.blockedBy {
+			inward := map[string]any{"key": k}
+			if b := j.issues[k]; b != nil {
+				inward["fields"] = map[string]any{"status": map[string]string{"name": b.status}}
+			}
+			links = append(links, map[string]any{
+				"type":        map[string]string{"name": "Blocks", "inward": "is blocked by", "outward": "blocks"},
+				"inwardIssue": inward,
+			})
+		}
+		fields["issuelinks"] = links
 	}
 	return map[string]any{"id": "10001", "self": "https://ignored", "key": is.key, "fields": fields}
 }
@@ -369,6 +385,8 @@ type listenOptions struct {
 	rechecks  []float64
 	attempts  int
 	childOpts []func(*configOptions)
+	// blockers sets listener.blockers: link type Blocks, done statuses [Done].
+	blockers bool
 }
 
 func newListenEnv(t *testing.T, o listenOptions) *listenEnv {
@@ -401,6 +419,13 @@ func newListenEnv(t *testing.T, o listenOptions) *listenEnv {
 	if attempts == 0 {
 		attempts = 2
 	}
+	blockers := ""
+	if o.blockers {
+		blockers = `
+  blockers:
+    link_type: Blocks
+    done_statuses: [Done]`
+	}
 	cfg := clarifyConfig(t, func(c *configOptions) {
 		c.isolation = isolationAbsent
 		c.jira = &jiraOptions{baseURL: j.URL()}
@@ -410,7 +435,7 @@ listener:
   services_dir: %s
   default_config: %s
   max_attempts: %d
-  clone_timeout: 1m
+  clone_timeout: 1m%s
   query:
     projects: [PAY]
     label: ai-run
@@ -426,7 +451,7 @@ gitlab:
   base_url: https://gitlab.test
   token_env: GITLAB_TOKEN
   allowed_groups: [group]
-`, wd, childCfg, attempts, listenReporter)
+`, wd, childCfg, attempts, blockers, listenReporter)
 	})
 	return &listenEnv{t: t, wd: wd, svc: svc, bare: bare, cfg: cfg, childCfg: childCfg, jira: j,
 		invocationsLog: invocationsLog, maxAttempts: attempts}

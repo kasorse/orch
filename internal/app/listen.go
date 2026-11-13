@@ -255,6 +255,9 @@ type listenRunner struct {
 	stopErr error
 	// jiraAuth is set when Jira refused the credentials: nothing more is written to it.
 	jiraAuth bool
+	// waitingOn is, by ticket key, the blocker it was last logged waiting for (SPEC §4 of
+	// specs/listener-story): in memory, not in the state.
+	waitingOn map[string]string
 }
 
 func (r *listenRunner) logf(format string, args ...any) {
@@ -438,7 +441,7 @@ func (r *listenRunner) poll() (bool, error) {
 		if r.stopping() || r.stopErr != nil {
 			return false, nil
 		}
-		if !r.eligible(h) {
+		if !r.eligible(h) || r.blocked(h) {
 			continue
 		}
 		dispatched, err := r.dispatch(h)
@@ -473,6 +476,34 @@ func (r *listenRunner) eligible(h domain.TicketHead) bool {
 		return false
 	}
 	return !e.Waiting(r.now())
+}
+
+// blocked reports whether h waits for an unfinished blocker (specs/listener-story/SPEC.md §4): with
+// listener.blockers set, a ticket with a blocker whose status is not done is skipped, without a
+// claim, a comment, an attempt or a state entry. It logs once per ticket and blocker; what it
+// remembers is in memory only, and forgotten when the ticket no longer waits.
+func (r *listenRunner) blocked(h domain.TicketHead) bool {
+	b := r.lc.Blockers
+	if b == nil {
+		return false
+	}
+	blocker, waits := listener.Waiting(h, b.LinkType, b.DoneStatuses)
+	if !waits {
+		delete(r.waitingOn, h.Key)
+		return false
+	}
+	if r.waitingOn == nil {
+		r.waitingOn = map[string]string{}
+	}
+	if r.waitingOn[h.Key] != blocker.Key {
+		r.waitingOn[h.Key] = blocker.Key
+		status := blocker.Status
+		if status == "" {
+			status = "no status"
+		}
+		r.logf("%s waits for %s (%s)", h.Key, blocker.Key, status)
+	}
+	return true
 }
 
 // isEpic reports whether the issue type is one story.jira_issue_types sends to a story plan.
