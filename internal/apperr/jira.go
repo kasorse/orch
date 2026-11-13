@@ -38,6 +38,9 @@ const (
 	// (orchestrator revise, specs/revise/SPEC.md §4, §8).
 	JiraOpLinks       = "links"
 	JiraOpDescription = "description"
+	// JiraOpLink is the creation of an issue link, the one between two children of a listener's
+	// plan (specs/listener-story/SPEC.md §8.3).
+	JiraOpLink = "link"
 )
 
 var transientJiraFailures = map[JiraFailureKind]bool{
@@ -106,7 +109,7 @@ func (e *JiraError) headline() string {
 		if h, ok := e.createHeadline(key); ok {
 			return h
 		}
-	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition, JiraOpLabel, JiraOpLinks, JiraOpDescription:
+	case JiraOpStatus, JiraOpTransitions, JiraOpComment, JiraOpTransition, JiraOpLabel, JiraOpLinks, JiraOpDescription, JiraOpLink:
 		if h, ok := e.writeHeadline(key); ok {
 			return h
 		}
@@ -160,6 +163,7 @@ func (e *JiraError) writeHeadline(key string) (string, bool) {
 		JiraOpLabel:       "removing a label of " + key,
 		JiraOpLinks:       "reading the web links of " + key,
 		JiraOpDescription: "updating the description of " + key,
+		JiraOpLink:        "linking " + key,
 	}[e.Op]
 	switch e.Kind {
 	case JiraNotFound:
@@ -193,6 +197,8 @@ func (e *JiraError) opVerb() string {
 		return "move"
 	case JiraOpLabel, JiraOpDescription:
 		return "edit"
+	case JiraOpLink:
+		return "link"
 	}
 	return "read"
 }

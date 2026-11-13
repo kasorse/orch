@@ -21,7 +21,7 @@ const (
 	dcSearchPath    = "/rest/api/2/search"
 
 	searchPageSize = 50
-	searchFields   = "summary,status,labels,components,reporter,issuetype"
+	searchFields   = "summary,status,labels,components,reporter,issuetype,issuelinks"
 )
 
 // searchPage is one answer of the search endpoints. Issues stay raw so each issue and each of
@@ -194,6 +194,10 @@ func toTicketHead(raw json.RawMessage, auth string) (domain.TicketHead, string) 
 	if detail != "" {
 		return domain.TicketHead{}, detail
 	}
+	blockedBy, detail := toBlockedBy(issue.Fields["issuelinks"])
+	if detail != "" {
+		return domain.TicketHead{}, detail
+	}
 	return domain.TicketHead{
 		Key:        *issue.Key,
 		Summary:    normalize(summary),
@@ -202,5 +206,70 @@ func toTicketHead(raw json.RawMessage, auth string) (domain.TicketHead, string) 
 		Labels:     labels,
 		Components: components,
 		Reporter:   reporter,
+		BlockedBy:  blockedBy,
 	}, ""
+}
+
+const maxIssueLinks = 500
+
+// toBlockedBy reads the inward side of fields.issuelinks (specs/listener-story/SPEC.md §4): the
+// entries with an inwardIssue, which Cloud and Data Center shape alike ("is blocked by" for the
+// type Blocks). The status is the one Jira gives in the link; a link without one keeps
+// Status "". An entry with only an outwardIssue is the other side and is skipped. Absent, null
+// and [] give none.
+func toBlockedBy(raw json.RawMessage) ([]domain.TicketRef, string) {
+	if isNull(raw) {
+		return nil, ""
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, "fields.issuelinks: not an array"
+	}
+	if len(entries) > maxIssueLinks {
+		return nil, fmt.Sprintf("fields.issuelinks: more than %d entries", maxIssueLinks)
+	}
+	var refs []domain.TicketRef
+	for i, e := range entries {
+		var link struct {
+			Type        json.RawMessage `json:"type"`
+			InwardIssue json.RawMessage `json:"inwardIssue"`
+		}
+		if err := json.Unmarshal(e, &link); err != nil || isNull(e) {
+			return nil, fmt.Sprintf("fields.issuelinks[%d]: not an object", i)
+		}
+		if isNull(link.InwardIssue) {
+			continue
+		}
+		var inward struct {
+			Key    *string                    `json:"key"`
+			Fields map[string]json.RawMessage `json:"fields"`
+		}
+		if err := json.Unmarshal(link.InwardIssue, &inward); err != nil {
+			return nil, fmt.Sprintf("fields.issuelinks[%d].inwardIssue: not an object", i)
+		}
+		if inward.Key == nil || !domain.ValidTicketKey(*inward.Key) {
+			return nil, fmt.Sprintf("fields.issuelinks[%d].inwardIssue.key: missing or not an issue key", i)
+		}
+		status, detail := toStatus(inward.Fields["status"], fmt.Sprintf("fields.issuelinks[%d].inwardIssue.fields", i), false)
+		if detail != "" {
+			return nil, detail
+		}
+		typeName := ""
+		if !isNull(link.Type) {
+			var lt struct {
+				Name *string `json:"name"`
+			}
+			if err := json.Unmarshal(link.Type, &lt); err != nil {
+				return nil, fmt.Sprintf("fields.issuelinks[%d].type: not an object", i)
+			}
+			if lt.Name != nil {
+				if !validName(*lt.Name) {
+					return nil, fmt.Sprintf("fields.issuelinks[%d].type.name: too long or not one line", i)
+				}
+				typeName = *lt.Name
+			}
+		}
+		refs = append(refs, domain.TicketRef{Key: *inward.Key, Status: status, LinkType: typeName})
+	}
+	return refs, ""
 }

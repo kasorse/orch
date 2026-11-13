@@ -54,6 +54,19 @@ type TicketHead struct {
 	Components []string
 	// Reporter is the accountId on Jira Cloud and the username on Data Center.
 	Reporter string
+	// BlockedBy are the issues on the inward side of the issue's links ("is blocked by" for the
+	// link type Blocks), of every link type, in Jira's order; the caller keeps the ones whose
+	// LinkType it means (specs/listener-story/SPEC.md §4).
+	BlockedBy []TicketRef
+}
+
+// TicketRef is the other end of an issue link: its key and the name of its status, "" when Jira
+// gave none (a link without a status counts as unfinished). LinkType is the name of the link's
+// type, which the caller compares with listener.blockers.link_type.
+type TicketRef struct {
+	Key      string
+	Status   string
+	LinkType string
 }
 
 // TicketComment is one comment of an issue.
