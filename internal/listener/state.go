@@ -140,6 +140,12 @@ type Entry struct {
 	Reason    string    `json:"reason,omitempty"`
 	Writes    Writes    `json:"writes,omitzero"`
 	NextTryAt time.Time `json:"next_try_at,omitzero"`
+	// Kind is KindPlan for an Epic that is planned (specs/listener-story/SPEC.md §9): its run fields
+	// stay empty. "" is a ticket that runs, which is every entry an older state holds.
+	Kind string `json:"kind,omitempty"`
+	// PlanDir is the directory of the plan's artifacts, PlanDir(key, n), checked on load and never
+	// trusted as a path.
+	PlanDir string `json:"plan_dir,omitempty"`
 }
 
 // State is state.json: per ticket key, the Entry.
@@ -236,6 +242,9 @@ func (s State) Validate() error {
 		if err := e.validate(); err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
+		if e.PlanDir != "" && !ValidPlanDir(key, e.PlanDir) {
+			return fmt.Errorf("%s: plan_dir %q is not plans/%s.<n>", key, e.PlanDir, key)
+		}
 	}
 	return nil
 }
@@ -266,6 +275,12 @@ func (e Entry) validate() error {
 		return errors.New("run_id and run_dir go together")
 	case !e.NextTryAt.IsZero() && e.Outcome != ResultRetry:
 		return errors.New("next_try_at goes with the outcome retry only")
+	case e.Kind != "" && e.Kind != KindPlan:
+		return fmt.Errorf("kind %q is not %s", e.Kind, KindPlan)
+	case e.PlanDir != "" && e.Kind != KindPlan:
+		return errors.New("plan_dir goes with kind plan only")
+	case e.Kind == KindPlan && (e.Phase == PhaseRunning || e.Service != "" || e.RunID != ""):
+		return errors.New("a plan has no run and no service")
 	}
 	if e.RunID != "" {
 		switch {

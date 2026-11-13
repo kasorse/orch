@@ -38,6 +38,27 @@ func TestStateRoundTrip(t *testing.T) {
 	}
 }
 
+// A plan's entry round-trips, and a state written before plans (no kind, no plan_dir) still loads.
+func TestStateKeepsAPlanAndLoadsAnOldState(t *testing.T) {
+	s := NewState()
+	s.Tickets["PAY-9"] = Entry{Phase: PhaseFinished, Outcome: ResultFailed, Kind: KindPlan, PlanDir: PlanDir("PAY-9", 2), Attempts: 1}
+	data, err := s.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := ParseState(data)
+	if err != nil {
+		t.Fatalf("ParseState: %v\n%s", err, data)
+	}
+	if e := got.Tickets["PAY-9"]; e.Kind != KindPlan || e.PlanDir != "plans/PAY-9.2" {
+		t.Errorf("entry = %+v, want kind plan and plan_dir plans/PAY-9.2", e)
+	}
+	old := `{"v":1,"tickets":{"PAY-1":{"phase":"finished","attempts":1,"outcome":"done"}}}`
+	if _, err := ParseState([]byte(old)); err != nil {
+		t.Errorf("a state without kind loads: %v", err)
+	}
+}
+
 func TestParseStateRefuses(t *testing.T) {
 	tests := []struct {
 		name, json, want string
@@ -55,6 +76,11 @@ func TestParseStateRefuses(t *testing.T) {
 		{"run id without dir", `{"v":1,"tickets":{"PAY-1":{"phase":"running","attempts":0,"service":"billing","run_id":"` + testRunID + `"}}}`, "go together"},
 		{"bad write state", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"writes":{"comment":{"state":"sent"}}}}}`, "intent or done"},
 		{"next_try_at without retry", `{"v":1,"tickets":{"PAY-1":{"phase":"finished","attempts":0,"outcome":"failed","next_try_at":"2026-10-29T11:00:00Z"}}}`, "retry only"},
+		{"unknown kind", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"kind":"story"}}}`, "kind"},
+		{"plan_dir without kind", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"plan_dir":"plans/PAY-1.1"}}}`, "kind plan only"},
+		{"plan_dir of another ticket", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"kind":"plan","plan_dir":"plans/PAY-2.1"}}}`, "plan_dir"},
+		{"plan_dir that escapes", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"kind":"plan","plan_dir":"plans/PAY-1.1/../../x"}}}`, "plan_dir"},
+		{"a plan with a service", `{"v":1,"tickets":{"PAY-1":{"phase":"claimed","attempts":0,"kind":"plan","service":"billing"}}}`, "no run and no service"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

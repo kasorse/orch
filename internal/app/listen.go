@@ -24,6 +24,7 @@ import (
 	"github.com/kasorse/orch/internal/jira"
 	"github.com/kasorse/orch/internal/listener"
 	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/provider"
 	"github.com/kasorse/orch/internal/repository"
 	"github.com/kasorse/orch/internal/secretscan"
 )
@@ -167,11 +168,15 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 		servicesDir: servicesDir, stateFile: filepath.Join(stateDir, "state.json"), tasksDir: filepath.Join(stateDir, "tasks"),
 		logsDir: filepath.Join(stateDir, "logs"), scrub: scrub, now: time.Now, sleep: sleepContext,
 		runs: map[string]string{}, wake: make(chan struct{}, 1),
+		plansDir: filepath.Join(stateDir, listenerPlansDir), registry: registry,
 	}
 	// The Jira client takes the credentials from the environment at its construction; the
 	// environment is shaped after it (specs/embed/SPEC.md §2.4), and the git processes of the
 	// checkout get the shaped one.
 	r.jira = newListenerJiraClient(cfg)
+	if cfg.Listener.Story != nil {
+		r.catalog = newListenerGitLab(cfg, r.logf)
+	}
 	if err := r.environment(); err != nil {
 		return err
 	}
@@ -200,10 +205,10 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 }
 
 // listenerScrubEnv is the credential variables the listener names in every task file: the Jira
-// ones and the GitLab token.
+// ones, the GitLab token and, when there is one, the read-only API token of the Epic's catalog.
 func listenerScrubEnv(cfg config.Config) []string {
 	var names []string
-	for _, n := range []string{cfg.Jira.TokenEnv, cfg.Jira.EmailEnv, cfg.GitLab.TokenEnv} {
+	for _, n := range []string{cfg.Jira.TokenEnv, cfg.Jira.EmailEnv, cfg.GitLab.TokenEnv, cfg.GitLab.APITokenEnv} {
 		if n != "" && !slices.Contains(names, n) {
 			names = append(names, n)
 		}
@@ -267,12 +272,23 @@ type listenRunner struct {
 	bot      string
 	checkout *serviceCheckout
 
-	// mu guards state, runs, stopErr and fatal: the runs' goroutines and the loop change them.
+	// What an Epic's plan needs (specs/listener-story/SPEC.md §5–§7): the providers its calls run
+	// on, the GitLab catalog (nil without listener.story), the directory its artifacts go to and
+	// the loader of a repository's configuration (nil: the layered, validated one).
+	registry   *provider.Registry
+	catalog    planGitLab
+	plansDir   string
+	loadConfig func(path string) (config.Config, error)
+
+	// mu guards state, runs, planning, stopErr and fatal: the runs' goroutines and the loop change them.
 	mu    sync.Mutex
 	state listener.State
 	// runs are the runs in progress (a slot each, specs/listener-story/SPEC.md §3): ticket key to
 	// the service it runs in, "" until the service is known.
 	runs map[string]string
+	// planning is the Epic whose plan is in progress, "" when none: the plan holds every slot (A12),
+	// so while it is set no slot is free and nothing starts.
+	planning string
 	// stopErr, once set, is why the listener stops with exit 2 (SPEC §10).
 	stopErr error
 	// fatal is the first error of a run's goroutine that ends the listener with exit 1.
@@ -380,7 +396,14 @@ func (r *listenRunner) halted() bool { return r.stopping() || r.stopError() != n
 func (r *listenRunner) slotFree() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.runs) < r.maxRuns()
+	return r.planning == "" && len(r.runs) < r.maxRuns()
+}
+
+// noRuns reports whether nothing is in progress: no run and no plan. An Epic's plan starts only then.
+func (r *listenRunner) noRuns() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.runs) == 0 && r.planning == ""
 }
 
 // holder is the ticket whose run is in progress in service, if any.
@@ -404,7 +427,7 @@ func (r *listenRunner) holderLocked(service string) (string, bool) {
 func (r *listenRunner) canStart(service string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.runs) >= r.maxRuns() {
+	if r.planning != "" || len(r.runs) >= r.maxRuns() {
 		return false
 	}
 	if service == "" {
@@ -430,14 +453,30 @@ func (r *listenRunner) bind(key, service string) bool {
 // of its own; the slot is held until body returns, that is until the outcome is written. An error of
 // body ends the listener; a panic in it is the ticket's alone (cycle).
 func (r *listenRunner) startRun(key, service string, body func() error) {
+	r.start(key, service, false, body)
+}
+
+// startPlan is startRun for an Epic's plan, which takes every slot: it is called only when noRuns,
+// and until body returns no slot is free (SPEC §3).
+func (r *listenRunner) startPlan(key string, body func() error) {
+	r.start(key, "", true, body)
+}
+
+func (r *listenRunner) start(key, service string, exclusive bool, body func() error) {
 	r.mu.Lock()
 	r.runs[key] = service
+	if exclusive {
+		r.planning = key
+	}
 	r.mu.Unlock()
 	r.wg.Add(1)
 	go func() {
 		defer func() {
 			r.mu.Lock()
 			delete(r.runs, key)
+			if r.planning == key {
+				r.planning = ""
+			}
 			r.mu.Unlock()
 			select {
 			case r.wake <- struct{}{}:
@@ -755,11 +794,20 @@ func (r *listenRunner) poll() error {
 			continue
 		}
 		if err := r.dispatch(h); err != nil {
+			if errors.Is(err, errEpicWaits) {
+				// Nothing after the Epic is started in this poll, or the runs that come after it would
+				// keep it waiting for ever: it is planned when the runs in progress have ended.
+				return nil
+			}
 			return listenFatal{err}
 		}
 	}
 	return nil
 }
+
+// errEpicWaits is dispatch's answer for an Epic that cannot be planned yet because a run is in
+// progress (SPEC §3, A12): it is not claimed, and the poll goes no further.
+var errEpicWaits = errors.New("an Epic waits for the runs in progress")
 
 // serviceOf is the service the head names, "" when it cannot be named: such a ticket is dispatched
 // all the same and blocked in process (SPEC §3).
@@ -862,14 +910,25 @@ func (r *listenRunner) dispatch(h domain.TicketHead) error {
 	if e, ok := r.entry(key); ok && e.Spent(r.lc.MaxAttempts) {
 		return r.endUnclaimed(h, listener.ResultSpent, "")
 	}
-	if r.isEpic(h.Type) {
+	epic := r.isEpic(h.Type)
+	if epic && r.lc.Story == nil {
 		return r.endUnclaimed(h, listener.ResultBlocked,
 			fmt.Sprintf("%s is an %s: plan it as a story (orchestrator story plan --jira %s); the listener runs one ticket as one run in one service.", key, h.Type, key))
 	}
-	// The service is computed from the head before the claim: at most one run per service.
-	service := r.serviceOf(h)
-	if service != "" && r.serviceBusy(h, service) {
-		return nil
+	// The service is computed from the head before the claim: at most one run per service. An Epic
+	// has none: its plan takes every slot, so it starts only when nothing is in progress.
+	service := ""
+	if epic {
+		if !r.noRuns() {
+			r.epicWaits(key)
+			return errEpicWaits
+		}
+		delete(r.busyOn, key)
+	} else {
+		service = r.serviceOf(h)
+		if service != "" && r.serviceBusy(h, service) {
+			return nil
+		}
 	}
 
 	transitions, err := r.jira.Transitions(r.ctx, key)
@@ -894,7 +953,12 @@ func (r *listenRunner) dispatch(h domain.TicketHead) error {
 		r.logf("%s skipped: %v", key, err)
 		return nil
 	}
-	if err := r.update(key, func(e *listener.Entry) { e.Status = startStatus }); err != nil {
+	if err := r.update(key, func(e *listener.Entry) {
+		e.Status = startStatus
+		if epic {
+			e.Kind = listener.KindPlan
+		}
+	}); err != nil {
 		return err
 	}
 	if err := r.jira.Transition(r.ctx, key, start.ID); err != nil {
@@ -926,9 +990,25 @@ func (r *listenRunner) dispatch(h domain.TicketHead) error {
 	if err := r.update(key, func(e *listener.Entry) { e.Phase = listener.PhaseClaimed }); err != nil {
 		return err
 	}
+	if epic {
+		r.logf("%s claimed: planning it", key)
+		r.startPlan(key, func() error { return r.plan(key) })
+		return nil
+	}
 	r.logf("%s claimed", key)
 	r.startRun(key, service, func() error { return r.process(h, prev, service) })
 	return nil
+}
+
+// epicWaits logs once per Epic that it waits for the runs in progress.
+func (r *listenRunner) epicWaits(key string) {
+	if r.busyOn == nil {
+		r.busyOn = map[string]string{}
+	}
+	if r.busyOn[key] != "runs" {
+		r.busyOn[key] = "runs"
+		r.logf("%s is an Epic to plan: it waits for the runs in progress", key)
+	}
 }
 
 // restore puts the entry of key back as it was before a claim that did not happen.
@@ -1596,7 +1676,12 @@ func (r *listenRunner) reviewLines(run *domain.Run) []string {
 // §3): the others wait for a slot here, before the first poll. The rest (a claim to settle, an outcome
 // to write) are quick and are done here, one after the other.
 func (r *listenRunner) recover() error {
-	for _, key := range r.unfinished() {
+	keys := r.unfinished()
+	// An Epic's plan needs every slot: the ones cut off are started again first, while nothing runs.
+	slices.SortStableFunc(keys, func(a, b string) int {
+		return boolRank(r.entryOf(a).Kind != listener.KindPlan) - boolRank(r.entryOf(b).Kind != listener.KindPlan)
+	})
+	for _, key := range keys {
 		if r.halted() {
 			return nil
 		}
@@ -1614,6 +1699,14 @@ func (r *listenRunner) recover() error {
 		r.startRun(key, e.Service, func() error { return r.recoverEntry(key) })
 	}
 	return nil
+}
+
+// boolRank is 1 for true and 0 for false.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // recoverEntry carries one unfinished entry to its end. A claiming one is settled by the ticket's
@@ -1654,6 +1747,12 @@ func (r *listenRunner) recoverEntry(key string) error {
 func (r *listenRunner) recoverClaimed(key string, e listener.Entry) error {
 	switch e.Outcome {
 	case "":
+		if e.Kind == listener.KindPlan && r.noRuns() && !r.halted() {
+			// A plan cut off has nothing to resume: it is made again from the start (A10).
+			r.logf("%s: its plan is made again from the start", key)
+			r.startPlan(key, func() error { return r.plan(key) })
+			return nil
+		}
 		return r.endInfra(key, errors.New("the listener stopped before its run started"))
 	case listener.ResultRetry:
 		return r.write(key, listener.Infrastructure(), nil)
