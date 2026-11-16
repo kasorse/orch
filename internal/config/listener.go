@@ -69,11 +69,15 @@ type ListenerConfig struct {
 	// DefaultConfig is the --config of a service without its own orchestrator.yaml; empty means
 	// none. Its existence is checked where it is used, not here.
 	DefaultConfig string
-	MaxAttempts   int
-	CloneTimeout  time.Duration
-	Query         ListenerQuery
-	Labels        ListenerLabels
-	Transitions   ListenerTransitions
+	// ConfigsDir holds the operator's configurations, one per service:
+	// <ConfigsDir>/<service>/orchestrator.yaml, used when the service has no file of its own and
+	// before DefaultConfig; empty means none. Relative to the working directory.
+	ConfigsDir   string
+	MaxAttempts  int
+	CloneTimeout time.Duration
+	Query        ListenerQuery
+	Labels       ListenerLabels
+	Transitions  ListenerTransitions
 	// MaxParallel is how many runs go at once, at most one per service
 	// (specs/listener-story/SPEC.md §3).
 	MaxParallel int
@@ -164,6 +168,7 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		PollInterval  string  `yaml:"poll_interval"`
 		ServicesDir   *string `yaml:"services_dir"`
 		DefaultConfig string  `yaml:"default_config"`
+		ConfigsDir    string  `yaml:"configs_dir"`
 		MaxAttempts   *int    `yaml:"max_attempts"`
 		CloneTimeout  string  `yaml:"clone_timeout"`
 		Query         struct {
@@ -200,6 +205,7 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		l.MaxParallel = *raw.MaxParallel
 	}
 	l.Blockers, l.Story = raw.Blockers, raw.Story
+	l.ConfigsDir = raw.ConfigsDir
 	return nil
 }
 
@@ -273,6 +279,9 @@ func validateListener(l ListenerConfig) []string {
 	}
 	if l.DefaultConfig != "" && (strings.TrimSpace(l.DefaultConfig) != l.DefaultConfig || hasControl(l.DefaultConfig)) {
 		problems = append(problems, "listener.default_config must be a relative or absolute path on one line")
+	}
+	if l.ConfigsDir != "" && (strings.TrimSpace(l.ConfigsDir) != l.ConfigsDir || hasControl(l.ConfigsDir)) {
+		problems = append(problems, "listener.configs_dir must be a relative or absolute path on one line")
 	}
 
 	problems = append(problems, jqlListProblems("listener.query.projects", l.Query.Projects)...)

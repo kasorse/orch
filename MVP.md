@@ -436,6 +436,7 @@ security:                      # required for protected_paths (§38.3); no key w
 # listener:                    # optional; needed only for `jira listen` (§51), with jira and gitlab
 #   poll_interval: 1m          # 30s..1h
 #   services_dir: .            # relative to the working directory
+#   configs_dir: services-config   # optional; <configs_dir>/<service>/orchestrator.yaml first
 #   default_config: service.yaml   # optional; --config for a service without orchestrator.yaml
 #   max_attempts: 3            # 1..10 finished runs per ticket
 #   clone_timeout: 10m         # 1m..1h
@@ -6466,7 +6467,9 @@ otherwise `blocked`.
   owns the services directory, nobody works in it by hand (D16).
 * **The service's configuration**: `<service>/orchestrator.yaml` when it exists (its test
   command, checks, protected paths, routes, limits and instruction files apply, D7); otherwise
-  `listener.default_config` as `--config` (D6); without one, a comment and `failed`.
+  `<listener.configs_dir>/<service>/orchestrator.yaml` when `configs_dir` is set and the file
+  exists; otherwise `listener.default_config` as `--config` (D6); without one, a comment and
+  `failed`.
 
 ## 51.7 The task (SPEC §7)
 
@@ -6479,7 +6482,8 @@ passes the validated task to the run as a value: `runTask(ctx, dir, configPath, 
 `dir` the service's directory. The run reads the working directory nowhere: `dir` gives the
 repository, `reporter.Cwd`, the runs directory and every path it derives, and a resume takes the
 same parameter (`resumeRun`); `run` and `resume` on the command line pass the working directory.
-The configuration is the service's own `orchestrator.yaml`, else `listener.default_config`, as an
+The configuration is the service's own `orchestrator.yaml`, else
+`<listener.configs_dir>/<service>/orchestrator.yaml`, else `listener.default_config`, as an
 absolute path. The run records `task.source {kind: jira, key, url, fetched_at, listener: true}`,
 builds no Jira client and needs no `jira` section, runs the clarify step like any run (unlike a
 story task), and has `jira.write` off (`options.jira_write` empty) whatever the service's file

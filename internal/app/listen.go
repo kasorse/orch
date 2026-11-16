@@ -1126,23 +1126,36 @@ func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry, named s
 
 // configFor is the configuration file the run of a service loads, absolute: the service's own
 // orchestrator.yaml when it has one (the repository's own rules apply, SPEC §6.4), else
-// listener.default_config.
+// <listener.configs_dir>/<service>/orchestrator.yaml, else listener.default_config.
 func (r *listenRunner) configFor(serviceDir string) (string, error) {
+	service := filepath.Base(serviceDir)
 	own := filepath.Join(serviceDir, defaultConfigPath)
 	if _, err := os.Stat(own); err == nil {
 		return own, nil
 	}
+	abs := func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(r.wd, p)
+	}
+	if r.lc.ConfigsDir != "" {
+		path := abs(filepath.Join(r.lc.ConfigsDir, service, defaultConfigPath))
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+		if r.lc.DefaultConfig == "" {
+			return "", fmt.Errorf("the service %s has no %s and there is no %s", service, defaultConfigPath, path)
+		}
+	}
 	def := r.lc.DefaultConfig
 	if def == "" {
-		return "", fmt.Errorf("the service %s has no %s and listener.default_config is not set", filepath.Base(serviceDir), defaultConfigPath)
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config is not set", service, defaultConfigPath)
 	}
-	if !filepath.IsAbs(def) {
-		def = filepath.Join(r.wd, def)
+	if _, err := os.Stat(abs(def)); err != nil {
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", service, defaultConfigPath, r.lc.DefaultConfig)
 	}
-	if _, err := os.Stat(def); err != nil {
-		return "", fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", filepath.Base(serviceDir), defaultConfigPath, r.lc.DefaultConfig)
-	}
-	return def, nil
+	return abs(def), nil
 }
 
 // writeTask records the task of the run (SPEC §7.2) as tasks/<KEY>.<attempt>.json, the record and

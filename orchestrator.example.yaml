@@ -373,6 +373,8 @@ security:
 # listener:
 #   poll_interval: 1m              # 30s..1h; waited while a slot is free and no run ends
 #   services_dir: .                # relative to the working directory; one directory per service
+#   configs_dir: services-config   # optional; <configs_dir>/<service>/orchestrator.yaml for a service
+#                                  # without its own orchestrator.yaml, tried before default_config
 #   default_config: service.yaml   # optional; --config for a service without its own orchestrator.yaml
 #   max_attempts: 3                # 1..10 finished runs per ticket
 #   clone_timeout: 10m             # 1m..1h

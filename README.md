@@ -1324,7 +1324,7 @@ In Docker:
 * **A cloned repository's `orchestrator.yaml` is trusted**, test command and `worktree.setup`
   included, because its group is in `gitlab.allowed_groups`. Allow only groups whose members you
   trust to run code on this machine. A repository without the file runs under
-  `listener.default_config`.
+  `<listener.configs_dir>/<service>/orchestrator.yaml`, else `listener.default_config`.
 * The GitLab token reaches only git, through a credential helper the listener configures for
   `gitlab.base_url`; it is in no URL, `.git/config`, log or comment, and not in the provider
   CLIs' or the test command's environment. The Jira variables are in no process a run starts.

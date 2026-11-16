@@ -167,6 +167,8 @@ func TestValidateListener(t *testing.T) {
 		{"default_config relative", func(l *ListenerConfig) { l.DefaultConfig = "service.yaml" }, ""},
 		{"default_config absolute", func(l *ListenerConfig) { l.DefaultConfig = "/etc/orch/service.yaml" }, ""},
 		{"default_config multiline", func(l *ListenerConfig) { l.DefaultConfig = "a\nb" }, "listener.default_config must be a relative or absolute path"},
+		{"configs_dir absolute", func(l *ListenerConfig) { l.ConfigsDir = "/etc/orch/services" }, ""},
+		{"configs_dir multiline", func(l *ListenerConfig) { l.ConfigsDir = "a\nb" }, "listener.configs_dir must be a relative or absolute path"},
 		{"projects missing", func(l *ListenerConfig) { l.Query.Projects = nil }, "listener.query.projects is required"},
 		{"statuses missing", func(l *ListenerConfig) { l.Query.Statuses = nil }, "listener.query.statuses is required"},
 		{"reporters missing", func(l *ListenerConfig) { l.Query.Reporters = nil }, "listener.query.reporters is required"},
