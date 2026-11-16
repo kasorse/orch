@@ -6637,8 +6637,9 @@ claim (start) → children already there? → the services (labels, else the cat
   is `blocked`.
 * **Checkouts** go through the listener's own (§51.6); a network failure is `retry`, any other
   problem `failed`. **Survey**: one call per target and per reference (§48.2, step 3), `read`, in the
-  checkout, on the route of that repository's configuration (its `orchestrator.yaml`, else
-  `listener.default_config`); a reference's survey is told it is one. **Specify**: §48.2, step 4,
+  checkout, on the listener's own `actions.investigate` and `context.extra_deny`: planning only
+  reads, so no service's configuration is needed until its child ticket runs (§51.6). A
+  reference's survey is told it is one. **Specify**: §48.2, step 4,
   with the reference surveys (fenced, "reference: not changed, never a task's repo") and told that
   the tasks of different services run in parallel from their default branches; `story.Validate`
   as for a story; one task is a plan too.

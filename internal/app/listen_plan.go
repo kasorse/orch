@@ -379,8 +379,8 @@ func (p *planRun) checkouts(targets, refs []planTarget) (map[string]string, *pla
 	return dirs, nil
 }
 
-// surveys is one survey call per target and per reference, one after another (SPEC §6), each on the
-// route of that repository's configuration.
+// surveys is one survey call per target and per reference, one after another (SPEC §6), on the
+// listener's investigate route.
 func (p *planRun) surveys(text string, targets, refs []planTarget, dirs map[string]string) (surveys, refSurveys []action.SurveyInput, end *planEnd) {
 	for _, group := range []struct {
 		repos     []planTarget
@@ -393,10 +393,7 @@ func (p *planRun) surveys(text string, targets, refs []planTarget, dirs map[stri
 			if end := p.budget(); end != nil {
 				return nil, nil, end
 			}
-			repo, route, timeout, err := p.r.surveyRepo(t.Name, dirs[t.Name], group.reference)
-			if err != nil {
-				return nil, nil, failedBy(err.Error())
-			}
+			repo, route, timeout := p.r.surveyRepo(t.Name, dirs[t.Name], group.reference)
 			p.r.logf("%s: surveying %s", p.key, t.Name)
 			res, err := action.Survey(p.r.ctx, p.call(route, timeout), repo, text)
 			name := "survey-" + t.Name
@@ -443,42 +440,14 @@ func (p *planRun) specify(text string, targets []planTarget, surveys, refSurveys
 	return res.Answer, tasks, nil
 }
 
-// surveyRepo is the survey of one checkout: its directory, its deny list and the route of the
-// configuration the listener would run it with (configFor: its own orchestrator.yaml, else
-// listener.default_config), and not the story's rule that every service keeps its own (SPEC §6).
-func (r *listenRunner) surveyRepo(name, dir string, reference bool) (action.SurveyRepo, config.ProviderModel, time.Duration, error) {
-	path, err := r.configFor(dir)
-	if err != nil {
-		return action.SurveyRepo{}, config.ProviderModel{}, 0, err
-	}
-	load := r.loadConfig
-	if load == nil {
-		load = r.loadServiceConfig
-	}
-	cfg, err := load(path)
-	if err != nil {
-		return action.SurveyRepo{}, config.ProviderModel{}, 0, fmt.Errorf("the configuration of %s cannot be used for its survey: %s", name, firstLineOf(err.Error()))
-	}
-	inv := cfg.Actions.Investigate
-	repo := action.SurveyRepo{Name: name, Dir: dir, ExtraDeny: cfg.Context.ExtraDeny, RunsDir: runsBaseDir, Reference: reference}
-	return repo, inv.ProviderModel, inv.Timeout, nil
-}
-
-// loadServiceConfig loads the configuration file at path as a run would: with the organisation's
-// layer, validated, and with the authorities its routes can enforce.
-func (r *listenRunner) loadServiceConfig(path string) (config.Config, error) {
-	orgPath, _ := config.FindOrgConfig(orgConfigEtcPath, os.Getenv)
-	cfg, _, err := config.LoadLayered(path, orgPath)
-	if err != nil {
-		return config.Config{}, err
-	}
-	if err := config.Validate(cfg); err != nil {
-		return config.Config{}, err
-	}
-	if err := config.ValidateAuthorities(cfg, r.registry); err != nil {
-		return config.Config{}, err
-	}
-	return cfg, nil
+// surveyRepo is the survey of one checkout: its directory and the listener's own deny list and
+// investigate route. Planning an Epic only reads the repositories, targets and references alike, so
+// it needs no service's configuration; a target's own is required when its child ticket runs
+// (configFor).
+func (r *listenRunner) surveyRepo(name, dir string, reference bool) (action.SurveyRepo, config.ProviderModel, time.Duration) {
+	inv := r.cfg.Actions.Investigate
+	return action.SurveyRepo{Name: name, Dir: dir, ExtraDeny: r.cfg.Context.ExtraDeny, RunsDir: runsBaseDir, Reference: reference},
+		inv.ProviderModel, inv.Timeout
 }
 
 // call is a planning call on route, whose raw output goes to the plan's logs.
