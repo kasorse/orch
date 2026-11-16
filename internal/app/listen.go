@@ -278,12 +278,10 @@ type listenRunner struct {
 	checkout *serviceCheckout
 
 	// What an Epic's plan needs (specs/listener-story/SPEC.md §5–§7): the providers its calls run
-	// on, the GitLab catalog (nil without listener.story), the directory its artifacts go to and
-	// the loader of a repository's configuration (nil: the layered, validated one).
-	registry   *provider.Registry
-	catalog    planGitLab
-	plansDir   string
-	loadConfig func(path string) (config.Config, error)
+	// on, the GitLab catalog (nil without listener.story) and the directory its artifacts go to.
+	registry *provider.Registry
+	catalog  planGitLab
+	plansDir string
 
 	// mu guards state, runs, planning, stopErr and fatal: the runs' goroutines and the loop change them.
 	mu    sync.Mutex

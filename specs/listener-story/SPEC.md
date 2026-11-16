@@ -211,9 +211,9 @@ gitlab:
 ## 6. The survey
 
 * One `survey` call per target and per reference (`action.Survey`, MVP.md §48.2), `read`
-  authority, in the checkout, in place, with that repository's deny list, on the route of that
-  repository's configuration: its own `orchestrator.yaml`, else `listener.default_config` (the
-  listener's `configFor`, not `loadStoryService`'s "every service keeps its own config").
+  authority, in the checkout, in place, on the listener's own `actions.investigate` and
+  `context.extra_deny`: the plan only reads, so it needs no service's configuration; a target's
+  is required when its child ticket runs (amended 2026-11-17).
 * A reference's survey is told it is a reference: what the targets must reproduce or read from
   it (models, dictionaries, rules, UI), not what to change in it.
 * The calls run one after another (the plan is exclusive, §3; a survey is short).

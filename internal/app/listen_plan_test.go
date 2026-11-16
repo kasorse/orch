@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -268,8 +269,8 @@ type planProvider struct {
 }
 
 type planCall struct {
-	action, repo, dir, prompt string
-	authority                 domain.Authority
+	action, repo, dir, prompt, model string
+	authority                        domain.Authority
 }
 
 func (p *planProvider) Supports(domain.Authority) bool { return true }
@@ -277,7 +278,7 @@ func (p *planProvider) Supports(domain.Authority) bool { return true }
 func (p *planProvider) Execute(ctx context.Context, req provider.Request) (provider.Result, error) {
 	first, _, _ := strings.Cut(req.Prompt, "\n")
 	action := strings.TrimPrefix(first, "ACTION: ")
-	call := planCall{action: action, dir: req.WorkingDir, prompt: req.Prompt, authority: req.Authority}
+	call := planCall{action: action, dir: req.WorkingDir, prompt: req.Prompt, model: req.Model, authority: req.Authority}
 	if _, rest, ok := strings.Cut(req.Prompt, `Survey the repository "`); ok {
 		call.repo, _, _ = strings.Cut(rest, `"`)
 	}
@@ -416,12 +417,6 @@ func newEpicEnv(t *testing.T, status string, labels ...string) *epicEnv {
 	r.lc.DefaultConfig = filepath.Join(t.TempDir(), "default.yaml")
 	if err := os.WriteFile(r.lc.DefaultConfig, []byte("version: 2\n"), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	r.loadConfig = func(string) (config.Config, error) {
-		var c config.Config
-		c.Actions.Investigate = config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "survey-model"}}
-		c.Context.ExtraDeny = []string{"vault"}
-		return c, nil
 	}
 	r.checkout = ckCheckout(t, root)
 	r.plansDir = filepath.Join(t.TempDir(), "plans")
@@ -587,6 +582,27 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name, "a.txt")); err != nil {
 			t.Errorf("checkout of %s: %v", name, err)
 		}
+	}
+}
+
+// Planning reads no service's configuration: with none anywhere (no default_config, no configs_dir)
+// every survey, targets and the reference alike, is on the listener's investigate route and the
+// plan reaches specify.
+func TestPlan_NeedsNoServiceConfiguration(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.r.lc.DefaultConfig = ""
+	env.plan()
+
+	models := map[string]string{}
+	for _, s := range env.prov.callsOf("survey") {
+		models[s.repo] = s.model
+	}
+	want := map[string]string{"sku-master": "m", "sku-master-fe": "m", "product-master": "m"}
+	if !maps.Equal(models, want) {
+		t.Fatalf("survey models = %v, want %v\n%s", models, want, env.out.String())
+	}
+	if len(env.prov.callsOf("specify")) != 1 {
+		t.Errorf("the plan stopped before specify:\n%s", env.out.String())
 	}
 }
 
