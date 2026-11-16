@@ -61,7 +61,7 @@ func TestSearch_CloudPagesByToken(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/jira/rest/api/2/search/jql" {
 			t.Errorf("got %s %s", r.Method, r.URL.Path)
 		}
-		if q.Get("jql") != `project in ("PAY")` || q.Get("fields") != "summary,status,labels,components,reporter,issuetype" || q.Get("maxResults") != "50" {
+		if q.Get("jql") != `project in ("PAY")` || q.Get("fields") != "summary,status,labels,components,reporter,issuetype,issuelinks" || q.Get("maxResults") != "50" {
 			t.Errorf("query = %v", q)
 		}
 		if r.Header.Get("Authorization") != "Basic "+testBasic {

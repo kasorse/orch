@@ -524,6 +524,62 @@ func TestListen_AnEpicIsBlockedWithoutAClaim(t *testing.T) {
 	}
 }
 
+// With listener.blockers, a ticket blocked by one in Code Review waits: no claim, no comment, no
+// run and no state entry, one log line naming the blocker and its status. Once the blocker is Done
+// the next poll takes it (specs/listener-story/SPEC.md §4).
+func TestListen_ATicketBlockedByAnUnfinishedOneWaits(t *testing.T) {
+	env := newListenEnv(t, listenOptions{pPre: 0.85, blockers: true})
+	env.jira.add("PAY-11", "the blocker", listenTask, "service:billing").status = "Code Review"
+	env.jira.add("PAY-12", "Add() subtracts", listenTask, "service:billing").blockedBy = []string{"PAY-11"}
+
+	stderr := mustListen(t, env)
+
+	if posts := env.jira.posts("/transitions"); len(posts) != 0 {
+		t.Errorf("transitions posted: %+v", posts)
+	}
+	if posts := env.jira.posts("/comment"); len(posts) != 0 {
+		t.Errorf("comments posted: %+v", posts)
+	}
+	if _, err := os.Stat(filepath.Join(env.wd, ".orchestrator", "listener", "state.json")); err == nil {
+		t.Errorf("state.json was written: %v", env.state().Tickets)
+	}
+	if got := invocationsOrNone(env.invocationsLog); len(got) != 0 || len(env.runs()) != 0 {
+		t.Errorf("a run was made: %v", got)
+	}
+	if !strings.Contains(stderr, "listen: PAY-12 waits for PAY-11 (Code Review)") || strings.Contains(stderr, "PAY-12 claimed") {
+		t.Errorf("stderr lacks the wait line or has a claim:\n%s", stderr)
+	}
+
+	env.jira.setStatus("PAY-11", "Done")
+	stderr = mustListen(t, env)
+
+	if got := env.jira.statusOf("PAY-12"); got != "Ready to Review" {
+		t.Fatalf("PAY-12 is in %q, want Ready to Review\nstderr:\n%s", got, stderr)
+	}
+	if strings.Contains(stderr, "waits for") {
+		t.Errorf("stderr still has a wait line:\n%s", stderr)
+	}
+	if e := env.state().Tickets["PAY-12"]; e.Outcome != "done" || e.Attempts != 1 {
+		t.Errorf("state = %+v, want done with one attempt", e)
+	}
+}
+
+// Without listener.blockers the links are not read: the blocked ticket runs as before.
+func TestListen_WithoutBlockersALinkedTicketRuns(t *testing.T) {
+	env := newListenEnv(t, listenOptions{pPre: 0.85})
+	env.jira.add("PAY-11", "the blocker", listenTask, "service:billing").status = "Code Review"
+	env.jira.add("PAY-12", "Add() subtracts", listenTask, "service:billing").blockedBy = []string{"PAY-11"}
+
+	stderr := mustListen(t, env)
+
+	if got := env.jira.statusOf("PAY-12"); got != "Ready to Review" {
+		t.Fatalf("PAY-12 is in %q, want Ready to Review\nstderr:\n%s", got, stderr)
+	}
+	if strings.Contains(stderr, "waits for") {
+		t.Errorf("stderr has a wait line:\n%s", stderr)
+	}
+}
+
 // A claim another listener made first is refused by the workflow: the ticket is skipped and nothing
 // else is written, though it is now in the status the claim leads to.
 func TestListen_AClaimAnotherListenerMadeFirstIsSkipped(t *testing.T) {

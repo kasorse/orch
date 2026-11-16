@@ -1,0 +1,18 @@
+Planned: 3 child tickets created under PMC-1.
+
+Services:
+* sku-master: the dictionary lives here
+* sku-master-fe: the editor shows it
+
+Children:
+||Issue||Service||Title||Blocked by||
+|PMC-2|sku-master|The dictionary|—|
+|PMC-3|sku-master-fe|The editor|—|
+|PMC-4|sku-master|The country attributes|PMC-2|
+
+References (read only, no task):
+* g/pim/product-master
+
+The children are in Backlog, which the listener does not poll (To Do): move them there.
+
+Planning cost: $0.42

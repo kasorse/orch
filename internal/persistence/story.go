@@ -32,7 +32,11 @@ const StoryPlanPrefix = ".plan-"
 
 // storyCallRE is the name of one of a story's planning calls: survey-<service> or specify. It
 // names the call's artifact and logs, so it is checked wherever it becomes part of a path.
-var storyCallRE = regexp.MustCompile(`^(survey-[A-Za-z0-9][A-Za-z0-9._-]{0,63}|specify)$`)
+var storyCallRE = regexp.MustCompile(`^(survey-[A-Za-z0-9][A-Za-z0-9._-]{0,63}|specify|select)$`)
+
+// listenerPlanRE is the name of a listener's plan directory: <KEY>.<n>
+// (specs/listener-story/SPEC.md §7.3).
+var listenerPlanRE = regexp.MustCompile(`^[A-Z][A-Z0-9_]*-[0-9]{1,9}$`)
 
 // StoryPlan is the directory of a story being planned.
 type StoryPlan struct {
@@ -61,6 +65,48 @@ func NewStoryPlan(base string) (*StoryPlan, error) {
 		}
 	}
 	return &StoryPlan{base: base, dir: dir}, nil
+}
+
+// NewListenerPlan creates base/<key>.<n>/ with artifacts/ and logs/ (specs/listener-story/SPEC.md
+// §7.3), base being <listener dir>/plans, and returns it with n: the first number from or above
+// that names no directory yet, so a plan made again (after a stop, or for a ticket moved back to
+// the queue) never overwrites what an earlier one kept. Nothing is ever removed.
+func NewListenerPlan(base, key string, from int) (*StoryPlan, int, error) {
+	if !listenerPlanRE.MatchString(key) {
+		return nil, 0, fmt.Errorf("create the plan directory: %q is not an issue key", key)
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return nil, 0, fmt.Errorf("create the plans directory: %w", err)
+	}
+	for n := max(from, 1); n < max(from, 1)+1000; n++ {
+		dir := filepath.Join(base, fmt.Sprintf("%s.%d", key, n))
+		err := os.Mkdir(dir, 0o755)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, 0, fmt.Errorf("create the plan directory: %w", err)
+		}
+		for _, sub := range []string{"artifacts", "logs"} {
+			if err := os.Mkdir(filepath.Join(dir, sub), 0o755); err != nil {
+				return nil, 0, fmt.Errorf("create the plan directory: %w", err)
+			}
+		}
+		return &StoryPlan{base: base, dir: dir}, n, nil
+	}
+	return nil, 0, fmt.Errorf("create the plan directory: %s has too many plans", key)
+}
+
+// SaveFile writes name, a file of the plan's directory itself (plan.json), atomically. name is one
+// element: it cannot leave the directory.
+func (p *StoryPlan) SaveFile(name string, v any) error {
+	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") {
+		return fmt.Errorf("save %q: not a file of the plan's directory", name)
+	}
+	if err := p.writeJSON(name, v); err != nil {
+		return fmt.Errorf("save %s: %w", name, err)
+	}
+	return nil
 }
 
 // Dir is the story directory's current path: .plan-<id> until Rename.

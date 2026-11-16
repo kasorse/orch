@@ -13,6 +13,8 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/kasorse/orch/internal/apperr"
@@ -22,14 +24,16 @@ import (
 	"github.com/kasorse/orch/internal/jira"
 	"github.com/kasorse/orch/internal/listener"
 	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/provider"
 	"github.com/kasorse/orch/internal/repository"
 	"github.com/kasorse/orch/internal/secretscan"
 )
 
 // orchestrator jira listen (specs/jira-listener/SPEC.md): a supervisor that polls Jira for tickets
-// labelled ai-run, takes them one at a time, and runs each by calling the run (runTask, resumeRun)
-// in its own process, with its service's directory (specs/embed/SPEC.md §2). It owns Jira, the
-// services directory and its state; the run knows nothing of any of them.
+// labelled ai-run, takes them and runs each by calling the run (runTask, resumeRun) in its own
+// goroutine, with its service's directory (specs/embed/SPEC.md §2): up to listener.max_parallel runs
+// at once, at most one per service (specs/listener-story/SPEC.md §3). It owns Jira, the services
+// directory and its state; the run knows nothing of any of them.
 
 const (
 	listenUsage = "usage: orchestrator jira listen [--config orchestrator.yaml] [--once]"
@@ -40,6 +44,18 @@ const (
 	// and the task files.
 	listenerStateDir = ".orchestrator/listener"
 )
+
+// lockedWriter makes the listener's output safe for the goroutines of its runs: one Write at a time.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
 
 // listenOptions are the command line of jira listen.
 type listenOptions struct {
@@ -141,16 +157,26 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 	}
 	servicesDir = filepath.Clean(servicesDir)
 
+	// The runs' context is the listener's, and is also cancelled when the listener stops for a reason
+	// of its own (a credential, a state it cannot save): every run is then cut off and resumed on restart.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	r := &listenRunner{
-		ctx: ctx, bg: context.WithoutCancel(ctx), cfg: cfg, lc: cfg.Listener,
-		configPath: configPath, wd: wd, exe: exe, once: opts.once, claudeAuth: opts.claudeAuth, codexAuth: opts.codexAuth, stderr: stderr, osExec: osExec,
+		ctx: runCtx, cancel: cancel, bg: context.WithoutCancel(ctx), cfg: cfg, lc: cfg.Listener,
+		configPath: configPath, wd: wd, exe: exe, once: opts.once, claudeAuth: opts.claudeAuth, codexAuth: opts.codexAuth,
+		stderr: &lockedWriter{w: stderr}, osExec: osExec,
 		servicesDir: servicesDir, stateFile: filepath.Join(stateDir, "state.json"), tasksDir: filepath.Join(stateDir, "tasks"),
-		scrub: scrub, now: time.Now, sleep: sleepContext,
+		logsDir: filepath.Join(stateDir, "logs"), scrub: scrub, now: time.Now, sleep: sleepContext,
+		runs: map[string]string{}, wake: make(chan struct{}, 1),
+		plansDir: filepath.Join(stateDir, listenerPlansDir), registry: registry,
 	}
 	// The Jira client takes the credentials from the environment at its construction; the
 	// environment is shaped after it (specs/embed/SPEC.md §2.4), and the git processes of the
 	// checkout get the shaped one.
 	r.jira = newListenerJiraClient(cfg)
+	if cfg.Listener.Story != nil {
+		r.catalog = newListenerGitLab(cfg, r.logf)
+	}
 	if err := r.environment(); err != nil {
 		return err
 	}
@@ -167,6 +193,11 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 		return err
 	}
 	r.bot = bot
+	// The children a plan creates are reported by this account: before the first poll, it must be one
+	// the poll accepts (specs/listener-story/SPEC.md §2, A15).
+	if err := checkStoryReporter(cfg.Listener, bot); err != nil {
+		return err
+	}
 
 	if err := r.loadState(); err != nil {
 		return err
@@ -175,20 +206,14 @@ func listen(ctx context.Context, dir string, opts listenOptions, stderr io.Write
 		return err
 	}
 	r.logf("listening on %s for %s tickets labelled %s", cfg.Jira.BaseURL, strings.Join(cfg.Listener.Query.Projects, ", "), cfg.Listener.Query.Label)
-	if err := r.recover(); err != nil {
-		return err
-	}
-	if r.stopErr != nil {
-		return r.stopErr
-	}
-	return r.loop()
+	return r.run()
 }
 
 // listenerScrubEnv is the credential variables the listener names in every task file: the Jira
-// ones and the GitLab token.
+// ones, the GitLab token and, when there is one, the read-only API token of the Epic's catalog.
 func listenerScrubEnv(cfg config.Config) []string {
 	var names []string
-	for _, n := range []string{cfg.Jira.TokenEnv, cfg.Jira.EmailEnv, cfg.GitLab.TokenEnv} {
+	for _, n := range []string{cfg.Jira.TokenEnv, cfg.Jira.EmailEnv, cfg.GitLab.TokenEnv, cfg.GitLab.APITokenEnv} {
 		if n != "" && !slices.Contains(names, n) {
 			names = append(names, n)
 		}
@@ -226,6 +251,8 @@ func sleepContext(ctx context.Context, d time.Duration) error {
 // listenRunner is one running listener.
 type listenRunner struct {
 	ctx context.Context
+	// cancel cancels ctx: the listener stopping for a reason of its own cuts every run off.
+	cancel context.CancelFunc
 	// bg is ctx without its cancellation: what is written after a run ended must also happen when
 	// the listener was told to stop.
 	bg          context.Context
@@ -242,23 +269,309 @@ type listenRunner struct {
 	servicesDir string
 	stateFile   string
 	tasksDir    string
-	scrub       []string
+	// logsDir holds <KEY>.<attempt>.log, the output of a run when more than one run goes at once.
+	logsDir string
+	scrub   []string
 
 	jira     *jira.Client
 	bot      string
 	checkout *serviceCheckout
 
+	// What an Epic's plan needs (specs/listener-story/SPEC.md §5–§7): the providers its calls run
+	// on, the GitLab catalog (nil without listener.story), the directory its artifacts go to and
+	// the loader of a repository's configuration (nil: the layered, validated one).
+	registry   *provider.Registry
+	catalog    planGitLab
+	plansDir   string
+	loadConfig func(path string) (config.Config, error)
+
+	// mu guards state, runs, planning, stopErr and fatal: the runs' goroutines and the loop change them.
+	mu    sync.Mutex
 	state listener.State
-	now   func() time.Time
-	sleep func(context.Context, time.Duration) error
+	// runs are the runs in progress (a slot each, specs/listener-story/SPEC.md §3): ticket key to
+	// the service it runs in, "" until the service is known.
+	runs map[string]string
+	// planning is the Epic whose plan is in progress, "" when none: the plan holds every slot (A12),
+	// so while it is set no slot is free and nothing starts.
+	planning string
 	// stopErr, once set, is why the listener stops with exit 2 (SPEC §10).
 	stopErr error
+	// fatal is the first error of a run's goroutine that ends the listener with exit 1.
+	fatal error
+	now   func() time.Time
+	sleep func(context.Context, time.Duration) error
+	// wg counts the runs' goroutines; wake tells the loop that one ended.
+	wg   sync.WaitGroup
+	wake chan struct{}
 	// jiraAuth is set when Jira refused the credentials: nothing more is written to it.
-	jiraAuth bool
+	jiraAuth atomic.Bool
+	// waitingOn is, by ticket key, the blocker it was last logged waiting for (SPEC §4 of
+	// specs/listener-story): in memory, not in the state. Only the loop's goroutine reads it.
+	waitingOn map[string]string
+	// busyOn is the same for a ticket that waits for its service's run (SPEC §3).
+	busyOn map[string]string
 }
 
 func (r *listenRunner) logf(format string, args ...any) {
 	fmt.Fprintf(r.stderr, "listen: "+format+"\n", args...)
+}
+
+// maxRuns is the number of slots.
+func (r *listenRunner) maxRuns() int { return max(1, r.lc.MaxParallel) }
+
+// entryOf is the entry of key, empty when there is none.
+func (r *listenRunner) entryOf(key string) listener.Entry {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.Tickets[key]
+}
+
+// entry is the entry of key and whether there is one.
+func (r *listenRunner) entry(key string) (listener.Entry, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.Entry(key)
+}
+
+// unfinished are the keys whose cycle is not finished.
+func (r *listenRunner) unfinished() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.Unfinished()
+}
+
+// begin starts a new cycle of key in the state (not saved: update does it).
+func (r *listenRunner) begin(key string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state.Begin(key)
+}
+
+// setEntry replaces the entry of key and saves.
+func (r *listenRunner) setEntry(key string, e listener.Entry) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.state.Set(key, e); err != nil {
+		return err
+	}
+	return r.saveLocked()
+}
+
+// setStop makes err the reason the listener stops (the first one wins) and cuts every run off.
+func (r *listenRunner) setStop(err error) {
+	r.mu.Lock()
+	if r.stopErr == nil {
+		r.stopErr = err
+	}
+	r.mu.Unlock()
+	if r.cancel != nil {
+		r.cancel()
+	}
+}
+
+func (r *listenRunner) stopError() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stopErr
+}
+
+// fail records the first error of a run's goroutine that ends the listener, and cuts every run off.
+func (r *listenRunner) fail(err error) {
+	r.mu.Lock()
+	if r.fatal == nil {
+		r.fatal = err
+	}
+	r.mu.Unlock()
+	if r.cancel != nil {
+		r.cancel()
+	}
+}
+
+func (r *listenRunner) fatalErr() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.fatal
+}
+
+// halted reports whether nothing more may be started: the listener was told to stop, or a stop of
+// SPEC §10 happened.
+func (r *listenRunner) halted() bool { return r.stopping() || r.stopError() != nil }
+
+// slotFree reports whether fewer than max_parallel runs are in progress.
+func (r *listenRunner) slotFree() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.planning == "" && len(r.runs) < r.maxRuns()
+}
+
+// noRuns reports whether nothing is in progress: no run and no plan. An Epic's plan starts only then.
+func (r *listenRunner) noRuns() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.runs) == 0 && r.planning == ""
+}
+
+// holder is the ticket whose run is in progress in service, if any.
+func (r *listenRunner) holder(service string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.holderLocked(service)
+}
+
+func (r *listenRunner) holderLocked(service string) (string, bool) {
+	for key, s := range r.runs {
+		if s != "" && strings.EqualFold(s, service) {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+// canStart reports whether a run in service may start now: a slot is free and no run of the
+// service is in progress. An empty service (not known yet) needs only a slot.
+func (r *listenRunner) canStart(service string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.planning != "" || len(r.runs) >= r.maxRuns() {
+		return false
+	}
+	if service == "" {
+		return true
+	}
+	_, busy := r.holderLocked(service)
+	return !busy
+}
+
+// bind records the service the run of key turned out to be in. It is false when another run is in
+// progress there.
+func (r *listenRunner) bind(key, service string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if holder, busy := r.holderLocked(service); busy && holder != key {
+		return false
+	}
+	r.runs[key] = service
+	return true
+}
+
+// startRun takes a slot for the ticket key (in service, "" if unknown) and calls body in a goroutine
+// of its own; the slot is held until body returns, that is until the outcome is written. An error of
+// body ends the listener; a panic in it is the ticket's alone (cycle).
+func (r *listenRunner) startRun(key, service string, body func() error) {
+	r.start(key, service, false, body)
+}
+
+// startPlan is startRun for an Epic's plan, which takes every slot: it is called only when noRuns,
+// and until body returns no slot is free (SPEC §3).
+func (r *listenRunner) startPlan(key string, body func() error) {
+	r.start(key, "", true, body)
+}
+
+func (r *listenRunner) start(key, service string, exclusive bool, body func() error) {
+	r.mu.Lock()
+	r.runs[key] = service
+	if exclusive {
+		r.planning = key
+	}
+	r.mu.Unlock()
+	r.wg.Add(1)
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			delete(r.runs, key)
+			if r.planning == key {
+				r.planning = ""
+			}
+			r.mu.Unlock()
+			select {
+			case r.wake <- struct{}{}:
+			default:
+			}
+			r.wg.Done()
+		}()
+		if err := r.cycle(key, body); err != nil {
+			r.fail(err)
+		}
+	}()
+}
+
+// cycle calls body, the part of the ticket's cycle that goes on in its slot. A panic in it outside
+// the run's own call (which execute contains) stays in this goroutine too (specs/listener-story/SPEC.md
+// §3), and the other runs go on: a cycle whose outcome is not decided yet is ended as failed, with the
+// panic as its reason; one whose outcome was decided keeps it, and what is left to write of it is
+// written when the listener starts again (SPEC §9).
+func (r *listenRunner) cycle(key string, body func() error) error {
+	panicked, err := r.guard(key, body)
+	if panicked == "" {
+		return err
+	}
+	e, ok := r.entry(key)
+	switch {
+	case !ok || e.Phase == listener.PhaseFinished:
+		return nil
+	case e.Outcome != "":
+		r.logf("%s: what is left to write of its outcome %s is written when the listener starts again", key, e.Outcome)
+		return nil
+	}
+	again, err := r.guard(key, func() error { return r.endBefore(key, listener.ResultFailed, "internal error: "+panicked) })
+	if again != "" {
+		r.logf("%s: its cycle is ended when the listener starts again", key)
+		return nil
+	}
+	return err
+}
+
+// guard calls f and returns the first line of what it panicked with, "" when it did not panic. The
+// goroutine's stack goes to stderr, where the listener logs.
+func (r *listenRunner) guard(key string, f func() error) (panicked string, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			panicked = oneLineText(firstLineOf(fmt.Sprint(p)), 300)
+			if panicked == "" {
+				panicked = "a panic"
+			}
+			fmt.Fprintf(r.stderr, "listen: %s: the listener panicked in its cycle: %s\n%s\n", key, panicked, debug.Stack())
+			err = nil
+		}
+	}()
+	return "", f()
+}
+
+// waitForSlot blocks until a run in service may start, false when the listener is told to stop first.
+func (r *listenRunner) waitForSlot(service string) bool {
+	for !r.canStart(service) {
+		select {
+		case <-r.wake:
+		case <-r.ctx.Done():
+			return false
+		}
+	}
+	return !r.stopping()
+}
+
+// runLog is where the output of a run goes: the listener's stderr with one slot, else the file
+// logs/<KEY>.<attempt>.log (appended to, so a resumed run goes on in it), whose path it returns. The
+// returned function closes the file.
+func (r *listenRunner) runLog(key string, attempt int) (io.Writer, string, func()) {
+	if r.maxRuns() <= 1 {
+		return r.stderr, "", func() {}
+	}
+	path := filepath.Join(r.logsDir, fmt.Sprintf("%s.%d.log", key, attempt))
+	if err := os.MkdirAll(r.logsDir, 0o755); err == nil {
+		if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			return f, path, func() { _ = f.Close() }
+		}
+	}
+	r.logf("%s: cannot open %s, its output goes here", key, path)
+	return r.stderr, "", func() {}
+}
+
+// logSuffix is the " (log: path)" a start line ends with when the run has a log file.
+func logSuffix(path string) string {
+	if path == "" {
+		return ""
+	}
+	return " (log: " + path + ")"
 }
 
 // environment shapes the listener's own process environment, once, at start (specs/embed/SPEC.md
@@ -321,8 +634,8 @@ func (r *listenRunner) loadState() error {
 	return nil
 }
 
-// save writes state.json atomically.
-func (r *listenRunner) save() error {
+// saveLocked writes state.json atomically; the caller holds mu.
+func (r *listenRunner) saveLocked() error {
 	data, err := r.state.Marshal()
 	if err != nil {
 		return fmt.Errorf("cannot save the listener state: %w", err)
@@ -338,12 +651,14 @@ func (r *listenRunner) save() error {
 
 // update changes the entry of key and saves.
 func (r *listenRunner) update(key string, change func(e *listener.Entry)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	e := r.state.Tickets[key]
 	change(&e)
 	if err := r.state.Set(key, e); err != nil {
 		return err
 	}
-	return r.save()
+	return r.saveLocked()
 }
 
 // isAuth reports whether err is Jira refusing the credentials, and if so makes it the reason the
@@ -351,10 +666,8 @@ func (r *listenRunner) update(key string, change func(e *listener.Entry)) error 
 func (r *listenRunner) isAuth(err error) bool {
 	var jerr *apperr.JiraError
 	if errors.As(err, &jerr) && jerr.Kind == apperr.JiraAuth {
-		r.jiraAuth = true
-		if r.stopErr == nil {
-			r.stopErr = err
-		}
+		r.jiraAuth.Store(true)
+		r.setStop(err)
 		return true
 	}
 	return false
@@ -363,18 +676,46 @@ func (r *listenRunner) isAuth(err error) bool {
 // stopping reports whether the listener was told to stop.
 func (r *listenRunner) stopping() bool { return r.ctx.Err() != nil }
 
-// loop polls while idle (SPEC §3.2) until it is told to stop or a stop of §10 happens.
-func (r *listenRunner) loop() error {
+// run is the listener after its start: it recovers what a previous listener left (SPEC §9), polls
+// until it is told to stop or a stop of §10 happens, then waits for every run's goroutine.
+func (r *listenRunner) run() error {
+	err := r.recover()
+	if err == nil && r.stopError() == nil {
+		err = r.serve()
+	}
+	if err != nil {
+		// Nothing more is polled: what is in progress is cut off, to be resumed on restart.
+		r.cancel()
+	}
+	r.wg.Wait()
+	switch {
+	case r.fatalErr() != nil:
+		return r.fatalErr()
+	case r.stopError() != nil:
+		return r.stopError()
+	}
+	return err
+}
+
+// serve polls whenever a slot is free (SPEC §3): at start after the recovery, when a run ends, and
+// every poll_interval; not while every slot is taken. With once it polls once, as soon as a slot is
+// free: with one slot, after the run the recovery resumed, as before the slots.
+func (r *listenRunner) serve() error {
 	failures := 0
 	for {
-		if r.stopping() {
+		// The runs the recovery resumed, or the last poll started, may hold every slot: the poll, its
+		// search included, waits for one of them to end.
+		if r.halted() || !r.waitForSlot("") {
 			return nil
 		}
-		dispatched, err := r.poll()
+		// A run that ended before this poll is seen by it.
+		select {
+		case <-r.wake:
+		default:
+		}
+		err := r.poll()
 		switch {
-		case r.stopErr != nil:
-			return r.stopErr
-		case r.stopping():
+		case r.stopError() != nil || r.stopping():
 			return nil
 		case err != nil && !isFatalListen(err):
 			if r.once {
@@ -394,13 +735,28 @@ func (r *listenRunner) loop() error {
 		if r.once {
 			return nil
 		}
-		if dispatched {
-			continue
-		}
-		if r.sleep(r.ctx, r.lc.PollInterval) != nil {
+		if !r.idle() {
 			return nil
 		}
 	}
+}
+
+// idle waits for the next poll: a run ending, or poll_interval when a slot is free. It is false
+// when the listener was told to stop.
+func (r *listenRunner) idle() bool {
+	var tick <-chan time.Time
+	if r.slotFree() {
+		t := time.NewTimer(r.lc.PollInterval)
+		defer t.Stop()
+		tick = t.C
+	}
+	select {
+	case <-tick:
+	case <-r.wake:
+	case <-r.ctx.Done():
+		return false
+	}
+	return true
 }
 
 // listenFatal wraps an error that ends the listener with exit 1 (the state cannot be saved, say).
@@ -414,42 +770,80 @@ func isFatalListen(err error) bool {
 	return errors.As(err, &f)
 }
 
-// poll searches once and dispatches the first ticket that can be taken.
-func (r *listenRunner) poll() (bool, error) {
+// poll searches once and dispatches, in the search's order, every ticket that can be taken while a
+// slot is free (SPEC §3).
+func (r *listenRunner) poll() error {
 	// A claim that may have reached Jira and whose status could not be read is settled first.
-	for _, key := range r.state.Unfinished() {
-		if r.state.Tickets[key].Phase != listener.PhaseClaiming || r.stopping() || r.stopErr != nil {
+	for _, key := range r.unfinished() {
+		if r.entryOf(key).Phase != listener.PhaseClaiming || r.halted() {
 			continue
 		}
 		if err := r.recoverEntry(key); err != nil {
-			return false, listenFatal{err}
+			return listenFatal{err}
 		}
 	}
-	if r.stopping() || r.stopErr != nil {
-		return false, nil
+	if r.halted() {
+		return nil
 	}
 	q := r.lc.Query
 	heads, err := r.jira.Search(r.ctx, jira.BuildJQL(q.Projects, q.Label, q.Statuses, q.Reporters), maxListenIssues)
 	if err != nil {
 		r.isAuth(err)
-		return false, err
+		return err
 	}
 	for _, h := range heads {
-		if r.stopping() || r.stopErr != nil {
-			return false, nil
+		if r.halted() || !r.slotFree() {
+			return nil
 		}
-		if !r.eligible(h) {
+		if !r.eligible(h) || r.blocked(h) {
 			continue
 		}
-		dispatched, err := r.dispatch(h)
-		if err != nil {
-			return dispatched, listenFatal{err}
-		}
-		if dispatched || r.stopErr != nil {
-			return dispatched, nil
+		if err := r.dispatch(h); err != nil {
+			if errors.Is(err, errEpicWaits) {
+				// Nothing after the Epic is started in this poll, or the runs that come after it would
+				// keep it waiting for ever: it is planned when the runs in progress have ended.
+				return nil
+			}
+			return listenFatal{err}
 		}
 	}
-	return false, nil
+	return nil
+}
+
+// errEpicWaits is dispatch's answer for an Epic that cannot be planned yet because a run is in
+// progress (SPEC §3, A12): it is not claimed, and the poll goes no further.
+var errEpicWaits = errors.New("an Epic waits for the runs in progress")
+
+// serviceOf is the service the head names, "" when it cannot be named: such a ticket is dispatched
+// all the same and blocked in process (SPEC §3).
+func (r *listenRunner) serviceOf(h domain.TicketHead) string {
+	dirs, err := r.checkout.serviceDirs()
+	if err != nil {
+		return ""
+	}
+	service, err := listener.Service(h.Labels, h.Components, dirs, r.lc.Labels.ServicePrefix)
+	if err != nil {
+		return ""
+	}
+	return service
+}
+
+// serviceBusy reports whether a run of service is in progress, so that h is skipped: not claimed, and
+// logged once for the run it waits for.
+func (r *listenRunner) serviceBusy(h domain.TicketHead, service string) bool {
+	holder, busy := r.holder(service)
+	if !busy {
+		delete(r.busyOn, h.Key)
+		return false
+	}
+	if r.busyOn == nil {
+		r.busyOn = map[string]string{}
+	}
+	if r.busyOn[h.Key] != holder {
+		r.busyOn[h.Key] = holder
+		r.logf("%s waits for %s, which is running in %s", h.Key, holder, service)
+	}
+	return true
 }
 
 // eligible is the Go re-check of what the JQL filtered (SPEC §3.3): the search is a filter, not a
@@ -463,7 +857,7 @@ func (r *listenRunner) eligible(h domain.TicketHead) bool {
 		!slices.Contains(q.Reporters, h.Reporter) {
 		return false
 	}
-	e, ok := r.state.Entry(h.Key)
+	e, ok := r.entry(h.Key)
 	switch {
 	case !ok:
 		return true
@@ -475,6 +869,34 @@ func (r *listenRunner) eligible(h domain.TicketHead) bool {
 	return !e.Waiting(r.now())
 }
 
+// blocked reports whether h waits for an unfinished blocker (specs/listener-story/SPEC.md §4): with
+// listener.blockers set, a ticket with a blocker whose status is not done is skipped, without a
+// claim, a comment, an attempt or a state entry. It logs once per ticket and blocker; what it
+// remembers is in memory only, and forgotten when the ticket no longer waits.
+func (r *listenRunner) blocked(h domain.TicketHead) bool {
+	b := r.lc.Blockers
+	if b == nil {
+		return false
+	}
+	blocker, waits := listener.Waiting(h, b.LinkType, b.DoneStatuses)
+	if !waits {
+		delete(r.waitingOn, h.Key)
+		return false
+	}
+	if r.waitingOn == nil {
+		r.waitingOn = map[string]string{}
+	}
+	if r.waitingOn[h.Key] != blocker.Key {
+		r.waitingOn[h.Key] = blocker.Key
+		status := blocker.Status
+		if status == "" {
+			status = "no status"
+		}
+		r.logf("%s waits for %s (%s)", h.Key, blocker.Key, status)
+	}
+	return true
+}
+
 // isEpic reports whether the issue type is one story.jira_issue_types sends to a story plan.
 func (r *listenRunner) isEpic(issueType string) bool {
 	types := []string{"Epic"}
@@ -484,18 +906,34 @@ func (r *listenRunner) isEpic(issueType string) bool {
 	return slices.ContainsFunc(types, func(t string) bool { return strings.EqualFold(t, strings.TrimSpace(issueType)) })
 }
 
-// dispatch claims the ticket (SPEC §4) and carries it through its cycle. It reports whether the
-// ticket was taken: a claim that cannot be made leaves everything as it was and the next ticket is
-// tried.
-func (r *listenRunner) dispatch(h domain.TicketHead) (bool, error) {
+// dispatch claims the ticket (SPEC §4) and starts its cycle in a slot of its own: the claim is made
+// here, the run in a goroutine. A claim that cannot be made leaves everything as it was and the next
+// ticket is tried; so does a ticket whose service has a run in progress (SPEC §3).
+func (r *listenRunner) dispatch(h domain.TicketHead) error {
 	key := h.Key
 	// What can never run is ended from the queue, before any claim (SPEC §3.3, §8).
-	if e, ok := r.state.Entry(key); ok && e.Spent(r.lc.MaxAttempts) {
-		return false, r.endUnclaimed(h, listener.ResultSpent, "")
+	if e, ok := r.entry(key); ok && e.Spent(r.lc.MaxAttempts) {
+		return r.endUnclaimed(h, listener.ResultSpent, "")
 	}
-	if r.isEpic(h.Type) {
-		return false, r.endUnclaimed(h, listener.ResultBlocked,
+	epic := r.isEpic(h.Type)
+	if epic && r.lc.Story == nil {
+		return r.endUnclaimed(h, listener.ResultBlocked,
 			fmt.Sprintf("%s is an %s: plan it as a story (orchestrator story plan --jira %s); the listener runs one ticket as one run in one service.", key, h.Type, key))
+	}
+	// The service is computed from the head before the claim: at most one run per service. An Epic
+	// has none: its plan takes every slot, so it starts only when nothing is in progress.
+	service := ""
+	if epic {
+		if !r.noRuns() {
+			r.epicWaits(key)
+			return errEpicWaits
+		}
+		delete(r.busyOn, key)
+	} else {
+		service = r.serviceOf(h)
+		if service != "" && r.serviceBusy(h, service) {
+			return nil
+		}
 	}
 
 	transitions, err := r.jira.Transitions(r.ctx, key)
@@ -503,25 +941,30 @@ func (r *listenRunner) dispatch(h domain.TicketHead) (bool, error) {
 		if !r.isAuth(err) && !r.stopping() {
 			r.logf("%s skipped: cannot read its transitions: %s", key, firstLineOf(err.Error()))
 		}
-		return false, nil
+		return nil
 	}
 	start, ok := findTransition(transitions, r.lc.Transitions.Start)
 	if !ok {
 		r.logf("%s skipped: the transition %q is not offered", key, r.lc.Transitions.Start)
-		return false, nil
+		return nil
 	}
 	startStatus := start.To
 	if startStatus == "" {
 		startStatus = r.lc.Transitions.Start
 	}
 
-	prev, had := r.state.Entry(key)
-	if err := r.state.Begin(key); err != nil {
+	prev, had := r.entry(key)
+	if err := r.begin(key); err != nil {
 		r.logf("%s skipped: %v", key, err)
-		return false, nil
+		return nil
 	}
-	if err := r.update(key, func(e *listener.Entry) { e.Status = startStatus }); err != nil {
-		return false, err
+	if err := r.update(key, func(e *listener.Entry) {
+		e.Status = startStatus
+		if epic {
+			e.Kind = listener.KindPlan
+		}
+	}); err != nil {
+		return err
 	}
 	if err := r.jira.Transition(r.ctx, key, start.ID); err != nil {
 		if !jira.MayExist(err) {
@@ -531,51 +974,79 @@ func (r *listenRunner) dispatch(h domain.TicketHead) (bool, error) {
 			if !r.isAuth(err) && !r.stopping() {
 				r.logf("%s skipped: the claim was refused: %s", key, firstLineOf(err.Error()))
 			}
-			return false, r.restore(key, prev, had)
+			return r.restore(key, prev, had)
 		}
 		// The claim may have reached Jira: the entry stays claiming until the status tells (SPEC §9).
 		if r.stopping() {
 			r.logf("%s: the claim may have been made; its status is read when the listener starts again", key)
-			return false, nil
+			return nil
 		}
 		status, serr := r.jira.Status(r.bg, key)
 		switch {
 		case serr != nil:
 			r.isAuth(serr)
 			r.logf("%s: the claim may have been made and its status cannot be read; it is read again before the next poll: %s", key, firstLineOf(serr.Error()))
-			return false, nil
+			return nil
 		case !strings.EqualFold(status, startStatus):
 			r.logf("%s skipped: the claim failed: %s", key, firstLineOf(err.Error()))
-			return false, r.restore(key, prev, had)
+			return r.restore(key, prev, had)
 		}
 	}
 	if err := r.update(key, func(e *listener.Entry) { e.Phase = listener.PhaseClaimed }); err != nil {
-		return true, err
+		return err
+	}
+	if epic {
+		r.logf("%s claimed: planning it", key)
+		r.startPlan(key, func() error { return r.plan(key) })
+		return nil
 	}
 	r.logf("%s claimed", key)
-	return true, r.process(h, prev)
+	r.startRun(key, service, func() error { return r.process(h, prev, service) })
+	return nil
+}
+
+// epicWaits logs once per Epic that it waits for the runs in progress.
+func (r *listenRunner) epicWaits(key string) {
+	if r.busyOn == nil {
+		r.busyOn = map[string]string{}
+	}
+	if r.busyOn[key] != "runs" {
+		r.busyOn[key] = "runs"
+		r.logf("%s is an Epic to plan: it waits for the runs in progress", key)
+	}
 }
 
 // restore puts the entry of key back as it was before a claim that did not happen.
 func (r *listenRunner) restore(key string, prev listener.Entry, had bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if had {
 		r.state.Tickets[key] = prev
 	} else {
 		r.state.Drop(key)
 	}
-	return r.save()
+	return r.saveLocked()
 }
 
-// process takes a claimed ticket as far as its outcome.
-func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry) error {
+// process takes a claimed ticket as far as its outcome. named is the service dispatch named from the
+// head before the claim, whose slot the run holds; "" when it could not be named, and it is named
+// here, where why it cannot be is the ticket's outcome.
+func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry, named string) error {
 	key := h.Key
-	dirs, err := r.checkout.serviceDirs()
-	if err != nil {
-		return r.endInfra(key, err)
-	}
-	service, err := listener.Service(h.Labels, h.Components, dirs, r.lc.Labels.ServicePrefix)
-	if err != nil {
-		return r.endBefore(key, listener.ResultBlocked, err.Error())
+	service := named
+	if service == "" {
+		dirs, err := r.checkout.serviceDirs()
+		if err != nil {
+			return r.endInfra(key, err)
+		}
+		if service, err = listener.Service(h.Labels, h.Components, dirs, r.lc.Labels.ServicePrefix); err != nil {
+			return r.endBefore(key, listener.ResultBlocked, err.Error())
+		}
+		// Named only now (the services directory changed since the claim, a moment ago): the run
+		// takes the service's slot, or goes back to the queue when a run is in progress there.
+		if !r.bind(key, service) {
+			return r.endInfra(key, fmt.Errorf("a run is in progress in its service %s", service))
+		}
 	}
 	project, err := listener.Project(h.Labels, r.lc.Labels.ProjectPrefix)
 	if err != nil {
@@ -622,7 +1093,8 @@ func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry) error {
 		return r.endBefore(key, listener.ResultBlocked,
 			fmt.Sprintf("The ticket and its discussion are longer than %d bytes; shorten it.", r.cfg.Jira.MaxBytes))
 	}
-	task, err := r.writeTask(ticket, text, r.state.Tickets[key].Attempts+1)
+	attempt := r.entryOf(key).Attempts + 1
+	task, err := r.writeTask(ticket, text, attempt)
 	if err != nil {
 		return r.endInfra(key, err)
 	}
@@ -642,32 +1114,48 @@ func (r *listenRunner) process(h domain.TicketHead, prev listener.Entry) error {
 	}); err != nil {
 		return err
 	}
-	r.logf("%s running in %s", key, service)
+	// With one slot the run's progress goes to the listener's stderr; with more, to a file of its own.
+	out, logPath, closeLog := r.runLog(key, attempt)
+	defer closeLog()
+	r.logf("%s running in %s%s", key, service, logSuffix(logPath))
 	return r.execute(key, res.Dir, func(ctx context.Context) error {
 		return runTask(ctx, res.Dir, configPath, "", "", "", &task, nil, nil, false, "", domain.ModeAuto,
-			r.claudeAuth, r.codexAuth, false, strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
+			r.claudeAuth, r.codexAuth, false, strings.NewReader(""), plainWriter{out}, out)
 	})
 }
 
 // configFor is the configuration file the run of a service loads, absolute: the service's own
 // orchestrator.yaml when it has one (the repository's own rules apply, SPEC §6.4), else
-// listener.default_config.
+// <listener.configs_dir>/<service>/orchestrator.yaml, else listener.default_config.
 func (r *listenRunner) configFor(serviceDir string) (string, error) {
+	service := filepath.Base(serviceDir)
 	own := filepath.Join(serviceDir, defaultConfigPath)
 	if _, err := os.Stat(own); err == nil {
 		return own, nil
 	}
+	abs := func(p string) string {
+		if filepath.IsAbs(p) {
+			return p
+		}
+		return filepath.Join(r.wd, p)
+	}
+	if r.lc.ConfigsDir != "" {
+		path := abs(filepath.Join(r.lc.ConfigsDir, service, defaultConfigPath))
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+		if r.lc.DefaultConfig == "" {
+			return "", fmt.Errorf("the service %s has no %s and there is no %s", service, defaultConfigPath, path)
+		}
+	}
 	def := r.lc.DefaultConfig
 	if def == "" {
-		return "", fmt.Errorf("the service %s has no %s and listener.default_config is not set", filepath.Base(serviceDir), defaultConfigPath)
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config is not set", service, defaultConfigPath)
 	}
-	if !filepath.IsAbs(def) {
-		def = filepath.Join(r.wd, def)
+	if _, err := os.Stat(abs(def)); err != nil {
+		return "", fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", service, defaultConfigPath, r.lc.DefaultConfig)
 	}
-	if _, err := os.Stat(def); err != nil {
-		return "", fmt.Errorf("the service %s has no %s and listener.default_config %s cannot be read", filepath.Base(serviceDir), defaultConfigPath, r.lc.DefaultConfig)
-	}
-	return def, nil
+	return abs(def), nil
 }
 
 // writeTask records the task of the run (SPEC §7.2) as tasks/<KEY>.<attempt>.json, the record and
@@ -723,7 +1211,7 @@ func (r *listenRunner) checkoutProblem(key string, err error) error {
 	case classFailed:
 		return r.endBefore(key, listener.ResultFailed, ce.Msg)
 	case classStop:
-		r.stopErr = &apperr.ConfigError{Msg: "GitLab refused the credential in " + r.cfg.GitLab.TokenEnv + ": " + ce.Msg}
+		r.setStop(&apperr.ConfigError{Msg: "GitLab refused the credential in " + r.cfg.GitLab.TokenEnv + ": " + ce.Msg})
 	}
 	return r.endInfra(key, ce)
 }
@@ -773,7 +1261,7 @@ func (r *listenRunner) endBefore(key string, result listener.Result, reason stri
 // which is where it must still be when they are written. The entry is held (claimed) and its outcome
 // recorded in one save, so a restart writes what is missing (recoverClaimed).
 func (r *listenRunner) endUnclaimed(h domain.TicketHead, result listener.Result, reason string) error {
-	if err := r.state.Begin(h.Key); err != nil {
+	if err := r.begin(h.Key); err != nil {
 		r.logf("%s skipped: %v", h.Key, err)
 		return nil
 	}
@@ -795,17 +1283,22 @@ type outcome struct {
 }
 
 // listenRunHook, when set, is called with the ticket's key inside the contained call of a run, just
-// before the run (SetListenRunHook). It exists for the integration tests, which make it panic;
+// before the run (SetListenRunHook), in the run's own goroutine: runs of different services call it
+// at the same time. It exists for the integration tests, which make it panic or hold the run;
 // nothing sets it in production, and no run writes it (specs/embed/SPEC.md §2.6).
-var listenRunHook func(key string)
+var listenRunHook atomic.Pointer[func(key string)]
 
 // SetListenRunHook makes hook run inside every run the listener makes, before the run, and returns
 // a function that puts the previous hook back. It exists for the integration tests, which live in
-// another package and inject a panic with it.
+// another package and inject a panic with it, or a barrier that holds two runs at once (the hook
+// blocks until both are in it).
 func SetListenRunHook(hook func(key string)) (restore func()) {
-	previous := listenRunHook
-	listenRunHook = hook
-	return func() { listenRunHook = previous }
+	var next *func(key string)
+	if hook != nil {
+		next = &hook
+	}
+	previous := listenRunHook.Swap(next)
+	return func() { listenRunHook.Store(previous) }
 }
 
 // execute makes one call of the run (runTask for a new ticket, resumeRun for an interrupted one) in
@@ -816,8 +1309,8 @@ func SetListenRunHook(hook func(key string)) (restore func()) {
 func (r *listenRunner) execute(key, dir string, call func(ctx context.Context) error) error {
 	ctx, rec := withResultRecorder(r.ctx)
 	err := r.contained(key, func() error {
-		if h := listenRunHook; h != nil {
-			h(key)
+		if h := listenRunHook.Load(); h != nil {
+			(*h)(key)
 		}
 		return call(ctx)
 	})
@@ -842,7 +1335,7 @@ func (r *listenRunner) contained(key string, f func() error) (err error) {
 // afterRun decides the outcome of a run that returned res, records it and writes it to Jira.
 func (r *listenRunner) afterRun(key, dir string, res runResult) error {
 	line, code := res, res.ExitCode
-	e := r.state.Tickets[key]
+	e := r.entryOf(key)
 	var run *domain.Run
 	if listener.ValidRunID(line.RunID) {
 		if loaded, err := persistence.NewStore(filepath.Join(dir, runsBaseDir)).LoadRun(line.RunID); err == nil {
@@ -855,11 +1348,11 @@ func (r *listenRunner) afterRun(key, dir string, res runResult) error {
 	if listener.CutOff(code, r.stopping()) {
 		// Cut off by the listener's stop: the run is resumed on restart.
 		e.Interrupted = true
-		if err := r.state.Set(key, e); err != nil {
+		if err := r.setEntry(key, e); err != nil {
 			return err
 		}
 		r.logf("%s: the run was interrupted; it is resumed when the listener starts again", key)
-		return r.save()
+		return nil
 	}
 	reason := line.FailureReason
 	if reason == "" && run != nil {
@@ -873,10 +1366,7 @@ func (r *listenRunner) afterRun(key, dir string, res runResult) error {
 	if d.Transition == listener.ResultNone {
 		// The run was cancelled by someone else: it stays where it is, to be resumed on restart.
 		e.Interrupted = true
-		if err := r.state.Set(key, e); err != nil {
-			return err
-		}
-		return r.save()
+		return r.setEntry(key, e)
 	}
 	e.Outcome = d.Transition
 	if d.Counted {
@@ -887,14 +1377,11 @@ func (r *listenRunner) afterRun(key, dir string, res runResult) error {
 		e.Retries++
 		e.NextTryAt = r.now().UTC().Add(listener.Backoff(r.lc.PollInterval, e.Retries))
 	}
-	if err := r.state.Set(key, e); err != nil {
-		return err
-	}
-	if err := r.save(); err != nil {
+	if err := r.setEntry(key, e); err != nil {
 		return err
 	}
 	if d.Stop {
-		r.stopErr = &apperr.ConfigError{Msg: fmt.Sprintf("the run of %s failed on a credential: %s", key, firstLineOf(firstNonEmpty(line.Error, reason)))}
+		r.setStop(&apperr.ConfigError{Msg: fmt.Sprintf("the run of %s failed on a credential: %s", key, firstLineOf(firstNonEmpty(line.Error, reason)))})
 	}
 	if code != listener.ExitOK {
 		r.logf("%s: the run ended with exit %d", key, code)
@@ -907,7 +1394,7 @@ func (r *listenRunner) afterRun(key, dir string, res runResult) error {
 // the transition. A write that is already recorded is not made again, and one with an intent and no
 // result is not repeated: it may have reached Jira. A failed write is a log line, not a retry loop.
 func (r *listenRunner) write(key string, d listener.Decision, oc *outcome) error {
-	e := r.state.Tickets[key]
+	e := r.entryOf(key)
 	target := r.transitionName(e.Outcome)
 	startStatus := e.Status
 	if startStatus == "" {
@@ -930,7 +1417,7 @@ func (r *listenRunner) write(key string, d listener.Decision, oc *outcome) error
 		}
 	}
 
-	if d.Comment != listener.CommentNone && e.Writes.Comment.State == "" && !r.jiraAuth {
+	if d.Comment != listener.CommentNone && e.Writes.Comment.State == "" && !r.jiraAuth.Load() {
 		body, runID := r.commentBody(key, e, d, oc)
 		if moved != "" && target != "" {
 			body = append(body, "", listener.Moved(jira.Escape, moved, target))
@@ -955,11 +1442,11 @@ func (r *listenRunner) write(key string, d listener.Decision, oc *outcome) error
 				return err
 			}
 		}
-		e = r.state.Tickets[key]
+		e = r.entryOf(key)
 	}
 
 	to := ""
-	if canMove && !r.jiraAuth {
+	if canMove && !r.jiraAuth.Load() {
 		to = r.moveTicket(key, target)
 	}
 	if e.Phase != listener.PhaseFinished {
@@ -1039,6 +1526,10 @@ func (r *listenRunner) commentBody(key string, e listener.Entry, d listener.Deci
 		// Before any run: the reason the entry recorded, or the spent notice.
 		if e.Outcome == listener.ResultSpent {
 			return listener.Spent(jira.Escape, key, e.Attempts), ""
+		}
+		// An Epic's plan says what it created, from its plan.json (SPEC §9).
+		if body, ok := r.planBody(e); ok {
+			return body, ""
 		}
 		return listener.Blocked(jira.Escape, e.Reason), ""
 	}
@@ -1202,18 +1693,42 @@ func (r *listenRunner) reviewLines(run *domain.Run) []string {
 	return nil
 }
 
-// recover finishes what a previous listener left half done (SPEC §9).
+// recover finishes what a previous listener left half done (SPEC §9). An entry that was running goes
+// on in a slot of its own, at most max_parallel at once and one per service (specs/listener-story/SPEC.md
+// §3): the others wait for a slot here, before the first poll. The rest (a claim to settle, an outcome
+// to write) are quick and are done here, one after the other.
 func (r *listenRunner) recover() error {
-	for _, key := range r.state.Unfinished() {
-		if r.stopping() || r.stopErr != nil {
+	keys := r.unfinished()
+	// An Epic's plan needs every slot: the ones cut off are started again first, while nothing runs.
+	slices.SortStableFunc(keys, func(a, b string) int {
+		return boolRank(r.entryOf(a).Kind != listener.KindPlan) - boolRank(r.entryOf(b).Kind != listener.KindPlan)
+	})
+	for _, key := range keys {
+		if r.halted() {
 			return nil
 		}
-		r.logf("%s was %s when the listener stopped", key, r.state.Tickets[key].Phase)
-		if err := r.recoverEntry(key); err != nil {
-			return err
+		e := r.entryOf(key)
+		r.logf("%s was %s when the listener stopped", key, e.Phase)
+		if e.Phase != listener.PhaseRunning {
+			if err := r.recoverEntry(key); err != nil {
+				return err
+			}
+			continue
 		}
+		if !r.waitForSlot(e.Service) {
+			return nil
+		}
+		r.startRun(key, e.Service, func() error { return r.recoverEntry(key) })
 	}
 	return nil
+}
+
+// boolRank is 1 for true and 0 for false.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // recoverEntry carries one unfinished entry to its end. A claiming one is settled by the ticket's
@@ -1222,7 +1737,7 @@ func (r *listenRunner) recover() error {
 // ticket's attempts are kept (a none cycle is picked again like an unknown ticket). A status that
 // cannot be read leaves it claiming, for the next poll or start.
 func (r *listenRunner) recoverEntry(key string) error {
-	e := r.state.Tickets[key]
+	e := r.entryOf(key)
 	if e.Phase == listener.PhaseClaiming {
 		status, err := r.jira.Status(r.ctx, key)
 		if err != nil {
@@ -1238,7 +1753,7 @@ func (r *listenRunner) recoverEntry(key string) error {
 			return err
 		}
 		r.logf("%s claimed", key)
-		e = r.state.Tickets[key]
+		e = r.entryOf(key)
 	}
 	switch e.Phase {
 	case listener.PhaseClaimed:
@@ -1254,6 +1769,12 @@ func (r *listenRunner) recoverEntry(key string) error {
 func (r *listenRunner) recoverClaimed(key string, e listener.Entry) error {
 	switch e.Outcome {
 	case "":
+		if e.Kind == listener.KindPlan && r.noRuns() && !r.halted() {
+			// A plan cut off has nothing to resume: it is made again from the start (A10).
+			r.logf("%s: its plan is made again from the start", key)
+			r.startPlan(key, func() error { return r.plan(key) })
+			return nil
+		}
 		return r.endInfra(key, errors.New("the listener stopped before its run started"))
 	case listener.ResultRetry:
 		return r.write(key, listener.Infrastructure(), nil)
@@ -1304,9 +1825,14 @@ func (r *listenRunner) recoverRunning(key string, e listener.Entry) error {
 
 // resume continues the run id of the ticket key in the service directory dir.
 func (r *listenRunner) resume(key, dir, configPath, id string) error {
+	out, logPath, closeLog := r.runLog(key, r.entryOf(key).Attempts+1)
+	defer closeLog()
+	if logPath != "" {
+		r.logf("%s: its output goes to %s", key, logPath)
+	}
 	return r.execute(key, dir, func(ctx context.Context) error {
 		return resumeRun(ctx, dir, configPath, id, domain.ModeAuto, r.claudeAuth, r.codexAuth, false,
-			strings.NewReader(""), plainWriter{r.stderr}, r.stderr)
+			strings.NewReader(""), plainWriter{out}, out)
 	})
 }
 

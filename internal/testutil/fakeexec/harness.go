@@ -38,7 +38,8 @@ func PrependPath(t *testing.T, dir string) {
 //   - FAKE_RESPONSES_DIR: directory holding canned JSON responses, one file per
 //     action ("translate.json", "decide-context.json", "decide-clarity.json",
 //     "decide-classify.json", "clarify.json", "research.json", "investigate.json", "implement.json",
-//     "review.json", and a story's planning calls, "survey.json" and "specify.json").
+//     "review.json", a story's planning calls, "survey.json" and "specify.json", and the
+//     listener's selection of an Epic's services, "select.json").
 //     For "review", "implement" and "decide-clarity", a numbered override
 //     "review_<N>.json" / "implement_<N>.json" / "decide-clarity_<N>.json" (N = 1-based call
 //     count of that action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
@@ -156,6 +157,7 @@ for arg in "$prompt" "$@"; do
     "ACTION: review"*)          action="review" ;;
     "ACTION: survey"*)          action="survey" ;;
     "ACTION: specify"*)         action="specify" ;;
+    "ACTION: select"*)          action="select" ;;
   esac
   if [ -n "$action" ]; then
     action_arg="$arg"

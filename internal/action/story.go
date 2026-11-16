@@ -33,14 +33,26 @@ var surveyRules = fmt.Sprintf(`"summary" is at most %d bytes. "relevant_files" l
 
 // BuildSurveyPrompt is the prompt of the survey of repo (SPEC §7.2): the request, the
 // repository's name, and what to describe.
-func BuildSurveyPrompt(request, repo string) string {
+func BuildSurveyPrompt(request, repo string) string { return buildSurveyPrompt(request, repo, false) }
+
+// referenceRule tells the survey of a reference repository (specs/listener-story/SPEC.md §6) what
+// it is for: the repositories that change read it, it is not changed.
+const referenceRule = "This repository is a reference: it is not changed and no task is ever written for it. Describe what the " +
+	"repositories that do change must reproduce or read from it (models, dictionaries, rules, interfaces, UI), with the file that " +
+	"defines each, not what to change in it. "
+
+func buildSurveyPrompt(request, repo string, reference bool) string {
 	var b strings.Builder
 	b.WriteString("ACTION: survey\n\n")
 	b.WriteString("Survey the repository \"" + repo + "\" for the following software engineering task: describe what in this " +
 		"repository relates to it - the code the task would touch, the interfaces the repository provides or consumes, " +
 		"and the constraints a change must respect. A later step splits the task into a specification and tasks from " +
 		"the surveys of every repository it spans; this step only reports. The working directory is the repository's " +
-		"checkout. " + readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, " +
+		"checkout. ")
+	if reference {
+		b.WriteString(referenceRule)
+	}
+	b.WriteString(readOnlyRule + " Respond with a single JSON object, no markdown fences, no prose before or after it, " +
 		"matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"relevant_files\": [\"...\"],\n  \"interfaces\": [\"...\"],\n  \"constraints\": [\"...\"]\n}\n\n")
 	b.WriteString(surveyRules + "\n\n")
@@ -79,6 +91,24 @@ var specifyShapeRules = fmt.Sprintf(`"slug" names the spec's directory: 2 to %d 
 // the order of the repositories' names. A survey is a model's account of a repository that may
 // be hostile, so it is data: fenced, its list entries on one line each.
 func BuildSpecifyPrompt(request string, surveys []SurveyInput, repos []string, maxTasks int) string {
+	return buildSpecifyPrompt(SpecifyInput{Request: request, Surveys: surveys, Repos: repos, MaxTasks: maxTasks})
+}
+
+// parallelRule is what the listener tells specify about the order of the tasks of different
+// repositories (specs/listener-story/SPEC.md §7.1, L3): they run at the same time, each from its
+// repository's default branch.
+const parallelRule = "The tasks of different repositories run in parallel, each starting from its repository's default " +
+	"branch, and the tasks of one repository run one after another, in the order of their \"depends_on\". So a task " +
+	"must not need another repository's unmerged change to pass its own tests: it works against the contract written in " +
+	"the spec's \"contracts\", and what has to be rolled out in order is the operator's, not a task's."
+
+// referenceFenceWhat names a reference survey's fence.
+func referenceFenceWhat(repo string) string {
+	return "the survey of the reference repository " + repo + " (reference: not changed, never a task's repo)"
+}
+
+func buildSpecifyPrompt(in SpecifyInput) string {
+	request, surveys, repos, maxTasks := in.Request, in.Surveys, in.Repos, in.MaxTasks
 	var b strings.Builder
 	b.WriteString("ACTION: specify\n\n")
 	b.WriteString("Write a specification and a list of tasks for the following software engineering task, which spans the " +
@@ -91,6 +121,14 @@ func BuildSpecifyPrompt(request string, surveys []SurveyInput, repos []string, m
 	fmt.Fprintf(&b, "Repositories (the story's services, the only values \"repo\" may take): %s\nAt most %d tasks.\n\n",
 		strings.Join(slices.Sorted(slices.Values(repos)), ", "), maxTasks)
 	b.WriteString(specifyRules + "\n\n")
+	if in.Parallel {
+		b.WriteString(parallelRule + "\n\n")
+	}
+	if len(in.References) > 0 {
+		b.WriteString("Reference repositories, which the tasks read from and reproduce but never change: " +
+			strings.Join(slices.Sorted(slices.Values(referenceRepos(in.References))), ", ") +
+			". They are not in the list of repositories above: no task may name one.\n\n")
+	}
 	b.WriteString(specifyShapeRules + "\n\n")
 	b.WriteString("Task:\n" + taskBlock(request))
 
@@ -104,7 +142,25 @@ func BuildSpecifyPrompt(request string, surveys []SurveyInput, repos []string, m
 		}
 		b.WriteString(fence("survey", "the survey of the repository "+s.Repo, renderSurvey(s)))
 	}
+	refs := slices.SortedFunc(slices.Values(in.References), func(x, y SurveyInput) int { return cmp.Compare(x.Repo, y.Repo) })
+	if len(refs) > 0 {
+		b.WriteString("\nReference surveys, one per reference repository, each written by a read-only step in that repository:\n")
+	}
+	for i, s := range refs {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(fence("reference", referenceFenceWhat(s.Repo), renderSurvey(s)))
+	}
 	return b.String()
+}
+
+func referenceRepos(refs []SurveyInput) []string {
+	names := make([]string, len(refs))
+	for i, r := range refs {
+		names[i] = r.Repo
+	}
+	return names
 }
 
 // renderSurvey is a survey as the specify prompt shows it, inside its fence.
@@ -159,6 +215,9 @@ type SurveyRepo struct {
 	// the survey's deny list, as every step in that repository has it.
 	ExtraDeny []string
 	RunsDir   string
+	// Reference says the repository is a reference of the listener's plan: the survey is told it
+	// is not changed, and describes what the changed repositories take from it.
+	Reference bool
 }
 
 // SurveyResult is what a survey call gave, as far as it got: the prompt, the raw answer (also
@@ -178,6 +237,14 @@ type SpecifyInput struct {
 	// Repos are the story's services and MaxTasks is story.max_tasks.
 	Repos    []string
 	MaxTasks int
+	// References are the surveys of the reference repositories of the listener's plan
+	// (specs/listener-story/SPEC.md §7.1): fenced, "reference: not changed, never a task's repo". No
+	// task may name one: they are not in Repos.
+	References []SurveyInput
+	// Parallel says the tasks of different repositories run at the same time from their default
+	// branches (the listener's plan, L3), so a task must not need another repository's unmerged
+	// change. False, the story's own plan, leaves the order to the contracts and depends_on.
+	Parallel bool
 	// SpecDirExists reports whether <spec_dir>/<slug> exists in the story home; nil does not ask.
 	SpecDirExists func(slug string) bool
 }
@@ -194,7 +261,7 @@ type SpecifyResult struct {
 // the repository's deny list, and decodes the answer strictly. An answer that holds no JSON
 // object or breaks a rule is an *apperr.InvalidResponseError naming the field.
 func Survey(ctx context.Context, call PlanningCall, repo SurveyRepo, request string) (SurveyResult, error) {
-	res := SurveyResult{Prompt: BuildSurveyPrompt(request, repo.Name)}
+	res := SurveyResult{Prompt: buildSurveyPrompt(request, repo.Name, repo.Reference)}
 	if repo.Dir == "" {
 		return res, &apperr.WorkflowError{Msg: fmt.Sprintf("survey of %s: the repository has no checkout directory", repo.Name)}
 	}
@@ -223,7 +290,7 @@ func Survey(ctx context.Context, call PlanningCall, repo SurveyRepo, request str
 // rules of §9. An answer that holds no JSON object or breaks a rule is an
 // *apperr.InvalidResponseError naming the field; the raw answer is in the result either way.
 func Specify(ctx context.Context, call PlanningCall, in SpecifyInput) (SpecifyResult, error) {
-	res := SpecifyResult{Prompt: BuildSpecifyPrompt(in.Request, in.Surveys, in.Repos, in.MaxTasks)}
+	res := SpecifyResult{Prompt: buildSpecifyPrompt(in)}
 	kind := planningKind{action: "specify", log: "specify", timeout: "actions.investigate.timeout"}
 	var err error
 	res.Output, res.Usage, err = call.run(ctx, kind, provider.Request{Prompt: res.Prompt, Authority: domain.AuthorityNone})

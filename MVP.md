@@ -436,6 +436,7 @@ security:                      # required for protected_paths (§38.3); no key w
 # listener:                    # optional; needed only for `jira listen` (§51), with jira and gitlab
 #   poll_interval: 1m          # 30s..1h
 #   services_dir: .            # relative to the working directory
+#   configs_dir: services-config   # optional; <configs_dir>/<service>/orchestrator.yaml first
 #   default_config: service.yaml   # optional; --config for a service without orchestrator.yaml
 #   max_attempts: 3            # 1..10 finished runs per ticket
 #   clone_timeout: 10m         # 1m..1h
@@ -2660,20 +2661,24 @@ model benchmarking
 automatic model selection
 cost optimization
 automatic provider fallback
-parallel workflows (a story runs up to `story.max_parallel` ready tasks at once, each its own
-  run, and one run's workflow stays sequential, §48.6)
+parallel workflows (a story runs up to `story.max_parallel` ready tasks at once, and the listener
+  up to `listener.max_parallel` tickets of different services, each its own run, and one run's
+  workflow stays sequential, §48.6, §51.14)
 multi-agent parallel execution
 Web UI
 REST API
 IDE plugin
 GitHub integration; GitLab beyond clone, fetch and the push of the run's branch, which opens
-  one merge request (§50.6), and, for `orchestrator revise` only, a read-only API client (GET,
-  a token whose scopes are read-only, §54.3) and the fast-forward push to an open merge request's
+  one merge request (§50.6), and, for `orchestrator revise` and the listener's Epic catalog only,
+  a read-only API client (GET, a token whose scopes are read-only, §54.3, §51.13) and, for revise,
+  the fast-forward push to an open merge request's
   branch (§54); a token otherwise only for the git credential helper of the listener (§51.6,
   §50.13); Jira beyond reading one issue for `run --jira` (§39), the child
   issues of an approved story (§48.7), a comment and a transition after a merge request
-  (§39.12), and, for `jira listen` only (§51), a JQL search, reading comments and `/myself`,
-  and comments and transitions without a merge request (no links or worklogs)
+  (§39.12), and, for `jira listen` only (§51), a JQL search (with the issues' links), reading
+  comments and `/myself`, comments and transitions without a merge request, and with
+  `listener.story` an Epic's children and their "is blocked by" links (§51.13; no other links,
+  no worklogs)
 the listener as a library beyond `Listen` and `Embedded` (§53): no `Source` interface for Slack
   or another origin of tasks, no second `Listen` in one process or `Dir`, no in-memory verify
   server or credential helper script (the host answers the two execs through `Embedded`), no
@@ -3614,7 +3619,12 @@ page, the same retries and redaction): the JQL search (`GET /rest/api/2/search/j
 `nextPageToken` on Cloud, `GET /rest/api/2/search` with `startAt` on Data Center), the comments
 (`GET /rest/api/2/issue/{key}/comment?orderBy=created`, paged, at most 100) and `GET
 /rest/api/2/myself` (the bot's own account, once at start). `jira.Fetch` then also asks for
-`status`, `labels` and `reporter`. `run --jira` makes none of them.
+`status`, `labels` and `reporter`, and the search for `issuelinks`: a `domain.TicketHead` has
+`BlockedBy` (`{key, status, link_type}`), the issues of its links on the **inward** side ("is
+blocked by") with the status Jira gives in the link, on Cloud and Data Center alike; a link without
+a status counts as unfinished (§51.3). With `listener.story` it also searches an Epic's children
+(`parent = KEY AND reporter = "<account>"`, or `cf[<id>] = KEY` with `jira.create.link: field`,
+§51.13). `run --jira` makes none of them.
 
 ## 39.4 Response validation
 
@@ -3754,12 +3764,14 @@ header shows the source line (§27).
 
 * Writing to Jira other than the child issues of an approved story (§39.11, §48.7) and the
   comment and transition after a merge request (§39.12), for the listener only, its
-  comments and transitions without a merge request (§51.8), and for `orchestrator revise` only
-  the `Update <date>` appended to the description after its push (§54.9): worklogs, links,
-  assigning a ticket, a comment on a `run --jira` run without a merge request. Reading an
+  comments and transitions without a merge request (§51.8) and an Epic's children and their
+  "is blocked by" links (§39.11, §51.13), and for `orchestrator revise` only
+  the `Update <date>` appended to the description after its push (§54.9): worklogs, other
+  links, assigning a ticket, a comment on a `run --jira` run without a merge request. Reading an
   issue's web links is `revise`'s alone (§54.4).
-* Linked issues, sub-tasks, attachments, images; boards, sprints. Comments and JQL belong to
-  the listener alone (§51): `run --jira` reads neither.
+* Linked issues as a section of the task, sub-tasks, attachments, images; boards, sprints.
+  Comments, JQL and the links of a search belong to the listener alone (§51): `run --jira` reads
+  none of them.
 * The Data Center "Epic Link" field: on Data Center only a sub-task's parent is shown.
 * Converting wiki markup to Markdown; ADF (REST v3); OAuth or any interactive login.
 * `--jira` on `resume` or `validate`.
@@ -3782,6 +3794,13 @@ Normative; the story itself is §48.
   write to Jira, and the only one: `POST /rest/api/2/issue` to `jira.base_url`, with the same
   credential handling as the read (§39.8), no redirects, and idempotent (an intent is recorded
   before each request, a request that may have reached Jira is never repeated).
+* **The listener's children and links** (§51.13). With `listener.story` the listener creates an
+  Epic's children the same way (`jira.Client.Create`, the same intent rules, the intent in the
+  Epic's state entry), then one `POST /rest/api/2/issueLink` per link of a service's chain
+  (`jira.Client.Link(type, inward, outward)`: `{"type": {"name": <listener.blockers.link_type>},
+  "inwardIssue": <the later task, the blocked one>, "outwardIssue": <its blocker>}`, 201 with no
+  body; a 5xx or a timeout after sending may have reached Jira and is never repeated; 400, 403 and
+  404 are refused writes). Nothing is ever deleted.
 
 ## 39.12 Write-back after a merge request
 
@@ -5266,7 +5285,10 @@ jira:
 ```
 
 Every key is in the strict schema; `jira.create` without `jira`, and `link: field` without
-`field`, are config errors. Each service keeps its own `orchestrator.yaml`: its test command,
+`field`, are config errors. `jira.create` is also the listener's: with `listener.story` it is
+required, and an Epic's children are created by it (issue type, parent link, extra labels,
+components by service name, §51.13); `story.jira_issue_types` is then also the types the listener
+plans (default `[Epic]` there). Each service keeps its own `orchestrator.yaml`: its test command,
 checks, policy, routes and limits apply to its tasks; the home's config contributes only `story`
 and `jira`. A service's story base is the branch checked out in it when the story first starts.
 
@@ -6293,18 +6315,21 @@ All optional on load, strictly validated when present.
 
 Normative as a summary; the design record, with the decisions D1–D21 and the plan as built, is
 `specs/jira-listener/` (`SPEC.md` is the full text, `tasks/` the tasks JL01–JL06). Its §N below
-is that SPEC's section.
+is that SPEC's section. The Epic's plan, the blockers and the slots (§51.3, §51.13, §51.14) have
+their own design record, `specs/listener-story/` (the owner's answers L1–L7, the defaults
+A1–A16, the tasks LS01–LS07).
 
 `orchestrator jira listen` is a supervisor like `story run` (§48.6). It polls Jira for tickets
-labelled `ai-run`, and takes them one at a time: it claims a ticket by a transition, finds the
+labelled `ai-run`, and takes them up to `listener.max_parallel` at once, at most one per service
+(§51.14; one at a time by default): it claims a ticket by a transition, finds the
 service and the GitLab project from the ticket, clones or updates the checkout, runs the ticket
 by calling the run (`runTask`, `resumeRun`) in its own process, with the service's directory and
 the task as a value, `--mode auto`, and writes the outcome to Jira. There is no child process and
 no `run --listener-task` (`specs/embed`, §4). The run is an ordinary worktree run (clarify, the
 decision, the guard, the sandbox, delivery with the merge request) and knows nothing about the
 listener. **The listener owns Jira; the run never calls it.** No model is called by the
-listener itself: every word it writes to Jira is Go's, and model-written text is escaped and
-bounded.
+listener itself, except the planning calls of an Epic with `listener.story` (§51.13), which only
+propose: every word it writes to Jira is Go's, and model-written text is escaped and bounded.
 
 ## 51.1 CLI (SPEC §1)
 
@@ -6338,21 +6363,64 @@ service and project labels (`service:`, `gitlab:`); `listener.transitions` the f
 `jira.write.transition`. `gitlab` has `base_url`, `token_env` (env only), `username` (default
 `oauth2`) and the required `allowed_groups`. A `listener` without `jira` or `gitlab` is a
 configuration error. Only `jira`, `listener`, `gitlab`, `story.jira_issue_types`, the provider
-sections the chain checks and `security` matter to the listener; each service's run uses that
+sections the chain checks and `security` matter to the listener (with `listener.story`, also its
+`actions.investigate` route, which the select and specify calls use); each service's run uses that
 service's own configuration (§51.6).
+
+```yaml
+listener:
+  max_parallel: 2                 # 1..8, default 1: runs at once, at most one per service (§51.14)
+  labels:
+    ref_prefix: "ref:"            # default "ref:": ref:<group>/<path> on an Epic is a reference repository
+  blockers:                       # optional: a ticket blocked by an unfinished one waits (§51.3)
+    link_type: Blocks             # the link type's name; its inward side is "is blocked by"
+    done_statuses: [Done]         # a blocker in one of these is finished (case-insensitive)
+  story:                          # optional: an Epic is planned (§51.13); absent: refused as before
+    max_services: 5               # 1..20: the services the selection may choose
+    max_refs: 3                   # 0..10: ref: labels on one Epic
+    max_tasks: 12                 # 1..30
+    max_catalog: 500              # 1..2000: projects listed for the selection
+    max_cost_usd: 5               # optional: every planning call of one Epic
+gitlab:
+  api_token_env: GITLAB_READ_TOKEN  # the read-only API token (§54.3); required with listener.story
+```
+
+Every key is in the strict schema. `listener.story` without `jira.create` (§48.1), without
+`gitlab.api_token_env` or without `listener.blockers` is a config error: a plan creates children
+and links, and links nothing reads would chain nothing. It does not use `story.roots`,
+`story.spec_dir` or `story.max_parallel`, and needs no `story` section (only `jira_issue_types` is
+read from one). At start, with `listener.story`, the listener's own account (`GET /myself`) must be
+in `listener.query.reporters`, or the poll would never pick the children it creates: a config error
+before the first poll. `max_parallel` above 1 is checked against nothing else: the pod's CPU and
+memory are the operator's (`examples/embed/README.md`).
 
 ## 51.3 Polling (SPEC §3)
 
 Go builds the JQL, nothing comes from the configuration as JQL: `project in (…) AND labels =
 "ai-run" AND status in (…) AND reporter in (…) ORDER BY priority DESC, created ASC`, on the
-search of §39.3, at most 200 issues a poll. It polls only while no run is in progress: after a poll
-that dispatched a ticket, again at once when the ticket is finished, otherwise after
-`poll_interval`. A failed poll is a log line and the next one waits twice as long (up to 1 h);
-401 stops the listener. **The search is a filter, not a boundary**: Go re-checks, for each
-issue, the project, the exact label, the status (case-insensitive), the reporter, that the
-issue type is not in `story.jira_issue_types`, and that the state has no `next_try_at` in the
-future. An Epic-type issue gets a comment ("plan it as a story") and `blocked` (D18: story
-mode is later).
+search of §39.3, at most 200 issues a poll. It polls only while a slot is free (§51.14): at start
+after the recovery, again at once whenever a run ends, otherwise every `poll_interval`; never while
+every slot is taken. One poll dispatches, in the search's order, every issue that passes the
+re-checks while a slot is free. A failed poll is a log line and the next one waits twice as long
+(up to 1 h); 401 stops the listener. **The search is a filter, not a boundary**: Go re-checks, for
+each issue, the project, the exact label, the status (case-insensitive), the reporter, and that the
+state has no `next_try_at` in the future.
+
+* **Blockers** (`listener.blockers` set): an issue with a blocker (§39.3: a link of type
+  `blockers.link_type`, case-insensitive, on its inward side) whose status is not in
+  `done_statuses` is skipped: no claim, no comment, no attempt, no state entry, one log line when it
+  is first skipped for that blocker (`PMC-14 waits for PMC-13 (Code Review)`). A later poll takes it
+  once every blocker is finished, and the run's fresh base (§51.6) then starts from the default
+  branch with the blocker's merge in it; the listener checks the status, not the merge. This holds
+  for every ticket and for an Epic. Without `listener.blockers` the links are not read.
+* **A busy service**: an issue whose service (`listener.Service` on the head's labels and
+  components) has a run in progress is skipped, not claimed, logged once per run it waits for
+  (`PAY-13 waits for PAY-12, which is running in billing`). An issue whose service cannot be named
+  from the head is dispatched and blocked in the cycle, as before.
+* **An Epic** (an issue type in `story.jira_issue_types`, default `[Epic]`): with `listener.story`
+  it is planned (§51.13) when no run is in progress; while one is, it is not claimed, one log line,
+  and the poll stops there. Without `listener.story` it gets a comment ("plan it as a story") and
+  `blocked` from the queue, with no claim, as before.
 
 ## 51.4 Claim (SPEC §4)
 
@@ -6399,7 +6467,9 @@ otherwise `blocked`.
   owns the services directory, nobody works in it by hand (D16).
 * **The service's configuration**: `<service>/orchestrator.yaml` when it exists (its test
   command, checks, protected paths, routes, limits and instruction files apply, D7); otherwise
-  `listener.default_config` as `--config` (D6); without one, a comment and `failed`.
+  `<listener.configs_dir>/<service>/orchestrator.yaml` when `configs_dir` is set and the file
+  exists; otherwise `listener.default_config` as `--config` (D6); without one, a comment and
+  `failed`.
 
 ## 51.7 The task (SPEC §7)
 
@@ -6412,7 +6482,8 @@ passes the validated task to the run as a value: `runTask(ctx, dir, configPath, 
 `dir` the service's directory. The run reads the working directory nowhere: `dir` gives the
 repository, `reporter.Cwd`, the runs directory and every path it derives, and a resume takes the
 same parameter (`resumeRun`); `run` and `resume` on the command line pass the working directory.
-The configuration is the service's own `orchestrator.yaml`, else `listener.default_config`, as an
+The configuration is the service's own `orchestrator.yaml`, else
+`<listener.configs_dir>/<service>/orchestrator.yaml`, else `listener.default_config`, as an
 absolute path. The run records `task.source {kind: jira, key, url, fetched_at, listener: true}`,
 builds no Jira client and needs no `jira` section, runs the clarify step like any run (unlike a
 story task), and has `jira.write` off (`options.jira_write` empty) whatever the service's file
@@ -6477,7 +6548,12 @@ the status is read, in `start` it counts as `claimed`, else the entry is dropped
 without a run → transition `retry`, no attempt; `running` → a non-terminal `run.json` is resumed
 (`resumeRun` in the service directory, `--mode auto`, in the listener's process, D15) and then
 §51.8, a terminal one goes to §51.8 straight (only the writes not yet done); an intent without
-its result is not repeated, a log line.
+its result is not repeated, a log line. The running ones are resumed each in a slot, at most
+`max_parallel` at once and one per service; the others wait for a slot before the first poll
+(§51.14). An Epic's entry has `kind: plan`, `plan_dir` and, as its plan writes, `children`
+(`{task, key?, intent?}`) and `links` (`{blocked, blocker, state}`); its run fields stay empty. A
+plan cut off by a stop has nothing to resume: it is planned again from the start, unless an intent
+in the entry may have reached Jira, which fails the Epic naming it (§51.13).
 
 ## 51.10 Stopping (SPEC §10)
 
@@ -6516,10 +6592,112 @@ run, a clone that git says was refused for authentication.
 
 ## 51.12 Not covered
 
-* Story mode for Epics and multi-service tickets (D18); every reporter (D19); assigning the
-  ticket to the bot; several tickets at once; a webhook instead of polling.
+* A multi-service ticket that is not an Epic (an Epic is planned, §51.13); every reporter (D19);
+  assigning the ticket to the bot; two runs of one service at once; moving an Epic to done or
+  transitioning its children; deleting a child; a webhook instead of polling.
 * A service worked on by hand (D16); a retry command; a UI.
-* The live Jira and GitLab check is the operator's gate (no `-tags security` suite).
+* The live Jira and GitLab check is the operator's gate (no `-tags security` suite): the Epic
+  workflow's `start` transition, the link type's name, the children's initial status, a read-only
+  API token that can list the groups (`specs/listener-story/SPEC.md` §12).
+
+## 51.13 Planning an Epic (specs/listener-story §5–§9)
+
+With `listener.story` an Epic labelled `ai-run` is planned into child tickets that the listener then
+runs like any other. **A plan is Go's, the model only proposes**: Go fixes the catalog the model
+chooses from, the services it may target, the labels, the links and the order of the writes; the
+children are ordinary tickets, picked by the ordinary poll, and nothing in a child's run knows it
+came from an Epic.
+
+```text
+claim (start) → children already there? → the services (labels, else the catalog and select)
+→ clone/fetch targets and references → survey each → specify → validate
+→ create the children, then the links → one comment on the Epic, which stays at start
+```
+
+* **Exclusive**: a plan starts only when no run is in progress and holds every slot until it ends
+  (A12). There is no clarify step on the Epic: each child runs clarify on its own text.
+* **Children already there** (before the catalog): one search for the issues under the Epic
+  reported by the listener's account (§39.3). Any → a comment with their keys ("add the label
+  ai-restart to plan it again") and `blocked`, no attempt. With `listener.labels.restart` the search
+  is skipped, the label removed, and a new plan creates new children; the old ones are not touched.
+* **The services.** `gitlab:<path>` labels on the Epic (several allowed, unlike a ticket's) are the
+  services and no call is made. Otherwise the **catalog**: `internal/gitlab`'s `GroupProjects`
+  (`GET /api/v4/groups/<group>/projects?include_subgroups=true&archived=false&per_page=100`, page
+  after page by `Link`/`X-Next-Page` within `gitlab.base_url`, strict decoding, read-only, no
+  redirect, the token redacted) over every `allowed_groups` group, deduplicated and sorted by path,
+  at most `max_catalog`, each description one line of at most 300 runes, fenced as data; then one
+  **select** call, tool-less (`none`), on the listener's `actions.investigate` route: the Epic's
+  rendered text, the catalog and the references (not choosable). The answer `{"services": [{"path",
+  "why"}]}` is validated strictly: 1..`max_services` catalog paths, no duplicate, no reference, no
+  two with one last segment, `why` one line of at most 200 runes; anything else fails the plan with
+  the answer kept. A service's name is its path's last segment.
+* **References**: `<ref_prefix><group>/<path>` labels (at most `max_refs`, under `allowed_groups`),
+  checked out under `services_dir` like services and only read: never a task's repository, never
+  written to. A reference named like a target, a bad label, or a project outside the allowed groups
+  is `blocked`.
+* **Checkouts** go through the listener's own (§51.6); a network failure is `retry`, any other
+  problem `failed`. **Survey**: one call per target and per reference (§48.2, step 3), `read`, in the
+  checkout, on the route of that repository's configuration (its `orchestrator.yaml`, else
+  `listener.default_config`); a reference's survey is told it is one. **Specify**: §48.2, step 4,
+  with the reference surveys (fenced, "reference: not changed, never a task's repo") and told that
+  the tasks of different services run in parallel from their default branches; `story.Validate`
+  as for a story; one task is a plan too.
+* **The chain**: Go chains each service's tasks in the story's order (Kahn's order of `depends_on`,
+  smallest ID first): each task is blocked by the previous task of its service, whatever the
+  model's `depends_on` says. A `depends_on` across services gives no link, only a line in the
+  child's text (`Needs PMC-21 (sku-master), not linked`).
+* **The children**, in the story's order: the Epic's project, `jira.create.issue_type`, the Epic as
+  parent (`jira.create.link`), the task's title as summary (no task ID, 255 runes), the labels
+  `listener.query.label`, `<service_prefix><name>`, `<project_prefix><path>` and
+  `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description
+  `jira.Wiki` of the task, then `Story:` and `Service:`, `References:` (each project's URL, for the
+  child's `fetch_repository`), `Needs:`, and the spec's approach and contracts under `From the plan`,
+  cut to `jira.max_bytes / 2`. Every description is secret-scanned before the first creation: a
+  finding fails the plan naming the task, not the text. Then the links (§39.11). Each write has its
+  intent in the Epic's entry first and is never repeated once it may have reached Jira; a write in
+  doubt or refused stops the plan, `failed`, and the comment lists the children created so far.
+  The children are not transitioned; their status, read back once, outside `query.statuses` is a
+  warning in the Epic's comment.
+* **The record**: `.orchestrator/listener/plans/<KEY>.<attempt>/` holds `ticket.json`, every
+  call's prompt, answer, output and usage (`artifacts/select.json`, `survey-<name>.json`,
+  `specify.json`, and their logs) and `plan.json` (`{key, attempt, outcome, planned, source:
+  labels|select, targets, references, answer, tasks, chain, children, cost_usd, child_status}`).
+  Nothing is written into any repository. `listener.story.max_cost_usd`, checked before each call
+  against the calls so far, fails the plan with nothing created.
+
+| plan | comment | transition | attempt counted |
+|---|---|---|---|
+| children created | the services (with `why`), the table of children (key, service, title, blocked by), the references, a status warning, the plan's cost | none: stays `start` | yes |
+| children exist already | their keys; "add the label ai-restart to plan it again" | `blocked` | no |
+| no service, a bad label, a bad reference | the reason | `blocked` | no |
+| an invalid answer, the budget, a secret, a refused or doubtful write | the reason, the children created so far | `failed` | yes |
+| GitLab, Jira or provider: network, 5xx, rate limit | none | `retry` with backoff | no |
+| 401 from Jira | none | `retry`; the listener stops | no |
+| a 401/403 of the GitLab API | naming `gitlab.api_token_env` | `failed` | yes |
+| the listener stopping | none | none: stays `start`; planned again from the start on restart | no |
+
+Moving the Epic to done is the operator's. **Security**: the catalog, the references and every
+target are under `allowed_groups`; the selection cannot leave the catalog; the children are created
+and run by the listener's account, no authority comes from the Epic's or the model's text (§38.5),
+and what a child may do is its service's configuration. `gitlab.api_token_env` is scrubbed from
+every child process, never in a log, a URL or Jira.
+
+## 51.14 Slots (specs/listener-story §3)
+
+* The listener has `max_parallel` slots. A run (a new one, a resumed one, a restart's recovery)
+  takes one until its outcome is written, at most one run per service (two would share its
+  checkout, its test ports and databases); an Epic's plan takes every slot (§51.13).
+* Each run is a goroutine calling `runTask`/`resumeRun` with its service's directory; nothing reads
+  the working directory and the process environment is set once at start (§51.6), so runs in
+  different directories share no mutable state. The state is changed under one mutex and saved after
+  each change. A panic in one run is that ticket's `failed`; the other runs go on.
+* **Output**: with one slot, unchanged. Above one, each run's progress goes to
+  `.orchestrator/listener/logs/<KEY>.<attempt>.log`, and the listener's stderr gets one line per
+  start and end (`PMC-12 running in sku-master (log: …)`, `PMC-12 → Ready to Review (!12)`).
+* **Stopping**: SIGTERM cancels every run and the plan in progress and waits for them all; each run
+  is exit 5 (stays `start`, resumed on restart, §51.9).
+* The pod's CPU and memory must hold `max_parallel` runs at once (a Go service's compile peaks near
+  1 GB): the operator's (`examples/embed/README.md`).
 
 ---
 
@@ -6732,7 +6910,7 @@ non-permissive until it has it).
 A `Source` interface for Slack or another origin of tasks (the seam is the supervisor loop of
 `listen.go` against the Jira calls it makes; the interface is cut when the second source exists); a
 `transport` floor in the org layer; the Jira or GitLab token from anything but the environment;
-several tickets at once; a webhook; a UI; an in-memory verify server and a credential helper
+two runs of one service at once (§51.14); a webhook; a UI; an in-memory verify server and a credential helper
 script; publishing the module (a tag, a proxy, the mirror's CI). Several `Listen` calls in one
 process, or a host that is not the process's owner, are not supported (§53.2). The live check on
 the platform (the service built from `examples/embed/README.md`, deployed to dev, one ticket end

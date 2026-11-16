@@ -42,6 +42,7 @@ func TestImportsOnlyDomainApperrAndStdlib(t *testing.T) {
 func TestSendsOnlyGET(t *testing.T) {
 	other := regexp.MustCompile(`http\.Method(Post|Put|Patch|Delete|Head|Options|Connect|Trace)|"(POST|PUT|PATCH|DELETE)"`)
 	files, _ := filepath.Glob("*.go")
+	requests := 0
 	for _, path := range files {
 		if strings.HasSuffix(path, "_test.go") {
 			continue
@@ -53,8 +54,9 @@ func TestSendsOnlyGET(t *testing.T) {
 		if m := other.Find(src); m != nil {
 			t.Errorf("%s names %s: the GitLab client sends only GET", path, m)
 		}
-		if n := strings.Count(string(src), "http.NewRequest"); n != 1 {
-			t.Errorf("%s builds %d requests; the one in once (a GET) is the only one allowed", path, n)
-		}
+		requests += strings.Count(string(src), "http.NewRequest")
+	}
+	if requests != 1 {
+		t.Errorf("the package builds %d requests; the one in once (a GET) is the only one allowed", requests)
 	}
 }

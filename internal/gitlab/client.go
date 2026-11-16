@@ -74,6 +74,8 @@ type Options struct {
 	// HTTPClient carries the requests; nil is a plain one. The integration tests give one that
 	// reaches their fake GitLab. Its redirects are never followed, whatever it says.
 	HTTPClient *http.Client
+	// Logf receives the one-line notes of a listing (the projects dropped); nil is silent.
+	Logf func(format string, args ...any)
 }
 
 // Client reads merge requests from one GitLab.
@@ -324,34 +326,40 @@ func plainText(s string, max int) bool {
 // checks the package builds no other method). Transient failures are retried with Retry-After
 // or a doubling backoff.
 func (c *Client) get(ctx context.Context, path, what string) ([]byte, *apperr.GitLabError) {
+	raw, _, gerr := c.getWithHeader(ctx, path, what)
+	return raw, gerr
+}
+
+// getWithHeader is get that also returns the headers of the answer (the next page of a list).
+func (c *Client) getWithHeader(ctx context.Context, path, what string) ([]byte, http.Header, *apperr.GitLabError) {
 	for attempt := 1; ; attempt++ {
-		raw, retryAfter, gerr := c.once(ctx, c.opts.BaseURL+path, what)
+		raw, header, retryAfter, gerr := c.once(ctx, c.opts.BaseURL+path, what)
 		if gerr == nil {
-			return raw, nil
+			return raw, header, nil
 		}
 		gerr.Attempts = attempt
 		if !gerr.Kind.Transient() || attempt > c.opts.MaxRetries || ctx.Err() != nil {
-			return nil, gerr
+			return nil, nil, gerr
 		}
 		wait := min(baseBackoff<<(attempt-1), c.opts.Timeout)
 		if retryAfter > 0 {
 			if retryAfter > c.opts.Timeout {
-				return nil, gerr
+				return nil, nil, gerr
 			}
 			wait = retryAfter
 		}
 		if err := c.sleep(ctx, wait); err != nil {
-			return nil, c.fail(what, apperr.GitLabCancelled, 0, "", "", ctx.Err())
+			return nil, nil, c.fail(what, apperr.GitLabCancelled, 0, "", "", ctx.Err())
 		}
 	}
 }
 
-func (c *Client) once(ctx context.Context, target, what string) ([]byte, time.Duration, *apperr.GitLabError) {
+func (c *Client) once(ctx context.Context, target, what string) ([]byte, http.Header, time.Duration, *apperr.GitLabError) {
 	actx, cancel := context.WithTimeout(ctx, c.opts.Timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(actx, http.MethodGet, target, nil)
 	if err != nil {
-		return nil, 0, c.fail(what, apperr.GitLabInvalidResponse, 0, "", "", fmt.Errorf("build request: %w", err))
+		return nil, nil, 0, c.fail(what, apperr.GitLabInvalidResponse, 0, "", "", fmt.Errorf("build request: %w", err))
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", c.opts.UserAgent)
@@ -359,15 +367,15 @@ func (c *Client) once(ctx context.Context, target, what string) ([]byte, time.Du
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, c.transportError(ctx, actx, what, err)
+		return nil, nil, 0, c.transportError(ctx, actx, what, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBody+1))
 	if err != nil {
-		return nil, 0, c.transportError(ctx, actx, what, fmt.Errorf("read response: %w", err))
+		return nil, nil, 0, c.transportError(ctx, actx, what, fmt.Errorf("read response: %w", err))
 	}
 	if len(raw) > maxResponseBody {
-		return nil, 0, c.fail(what, apperr.GitLabInvalidResponse, resp.StatusCode, "the response body is larger than 1 MiB", "", nil)
+		return nil, nil, 0, c.fail(what, apperr.GitLabInvalidResponse, resp.StatusCode, "the response body is larger than 1 MiB", "", nil)
 	}
 	status := resp.StatusCode
 	if status >= 300 && status < 400 {
@@ -375,10 +383,10 @@ func (c *Client) once(ctx context.Context, target, what string) ([]byte, time.Du
 		if loc, err := resp.Location(); err == nil {
 			host = loc.Host
 		}
-		return nil, 0, c.fail(what, apperr.GitLabRedirect, status, host, "", nil)
+		return nil, nil, 0, c.fail(what, apperr.GitLabRedirect, status, host, "", nil)
 	}
 	if status == http.StatusOK {
-		return raw, 0, nil
+		return raw, resp.Header, 0, nil
 	}
 	kind, detail := apperr.GitLabInvalidResponse, "unexpected status "+strconv.Itoa(status)
 	switch status {
@@ -393,7 +401,7 @@ func (c *Client) once(ctx context.Context, target, what string) ([]byte, time.Du
 	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
 		kind = apperr.GitLabUnavailable
 	}
-	return nil, parseRetryAfter(resp.Header.Get("Retry-After")), c.fail(what, kind, status, detail, string(raw), nil)
+	return nil, nil, parseRetryAfter(resp.Header.Get("Retry-After")), c.fail(what, kind, status, detail, string(raw), nil)
 }
 
 func (c *Client) transportError(ctx, actx context.Context, what string, err error) *apperr.GitLabError {

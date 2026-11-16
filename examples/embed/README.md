@@ -116,13 +116,16 @@ secretKeys:                      # the variables the configuration names, from t
   - GITLAB_TOKEN
   - ANTHROPIC_API_KEY
   - OPENAI_API_KEY
+  # - GITLAB_READ_TOKEN          # with listener.story: the read-only API token of the Epic's catalog
 
 persistence:
   enabled: true
   mountPath: /data               # Options.Dir: state, lock, task files, clones, worktrees
-  size: 20Gi
+  size: 20Gi                     # more with max_parallel: one worktree per run in progress
 
-resources:                       # a compile and a test run of the services it changes
+resources:                       # a compile and a test run of the services it changes, for each of
+                                 # listener.max_parallel runs at once (a Go service's compile peaks
+                                 # near 1 GB): these hold one; add about 1 CPU and 2Gi per extra slot
   requests: {cpu: "2", memory: 4Gi}
   limits: {cpu: "4", memory: 8Gi}
 
@@ -155,6 +158,7 @@ listener:
   default_config: /etc/orchestrator/default.yaml
   max_attempts: 3
   clone_timeout: 10m
+  max_parallel: 1                # runs at once, one per service; raise it with the pod's resources
   query:
     projects: [PAY]
     label: ai-run
@@ -169,6 +173,13 @@ listener:
     failed: Failed
     done: Ready to Review
     retry: To Do
+  # An Epic planned into child tickets (MVP.md §51.13) needs, besides listener.story, jira.create,
+  # gitlab.api_token_env, these blockers and the listener's own account in query.reporters:
+  # blockers:
+  #   link_type: Blocks
+  #   done_statuses: [Done]
+  # story:
+  #   max_services: 5
 
 gitlab:
   base_url: https://gitlab.example.com
@@ -290,8 +301,10 @@ says the same):
       `jira.email_env`, `jira.token_env`, `gitlab.token_env`, `providers.*.api_key_env`.
 - [ ] One replica, strategy `Recreate`: a second listener on the same volume is refused, two on
       different volumes claim the same tickets.
-- [ ] The stop timeout is above `execution.timeout`: on SIGTERM the listener cancels the run in
-      progress and waits for the call to return.
+- [ ] The pod's CPU and memory hold `listener.max_parallel` runs at once (a compile and a test run
+      each); the listener checks nothing about it.
+- [ ] The stop timeout is above `execution.timeout`: on SIGTERM the listener cancels every run in
+      progress and waits for the calls to return.
 - [ ] The Jira workflow allows `start` from the status in `query.statuses` (it is the only lock),
       and `start`, `blocked`, `failed`, `done` and `retry` exist as transitions.
 - [ ] `gitlab.allowed_groups` names only groups whose members may run code on this machine: a cloned

@@ -6,6 +6,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -24,7 +25,15 @@ const (
 	defaultListenerServicePrefix = "service:"
 	defaultListenerProjectPrefix = "gitlab:"
 	defaultListenerRestartLabel  = "ai-restart"
+	defaultListenerRefPrefix     = "ref:"
+	defaultListenerMaxParallel   = 1
 	defaultGitLabUsername        = "oauth2"
+
+	// The defaults of listener.story (specs/listener-story/SPEC.md §2).
+	defaultListenerStoryMaxServices = 5
+	defaultListenerStoryMaxRefs     = 3
+	defaultListenerStoryMaxTasks    = 12
+	defaultListenerStoryMaxCatalog  = 500
 )
 
 // Bounds on the listener's durations and counts.
@@ -35,6 +44,17 @@ const (
 	maxListenerMaxAttempts  = 10
 	minListenerCloneTimeout = time.Minute
 	maxListenerCloneTimeout = time.Hour
+	minListenerMaxParallel  = 1
+	maxListenerMaxParallel  = 8
+
+	minListenerStoryMaxServices = 1
+	maxListenerStoryMaxServices = 20
+	minListenerStoryMaxRefs     = 0
+	maxListenerStoryMaxRefs     = 10
+	minListenerStoryMaxTasks    = 1
+	maxListenerStoryMaxTasks    = 30
+	minListenerStoryMaxCatalog  = 1
+	maxListenerStoryMaxCatalog  = 2000
 )
 
 // gitlabPathPattern is a project path or a group prefix of one: slash-separated segments of
@@ -49,11 +69,68 @@ type ListenerConfig struct {
 	// DefaultConfig is the --config of a service without its own orchestrator.yaml; empty means
 	// none. Its existence is checked where it is used, not here.
 	DefaultConfig string
-	MaxAttempts   int
-	CloneTimeout  time.Duration
-	Query         ListenerQuery
-	Labels        ListenerLabels
-	Transitions   ListenerTransitions
+	// ConfigsDir holds the operator's configurations, one per service:
+	// <ConfigsDir>/<service>/orchestrator.yaml, used when the service has no file of its own and
+	// before DefaultConfig; empty means none. Relative to the working directory.
+	ConfigsDir   string
+	MaxAttempts  int
+	CloneTimeout time.Duration
+	Query        ListenerQuery
+	Labels       ListenerLabels
+	Transitions  ListenerTransitions
+	// MaxParallel is how many runs go at once, at most one per service
+	// (specs/listener-story/SPEC.md §3).
+	MaxParallel int
+	// Blockers is listener.blockers; nil means a ticket's links are not read (SPEC.md §4).
+	Blockers *ListenerBlockers
+	// Story is listener.story; nil means an Epic is refused, as before (SPEC.md §5–§9).
+	Story *ListenerStory
+}
+
+// ListenerBlockers is listener.blockers: the link type whose inward side is "is blocked by", and
+// the statuses in which a blocker is finished (compared case-insensitively).
+type ListenerBlockers struct {
+	LinkType     string   `yaml:"link_type"`
+	DoneStatuses []string `yaml:"done_statuses"`
+}
+
+// ListenerStory is listener.story: the bounds of an Epic's plan. Absent keys take their defaults;
+// an explicit 0 stays 0 so Validate can refuse it where 0 is out of bounds.
+type ListenerStory struct {
+	MaxServices int
+	MaxRefs     int
+	MaxTasks    int
+	MaxCatalog  int
+	// MaxCostUSD bounds every planning call of one Epic; nil means no budget.
+	MaxCostUSD *float64
+}
+
+// UnmarshalYAML applies the defaults of listener.story for absent keys.
+func (s *ListenerStory) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw struct {
+		MaxServices *int     `yaml:"max_services"`
+		MaxRefs     *int     `yaml:"max_refs"`
+		MaxTasks    *int     `yaml:"max_tasks"`
+		MaxCatalog  *int     `yaml:"max_catalog"`
+		MaxCostUSD  *float64 `yaml:"max_cost_usd"`
+	}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	orInt := func(p *int, def int) int {
+		if p == nil {
+			return def
+		}
+		return *p
+	}
+	*s = ListenerStory{
+		MaxServices: orInt(raw.MaxServices, defaultListenerStoryMaxServices),
+		MaxRefs:     orInt(raw.MaxRefs, defaultListenerStoryMaxRefs),
+		MaxTasks:    orInt(raw.MaxTasks, defaultListenerStoryMaxTasks),
+		MaxCatalog:  orInt(raw.MaxCatalog, defaultListenerStoryMaxCatalog),
+		MaxCostUSD:  raw.MaxCostUSD,
+	}
+	return nil
 }
 
 // ListenerQuery is listener.query: what the search and the Go re-check accept.
@@ -70,6 +147,8 @@ type ListenerLabels struct {
 	ServicePrefix string `yaml:"service_prefix"`
 	ProjectPrefix string `yaml:"project_prefix"`
 	Restart       string `yaml:"restart"`
+	// RefPrefix marks a reference repository on an Epic: <ref_prefix><group>/<path>.
+	RefPrefix string `yaml:"ref_prefix"`
 }
 
 // ListenerTransitions is listener.transitions: each a transition's name or its target status, as
@@ -89,6 +168,7 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 		PollInterval  string  `yaml:"poll_interval"`
 		ServicesDir   *string `yaml:"services_dir"`
 		DefaultConfig string  `yaml:"default_config"`
+		ConfigsDir    string  `yaml:"configs_dir"`
 		MaxAttempts   *int    `yaml:"max_attempts"`
 		CloneTimeout  string  `yaml:"clone_timeout"`
 		Query         struct {
@@ -101,15 +181,32 @@ func (l *ListenerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error 
 			ServicePrefix *string `yaml:"service_prefix"`
 			ProjectPrefix *string `yaml:"project_prefix"`
 			Restart       *string `yaml:"restart"`
+			RefPrefix     *string `yaml:"ref_prefix"`
 		} `yaml:"labels"`
 		Transitions ListenerTransitions `yaml:"transitions"`
+		MaxParallel *int                `yaml:"max_parallel"`
+		Blockers    *ListenerBlockers   `yaml:"blockers"`
+		Story       *ListenerStory      `yaml:"story"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
 	}
-	return l.finish(raw.PollInterval, raw.ServicesDir, raw.DefaultConfig, raw.MaxAttempts, raw.CloneTimeout,
+	if err := l.finish(raw.PollInterval, raw.ServicesDir, raw.DefaultConfig, raw.MaxAttempts, raw.CloneTimeout,
 		raw.Query.Projects, raw.Query.Label, raw.Query.Statuses, raw.Query.Reporters,
-		raw.Labels.ServicePrefix, raw.Labels.ProjectPrefix, raw.Labels.Restart, raw.Transitions)
+		raw.Labels.ServicePrefix, raw.Labels.ProjectPrefix, raw.Labels.Restart, raw.Transitions); err != nil {
+		return err
+	}
+	l.Labels.RefPrefix = defaultListenerRefPrefix
+	if raw.Labels.RefPrefix != nil {
+		l.Labels.RefPrefix = *raw.Labels.RefPrefix
+	}
+	l.MaxParallel = defaultListenerMaxParallel
+	if raw.MaxParallel != nil {
+		l.MaxParallel = *raw.MaxParallel
+	}
+	l.Blockers, l.Story = raw.Blockers, raw.Story
+	l.ConfigsDir = raw.ConfigsDir
+	return nil
 }
 
 // finish builds the section from the decoded keys, defaulting the absent ones.
@@ -183,6 +280,9 @@ func validateListener(l ListenerConfig) []string {
 	if l.DefaultConfig != "" && (strings.TrimSpace(l.DefaultConfig) != l.DefaultConfig || hasControl(l.DefaultConfig)) {
 		problems = append(problems, "listener.default_config must be a relative or absolute path on one line")
 	}
+	if l.ConfigsDir != "" && (strings.TrimSpace(l.ConfigsDir) != l.ConfigsDir || hasControl(l.ConfigsDir)) {
+		problems = append(problems, "listener.configs_dir must be a relative or absolute path on one line")
+	}
 
 	problems = append(problems, jqlListProblems("listener.query.projects", l.Query.Projects)...)
 	problems = append(problems, jqlListProblems("listener.query.statuses", l.Query.Statuses)...)
@@ -197,6 +297,7 @@ func validateListener(l ListenerConfig) []string {
 		{"listener.labels.service_prefix", l.Labels.ServicePrefix},
 		{"listener.labels.project_prefix", l.Labels.ProjectPrefix},
 		{"listener.labels.restart", l.Labels.Restart},
+		{"listener.labels.ref_prefix", l.Labels.RefPrefix},
 	} {
 		if p.value == "" || strings.ContainsFunc(p.value, func(r rune) bool { return unicode.IsSpace(r) || !unicode.IsPrint(r) }) {
 			problems = append(problems, fmt.Sprintf("%s %q must be a non-empty label or label prefix without whitespace", p.key, p.value))
@@ -204,6 +305,20 @@ func validateListener(l ListenerConfig) []string {
 	}
 	if l.Labels.ServicePrefix == l.Labels.ProjectPrefix && l.Labels.ServicePrefix != "" {
 		problems = append(problems, "listener.labels.service_prefix and listener.labels.project_prefix must differ")
+	}
+	if l.Labels.RefPrefix != "" && (l.Labels.RefPrefix == l.Labels.ServicePrefix || l.Labels.RefPrefix == l.Labels.ProjectPrefix) {
+		problems = append(problems, "listener.labels.ref_prefix must differ from listener.labels.service_prefix and listener.labels.project_prefix")
+	}
+
+	if l.MaxParallel < minListenerMaxParallel || l.MaxParallel > maxListenerMaxParallel {
+		problems = append(problems, fmt.Sprintf("listener.max_parallel must be between %d and %d, got %d",
+			minListenerMaxParallel, maxListenerMaxParallel, l.MaxParallel))
+	}
+	if l.Blockers != nil {
+		problems = append(problems, validateListenerBlockers(*l.Blockers)...)
+	}
+	if l.Story != nil {
+		problems = append(problems, validateListenerStory(*l.Story)...)
 	}
 
 	for _, t := range []struct{ key, value string }{
@@ -221,6 +336,68 @@ func validateListener(l ListenerConfig) []string {
 		case hasControl(t.value):
 			problems = append(problems, key+" must be a single line without control characters")
 		}
+	}
+	return problems
+}
+
+// validateListenerBlockers checks listener.blockers (specs/listener-story/SPEC.md §2, §4).
+func validateListenerBlockers(b ListenerBlockers) []string {
+	var problems []string
+	switch {
+	case strings.TrimSpace(b.LinkType) == "":
+		problems = append(problems, "listener.blockers.link_type is required")
+	case b.LinkType != strings.TrimSpace(b.LinkType) || hasControl(b.LinkType):
+		problems = append(problems, fmt.Sprintf("listener.blockers.link_type %q must be one line without leading or trailing whitespace", b.LinkType))
+	}
+	if len(b.DoneStatuses) == 0 {
+		problems = append(problems, "listener.blockers.done_statuses is required (at least one)")
+	}
+	for i, s := range b.DoneStatuses {
+		if strings.TrimSpace(s) == "" || hasControl(s) {
+			problems = append(problems, fmt.Sprintf("listener.blockers.done_statuses[%d] %q must be a non-empty status on one line", i, s))
+		}
+	}
+	return problems
+}
+
+// validateListenerStory checks the bounds of listener.story (specs/listener-story/SPEC.md §2).
+func validateListenerStory(s ListenerStory) []string {
+	var problems []string
+	for _, b := range []struct {
+		key           string
+		value, lo, hi int
+	}{
+		{"listener.story.max_services", s.MaxServices, minListenerStoryMaxServices, maxListenerStoryMaxServices},
+		{"listener.story.max_refs", s.MaxRefs, minListenerStoryMaxRefs, maxListenerStoryMaxRefs},
+		{"listener.story.max_tasks", s.MaxTasks, minListenerStoryMaxTasks, maxListenerStoryMaxTasks},
+		{"listener.story.max_catalog", s.MaxCatalog, minListenerStoryMaxCatalog, maxListenerStoryMaxCatalog},
+	} {
+		if b.value < b.lo || b.value > b.hi {
+			problems = append(problems, fmt.Sprintf("%s must be between %d and %d, got %d", b.key, b.lo, b.hi, b.value))
+		}
+	}
+	if v := s.MaxCostUSD; v != nil && (*v <= 0 || math.IsNaN(*v) || math.IsInf(*v, 0)) {
+		problems = append(problems, fmt.Sprintf("listener.story.max_cost_usd must be positive and finite, got %v", *v))
+	}
+	return problems
+}
+
+// listenerStoryProblems are listener.story's cross-checks: a plan creates children (jira.create),
+// lists the groups' projects (gitlab.api_token_env) and links the children of one service, which
+// only listener.blockers reads.
+func listenerStoryProblems(cfg Config) []string {
+	if cfg.Listener == nil || cfg.Listener.Story == nil {
+		return nil
+	}
+	var problems []string
+	if cfg.Jira == nil || cfg.Jira.Create == nil {
+		problems = append(problems, "listener.story needs jira.create: the plan creates the Epic's child tickets")
+	}
+	if cfg.GitLab == nil || cfg.GitLab.APITokenEnv == "" {
+		problems = append(problems, "listener.story needs gitlab.api_token_env: the plan lists the allowed groups' projects")
+	}
+	if cfg.Listener.Blockers == nil {
+		problems = append(problems, "listener.story needs listener.blockers: the plan links the tasks of one service, and only listener.blockers reads the links")
 	}
 	return problems
 }
