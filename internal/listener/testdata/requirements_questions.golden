@@ -1,7 +1,5 @@
-Requirements of PMC-1, from the Epic and its references (product-master, pim-dictionaries):
-Add a categories dictionary to sku-master and show it in the editor.
-* The dictionary holds the categories of product-master, by country.
-* The editor shows the \{category\} of each SKU.
+How the plan understood PMC-1 (references: product-master, pim-dictionaries):
+Add a \{categories\} dictionary to sku-master and show it in the editor.
 
 Open questions — answer them in a comment and move the Epic back to To Do:
 # Which countries come first?

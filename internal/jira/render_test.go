@@ -149,7 +149,7 @@ func TestRender_Discussion(t *testing.T) {
 		"Discussion since the orchestrator's questions:\n" +
 		"--- orchestrator, 2026-10-29 10:02\n[orchestrator] Which currency?\n1. EUR or USD?\n" +
 		"--- comment, 2026-10-29 11:40\nEUR, please\n\ncc [~bob]\n" +
-		"--- orchestrator, 2026-10-29 11:50\nthanks\n\n" +
+		"--- comment, 2026-10-29 11:50\nthanks\n\n" +
 		"Operator notes:\nmind the tax\n"
 	if got != want {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
@@ -162,6 +162,20 @@ func TestRender_Discussion(t *testing.T) {
 	}
 	if strings.Contains(got, "first question") || strings.Contains(got, "an old answer") {
 		t.Errorf("the discussion holds comments from before the last question:\n%s", got)
+	}
+}
+
+// An Epic's plan reads every round: from the bot's first question on.
+func TestRender_DiscussionFromFirst(t *testing.T) {
+	got, err := Render(minimalTicket(), "", 32768, RenderOptions{Comments: discussionComments(), Bot: "bot", FromFirst: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"--- orchestrator, 2026-10-29 09:00\n[orchestrator] first question\nold\n--- comment, 2026-10-29 09:30\nan old answer\n",
+		"[orchestrator] Which currency?", "EUR, please"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
 	}
 }
 

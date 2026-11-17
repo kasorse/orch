@@ -152,7 +152,7 @@ func (r *listenRunner) plan(key string) error {
 	if err != nil {
 		return r.jiraProblem(key, err)
 	}
-	text, err := jira.Render(ticket, "", r.cfg.Jira.MaxBytes, jira.RenderOptions{Comments: comments, Bot: r.bot})
+	text, err := jira.Render(ticket, "", r.cfg.Jira.MaxBytes, jira.RenderOptions{Comments: comments, Bot: r.bot, FromFirst: true})
 	if err != nil {
 		return r.endBefore(key, listener.ResultBlocked,
 			fmt.Sprintf("The Epic and its discussion are longer than %d bytes; shorten it.", r.cfg.Jira.MaxBytes))
@@ -481,7 +481,7 @@ func (r *listenRunner) requirementsBody(key string, refs []planTarget, a story.R
 		names[i] = ref.Name
 	}
 	return listener.RequirementsComment(jira.Escape, key, names, listener.Requirements{
-		Summary: a.Summary, Requirements: a.Requirements, Questions: a.Questions, BackTo: r.queueStatus(),
+		Summary: a.Summary, Questions: a.Questions, BackTo: r.queueStatus(),
 	})
 }
 

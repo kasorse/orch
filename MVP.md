@@ -3686,8 +3686,11 @@ Discussion since the orchestrator's questions:
 ```
 
 It holds the bot's **last** comment that asked questions (first line `[orchestrator]`, the bot
-being the account `/myself` answered) and every comment after it; without such a comment there
-is no section. Authors are not named. `run --jira` renders no comments.
+being the account `/myself` answered) and every comment after it; an Epic's plan starts at the bot's
+**first** such comment instead, so it reads every round of questions and answers. Without such a
+comment there is no section. Authors are not named; a comment of the bot's account without
+`[orchestrator]` is labelled `comment`, a person's written with the same account. `run --jira`
+renders no comments.
 
 ## 39.6 Order of operations
 
@@ -6655,14 +6658,18 @@ child's run studies it, as for any ticket.
   as requirements a developer can implement without reading the references, and a question only for
   what neither the Epic nor the references settle and that changes what is built (none about code
   layout, naming or tests). The answer `{"summary", "requirements", "questions"}` is strict
-  (`story.ParseRequirements`: summary 1..4000 bytes, 1..30 requirements and 0..10 questions of 1..600
-  bytes each, unknown keys refused); a violation fails the plan with the answer kept. It counts in
+  (`story.ParseRequirements`: summary 1..1200 bytes, 1..30 requirements of 1..600 bytes, any number of
+  questions of 1..400 bytes, unknown keys refused; the prompt asks for a short, plain summary and
+  questions, which people read on the Epic, and puts the detail in the requirements); a violation fails the plan with the answer kept. It counts in
   `listener.story.max_cost_usd`.
 * **The requirements comment**: right after the call, one comment on the Epic
   (`listener.RequirementsComment`, first line `[orchestrator]`, so the next plan's text holds the
-  discussion that follows it, §51.7): the summary, one bullet per requirement and, with questions,
-  "Open questions — answer them in a comment and move the Epic back to <status>" and one numbered
-  line each. It is secret-scanned before it is written (a finding fails the Epic, nothing written).
+  discussion from the plan's first such comment on, every round, §39.5): "How the plan understood <Epic> (references: …)", the summary
+  and, with questions, "Open questions — answer them in a comment and move the Epic back to <status>"
+  and one numbered line each. It is for people only: the requirements are not in it (they go to
+  specify and to the children's descriptions); the next plan states them again from the Epic, its
+  discussion and the references, never from a past plan's files; a comment over 8 KiB is cut (the
+  questions it loses are asked again by the next plan). It is secret-scanned before it is written (a finding fails the Epic, nothing written).
   **No question**: the comment is written (a failure to write it is a log line, the plan goes on) and
   the plan specifies. **Any question**: the Epic ends `blocked` with this comment as the outcome's
   one comment, no attempt counted, no `specify` call, no child; the person answers in a comment and

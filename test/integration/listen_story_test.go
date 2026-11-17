@@ -145,6 +145,9 @@ const (
 	// epicAskingResponse is what the plan understood when something the Epic needs is left open.
 	epicAskingResponse = `{"summary":"A categories dictionary, shown in the editor.",` +
 		`"requirements":["Billing keeps the categories of catalog."],"questions":["Which countries get the categories"]}`
+	// epicSecondQuestionResponse is a second round: the first answer settled the countries only.
+	epicSecondQuestionResponse = `{"summary":"A categories dictionary for Germany and France, shown in the editor.",` +
+		`"requirements":["Billing keeps the categories of catalog."],"questions":["Which currency are the prices in"]}`
 	// epicSpecifyResponse is three tasks: two of billing, the second needing the first, and one of shipping.
 	epicSpecifyResponse = `{"slug":"digital-categories","prefix":"DC","title":"Digital categories",` +
 		`"spec":{"problem":"p","approach":"a","contracts":"c","out_of_scope":"","risks":""},"tasks":[` +
@@ -306,7 +309,7 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 		t.Errorf("PAY-1 is in %q, want In Progress", got)
 	}
 	comments := env.jira.botComments("PAY-1")
-	if len(comments) != 2 || !strings.Contains(comments[0], "Requirements of PAY-1, from the Epic and its references (catalog):") ||
+	if len(comments) != 2 || !strings.Contains(comments[0], "How the plan understood PAY-1 (references: catalog):") ||
 		!strings.Contains(comments[1], "Planned: 3 child tickets created under PAY-1.") {
 		t.Errorf("PAY-1 comments = %q, want the requirements, then the plan's", comments)
 	}
@@ -356,7 +359,8 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 
 // An Epic whose requirements leave a question open is blocked with that one comment, and no child is
 // created and no target is checked out; once a person answers in a comment and moves the Epic back to
-// the queue, its next plan reads the answer, goes through to specify and creates the children
+// the queue, its next plan reads the answer; after a second round, the third reads both answers, goes
+// through to specify and creates the children
 // (specs/listener-requirements/SPEC.md §3, §8).
 func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T) {
 	env, _ := newEpicListenEnv(t)
@@ -376,8 +380,8 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 	if len(comments) != 1 {
 		t.Fatalf("PAY-1 comments = %q, want one\nstderr:\n%s", comments, stderr)
 	}
-	for _, want := range []string{"[orchestrator]\n", "Requirements of PAY-1, from the Epic and its references (catalog):",
-		"* Billing keeps the categories of catalog.", "Open questions", "# Which countries get the categories", "move the Epic back to To Do"} {
+	for _, want := range []string{"[orchestrator]\n", "How the plan understood PAY-1 (references: catalog):",
+		"A categories dictionary, shown in the editor.", "Open questions", "# Which countries get the categories", "move the Epic back to To Do"} {
 		if !strings.Contains(comments[0], want) {
 			t.Errorf("the comment lacks %q:\n%s", want, comments[0])
 		}
@@ -400,8 +404,17 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 		t.Errorf("the reference was not checked out: %v", err)
 	}
 
-	// A person answers and moves the Epic back to the queue; the plan now understands the Epic.
+	// A person answers and moves the Epic back to the queue; the plan asks a second round.
 	env.jira.person("PAY-1", "Only Germany and France.")
+	env.jira.setStatus("PAY-1", "To Do")
+	writeResponse(t, responses, "requirements", epicSecondQuestionResponse)
+	stderr = mustListen(t, env)
+	if got := env.jira.statusOf("PAY-1"); got != "Blocked" {
+		t.Fatalf("PAY-1 is in %q after the first answer, want Blocked again\nstderr:\n%s", got, stderr)
+	}
+
+	// The second answer; the third plan reads both rounds and understands the Epic.
+	env.jira.person("PAY-1", "Prices in EUR.")
 	env.jira.setStatus("PAY-1", "To Do")
 	writeResponse(t, responses, "requirements", epicRequirementsResponse)
 	stderr = mustListen(t, env)
@@ -410,12 +423,13 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Which countries get the categories", "--- comment, ", "Only Germany and France."} {
+	for _, want := range []string{"Which countries get the categories", "--- comment, ", "Only Germany and France.",
+		"Which currency are the prices in", "Prices in EUR."} {
 		if !strings.Contains(string(prompt), want) {
-			t.Errorf("the second requirements prompt lacks %q:\n%s", want, prompt)
+			t.Errorf("the third requirements prompt lacks %q:\n%s", want, prompt)
 		}
 	}
-	want := []string{"select", "survey", "requirements", "select", "survey", "requirements", "specify"}
+	want := []string{"select", "survey", "requirements", "select", "survey", "requirements", "select", "survey", "requirements", "specify"}
 	if got := invocations(t, env.invocationsLog); !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v\nstderr:\n%s", got, want, stderr)
 	}
@@ -426,9 +440,9 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 		t.Errorf("%d children were created, want 3\nstderr:\n%s", created, stderr)
 	}
 	comments = env.jira.botComments("PAY-1")
-	if len(comments) != 3 || !strings.Contains(comments[1], "Requirements of PAY-1") || strings.Contains(comments[1], "Open questions") ||
-		!strings.Contains(comments[2], "Planned: 3 child tickets created under PAY-1.") {
-		t.Errorf("PAY-1 comments = %q, want the questions, the requirements, then the plan's", comments)
+	if len(comments) != 4 || !strings.Contains(comments[2], "How the plan understood PAY-1") || strings.Contains(comments[2], "Open questions") ||
+		!strings.Contains(comments[3], "Planned: 3 child tickets created under PAY-1.") {
+		t.Errorf("PAY-1 comments = %q, want two rounds of questions, the requirements, then the plan's", comments)
 	}
 	if e := env.state().Tickets["PAY-1"]; e.Outcome != "planned" || e.Attempts != 1 {
 		t.Errorf("PAY-1 state = %+v, want planned after one attempt", e)
