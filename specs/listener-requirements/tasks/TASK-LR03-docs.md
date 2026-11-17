@@ -27,3 +27,10 @@ SPEC §8 (the scenario) and §9 (the documents).
 - `grep -n "survey of each target\|one survey per target" MVP.md` finds nothing that still says
   the plan surveys the targets.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-17)
+
+Run `52b901ae-2bde-4b72-8a18-637e7d0e0892` in orch: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/listener-requirements/LR03` on `story/listener-requirements/LR02` @ 4fd57cc, commit 47cbfb8.
+Cost $1.32. Implementation summary: Test blocked-Epic scenario and document the requirements flow.
+Conflicts with spec/listener-requirements: none.

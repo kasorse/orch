@@ -33,3 +33,10 @@ specifies from the requirements and creates children whose descriptions hold the
 - No target is checked out or surveyed during a plan (the fake checkout and provider see none).
 - An Epic with a question gets exactly one comment and no child.
 - `scripts/check.sh` passes.
+
+## As built (2026-11-17)
+
+Run `39a83539-1c51-4f5c-b825-8f573efa006c` in orch: completed, 0 fix iterations, tests passed, review pass.
+Branch `story/listener-requirements/LR02` on `story/listener-requirements/LR01` @ 4f88cb7, commit 4fd57cc.
+Cost $5.59. Implementation summary: Plan an Epic from its references and requirements, block on questions.
+Conflicts with spec/listener-requirements: none.
