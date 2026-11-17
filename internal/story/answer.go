@@ -156,6 +156,65 @@ func ParseSurvey(obj []byte) (SurveyAnswer, error) {
 	return a, nil
 }
 
+// Bounds of the requirements answer (specs/listener-requirements/SPEC.md §2). The prompt states the
+// same numbers.
+const (
+	MaxRequirementsSummaryBytes = 4000
+	MaxRequirements             = 30
+	MaxRequirementBytes         = 600
+	MaxQuestions                = 10
+	MaxQuestionBytes            = 600
+)
+
+// RequirementsAnswer is the answer of the requirements call: what the Epic asks for, understood
+// from its text and its references, and what is left unclear.
+type RequirementsAnswer struct {
+	Summary      string   `json:"summary"`
+	Requirements []string `json:"requirements"`
+	Questions    []string `json:"questions"`
+}
+
+// ParseRequirements decodes a requirements answer strictly: no other key, a summary of 1 to
+// MaxRequirementsSummaryBytes, 1 to MaxRequirements requirements and at most MaxQuestions
+// questions, each one of 1 to 600 bytes. Any violation is an *AnswerError naming the field.
+func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
+	var a RequirementsAnswer
+	if err := decodeStrict(obj, &a); err != nil {
+		return RequirementsAnswer{}, err
+	}
+	switch {
+	case strings.TrimSpace(a.Summary) == "":
+		return RequirementsAnswer{}, answerErr("summary", "is empty")
+	case len(a.Summary) > MaxRequirementsSummaryBytes:
+		return RequirementsAnswer{}, answerErr("summary", "is %d bytes, over the %d-byte limit", len(a.Summary), MaxRequirementsSummaryBytes)
+	case len(a.Requirements) == 0:
+		return RequirementsAnswer{}, answerErr("requirements", "is empty")
+	}
+	for _, list := range []struct {
+		name  string
+		items []string
+		limit int
+		bytes int
+	}{
+		{"requirements", a.Requirements, MaxRequirements, MaxRequirementBytes},
+		{"questions", a.Questions, MaxQuestions, MaxQuestionBytes},
+	} {
+		if err := checkCount(list.name, len(list.items), list.limit); err != nil {
+			return RequirementsAnswer{}, err
+		}
+		for i, item := range list.items {
+			field := fmt.Sprintf("%s[%d]", list.name, i)
+			switch {
+			case strings.TrimSpace(item) == "":
+				return RequirementsAnswer{}, answerErr(field, "is empty")
+			case len(item) > list.bytes:
+				return RequirementsAnswer{}, answerErr(field, "is %d bytes, over the %d-byte limit", len(item), list.bytes)
+			}
+		}
+	}
+	return a, nil
+}
+
 func checkCount(field string, n, limit int) error {
 	if n > limit {
 		return answerErr(field, "has %d entries, more than %d", n, limit)
