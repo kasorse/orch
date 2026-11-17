@@ -44,6 +44,8 @@ type epicJira struct {
 	labels   []string
 	comments []string
 	posts    []string
+	// thread is the Epic's comments as Jira lists them: the listener's and a person's, oldest first.
+	thread []string
 
 	// The children: the bodies of the creations and of the links the fake received, the keys the
 	// search finds under the Epic already, the status a child is created in, and what the n-th
@@ -179,7 +181,7 @@ func (j *epicJira) handle(w http.ResponseWriter, req *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case req.Method == http.MethodGet && strings.HasSuffix(req.URL.Path, "/comment"):
-		fmt.Fprint(w, `{"comments":[],"total":0}`)
+		fmt.Fprintf(w, `{"comments":[%s],"total":%d}`, strings.Join(j.thread, ","), len(j.thread))
 	case req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/comment"):
 		body, _ := io.ReadAll(req.Body)
 		var in struct {
@@ -187,6 +189,7 @@ func (j *epicJira) handle(w http.ResponseWriter, req *http.Request) {
 		}
 		_ = json.Unmarshal(body, &in)
 		j.comments = append(j.comments, in.Body)
+		j.addToThread("bot-1", in.Body)
 		j.posts = append(j.posts, req.URL.Path)
 		w.WriteHeader(http.StatusCreated)
 		fmt.Fprint(w, `{"id":"10001"}`)
@@ -231,6 +234,20 @@ func (j *epicJira) handleWrite(w http.ResponseWriter, req *http.Request) {
 	if !isLink {
 		fmt.Fprintf(w, `{"id":"%d","key":%q,"self":"https://ignored"}`, 20000+n, childKey(n-1))
 	}
+}
+
+// addToThread adds a comment by author to the Epic's list, a minute after the one before; j.mu is held.
+func (j *epicJira) addToThread(author, body string) {
+	b, _ := json.Marshal(body)
+	j.thread = append(j.thread, fmt.Sprintf(`{"id":"%d","author":{"accountId":%q},"created":"2026-11-17T10:%02d:00.000+0000","body":%s}`,
+		30000+len(j.thread), author, len(j.thread), b))
+}
+
+// personComments is a person's comment on the Epic, after what is there.
+func (j *epicJira) personComments(body string) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.addToThread("rep-1", body)
 }
 
 func (j *epicJira) client() *jira.Client {
@@ -325,6 +342,15 @@ func (p *planProvider) callsOf(action string) []planCall {
 }
 
 const epicSurveyAnswer = `{"summary":"What this repository has.","relevant_files":["a.txt"],"interfaces":[],"constraints":[]}`
+
+// epicRequirementsAnswer is what the plan understood of the Epic, with no question.
+const epicRequirementsAnswer = `{"summary":"A categories dictionary in sku-master, shown by sku-master-fe.",` +
+	`"requirements":["sku-master keeps the categories of product-master, by country.","sku-master-fe shows the category of each SKU."],"questions":[]}`
+
+// epicQuestionsAnswer is the same with two questions, which block the Epic.
+const epicQuestionsAnswer = `{"summary":"A categories dictionary in sku-master, shown by sku-master-fe.",` +
+	`"requirements":["sku-master keeps the categories of product-master, by country."],` +
+	`"questions":["Which countries come first?","Is the old [category] list kept?"]}`
 
 const epicSelectAnswer = `{"services":[{"path":"g/pim/sku-master","why":"the dictionary lives here"},{"path":"g/pim/sku-master-fe","why":"the editor shows it"}]}`
 
@@ -422,7 +448,7 @@ func newEpicEnv(t *testing.T, status string, labels ...string) *epicEnv {
 	r.plansDir = filepath.Join(t.TempDir(), "plans")
 
 	prov := &planProvider{
-		outputs: map[string]string{"select": epicSelectAnswer, "survey": epicSurveyAnswer, "specify": epicSpecifyAnswer},
+		outputs: map[string]string{"select": epicSelectAnswer, "survey": epicSurveyAnswer, "requirements": epicRequirementsAnswer, "specify": epicSpecifyAnswer},
 		costs:   map[string]float64{},
 	}
 	r.registry = provider.NewRegistry()
@@ -500,7 +526,7 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "survey", "survey", "specify"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "specify"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
 	if got := env.cat.asked(); !slices.Equal(got, []string{"g"}) {
@@ -521,7 +547,8 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 		t.Errorf("the reference is not named as not choosable:\n%s", sel.prompt)
 	}
 
-	// A survey of each target and one of the reference, read-only, in place, told which is which.
+	// A survey of the reference only, read-only, in place, told it is one: no target is surveyed
+	// (specs/listener-requirements/SPEC.md §6).
 	surveys := env.prov.callsOf("survey")
 	var repos []string
 	for _, s := range surveys {
@@ -529,32 +556,59 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 		if s.authority != domain.AuthorityRead || s.dir != filepath.Join(env.r.checkout.servicesDir, s.repo) {
 			t.Errorf("survey of %s ran with authority %q in %q", s.repo, s.authority, s.dir)
 		}
-		if isRef := strings.Contains(s.prompt, "This repository is a reference"); isRef != (s.repo == "product-master") {
-			t.Errorf("survey of %s: told it is a reference = %v", s.repo, isRef)
+		if !strings.Contains(s.prompt, "This repository is a reference") {
+			t.Errorf("survey of %s is not told it is a reference", s.repo)
 		}
 	}
-	if !slices.Equal(repos, []string{"sku-master", "sku-master-fe", "product-master"}) {
-		t.Errorf("surveyed %v, want the two targets, then the reference", repos)
+	if !slices.Equal(repos, []string{"product-master"}) {
+		t.Errorf("surveyed %v, want the reference only", repos)
 	}
+
+	// The requirements: tool-less, from the Epic and the reference's survey.
+	req := env.prov.callsOf("requirements")[0]
+	if req.authority != domain.AuthorityNone || req.dir != "" || !strings.Contains(req.prompt, "Add a categories dictionary to sku-master") ||
+		!strings.Contains(req.prompt, "the survey of the reference repository product-master") {
+		t.Errorf("requirements ran with authority %q in %q, or lacks the Epic or the reference:\n%s", req.authority, req.dir, req.prompt)
+	}
+
+	// Specify works from the requirements and the targets' names and notes, with no target survey.
 	spec := env.prov.callsOf("specify")[0]
-	if !strings.Contains(spec.prompt, "reference: not changed, never a task's repo") || !strings.Contains(spec.prompt, "run in parallel") ||
-		!strings.Contains(spec.prompt, "the only values \"repo\" may take): sku-master, sku-master-fe\n") {
-		t.Errorf("specify is not told about the reference, the parallel runs and the targets:\n%s", spec.prompt)
+	for _, want := range []string{
+		"reference: not changed, never a task's repo", "run in parallel",
+		"the only values \"repo\" may take): sku-master, sku-master-fe\n",
+		"The target repositories were not studied", "sku-master keeps the categories of product-master, by country.",
+		"sku-master: The SKU dictionaries; the dictionary lives here", "sku-master-fe: The SKU editor; the editor shows it",
+	} {
+		if !strings.Contains(spec.prompt, want) {
+			t.Errorf("the specify prompt lacks %q:\n%s", want, spec.prompt)
+		}
+	}
+	if strings.Contains(spec.prompt, "the survey of the repository sku-master") {
+		t.Errorf("specify was given a target's survey:\n%s", spec.prompt)
 	}
 
 	// Every call's prompt and answer, and the plan, are in the plan's directory.
-	for _, name := range []string{"select", "survey-sku-master", "survey-sku-master-fe", "survey-product-master", "specify"} {
+	for _, name := range []string{"select", "survey-product-master", "requirements", "specify"} {
 		a := env.artifact(name)
 		if a["prompt"] == "" || a["output"] == "" || a["answer"] == nil {
 			t.Errorf("artifact %s = %v, want its prompt, output and answer", name, a)
 		}
+	}
+	for _, name := range []string{"survey-sku-master", "survey-sku-master-fe"} {
+		if _, err := os.Stat(filepath.Join(env.planDir(), "artifacts", name+".json")); err == nil {
+			t.Errorf("a target's survey artifact %s was written", name)
+		}
+	}
+	if log := env.out.String(); !strings.Contains(log, "PMC-1: requirements: 2, questions: 0") {
+		t.Errorf("the requirements are not logged:\n%s", log)
 	}
 	if _, err := os.Stat(filepath.Join(env.planDir(), "ticket.json")); err != nil {
 		t.Errorf("ticket.json: %v", err)
 	}
 	rec := env.record()
 	if !rec.Planned || rec.Source != "select" || len(rec.Targets) != 2 || rec.Targets[0].Why != "the dictionary lives here" ||
-		len(rec.References) != 1 || rec.References[0].Path != "g/pim/product-master" {
+		len(rec.References) != 1 || rec.References[0].Path != "g/pim/product-master" ||
+		rec.Requirements == nil || len(rec.Requirements.Requirements) != 2 || len(rec.Questions) != 0 {
 		t.Errorf("plan.json = %+v", rec)
 	}
 	if want := []listener.Link{{Blocked: "PM03", Blocker: "PM01"}}; !slices.Equal(rec.Chain, want) {
@@ -564,13 +618,20 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 		t.Errorf("tasks = %+v, children = %v", rec.Tasks, rec.Children)
 	}
 
-	// The plan became its children: the Epic is planned, commented on, and stays where the claim put it.
+	// The plan became its children: the Epic is planned, commented on (the requirements, then the plan),
+	// and stays where the claim put it.
 	e := env.r.entryOf("PMC-1")
 	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultPlanned || e.Kind != listener.KindPlan || e.PlanDir != "plans/PMC-1.1" || e.Attempts != 1 {
 		t.Errorf("entry = %+v", e)
 	}
-	if comments := env.jira.commentBodies(); len(comments) != 1 || !strings.Contains(comments[0], "Planned: 3 child tickets created under PMC-1.") {
-		t.Errorf("comments = %q", comments)
+	comments := env.jira.commentBodies()
+	if len(comments) != 2 || !strings.HasPrefix(comments[0], "[orchestrator]\nRequirements of PMC-1, from the Epic and its references (product\\-master):\n") ||
+		!strings.Contains(comments[0], "* sku\\-master keeps the categories of product\\-master, by country.") || strings.Contains(comments[0], "Open questions") ||
+		!strings.Contains(comments[1], "Planned: 3 child tickets created under PMC-1.") {
+		t.Errorf("comments = %q, want the requirements, then the plan's", comments)
+	}
+	if posts := env.jira.writes(); len(posts) == 0 {
+		t.Errorf("no child was created")
 	}
 	if got := env.jira.statusNow(); got != "In Progress" {
 		t.Errorf("status = %q, want In Progress: the Epic is not moved", got)
@@ -578,16 +639,19 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	if st := env.stateIsValid(); st.Tickets["PMC-1"].PlanDir != "plans/PMC-1.1" {
 		t.Errorf("saved entry = %+v", st.Tickets["PMC-1"])
 	}
-	for _, name := range []string{"sku-master", "sku-master-fe", "product-master"} {
-		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name, "a.txt")); err != nil {
-			t.Errorf("checkout of %s: %v", name, err)
+	// The reference is checked out; no target is: its child's run does it.
+	if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, "product-master", "a.txt")); err != nil {
+		t.Errorf("checkout of the reference: %v", err)
+	}
+	for _, name := range []string{"sku-master", "sku-master-fe"} {
+		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name)); err == nil {
+			t.Errorf("the target %s was checked out by the plan", name)
 		}
 	}
 }
 
 // Planning reads no service's configuration: with none anywhere (no default_config, no configs_dir)
-// every survey, targets and the reference alike, is on the listener's investigate route and the
-// plan reaches specify.
+// the reference's survey is on the listener's investigate route and the plan reaches specify.
 func TestPlan_NeedsNoServiceConfiguration(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.r.lc.DefaultConfig = ""
@@ -597,7 +661,7 @@ func TestPlan_NeedsNoServiceConfiguration(t *testing.T) {
 	for _, s := range env.prov.callsOf("survey") {
 		models[s.repo] = s.model
 	}
-	want := map[string]string{"sku-master": "m", "sku-master-fe": "m", "product-master": "m"}
+	want := map[string]string{"product-master": "m"}
 	if !maps.Equal(models, want) {
 		t.Fatalf("survey models = %v, want %v\n%s", models, want, env.out.String())
 	}
@@ -610,8 +674,15 @@ func TestPlan_GitlabLabelsAreTheServicesAndSkipTheSelection(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "gitlab:g/pim/sku-master", "gitlab:g/pim/sku-master-fe")
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"survey", "survey", "specify"}; !slices.Equal(got, want) {
-		t.Fatalf("calls = %v, want %v (no select)\n%s", got, want, env.out.String())
+	// No reference: the requirements come from the Epic's text alone (B1), and no target is surveyed.
+	if got, want := env.prov.actions(), []string{"requirements", "specify"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v (no select, no survey)\n%s", got, want, env.out.String())
+	}
+	if p := env.prov.callsOf("requirements")[0].prompt; strings.Contains(p, "Reference surveys") {
+		t.Errorf("the requirements of an Epic without references hold a survey:\n%s", p)
+	}
+	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "Requirements of PMC-1, from the Epic:") {
+		t.Errorf("comments = %q", c)
 	}
 	if got := env.cat.asked(); len(got) != 0 {
 		t.Errorf("the catalog was read for %v with the services named", got)
@@ -695,11 +766,12 @@ func TestPlan_TheBudgetStopsBeforeSpecify(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	limit := 0.5
 	env.r.lc.Story.MaxCostUSD = &limit
-	env.prov.costs["survey"] = 0.2
+	env.prov.costs["survey"] = 0.3
+	env.prov.costs["requirements"] = 0.3
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "survey", "survey"}; !slices.Equal(got, want) {
-		t.Fatalf("calls = %v, want %v: the three surveys cost $0.60, which reaches the budget before specify\n%s", got, want, env.out.String())
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v: the survey and the requirements cost $0.60, which reaches the budget before specify\n%s", got, want, env.out.String())
 	}
 	e := env.r.entryOf("PMC-1")
 	if e.Outcome != listener.ResultFailed || e.Attempts != 1 || !strings.Contains(e.Reason, "max_cost_usd") {
@@ -709,10 +781,130 @@ func TestPlan_TheBudgetStopsBeforeSpecify(t *testing.T) {
 		t.Error("a specify artifact was written without a specify call")
 	}
 	if rec := env.record(); rec.Outcome != "failed" || rec.CostUSD < 0.59 || rec.Planned {
-		t.Errorf("plan.json = %+v, want the cost of the three surveys", rec)
+		t.Errorf("plan.json = %+v, want the cost of the survey and the requirements", rec)
 	}
-	if len(env.jira.commentBodies()) != 1 || env.jira.statusNow() != "Failed" {
-		t.Errorf("comments = %q, status = %q", env.jira.commentBodies(), env.jira.statusNow())
+	// The requirements comment, then the failure's.
+	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "Requirements of PMC-1") || !strings.Contains(c[1], `max\_cost\_usd`) ||
+		env.jira.statusNow() != "Failed" {
+		t.Errorf("comments = %q, status = %q", c, env.jira.statusNow())
+	}
+}
+
+// The budget is checked before the requirements call too.
+func TestPlan_TheBudgetStopsBeforeTheRequirements(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	limit := 0.5
+	env.r.lc.Story.MaxCostUSD = &limit
+	env.prov.costs["survey"] = 0.6
+	env.plan()
+
+	if got, want := env.prov.actions(), []string{"select", "survey"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
+	}
+	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "Requirements of") {
+		t.Errorf("comments = %q, want the failure's only", c)
+	}
+}
+
+// An Epic whose requirements leave a question is blocked, with one comment that holds them and the
+// questions, and nothing is specified or created (specs/listener-requirements/SPEC.md §3, R2).
+func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.prov.outputs["requirements"] = epicQuestionsAnswer
+	env.plan()
+
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v: no specify\n%s", got, want, env.out.String())
+	}
+	if got := env.jira.writes(); len(got) != 0 {
+		t.Errorf("writes = %v, want no child", got)
+	}
+	e := env.r.entryOf("PMC-1")
+	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultBlocked || e.Attempts != 0 || !strings.Contains(e.Reason, "2 open questions") {
+		t.Errorf("entry = %+v, want blocked, no attempt", e)
+	}
+	if got := env.jira.statusNow(); got != "Blocked" {
+		t.Errorf("status = %q, want Blocked", got)
+	}
+	c := env.jira.commentBodies()
+	if len(c) != 1 {
+		t.Fatalf("comments = %q, want one", c)
+	}
+	for _, want := range []string{
+		"[orchestrator]\nRequirements of PMC-1, from the Epic and its references (product\\-master):",
+		"* sku\\-master keeps the categories of product\\-master, by country.",
+		"Open questions — answer them in a comment and move the Epic back to To Do:",
+		`# Which countries come first\?`, `# Is the old \[category\] list kept\?`,
+	} {
+		if !strings.Contains(c[0], want) {
+			t.Errorf("the comment lacks %q:\n%s", want, c[0])
+		}
+	}
+	rec := env.record()
+	if rec.Outcome != "blocked" || rec.Planned || rec.Requirements == nil || !slices.Equal(rec.Questions, []string{"Which countries come first?", "Is the old [category] list kept?"}) {
+		t.Errorf("plan.json = %+v", rec)
+	}
+	if !strings.Contains(env.out.String(), "PMC-1: blocked by 2 open questions") {
+		t.Errorf("the block is not logged:\n%s", env.out.String())
+	}
+
+	// A person answers and moves the Epic back: the next plan's requirements read the answer.
+	env.jira.mu.Lock()
+	env.jira.status = "To Do"
+	env.jira.mu.Unlock()
+	env.jira.personComments("Germany first; the old list goes.")
+	env.prov.outputs["requirements"] = epicRequirementsAnswer
+	env.plan()
+
+	reqs := env.prov.callsOf("requirements")
+	if len(reqs) != 2 || !strings.Contains(reqs[1].prompt, "Germany first; the old list goes.") || !strings.Contains(reqs[1].prompt, `Which countries come first\?`) {
+		t.Fatalf("the second requirements prompt lacks the discussion:\n%s", reqs[len(reqs)-1].prompt)
+	}
+	if e := env.r.entryOf("PMC-1"); e.Outcome != listener.ResultPlanned || len(env.jira.createdIssues()) != 3 {
+		t.Errorf("entry = %+v, children %d: the second plan does not reach its children", e, len(env.jira.createdIssues()))
+	}
+}
+
+func TestPlan_AnInvalidRequirementsAnswerFailsWithTheAnswerKept(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "gitlab:g/pim/sku-master")
+	env.prov.outputs["requirements"] = `{"summary":"s","requirements":[],"questions":[]}`
+	env.plan()
+
+	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements"}) {
+		t.Fatalf("calls = %v, want the requirements only", got)
+	}
+	e := env.r.entryOf("PMC-1")
+	if e.Outcome != listener.ResultFailed || e.Attempts != 1 || !strings.Contains(e.Reason, "requirements") {
+		t.Errorf("entry = %+v", e)
+	}
+	a := env.artifact("requirements")
+	if a["output"] != env.prov.outputs["requirements"] || a["answer"] != nil || !strings.Contains(fmt.Sprint(a["error"]), "requirements") {
+		t.Errorf("requirements artifact = %v, want the raw answer and the error", a)
+	}
+	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "Requirements of") || env.jira.statusNow() != "Failed" {
+		t.Errorf("comments = %q, status = %q", c, env.jira.statusNow())
+	}
+}
+
+func TestPlan_ASecretInTheRequirementsFailsAndWritesNoRequirements(t *testing.T) {
+	secret := "-----BEGIN " + "RSA PRIVATE KEY-----" // split: the repository's own secret scan would flag the fixture
+	env := newEpicEnv(t, "To Do", "gitlab:g/pim/sku-master")
+	env.prov.outputs["requirements"] = `{"summary":"s","requirements":["use ` + secret + `"],"questions":["q?"]}`
+	env.plan()
+
+	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements"}) {
+		t.Fatalf("calls = %v, want no specify", got)
+	}
+	e := env.r.entryOf("PMC-1")
+	if e.Outcome != listener.ResultFailed || e.Attempts != 1 || !strings.Contains(e.Reason, "secret") {
+		t.Errorf("entry = %+v", e)
+	}
+	c := env.jira.commentBodies()
+	if len(c) != 1 || strings.Contains(c[0], "PRIVATE KEY") || strings.Contains(c[0], "Requirements of") {
+		t.Errorf("comments = %q, want the failure only, without the text", c)
+	}
+	if rec := env.record(); rec.Requirements != nil || len(rec.Questions) != 0 {
+		t.Errorf("plan.json = %+v: the requirements with a secret are recorded", rec)
 	}
 }
 
@@ -814,7 +1006,7 @@ func TestPlan_ACutOffPlanIsMadeAgainOnRestart(t *testing.T) {
 	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultPlanned || e.PlanDir != "plans/PMC-1.1" {
 		t.Errorf("entry = %+v, want the plan made again to its end", e)
 	}
-	if got := env.prov.actions(); !slices.Equal(got, []string{"survey", "survey", "specify"}) {
+	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements", "specify"}) {
 		t.Errorf("calls = %v", got)
 	}
 }

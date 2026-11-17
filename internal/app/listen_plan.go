@@ -17,6 +17,7 @@ import (
 	"github.com/kasorse/orch/internal/jira"
 	"github.com/kasorse/orch/internal/listener"
 	"github.com/kasorse/orch/internal/persistence"
+	"github.com/kasorse/orch/internal/secretscan"
 	"github.com/kasorse/orch/internal/story"
 )
 
@@ -54,6 +55,8 @@ type planTarget struct {
 	Path string `json:"path"`
 	// Why is the selection's reason for a service; empty for a reference and for a gitlab: label.
 	Why string `json:"why,omitempty"`
+	// Description is the catalog's description of a selected service, for specify's notes.
+	Description string `json:"description,omitempty"`
 }
 
 // planTask is one task of the plan as plan.json records it.
@@ -80,12 +83,16 @@ type planRecord struct {
 	// Planned says the plan was validated: there is a spec, its tasks and their chain.
 	Planned bool `json:"planned"`
 	// Source is "labels" (gitlab: labels, no selection call) or "select".
-	Source     string               `json:"source,omitempty"`
-	Targets    []planTarget         `json:"targets,omitempty"`
-	References []planTarget         `json:"references,omitempty"`
-	Answer     *story.SpecifyAnswer `json:"answer,omitempty"`
-	Tasks      []planTask           `json:"tasks,omitempty"`
-	Chain      []listener.Link      `json:"chain,omitempty"`
+	Source     string       `json:"source,omitempty"`
+	Targets    []planTarget `json:"targets,omitempty"`
+	References []planTarget `json:"references,omitempty"`
+	// Requirements is the requirements call's answer (specs/listener-requirements/SPEC.md §7), and
+	// Questions a copy of its questions, which made the Epic blocked when there are any.
+	Requirements *story.RequirementsAnswer `json:"requirements,omitempty"`
+	Questions    []string                  `json:"questions,omitempty"`
+	Answer       *story.SpecifyAnswer      `json:"answer,omitempty"`
+	Tasks        []planTask                `json:"tasks,omitempty"`
+	Chain        []listener.Link           `json:"chain,omitempty"`
 	// Children are the issues the plan created, in the story's order (empty until they are built).
 	Children []string `json:"children"`
 	CostUSD  float64  `json:"cost_usd"`
@@ -128,8 +135,9 @@ type planRun struct {
 }
 
 // plan is the cycle of a claimed Epic, in the exclusive slot (SPEC §3): the Epic's text, its labels,
-// the catalog and the selection (or the gitlab: labels), the checkouts, a survey of each, specify,
-// the validation and the chain. It ends the Epic with one of the outcomes of SPEC §9; a listener
+// the catalog and the selection (or the gitlab: labels), the references' checkouts and surveys, the
+// requirements and their comment (a question ends it blocked), specify, the validation and the chain
+// (specs/listener-requirements/SPEC.md). It ends the Epic with one of the outcomes of SPEC §9; a listener
 // that is stopping leaves it claimed, to be planned again from the start on restart (A10).
 func (r *listenRunner) plan(key string) error {
 	p := &planRun{r: r, key: key, calls: map[string]*domain.Usage{}, rec: planRecord{V: planRecordVersion, Key: key, Children: []string{}}}
@@ -192,15 +200,21 @@ func (r *listenRunner) plan(key string) error {
 	}
 	r.logf("%s: services: %s", key, describeTargets(targets))
 
-	dirs, end := p.checkouts(targets, refs)
+	// The references only are checked out and surveyed: a target is studied by its child's run
+	// (specs/listener-requirements/SPEC.md §6).
+	dirs, end := p.checkouts(refs)
 	if end != nil {
 		return p.finish(end)
 	}
-	surveys, refSurveys, end := p.surveys(text, targets, refs, dirs)
+	refSurveys, end := p.surveys(text, refs, dirs)
 	if end != nil {
 		return p.finish(end)
 	}
-	answer, tasks, end := p.specify(text, targets, surveys, refSurveys)
+	req, end := p.requirements(text, refs, refSurveys)
+	if end != nil {
+		return p.finish(end)
+	}
+	answer, tasks, end := p.specify(text, targets, refSurveys, req)
 	if end != nil {
 		return p.finish(end)
 	}
@@ -224,7 +238,7 @@ func (r *listenRunner) plan(key string) error {
 		}
 	}
 	r.logf("%s: the plan has %d tasks in %d services", key, len(tasks), len(targets))
-	return p.createChildren(ticket, answer, tasks, targets, refs, restart)
+	return p.createChildren(ticket, answer, req, tasks, targets, refs, restart)
 }
 
 // labels reads the Epic's labels (SPEC §5.2, §5.3): the references, and the services the gitlab:
@@ -350,6 +364,13 @@ func (p *planRun) selectServices(text string, refs []planTarget) ([]planTarget, 
 	if nerr != nil {
 		return nil, failedBy(nerr.Error())
 	}
+	for i := range targets {
+		for _, project := range catalog {
+			if project.Path == targets[i].Path {
+				targets[i].Description = project.Description
+			}
+		}
+	}
 	return targets, nil
 }
 
@@ -361,12 +382,13 @@ func targetPaths(ts []planTarget) []string {
 	return paths
 }
 
-// checkouts makes every target's and every reference's checkout ready, through the listener's own
-// (SPEC §5.3), and returns their directories by name.
-func (p *planRun) checkouts(targets, refs []planTarget) (map[string]string, *planEnd) {
+// checkouts makes every reference's checkout ready, through the listener's own (SPEC §5.3), and
+// returns their directories by name. A target is not checked out: its child's run does it
+// (specs/listener-requirements/SPEC.md §6).
+func (p *planRun) checkouts(refs []planTarget) (map[string]string, *planEnd) {
 	r := p.r
 	dirs := map[string]string{}
-	for _, t := range slices.Concat(targets, refs) {
+	for _, t := range refs {
 		if r.stopping() {
 			return nil, quietEnd()
 		}
@@ -379,40 +401,112 @@ func (p *planRun) checkouts(targets, refs []planTarget) (map[string]string, *pla
 	return dirs, nil
 }
 
-// surveys is one survey call per target and per reference, one after another (SPEC §6), on the
-// listener's investigate route.
-func (p *planRun) surveys(text string, targets, refs []planTarget, dirs map[string]string) (surveys, refSurveys []action.SurveyInput, end *planEnd) {
-	for _, group := range []struct {
-		repos     []planTarget
-		reference bool
-	}{{targets, false}, {refs, true}} {
-		for _, t := range group.repos {
-			if p.r.stopping() {
-				return nil, nil, quietEnd()
-			}
-			if end := p.budget(); end != nil {
-				return nil, nil, end
-			}
-			repo, route, timeout := p.r.surveyRepo(t.Name, dirs[t.Name], group.reference)
-			p.r.logf("%s: surveying %s", p.key, t.Name)
-			res, err := action.Survey(p.r.ctx, p.call(route, timeout), repo, text)
-			name := "survey-" + t.Name
-			p.calls[name] = res.Usage
-			if err := saveCall(p.plan, name, res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
-				return nil, nil, p.callEnd(err)
-			}
-			if group.reference {
-				refSurveys = append(refSurveys, action.SurveyInput{Repo: t.Name, Answer: res.Answer})
-			} else {
-				surveys = append(surveys, action.SurveyInput{Repo: t.Name, Answer: res.Answer})
-			}
+// surveys is one survey call per reference, one after another (SPEC §6), on the listener's
+// investigate route. No target is surveyed (specs/listener-requirements/SPEC.md §6).
+func (p *planRun) surveys(text string, refs []planTarget, dirs map[string]string) (refSurveys []action.SurveyInput, end *planEnd) {
+	for _, t := range refs {
+		if p.r.stopping() {
+			return nil, quietEnd()
 		}
+		if end := p.budget(); end != nil {
+			return nil, end
+		}
+		repo, route, timeout := p.r.surveyRepo(t.Name, dirs[t.Name])
+		p.r.logf("%s: surveying %s", p.key, t.Name)
+		res, err := action.Survey(p.r.ctx, p.call(route, timeout), repo, text)
+		name := "survey-" + t.Name
+		p.calls[name] = res.Usage
+		if err := saveCall(p.plan, name, res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
+			return nil, p.callEnd(err)
+		}
+		refSurveys = append(refSurveys, action.SurveyInput{Repo: t.Name, Answer: res.Answer})
 	}
-	return surveys, refSurveys, nil
+	return refSurveys, nil
 }
 
-// specify is the specification call (SPEC §7.1) and the validation of its tasks as a story's.
-func (p *planRun) specify(text string, targets []planTarget, surveys, refSurveys []action.SurveyInput) (story.SpecifyAnswer, []story.Task, *planEnd) {
+// requirements is the requirements call and its comment (specs/listener-requirements/SPEC.md §2,
+// §3): what the Epic asks for, from its text and its references' surveys, recorded in plan.json and,
+// once secret-scanned, written on the Epic. With a question the plan ends blocked, and the comment is
+// the outcome's (planBody); without one it is written here, and a failure to write it is logged.
+func (p *planRun) requirements(text string, refs []planTarget, refSurveys []action.SurveyInput) (story.RequirementsAnswer, *planEnd) {
+	r := p.r
+	if r.stopping() {
+		return story.RequirementsAnswer{}, quietEnd()
+	}
+	if end := p.budget(); end != nil {
+		return story.RequirementsAnswer{}, end
+	}
+	r.logf("%s: stating the requirements", p.key)
+	inv := r.cfg.Actions.Investigate
+	res, err := action.Requirements(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.RequirementsInput{Request: text, References: refSurveys})
+	p.calls["requirements"] = res.Usage
+	if err := saveCall(p.plan, "requirements", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
+		return story.RequirementsAnswer{}, p.callEnd(err)
+	}
+	a := res.Answer
+	r.logf("%s: requirements: %d, questions: %d", p.key, len(a.Requirements), len(a.Questions))
+
+	// The model's text reaches Jira here: scanned as it wrote it and as it is sent (SPEC §3, B5).
+	comment := listener.ComposeFor(jira.Escape, r.requirementsBody(p.key, refs, a), "")
+	raw := strings.Join(slices.Concat([]string{a.Summary}, a.Requirements, a.Questions), "\n")
+	for _, s := range []string{raw, comment} {
+		if findings, _ := secretscan.Scan("comment", []byte(s)); len(findings) > 0 {
+			return story.RequirementsAnswer{}, failedBy("The requirements look like they hold a secret, so nothing was written on the Epic.")
+		}
+	}
+	p.rec.Requirements, p.rec.Questions = &a, slices.Clone(a.Questions)
+	if n := len(a.Questions); n > 0 {
+		questions := "questions"
+		if n == 1 {
+			questions = "question"
+		}
+		r.logf("%s: blocked by %d open %s", p.key, n, questions)
+		return story.RequirementsAnswer{}, blockedBy(fmt.Sprintf("The requirements leave %d open %s: answer them in a comment and move the Epic back to %s.",
+			n, questions, r.queueStatus()))
+	}
+	if r.stopping() {
+		return story.RequirementsAnswer{}, quietEnd()
+	}
+	if _, err := r.jira.Comment(r.ctx, p.key, comment); err != nil {
+		r.isAuth(err)
+		r.logf("%s: cannot write the requirements comment, the plan goes on: %s", p.key, firstLineOf(err.Error()))
+	}
+	return a, nil
+}
+
+// requirementsBody is the requirements comment's body (SPEC §3) of an Epic with these references.
+func (r *listenRunner) requirementsBody(key string, refs []planTarget, a story.RequirementsAnswer) []string {
+	names := make([]string, len(refs))
+	for i, ref := range refs {
+		names[i] = ref.Name
+	}
+	return listener.RequirementsComment(jira.Escape, key, names, listener.Requirements{
+		Summary: a.Summary, Requirements: a.Requirements, Questions: a.Questions, BackTo: r.queueStatus(),
+	})
+}
+
+// targetNotes are what specify knows of each target it was not given a survey of: its catalog
+// description and why the selection chose it, by name.
+func targetNotes(targets []planTarget) map[string]string {
+	notes := map[string]string{}
+	for _, t := range targets {
+		var parts []string
+		for _, s := range []string{t.Description, t.Why} {
+			if s = strings.TrimSpace(s); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		if len(parts) > 0 {
+			notes[t.Name] = strings.Join(parts, "; ")
+		}
+	}
+	return notes
+}
+
+// specify is the specification call (SPEC §7.1) and the validation of its tasks as a story's: from the
+// Epic's text, its requirements, the references' surveys and the targets by name and note
+// (specs/listener-requirements/SPEC.md §4).
+func (p *planRun) specify(text string, targets []planTarget, refSurveys []action.SurveyInput, req story.RequirementsAnswer) (story.SpecifyAnswer, []story.Task, *planEnd) {
 	r, sc := p.r, p.r.lc.Story
 	if r.stopping() {
 		return story.SpecifyAnswer{}, nil, quietEnd()
@@ -427,7 +521,8 @@ func (p *planRun) specify(text string, targets []planTarget, surveys, refSurveys
 	r.logf("%s: specifying", p.key)
 	inv := r.cfg.Actions.Investigate
 	res, err := action.Specify(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.SpecifyInput{
-		Request: text, Surveys: surveys, Repos: names, MaxTasks: sc.MaxTasks, References: refSurveys, Parallel: true,
+		Request: text, Repos: names, MaxTasks: sc.MaxTasks, References: refSurveys, Parallel: true,
+		Requirements: &req, Notes: targetNotes(targets),
 	})
 	p.calls["specify"] = res.Usage
 	if err := saveCall(p.plan, "specify", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
@@ -440,13 +535,12 @@ func (p *planRun) specify(text string, targets []planTarget, surveys, refSurveys
 	return res.Answer, tasks, nil
 }
 
-// surveyRepo is the survey of one checkout: its directory and the listener's own deny list and
-// investigate route. Planning an Epic only reads the repositories, targets and references alike, so
-// it needs no service's configuration; a target's own is required when its child ticket runs
-// (configFor).
-func (r *listenRunner) surveyRepo(name, dir string, reference bool) (action.SurveyRepo, config.ProviderModel, time.Duration) {
+// surveyRepo is the survey of one reference's checkout: its directory and the listener's own deny list
+// and investigate route. Planning an Epic only reads its references, so it needs no service's
+// configuration; a target's own is required when its child ticket runs (configFor).
+func (r *listenRunner) surveyRepo(name, dir string) (action.SurveyRepo, config.ProviderModel, time.Duration) {
 	inv := r.cfg.Actions.Investigate
-	return action.SurveyRepo{Name: name, Dir: dir, ExtraDeny: r.cfg.Context.ExtraDeny, RunsDir: runsBaseDir, Reference: reference},
+	return action.SurveyRepo{Name: name, Dir: dir, ExtraDeny: r.cfg.Context.ExtraDeny, RunsDir: runsBaseDir, Reference: true},
 		inv.ProviderModel, inv.Timeout
 }
 

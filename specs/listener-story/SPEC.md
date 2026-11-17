@@ -43,7 +43,8 @@ poll (whenever a slot is free, §3):
     otherwise → claim and run it as today, in a slot of its own
 plan of an Epic (exclusive: no other run in progress, none starts meanwhile):
   claim (start) → children already there? (§9) → the catalog (§5.1) → select (§5.2)
-  → clone/fetch targets and refs (§5.3) → survey each (§6) → specify (§7) → validate
+  → clone/fetch the refs (§5.3) → survey each ref (§6) → requirements (specs/listener-requirements)
+  → specify (§7) → validate
   → create the children, then the links (§8) → comment on the Epic, it stays at start (§9)
 ```
 
@@ -198,6 +199,9 @@ gitlab:
 
 ### 5.3 Checkouts
 
+> **Amended by specs/listener-requirements (2026-11-17):** a plan checks out the references only.
+> A target is not checked out by the plan: its child's run does it, as for any ticket.
+
 * Every target and every reference goes through the listener's checkout of today
   (`serviceCheckout.prepare`, §51.6): clone when absent, else fetch and fast-forward the default
   branch, the same refusals. The name is the path's last segment. A reference's name equal to a
@@ -210,6 +214,10 @@ gitlab:
 
 ## 6. The survey
 
+> **Amended by specs/listener-requirements (2026-11-17):** one `survey` call per **reference**
+> only; no target is surveyed. The surveys feed one tool-less `requirements` call, whose answer is
+> written on the Epic (MVP.md §51.13); studying a target is its child's run's job.
+
 * One `survey` call per target and per reference (`action.Survey`, MVP.md §48.2), `read`
   authority, in the checkout, in place, on the listener's own `actions.investigate` and
   `context.extra_deny`: the plan only reads, so it needs no service's configuration; a target's
@@ -221,6 +229,11 @@ gitlab:
 ## 7. The specification
 
 ### 7.1 The call
+
+> **Amended by specs/listener-requirements (2026-11-17):** the listener's specify is fed the
+> Epic's requirements and the targets by name and note instead of target surveys
+> (`SpecifyInput.Requirements`, `Notes`): a task describes behaviour and contracts, never files or
+> packages. `story plan`'s specify is unchanged.
 
 * `action.Specify` as today, with two inputs added: `References` (the reference surveys, fenced,
   labelled "reference: not changed, never a task's repo") and `Ordered: false` — the listener
@@ -295,6 +308,10 @@ the comment names the task, not the text.
   deleted.
 
 ## 9. The Epic's outcomes
+
+> **Amended by specs/listener-requirements (2026-11-17):** a row is added: requirements that leave
+> an open question → the requirements and the numbered questions as the one comment, `blocked`, no
+> attempt counted, no child. The person answers in a comment and moves the Epic back to the queue.
 
 | plan | comment | transition | attempt counted |
 |---|---|---|---|

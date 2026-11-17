@@ -114,7 +114,7 @@ func childSummary(title string) string {
 // createChildren is the end of a plan (SPEC §8, §9): the descriptions are made and secret-scanned
 // before the first request, then each child is created in the story's order and each link made, and the
 // Epic is commented on, staying at start.
-func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswer, tasks []story.Task, targets, refs []planTarget, restart bool) error {
+func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswer, req story.RequirementsAnswer, tasks []story.Task, targets, refs []planTarget, restart bool) error {
 	r, key := p.r, p.key
 	create, blockers := r.cfg.Jira.Create, r.lc.Blockers
 	if create == nil || blockers == nil {
@@ -163,9 +163,12 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 			ServicePath: pathOf[t.Repo],
 			References:  refURLs,
 			Needs:       needs,
-			Approach:    answer.Spec.Approach,
-			Contracts:   answer.Spec.Contracts,
-			MaxBytes:    r.cfg.Jira.MaxBytes / 2,
+			// Every child gets all the story's requirements: it does not know which are its own
+			// (specs/listener-requirements/SPEC.md §5, B6).
+			Requirements: req.Requirements,
+			Approach:     answer.Spec.Approach,
+			Contracts:    answer.Spec.Contracts,
+			MaxBytes:     r.cfg.Jira.MaxBytes / 2,
 		})
 		queue := r.lc.Query.Label
 		if !r.lc.Story.QueueChildren {
@@ -410,6 +413,10 @@ func (r *listenRunner) planBody(e listener.Entry) (body []string, ok bool) {
 		return listener.PlanCreated(jira.Escape, c), true
 	case e.Outcome == listener.ResultFailed && len(children) > 0:
 		return listener.PlanFailed(jira.Escape, e.Reason, children), true
+	case e.Outcome == listener.ResultBlocked && rec.Requirements != nil && len(rec.Questions) > 0:
+		// The requirements with their questions are the outcome's comment: one comment, not two
+		// (specs/listener-requirements/SPEC.md §3).
+		return r.requirementsBody(rec.Key, rec.References, *rec.Requirements), true
 	}
 	return nil, false
 }

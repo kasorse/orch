@@ -6364,7 +6364,7 @@ service and project labels (`service:`, `gitlab:`); `listener.transitions` the f
 `oauth2`) and the required `allowed_groups`. A `listener` without `jira` or `gitlab` is a
 configuration error. Only `jira`, `listener`, `gitlab`, `story.jira_issue_types`, the provider
 sections the chain checks and `security` matter to the listener (with `listener.story`, also its
-`actions.investigate` route, which the select and specify calls use); each service's run uses that
+`actions.investigate` route, which the select, survey, requirements and specify calls use); each service's run uses that
 service's own configuration (§51.6).
 
 ```yaml
@@ -6380,7 +6380,7 @@ listener:
     max_refs: 3                   # 0..10: ref: labels on one Epic
     max_tasks: 12                 # 1..30
     max_catalog: 500              # 1..2000: projects listed for the selection
-    max_cost_usd: 5               # optional: every planning call of one Epic
+    max_cost_usd: 5               # optional: every planning call of one Epic (the requirements call too)
     queue_children: true          # false: the children lack listener.query.label
 gitlab:
   api_token_env: GITLAB_READ_TOKEN  # the read-only API token (§54.3); required with listener.story
@@ -6611,9 +6611,15 @@ came from an Epic.
 
 ```text
 claim (start) → children already there? → the services (labels, else the catalog and select)
-→ clone/fetch targets and references → survey each → specify → validate
+→ clone/fetch the references → survey each reference → requirements → comment on the Epic
+→ a question? blocked, stop → specify → validate
 → create the children, then the links → one comment on the Epic, which stays at start
 ```
+
+**An Epic is understood before it is split** (`specs/listener-requirements`). The plan studies the
+Epic and its references, states what must be built as requirements, writes them on the Epic and
+stops on any open question. A target service is **not** surveyed or checked out by the plan: its
+child's run studies it, as for any ticket.
 
 * **Exclusive**: a plan starts only when no run is in progress and holds every slot until it ends
   (A12). There is no clarify step on the Epic: each child runs clarify on its own text.
@@ -6636,14 +6642,39 @@ claim (start) → children already there? → the services (labels, else the cat
   checked out under `services_dir` like services and only read: never a task's repository, never
   written to. A reference named like a target, a bad label, or a project outside the allowed groups
   is `blocked`.
-* **Checkouts** go through the listener's own (§51.6); a network failure is `retry`, any other
-  problem `failed`. **Survey**: one call per target and per reference (§48.2, step 3), `read`, in the
-  checkout, on the listener's own `actions.investigate` and `context.extra_deny`: planning only
-  reads, so no service's configuration is needed until its child ticket runs (§51.6). A
-  reference's survey is told it is one. **Specify**: §48.2, step 4,
-  with the reference surveys (fenced, "reference: not changed, never a task's repo") and told that
+* **Checkouts** of the references only, through the listener's own (§51.6); a network failure is
+  `retry`, any other problem `failed`. The targets are not checked out: a child's run does it.
+  **Survey**: one call per reference (§48.2, step 3), `read`, in the checkout, on the listener's own
+  `actions.investigate` and `context.extra_deny`: planning only reads, so no service's
+  configuration is needed until its child ticket runs (§51.6). A reference's survey is told it is
+  one; no target is surveyed.
+* **Requirements**: one tool-less call (`none`, `action.Requirements`, planning kind `requirements`)
+  on the listener's `actions.investigate` route, also for an Epic with no reference: the Epic's text
+  (with its discussion) and the references' surveys (fenced as untrusted data) in; what must be
+  built (data, dictionaries and where their values come from, rules, behaviour per country, UI) out,
+  as requirements a developer can implement without reading the references, and a question only for
+  what neither the Epic nor the references settle and that changes what is built (none about code
+  layout, naming or tests). The answer `{"summary", "requirements", "questions"}` is strict
+  (`story.ParseRequirements`: summary 1..4000 bytes, 1..30 requirements and 0..10 questions of 1..600
+  bytes each, unknown keys refused); a violation fails the plan with the answer kept. It counts in
+  `listener.story.max_cost_usd`.
+* **The requirements comment**: right after the call, one comment on the Epic
+  (`listener.RequirementsComment`, first line `[orchestrator]`, so the next plan's text holds the
+  discussion that follows it, §51.7): the summary, one bullet per requirement and, with questions,
+  "Open questions — answer them in a comment and move the Epic back to <status>" and one numbered
+  line each. It is secret-scanned before it is written (a finding fails the Epic, nothing written).
+  **No question**: the comment is written (a failure to write it is a log line, the plan goes on) and
+  the plan specifies. **Any question**: the Epic ends `blocked` with this comment as the outcome's
+  one comment, no attempt counted, no `specify` call, no child; the person answers in a comment and
+  moves the Epic back to the queue, and the next plan reads the answer in the discussion. A plan cut
+  off after the comment writes it again on restart. **Specify**: §48.2, step 4,
+  with the requirements (fenced after the task, each to be covered by at least one task), the
+  reference surveys (fenced, "reference: not changed, never a task's repo") and the targets by name
+  and note (the catalog's description or the selection's `why`), told that the target repositories
+  were not studied, so a task describes behaviour and contracts, never files or packages, and that
   the tasks of different services run in parallel from their default branches; `story.Validate`
-  as for a story; one task is a plan too.
+  as for a story; one task is a plan too. `story plan`'s specify keeps its target surveys and its
+  prompt unchanged.
 * **The chain**: Go chains each service's tasks in the story's order (Kahn's order of `depends_on`,
   smallest ID first): each task is blocked by the previous task of its service, whatever the
   model's `depends_on` says. A `depends_on` across services gives no link, only a line in the
@@ -6654,17 +6685,23 @@ claim (start) → children already there? → the services (labels, else the cat
   to a child to run it, and the Epic's comment says so), `<service_prefix><name>`, `<project_prefix><path>` and
   `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description
   `jira.Wiki` of the task, then `Story:` and `Service:`, `References:` (each project's URL, for the
-  child's `fetch_repository`), `Needs:`, and the spec's approach and contracts under `From the plan`,
-  cut to `jira.max_bytes / 2`. Every description is secret-scanned before the first creation: a
+  child's `fetch_repository`), `Needs:`, the Epic's requirements (all of them, under the heading
+  `h3. Requirements of the story`: a child does not know which are its own) and the spec's approach and
+  contracts under `From the plan`, cut to `jira.max_bytes / 2` (the requirements are cut first, from
+  the end, with `…`). The contracts between services are written from the requirements, not from the
+  targets' code: intentions, not endpoints. Every description is secret-scanned before the first creation: a
   finding fails the plan naming the task, not the text. Then the links (§39.11). Each write has its
   intent in the Epic's entry first and is never repeated once it may have reached Jira; a write in
   doubt or refused stops the plan, `failed`, and the comment lists the children created so far.
   The children are not transitioned; their status, read back once, outside `query.statuses` is a
   warning in the Epic's comment.
 * **The record**: `.orchestrator/listener/plans/<KEY>.<attempt>/` holds `ticket.json`, every
-  call's prompt, answer, output and usage (`artifacts/select.json`, `survey-<name>.json`,
-  `specify.json`, and their logs) and `plan.json` (`{key, attempt, outcome, planned, source:
-  labels|select, targets, references, answer, tasks, chain, children, cost_usd, child_status}`).
+  call's prompt, answer, output and usage (`artifacts/select.json`, `survey-<reference>.json`,
+  `requirements.json`, `specify.json`, and their logs) and `plan.json` (`{key, attempt, outcome,
+  planned, source: labels|select, targets, references, requirements, questions, answer, tasks, chain,
+  children, cost_usd, child_status}`; `questions` is a copy of the requirements' questions, for a
+  `blocked` Epic). The log lines: `PMC-1: requirements: 7, questions: 0`, `PMC-1: blocked by 2 open
+  questions`.
   Nothing is written into any repository. `listener.story.max_cost_usd`, checked before each call
   against the calls so far, fails the plan with nothing created.
 
@@ -6673,13 +6710,19 @@ claim (start) → children already there? → the services (labels, else the cat
 | children created | the services (with `why`), the table of children (key, service, title, blocked by), the references, a status warning, the plan's cost | none: stays `start` | yes |
 | children exist already | their keys; "add the label ai-restart to plan it again" | `blocked` | no |
 | no service, a bad label, a bad reference | the reason | `blocked` | no |
+| the requirements leave an open question | the requirements and the numbered questions; "answer them in a comment and move the Epic back to <status>" (the one comment, no child) | `blocked` | no |
 | an invalid answer, the budget, a secret, a refused or doubtful write | the reason, the children created so far | `failed` | yes |
 | GitLab, Jira or provider: network, 5xx, rate limit | none | `retry` with backoff | no |
 | 401 from Jira | none | `retry`; the listener stops | no |
 | a 401/403 of the GitLab API | naming `gitlab.api_token_env` | `failed` | yes |
 | the listener stopping | none | none: stays `start`; planned again from the start on restart | no |
 
-Moving the Epic to done is the operator's. **Security**: the catalog, the references and every
+Moving the Epic to done is the operator's. **Left to the operator**: the children of two services
+run in parallel from the contracts the plan wrote from the requirements, so a front-end child may
+guess a different shape from its back-end child; queue the second child after the first is merged
+(`listener.story.queue_children: false` lets the operator choose the order). A requirements answer
+that asks nothing it should have asked lets the plan go on: the comment on the Epic is the
+operator's chance to stop it. **Security**: the catalog, the references and every
 target are under `allowed_groups`; the selection cannot leave the catalog; the children are created
 and run by the listener's account, no authority comes from the Epic's or the model's text (§38.5),
 and what a child may do is its service's configuration. `gitlab.api_token_env` is scrubbed from

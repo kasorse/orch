@@ -37,6 +37,14 @@ func goldenSurveys() []SurveyInput {
 	}
 }
 
+func goldenReferences() []SurveyInput {
+	return []SurveyInput{{Repo: "product-master", Answer: story.SurveyAnswer{
+		Summary:       "Refund rules are kept in app/Refund; each rule has a country.",
+		RelevantFiles: []string{"app/Refund/Rule.php"},
+		Interfaces:    []string{"GET /api/refund-rules (routes/api.php)"},
+	}}}
+}
+
 // fixNonce makes every delimiter nonce predictable (NONCE0001, NONCE0002, ... in the order
 // the prompt draws them) for the test, and restores the random one afterwards.
 func fixNonce(t *testing.T) {
@@ -210,6 +218,24 @@ func TestPrompts_Golden(t *testing.T) {
 		{"survey", func() string { return BuildSurveyPrompt(goldenStoryRequest, "billing") }},
 		{"specify", func() string {
 			return BuildSpecifyPrompt(goldenStoryRequest, goldenSurveys(), []string{"gateway", "billing"}, 12)
+		}},
+		{"requirements_no_references", func() string {
+			return BuildRequirementsPrompt(RequirementsInput{Request: goldenStoryRequest})
+		}},
+		{"requirements_references", func() string {
+			return BuildRequirementsPrompt(RequirementsInput{Request: goldenStoryRequest, References: goldenReferences()})
+		}},
+		{"specify_requirements", func() string {
+			return buildSpecifyPrompt(SpecifyInput{
+				Request: goldenStoryRequest, Repos: []string{"gateway", "billing"}, MaxTasks: 12,
+				References: goldenReferences(), Parallel: true,
+				Requirements: &story.RequirementsAnswer{
+					Summary:      "Refunds may be partial.\n",
+					Requirements: []string{"A refund takes an amount up to the payment's\nremaining amount.", "The public API accepts the amount."},
+					Questions:    []string{"never shown to specify"},
+				},
+				Notes: map[string]string{"billing": "Payments and refunds.", "gateway": "The public API.\n"},
+			})
 		}},
 	}
 	for _, tc := range cases {
