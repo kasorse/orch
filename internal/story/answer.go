@@ -164,6 +164,8 @@ const (
 	MaxRequirements             = 30
 	MaxRequirementBytes         = 600
 	MaxQuestionBytes            = 400
+	MaxAssumptions              = 15
+	MaxAssumptionBytes          = 400
 )
 
 // RequirementsAnswer is the answer of the requirements call: what the Epic asks for, understood
@@ -171,12 +173,16 @@ const (
 type RequirementsAnswer struct {
 	Summary      string   `json:"summary"`
 	Requirements []string `json:"requirements"`
-	Questions    []string `json:"questions"`
+	// Assumptions are the defaults taken instead of asking, and the questions the code answered
+	// (the plan's lookup adds those): written on the Epic for people to correct.
+	Assumptions []string `json:"assumptions,omitempty"`
+	Questions   []string `json:"questions"`
 }
 
 // ParseRequirements decodes a requirements answer strictly: no other key, a summary of 1 to
 // MaxRequirementsSummaryBytes, 1 to MaxRequirements requirements of 1 to MaxRequirementBytes and any
-// number of questions of 1 to MaxQuestionBytes. Any violation is an *AnswerError naming the field.
+// number of questions of 1 to MaxQuestionBytes, and at most MaxAssumptions assumptions of 1 to
+// MaxAssumptionBytes (the key may be left out). Any violation is an *AnswerError naming the field.
 func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	var a RequirementsAnswer
 	if err := decodeStrict(obj, &a); err != nil {
@@ -198,6 +204,7 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	}{
 		{"requirements", a.Requirements, MaxRequirements, MaxRequirementBytes},
 		{"questions", a.Questions, 0, MaxQuestionBytes}, // as many as there are
+		{"assumptions", a.Assumptions, MaxAssumptions, MaxAssumptionBytes},
 	} {
 		if err := checkCount(list.name, len(list.items), list.limit); err != nil {
 			return RequirementsAnswer{}, err
@@ -216,6 +223,54 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 }
 
 // checkCount refuses more than limit entries; a limit of 0 is none.
+// Bounds of the lookup answer: what the code settles of the requirements' questions.
+const (
+	MaxLookupAnswerBytes   = 400
+	MaxLookupEvidenceBytes = 300
+)
+
+// LookupItem is one question the code settles: its 1-based number in the questions asked, the
+// answer, and where in the code it shows.
+type LookupItem struct {
+	Question int    `json:"question"`
+	Answer   string `json:"answer"`
+	Evidence string `json:"evidence"`
+}
+
+// LookupAnswer is the answer of the plan's lookup call; a question it leaves out goes to people.
+type LookupAnswer struct {
+	Answers []LookupItem `json:"answers"`
+}
+
+// ParseLookup decodes a lookup answer strictly: each item names one of the n questions, at most once,
+// with an answer of 1 to MaxLookupAnswerBytes and evidence of 1 to MaxLookupEvidenceBytes.
+func ParseLookup(obj []byte, n int) (LookupAnswer, error) {
+	var a LookupAnswer
+	if err := decodeStrict(obj, &a); err != nil {
+		return LookupAnswer{}, err
+	}
+	seen := map[int]bool{}
+	for i, it := range a.Answers {
+		field := fmt.Sprintf("answers[%d]", i)
+		switch {
+		case it.Question < 1 || it.Question > n:
+			return LookupAnswer{}, answerErr(field+".question", "is %d, not one of the %d questions", it.Question, n)
+		case seen[it.Question]:
+			return LookupAnswer{}, answerErr(field+".question", "answers question %d again", it.Question)
+		case strings.TrimSpace(it.Answer) == "":
+			return LookupAnswer{}, answerErr(field+".answer", "is empty")
+		case len(it.Answer) > MaxLookupAnswerBytes:
+			return LookupAnswer{}, answerErr(field+".answer", "is %d bytes, over the %d-byte limit", len(it.Answer), MaxLookupAnswerBytes)
+		case strings.TrimSpace(it.Evidence) == "":
+			return LookupAnswer{}, answerErr(field+".evidence", "is empty")
+		case len(it.Evidence) > MaxLookupEvidenceBytes:
+			return LookupAnswer{}, answerErr(field+".evidence", "is %d bytes, over the %d-byte limit", len(it.Evidence), MaxLookupEvidenceBytes)
+		}
+		seen[it.Question] = true
+	}
+	return a, nil
+}
+
 func checkCount(field string, n, limit int) error {
 	if limit > 0 && n > limit {
 		return answerErr(field, "has %d entries, more than %d", n, limit)

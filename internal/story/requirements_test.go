@@ -1,6 +1,8 @@
 package story
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -66,6 +68,9 @@ func TestParseRequirements_Bounds(t *testing.T) {
 		{"a question at the limit", func(m map[string]any) { m["questions"] = []any{strings.Repeat("q", MaxQuestionBytes)} }, ""},
 		{"a question over the limit", func(m map[string]any) { m["questions"] = []any{strings.Repeat("q", MaxQuestionBytes+1)} }, "questions[0]"},
 		{"questions of the wrong type", func(m map[string]any) { m["questions"] = "which?" }, "questions"},
+		{"assumptions at the limit", func(m map[string]any) { m["assumptions"] = many(MaxAssumptions, "a") }, ""},
+		{"too many assumptions", func(m map[string]any) { m["assumptions"] = many(MaxAssumptions+1, "a") }, "assumptions"},
+		{"an assumption over the limit", func(m map[string]any) { m["assumptions"] = []any{strings.Repeat("a", MaxAssumptionBytes+1)} }, "assumptions[0]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,6 +99,35 @@ func TestParseRequirements_NotAnObject(t *testing.T) {
 		wantAnswerErr(t, err, "")
 		if err == nil {
 			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func TestParseLookup(t *testing.T) {
+	a, err := ParseLookup([]byte(`{"answers":[{"question":2,"answer":"Core publishes on save.","evidence":"sku-master/publish.go"}]}`), 2)
+	if err != nil || len(a.Answers) != 1 || a.Answers[0].Question != 2 {
+		t.Fatalf("answer = %+v, %v", a, err)
+	}
+	if a, err := ParseLookup([]byte(`{"answers":[]}`), 1); err != nil || len(a.Answers) != 0 {
+		t.Errorf("no answer: %+v, %v", a, err)
+	}
+	item := func(q int, answer, evidence string) string {
+		return fmt.Sprintf(`{"question":%d,"answer":%q,"evidence":%q}`, q, answer, evidence)
+	}
+	for name, tc := range map[string]struct{ obj, field string }{
+		"unknown key":       {`{"answers":[],"open":[1]}`, "open"},
+		"question 0":        {`{"answers":[` + item(0, "a", "e") + `]}`, "answers[0].question"},
+		"question too high": {`{"answers":[` + item(3, "a", "e") + `]}`, "answers[0].question"},
+		"question twice":    {`{"answers":[` + item(1, "a", "e") + `,` + item(1, "b", "e") + `]}`, "answers[1].question"},
+		"blank answer":      {`{"answers":[` + item(1, " ", "e") + `]}`, "answers[0].answer"},
+		"long answer":       {`{"answers":[` + item(1, strings.Repeat("a", MaxLookupAnswerBytes+1), "e") + `]}`, "answers[0].answer"},
+		"no evidence":       {`{"answers":[` + item(1, "a", "") + `]}`, "answers[0].evidence"},
+		"long evidence":     {`{"answers":[` + item(1, "a", strings.Repeat("e", MaxLookupEvidenceBytes+1)) + `]}`, "answers[0].evidence"},
+	} {
+		_, err := ParseLookup([]byte(tc.obj), 2)
+		var aerr *AnswerError
+		if !errors.As(err, &aerr) || aerr.Field != tc.field {
+			t.Errorf("%s: err = %v, want a field error on %s", name, err, tc.field)
 		}
 	}
 }

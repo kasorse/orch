@@ -357,8 +357,8 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 	}
 }
 
-// An Epic whose requirements leave a question open is blocked with that one comment, and no child is
-// created and no target is checked out; once a person answers in a comment and moves the Epic back to
+// An Epic whose requirements leave a question the code does not answer is blocked with that one
+// comment, and no child is created; once a person answers in a comment and moves the Epic back to
 // the queue, its next plan reads the answer; after a second round, the third reads both answers, goes
 // through to specify and creates the children
 // (specs/listener-requirements/SPEC.md §3, §8).
@@ -366,14 +366,16 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 	env, _ := newEpicListenEnv(t)
 	responses, prompts := os.Getenv("FAKE_RESPONSES_DIR"), os.Getenv("FAKE_PROMPTS_DIR")
 	writeResponse(t, responses, "requirements", epicAskingResponse)
+	writeResponse(t, responses, "lookup", `{"answers":[]}`)
 
 	stderr := mustListen(t, env)
 
 	if got := env.jira.statusOf("PAY-1"); got != "Blocked" {
 		t.Fatalf("PAY-1 is in %q, want Blocked\nstderr:\n%s", got, stderr)
 	}
-	// The references are surveyed, the requirements asked for, and nothing is specified.
-	if got, want := invocations(t, env.invocationsLog), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+	// The references are surveyed, the requirements asked for, their question looked up in the code, and
+	// nothing is specified.
+	if got, want := invocations(t, env.invocationsLog), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v", got, want)
 	}
 	comments := env.jira.botComments("PAY-1")
@@ -395,13 +397,11 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 	if e := env.state().Tickets["PAY-1"]; e.Phase != "finished" || e.Outcome != "blocked" || e.Attempts != 0 {
 		t.Errorf("PAY-1 state = %+v, want blocked, no attempt counted", e)
 	}
-	for _, target := range []string{"billing", "shipping"} {
-		if _, err := os.Stat(filepath.Join(env.wd, target)); err == nil {
-			t.Errorf("the plan checked out the target %s", target)
+	// With a question, the targets are checked out for the lookup to read, next to the reference.
+	for _, repo := range []string{"billing", "shipping", "catalog"} {
+		if _, err := os.Stat(filepath.Join(env.wd, repo)); err != nil {
+			t.Errorf("%s was not checked out: %v", repo, err)
 		}
-	}
-	if _, err := os.Stat(filepath.Join(env.wd, "catalog")); err != nil {
-		t.Errorf("the reference was not checked out: %v", err)
 	}
 
 	// A person answers and moves the Epic back to the queue; the plan asks a second round.
@@ -429,7 +429,7 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 			t.Errorf("the third requirements prompt lacks %q:\n%s", want, prompt)
 		}
 	}
-	want := []string{"select", "survey", "requirements", "select", "survey", "requirements", "select", "survey", "requirements", "specify"}
+	want := []string{"select", "survey", "requirements", "lookup", "select", "survey", "requirements", "lookup", "select", "survey", "requirements", "specify"}
 	if got := invocations(t, env.invocationsLog); !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v\nstderr:\n%s", got, want, stderr)
 	}

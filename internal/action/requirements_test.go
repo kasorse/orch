@@ -135,3 +135,25 @@ func TestSpecifyPrompt_RequirementsBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The lookup reads the checkouts' directory with read authority and the deny list, and a valid answer
+// is decoded; an answer naming a question that was not asked is refused.
+func TestLookup(t *testing.T) {
+	client := &fakeClient{output: `{"answers":[{"question":1,"answer":"At once.","evidence":"billing/refund.go"}]}`}
+	call := planningCallWith(client)
+	in := LookupInput{Request: "Refunds.", Summary: "s", Questions: []string{"q1?"}, Repos: []LookupRepo{{Name: "billing"}},
+		Dir: "/srv/services", RunsDir: ".orchestrator/runs"}
+	res, err := Lookup(context.Background(), call, in)
+	if err != nil || len(res.Answer.Answers) != 1 || res.Answer.Answers[0].Evidence != "billing/refund.go" {
+		t.Fatalf("Lookup = %+v, %v", res.Answer, err)
+	}
+	req := client.lastReq
+	if req.WorkingDir != "/srv/services" || req.Authority != domain.AuthorityRead || len(req.DenyRead) == 0 ||
+		!strings.HasPrefix(req.Prompt, "ACTION: lookup\n") {
+		t.Errorf("request = dir %q, authority %v, deny %v", req.WorkingDir, req.Authority, req.DenyRead)
+	}
+	client.output = `{"answers":[{"question":2,"answer":"a","evidence":"e"}]}`
+	if _, err := Lookup(context.Background(), call, in); err == nil || !strings.Contains(err.Error(), "question") {
+		t.Errorf("an answer to an unasked question: %v", err)
+	}
+}

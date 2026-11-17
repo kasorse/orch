@@ -1297,9 +1297,12 @@ labels, or let a model choose them from the allowed groups' projects (a read-onl
 `gitlab.api_token_env`); add `ref:<group>/<path>` for a repository the work reads from but does not
 change. The listener moves the Epic to `start`, surveys each reference (a target service is not
 surveyed: its child's run studies it), states the requirements it understood and writes them as a
-comment on the Epic (`specs/listener-requirements/`). If anything is unclear it stops: the Epic
-goes to `blocked` with the numbered questions and no child is created; answer in a comment and move
-the Epic back to the queue, and the next plan reads the answer. Otherwise it specifies the tasks from
+comment on the Epic (`specs/listener-requirements/`). Where a choice has a reasonable default it
+takes it, and a question the code may answer is first looked up in the references and the targets
+(checked out for it, read only); both are listed on the Epic as decided without asking, for you to
+correct. If anything is still unclear it stops: the Epic goes to `blocked` with the numbered
+questions and no child is created; answer in a comment and move the Epic back to the queue, and the
+next plan reads every round of answers. Otherwise it specifies the tasks from
 the requirements and creates one child per task (`jira.create`) in the queue's status with the labels the poll picks,
 links the tasks of one service so that each waits for the previous one (`listener.blockers`), and
 comments on the Epic, which stays at `start`: moving it to done is yours. The children then run as

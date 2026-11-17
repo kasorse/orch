@@ -16,7 +16,9 @@ import (
 // Requirements is the requirements call's answer as the comment needs it (the package cannot import
 // internal/story).
 type Requirements struct {
-	Summary   string
+	Summary string
+	// Decided are the defaults taken and the answers found in the code instead of asking.
+	Decided   []string
 	Questions []string
 	// BackTo is the status the Epic is moved back to once the questions are answered.
 	BackTo string
@@ -33,8 +35,8 @@ const (
 var wikiLeadRE = regexp.MustCompile(`(?i)^(h[1-6]|bq)\.`)
 
 // RequirementsComment is the body of the requirements comment (SPEC §3): the Epic and the names of its
-// references, the summary and, when there are questions, how to answer them and one numbered line
-// each. The answer's bounds keep it far below a comment's limit.
+// references, the summary, what was decided without asking (one bullet each) and, when there are
+// questions, how to answer them and one numbered line each. The answer's bounds keep it far below a comment's limit.
 func RequirementsComment(esc Escape, epic string, refs []string, a Requirements) []string {
 	head := "How the plan understood " + keyText(esc, epic)
 	if len(refs) > 0 {
@@ -45,6 +47,12 @@ func RequirementsComment(esc Escape, epic string, refs []string, a Requirements)
 		head += " (references: " + strings.Join(names, ", ") + ")"
 	}
 	body := []string{head + ":", summaryLine(esc, a.Summary)}
+	if len(a.Decided) > 0 {
+		body = append(body, "", "Decided without asking — if one is wrong, say so in a comment:")
+		for _, d := range a.Decided {
+			body = append(body, "* "+text(esc, d))
+		}
+	}
 	if len(a.Questions) > 0 {
 		back := strings.TrimSpace(a.BackTo)
 		if back == "" {

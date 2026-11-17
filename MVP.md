@@ -6646,7 +6646,8 @@ child's run studies it, as for any ticket.
   written to. A reference named like a target, a bad label, or a project outside the allowed groups
   is `blocked`.
 * **Checkouts** of the references only, through the listener's own (§51.6); a network failure is
-  `retry`, any other problem `failed`. The targets are not checked out: a child's run does it.
+  `retry`, any other problem `failed`. The targets are not checked out, except for the lookup below
+  when the requirements ask something: a child's run does it.
   **Survey**: one call per reference (§48.2, step 3), `read`, in the checkout, on the listener's own
   `actions.investigate` and `context.extra_deny`: planning only reads, so no service's
   configuration is needed until its child ticket runs (§51.6). A reference's survey is told it is
@@ -6657,14 +6658,27 @@ child's run studies it, as for any ticket.
   built (data, dictionaries and where their values come from, rules, behaviour per country, UI) out,
   as requirements a developer can implement without reading the references, and a question only for
   what neither the Epic nor the references settle and that changes what is built (none about code
-  layout, naming or tests). The answer `{"summary", "requirements", "questions"}` is strict
+  layout, naming or tests). A choice left open that has a reasonable default (what the references do,
+  what the Epic and its discussion imply) is taken and written in `assumptions` instead of asked; a
+  question is kept for what has no default or would be costly to undo if guessed wrong. The answer
+  `{"summary", "requirements", "assumptions", "questions"}` is strict
   (`story.ParseRequirements`: summary 1..1200 bytes, 1..30 requirements of 1..600 bytes, any number of
-  questions of 1..400 bytes, unknown keys refused; the prompt asks for a short, plain summary and
+  questions of 1..400 bytes, 0..15 assumptions of 1..400 bytes, unknown keys refused; the prompt asks for a short, plain summary and
   questions, which people read on the Epic, and puts the detail in the requirements); a violation fails the plan with the answer kept. It counts in
   `listener.story.max_cost_usd`.
+* **Lookup**, only when the requirements ask something: the targets are checked out next to the
+  references, and one `read` call (`action.Lookup`, planning kind `lookup`, on `actions.investigate`
+  with `context.extra_deny`) works in the checkouts' directory and answers what the code settles (how
+  existing code behaves, where data comes from, a choice the code makes moot), each with where it
+  shows (`story.ParseLookup`: `{"answers": [{"question", "answer", "evidence"}]}`). An answered
+  question becomes an assumption, "<question> <answer> (found in <evidence>)"; the rest stays a
+  question. A lookup that cannot run (a checkout fails) or fails leaves every question to people and
+  is logged; it counts in `listener.story.max_cost_usd`. The assumptions reach specify and the
+  children as requirements, each "Assumed: …".
 * **The requirements comment**: right after the call, one comment on the Epic
   (`listener.RequirementsComment`, first line `[orchestrator]`, so the next plan's text holds the
-  discussion from the plan's first such comment on, every round, §39.5): "How the plan understood <Epic> (references: …)", the summary
+  discussion from the plan's first such comment on, every round, §39.5): "How the plan understood <Epic> (references: …)", the summary,
+  "Decided without asking — if one is wrong, say so in a comment:" with one bullet per assumption,
   and, with questions, "Open questions — answer them in a comment and move the Epic back to <status>"
   and one numbered line each. It is for people only: the requirements are not in it (they go to
   specify and to the children's descriptions); the next plan states them again from the Epic, its
@@ -6707,8 +6721,9 @@ child's run studies it, as for any ticket.
   `requirements.json`, `specify.json`, and their logs) and `plan.json` (`{key, attempt, outcome,
   planned, source: labels|select, targets, references, requirements, questions, answer, tasks, chain,
   children, cost_usd, child_status}`; `questions` is a copy of the requirements' questions, for a
-  `blocked` Epic). The log lines: `PMC-1: requirements: 7, questions: 0`, `PMC-1: blocked by 2 open
-  questions`.
+  `blocked` Epic). The log lines: `PMC-1: requirements: 7, questions: 0`, `PMC-1: looking up 2
+  questions in the code`, `PMC-1: the code answered 1 of 2 questions`, `PMC-1: blocked by 1 open
+  question`.
   Nothing is written into any repository. `listener.story.max_cost_usd`, checked before each call
   against the calls so far, fails the plan with nothing created.
 
