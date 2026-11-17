@@ -103,16 +103,20 @@ type ListenerStory struct {
 	MaxCatalog  int
 	// MaxCostUSD bounds every planning call of one Epic; nil means no budget.
 	MaxCostUSD *float64
+	// QueueChildren gives the children the queue's label, so the listener runs them; false leaves
+	// that to the operator, one child at a time.
+	QueueChildren bool
 }
 
 // UnmarshalYAML applies the defaults of listener.story for absent keys.
 func (s *ListenerStory) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	var raw struct {
-		MaxServices *int     `yaml:"max_services"`
-		MaxRefs     *int     `yaml:"max_refs"`
-		MaxTasks    *int     `yaml:"max_tasks"`
-		MaxCatalog  *int     `yaml:"max_catalog"`
-		MaxCostUSD  *float64 `yaml:"max_cost_usd"`
+		MaxServices   *int     `yaml:"max_services"`
+		MaxRefs       *int     `yaml:"max_refs"`
+		MaxTasks      *int     `yaml:"max_tasks"`
+		MaxCatalog    *int     `yaml:"max_catalog"`
+		MaxCostUSD    *float64 `yaml:"max_cost_usd"`
+		QueueChildren *bool    `yaml:"queue_children"`
 	}
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -124,11 +128,12 @@ func (s *ListenerStory) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return *p
 	}
 	*s = ListenerStory{
-		MaxServices: orInt(raw.MaxServices, defaultListenerStoryMaxServices),
-		MaxRefs:     orInt(raw.MaxRefs, defaultListenerStoryMaxRefs),
-		MaxTasks:    orInt(raw.MaxTasks, defaultListenerStoryMaxTasks),
-		MaxCatalog:  orInt(raw.MaxCatalog, defaultListenerStoryMaxCatalog),
-		MaxCostUSD:  raw.MaxCostUSD,
+		MaxServices:   orInt(raw.MaxServices, defaultListenerStoryMaxServices),
+		MaxRefs:       orInt(raw.MaxRefs, defaultListenerStoryMaxRefs),
+		MaxTasks:      orInt(raw.MaxTasks, defaultListenerStoryMaxTasks),
+		MaxCatalog:    orInt(raw.MaxCatalog, defaultListenerStoryMaxCatalog),
+		MaxCostUSD:    raw.MaxCostUSD,
+		QueueChildren: raw.QueueChildren == nil || *raw.QueueChildren,
 	}
 	return nil
 }

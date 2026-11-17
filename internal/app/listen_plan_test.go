@@ -413,7 +413,7 @@ func newEpicEnv(t *testing.T, status string, labels ...string) *epicEnv {
 	r.cfg.Actions.Investigate = config.ActionConfig{ProviderModel: config.ProviderModel{Provider: "claude", Model: "m"}}
 	r.lc.MaxAttempts = 3
 	r.lc.Labels = config.ListenerLabels{ServicePrefix: "service:", ProjectPrefix: "gitlab:", Restart: "ai-restart", RefPrefix: "ref:"}
-	r.lc.Story = &config.ListenerStory{MaxServices: 5, MaxRefs: 3, MaxTasks: 12, MaxCatalog: 500}
+	r.lc.Story = &config.ListenerStory{MaxServices: 5, MaxRefs: 3, MaxTasks: 12, MaxCatalog: 500, QueueChildren: true}
 	r.lc.DefaultConfig = filepath.Join(t.TempDir(), "default.yaml")
 	if err := os.WriteFile(r.lc.DefaultConfig, []byte("version: 2\n"), 0o644); err != nil {
 		t.Fatal(err)
