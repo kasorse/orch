@@ -39,7 +39,8 @@ func PrependPath(t *testing.T, dir string) {
 //     action ("translate.json", "decide-context.json", "decide-clarity.json",
 //     "decide-classify.json", "clarify.json", "research.json", "investigate.json", "implement.json",
 //     "review.json", a story's planning calls, "survey.json" and "specify.json", and the
-//     listener's selection of an Epic's services, "select.json").
+//     listener's selection of an Epic's services and its requirements, "select.json" and
+//     "requirements.json").
 //     For "review", "implement" and "decide-clarity", a numbered override
 //     "review_<N>.json" / "implement_<N>.json" / "decide-clarity_<N>.json" (N = 1-based call
 //     count of that action, as kept in FAKE_STATE_DIR) is preferred over the unnumbered file when
@@ -158,6 +159,7 @@ for arg in "$prompt" "$@"; do
     "ACTION: survey"*)          action="survey" ;;
     "ACTION: specify"*)         action="specify" ;;
     "ACTION: select"*)          action="select" ;;
+    "ACTION: requirements"*)    action="requirements" ;;
   esac
   if [ -n "$action" ]; then
     action_arg="$arg"

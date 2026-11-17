@@ -28,6 +28,17 @@ func (j *epicJira) writes() []string {
 	return out
 }
 
+// afterRequirements are the Epic's comments after the first, which must be the requirements comment
+// (specs/listener-requirements/SPEC.md §3): the comments of the plan's outcome.
+func (e *epicEnv) afterRequirements() []string {
+	e.t.Helper()
+	c := e.jira.commentBodies()
+	if len(c) == 0 || !strings.HasPrefix(c[0], "[orchestrator]\nRequirements of PMC-1, from the Epic") || strings.Contains(c[0], "Open questions") {
+		e.t.Fatalf("the first comment is not the requirements without questions: %q", c)
+	}
+	return c[1:]
+}
+
 // planWithSpecify is a plan whose specify call answers out.
 func planWithSpecify(t *testing.T, out string, labels ...string) *epicEnv {
 	t.Helper()
@@ -75,6 +86,14 @@ func TestChildren_ThreeChildrenWithTheirLabelsAndParentAndTheLinkTheRightWayRoun
 			t.Errorf("the first child's description lacks %q:\n%s", want, issues[0].Fields.Description)
 		}
 	}
+	// Every child holds all the story's requirements, before the plan (listener-requirements §5).
+	reqs := "h3. Requirements of the story\n* sku\\-master keeps the categories of product\\-master, by country.\n" +
+		"* sku\\-master\\-fe shows the category of each SKU.\n\nh3. From the plan"
+	for i, is := range issues {
+		if !strings.Contains(is.Fields.Description, reqs) {
+			t.Errorf("child %d's description lacks the requirements:\n%s", i, is.Fields.Description)
+		}
+	}
 	if strings.Contains(issues[0].Fields.Description, "Needs:") {
 		t.Errorf("a task that needs nothing of another service has a Needs line:\n%s", issues[0].Fields.Description)
 	}
@@ -107,7 +126,7 @@ func TestChildren_ThreeChildrenWithTheirLabelsAndParentAndTheLinkTheRightWayRoun
 	if got := env.jira.statusNow(); got != "In Progress" {
 		t.Errorf("the Epic is in %q, want In Progress", got)
 	}
-	comments := env.jira.commentBodies()
+	comments := env.afterRequirements()
 	if len(comments) != 1 {
 		t.Fatalf("comments = %q", comments)
 	}
@@ -169,7 +188,7 @@ func TestChildren_NotQueuedChildrenLackTheQueueLabel(t *testing.T) {
 			t.Errorf("child %s is picked by the poll without the queue's label", h.Key)
 		}
 	}
-	comments := env.jira.commentBodies()
+	comments := env.afterRequirements()
 	if len(comments) != 1 || !strings.Contains(comments[0], "not labelled ai") {
 		t.Errorf("the Epic's comment does not say how to queue a child:\n%q", comments)
 	}
@@ -218,7 +237,7 @@ func TestChildren_ACreationThatTimesOutAfterSendingIsNotRepeated(t *testing.T) {
 	if got := env.jira.statusNow(); got != "Failed" {
 		t.Errorf("status = %q, want Failed", got)
 	}
-	comments := env.jira.commentBodies()
+	comments := env.afterRequirements()
 	if len(comments) != 1 {
 		t.Fatalf("comments = %q", comments)
 	}
@@ -249,7 +268,7 @@ func TestChildren_ARefusedCreationFailsWithoutADoubt(t *testing.T) {
 	if want := []listener.Child{{Task: "PM01", Key: "PMC-2"}}; !slices.Equal(e.Children, want) {
 		t.Errorf("children = %+v, want %+v: a refused creation leaves no intent", e.Children, want)
 	}
-	if c := env.jira.commentBodies(); len(c) != 1 || !strings.Contains(c[0], "was refused by Jira") || !strings.Contains(c[0], "|PMC-2|") {
+	if c := env.afterRequirements(); len(c) != 1 || !strings.Contains(c[0], "was refused by Jira") || !strings.Contains(c[0], "|PMC-2|") {
 		t.Errorf("comments = %q", c)
 	}
 }
@@ -269,7 +288,7 @@ func TestChildren_ARefusedLinkFailsTheEpicAndListsTheChildren(t *testing.T) {
 	if got := env.jira.statusNow(); got != "Failed" {
 		t.Errorf("status = %q, want Failed", got)
 	}
-	c := env.jira.commentBodies()
+	c := env.afterRequirements()
 	if len(c) != 1 {
 		t.Fatalf("comments = %q", c)
 	}
@@ -351,7 +370,7 @@ func TestChildren_ADescriptionWithASecretCreatesNothing(t *testing.T) {
 	if e.Outcome != listener.ResultFailed || e.Attempts != 1 || len(e.Children) != 0 {
 		t.Errorf("entry = %+v", e)
 	}
-	c := env.jira.commentBodies()
+	c := env.afterRequirements()
 	if len(c) != 1 || !strings.Contains(c[0], "PM02") || strings.Contains(c[0], "PRIVATE KEY") {
 		t.Errorf("comments = %q, want the task named and not the text", c)
 	}

@@ -50,6 +50,10 @@ type WikiTask struct {
 	References []string
 	// Needs are the tasks of other services this one needs, which no link chains.
 	Needs []WikiNeed
+	// Requirements are the story's requirements, all of them (specs/listener-requirements/SPEC.md §5),
+	// listed under "Requirements of the story" before the plan's section. When the description is too
+	// long they are cut first, from the end, before the plan is.
+	Requirements []string
 	// Approach and Contracts are the plan's, in Markdown, under "From the plan"; they are cut so that
 	// the whole description stays within MaxBytes (no cut when it is 0).
 	Approach, Contracts string
@@ -233,14 +237,53 @@ func listenerWiki(t WikiTask, body []string) string {
 	if c := strings.TrimSpace(t.Contracts); c != "" {
 		md = append(md, "#### Contracts", "", c, "")
 	}
+	var plan []string
 	if len(md) > 0 {
-		lines = append(lines, "", "h3. From the plan")
-		plan := markdown(strings.Join(md, "\n"))
-		note := "… (cut; the whole plan is in " + plainKey(t.Epic) + " comment)"
-		lines = appendWithin(lines, plan, note, t.MaxBytes)
+		plan = markdown(strings.Join(md, "\n"))
 	}
-	return strings.Join(lines, "\n") + "\n"
+	var reqs []string
+	for _, r := range t.Requirements {
+		if r = strings.Join(strings.Fields(r), " "); r != "" {
+			reqs = append(reqs, "* "+escape(r))
+		}
+	}
+
+	// head is the description up to the plan's lines, with the first k requirements, and the mark of
+	// a cut when cut.
+	head := func(k int, cut bool) []string {
+		out := slices.Clone(lines)
+		if len(reqs) > 0 {
+			out = append(out, "", "h3. Requirements of the story")
+			out = append(out, reqs[:k]...)
+			if cut {
+				out = append(out, requirementsCut)
+			}
+		}
+		if len(plan) > 0 {
+			out = append(out, "", "h3. From the plan")
+		}
+		return out
+	}
+	fits := func(ls []string) bool { return t.MaxBytes <= 0 || len(strings.Join(ls, "\n"))+1 <= t.MaxBytes }
+	if all := append(head(len(reqs), false), plan...); fits(all) {
+		return strings.Join(all, "\n") + "\n"
+	}
+	// The requirements are cut first, from the end; the plan only when none of them is left.
+	for k := len(reqs) - 1; k >= 0; k-- {
+		if all := append(head(k, true), plan...); fits(all) {
+			return strings.Join(all, "\n") + "\n"
+		}
+	}
+	out := head(0, len(reqs) > 0)
+	if len(plan) > 0 {
+		note := "… (cut; the whole plan is in " + plainKey(t.Epic) + " comment)"
+		out = appendWithin(out, plan, note, t.MaxBytes)
+	}
+	return strings.Join(out, "\n") + "\n"
 }
+
+// requirementsCut stands for the requirements a description too long left out.
+const requirementsCut = "* …"
 
 // appendWithin adds the lines of extra to lines while the whole stays within limit bytes (with its
 // final newline), and the note when some were left out. A cut inside a code block closes it. With

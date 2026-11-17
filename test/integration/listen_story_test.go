@@ -139,6 +139,9 @@ func (g *gitLabHTTP) mergeRequests(project string) string {
 const (
 	epicSelectResponse = `{"services":[{"path":"group/billing","why":"the dictionary lives here"},{"path":"group/shipping","why":"the editor shows it"}]}`
 	epicSurveyResponse = `{"summary":"Add is in fixture.go.","relevant_files":["fixture.go"],"interfaces":[],"constraints":[]}`
+	// epicRequirementsResponse is what the plan understood, with no question.
+	epicRequirementsResponse = `{"summary":"A categories dictionary, shown in the editor.",` +
+		`"requirements":["Billing keeps the categories of catalog.","Shipping shows the category of each item."],"questions":[]}`
 	// epicSpecifyResponse is three tasks: two of billing, the second needing the first, and one of shipping.
 	epicSpecifyResponse = `{"slug":"digital-categories","prefix":"DC","title":"Digital categories",` +
 		`"spec":{"problem":"p","approach":"a","contracts":"c","out_of_scope":"","risks":""},"tasks":[` +
@@ -165,6 +168,7 @@ func newEpicListenEnv(t *testing.T) (*listenEnv, *gitLabHTTP) {
 	responses := os.Getenv("FAKE_RESPONSES_DIR")
 	writeResponse(t, responses, "select", epicSelectResponse)
 	writeResponse(t, responses, "survey", epicSurveyResponse)
+	writeResponse(t, responses, "requirements", epicRequirementsResponse)
 	writeResponse(t, responses, "specify", epicSpecifyResponse)
 
 	gl := startGitLabHTTP(t, repoDir, "group/billing", "group/shipping", "group/catalog")
@@ -250,9 +254,10 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 	}
 	log := stderr.String()
 
-	// The plan: the catalog read once, the selection, a survey of each service and of the reference, specify.
+	// The plan: the catalog read once, the selection, a survey of the reference only, the requirements,
+	// specify (specs/listener-requirements: no target is surveyed or checked out by the plan).
 	calls := invocations(t, env.invocationsLog)
-	if want := []string{"select", "survey", "survey", "survey", "specify"}; len(calls) < len(want) || !slices.Equal(calls[:len(want)], want) {
+	if want := []string{"select", "survey", "requirements", "specify"}; len(calls) < len(want) || !slices.Equal(calls[:len(want)], want) {
 		t.Errorf("calls = %v, want the plan's first: %v", calls, want)
 	}
 	if got := gl.asked(); !slices.Equal(got, []string{"/api/v4/groups/group/projects"}) {
@@ -292,13 +297,15 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 		t.Errorf("link = %s, want PAY-4 blocked by PAY-2", links[0])
 	}
 
-	// The Epic stays at start, with the comment that names its children, and is planned once.
+	// The Epic stays at start, with the requirements comment and the one that names its children, and
+	// is planned once.
 	if got := env.jira.statusOf("PAY-1"); got != "In Progress" {
 		t.Errorf("PAY-1 is in %q, want In Progress", got)
 	}
 	comments := env.jira.botComments("PAY-1")
-	if len(comments) != 1 || !strings.Contains(comments[0], "Planned: 3 child tickets created under PAY-1.") {
-		t.Errorf("PAY-1 comments = %q, want the plan's", comments)
+	if len(comments) != 2 || !strings.Contains(comments[0], "Requirements of PAY-1, from the Epic and its references (catalog):") ||
+		!strings.Contains(comments[1], "Planned: 3 child tickets created under PAY-1.") {
+		t.Errorf("PAY-1 comments = %q, want the requirements, then the plan's", comments)
 	}
 	if e := env.state().Tickets["PAY-1"]; e.Phase != "finished" || e.Outcome != "planned" || e.Attempts != 1 {
 		t.Errorf("PAY-1 state = %+v, want planned after one attempt", e)
