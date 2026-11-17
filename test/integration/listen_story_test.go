@@ -142,6 +142,9 @@ const (
 	// epicRequirementsResponse is what the plan understood, with no question.
 	epicRequirementsResponse = `{"summary":"A categories dictionary, shown in the editor.",` +
 		`"requirements":["Billing keeps the categories of catalog.","Shipping shows the category of each item."],"questions":[]}`
+	// epicAskingResponse is what the plan understood when something the Epic needs is left open.
+	epicAskingResponse = `{"summary":"A categories dictionary, shown in the editor.",` +
+		`"requirements":["Billing keeps the categories of catalog."],"questions":["Which countries get the categories"]}`
 	// epicSpecifyResponse is three tasks: two of billing, the second needing the first, and one of shipping.
 	epicSpecifyResponse = `{"slug":"digital-categories","prefix":"DC","title":"Digital categories",` +
 		`"spec":{"problem":"p","approach":"a","contracts":"c","out_of_scope":"","risks":""},"tasks":[` +
@@ -348,5 +351,86 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 	// The second child of billing was claimed only after the first was delivered and moved to Done.
 	if first, second := strings.Index(log, "listen: PAY-2 → Ready to Review"), strings.Index(log, "listen: PAY-4 claimed"); first < 0 || second < first {
 		t.Errorf("PAY-4 was claimed at %d, before PAY-2 ended at %d:\n%s", second, first, log)
+	}
+}
+
+// An Epic whose requirements leave a question open is blocked with that one comment, and no child is
+// created and no target is checked out; once a person answers in a comment and moves the Epic back to
+// the queue, its next plan reads the answer, goes through to specify and creates the children
+// (specs/listener-requirements/SPEC.md §3, §8).
+func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T) {
+	env, _ := newEpicListenEnv(t)
+	responses, prompts := os.Getenv("FAKE_RESPONSES_DIR"), os.Getenv("FAKE_PROMPTS_DIR")
+	writeResponse(t, responses, "requirements", epicAskingResponse)
+
+	stderr := mustListen(t, env)
+
+	if got := env.jira.statusOf("PAY-1"); got != "Blocked" {
+		t.Fatalf("PAY-1 is in %q, want Blocked\nstderr:\n%s", got, stderr)
+	}
+	// The references are surveyed, the requirements asked for, and nothing is specified.
+	if got, want := invocations(t, env.invocationsLog), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+		t.Errorf("calls = %v, want %v", got, want)
+	}
+	comments := env.jira.botComments("PAY-1")
+	if len(comments) != 1 {
+		t.Fatalf("PAY-1 comments = %q, want one\nstderr:\n%s", comments, stderr)
+	}
+	for _, want := range []string{"[orchestrator]\n", "Requirements of PAY-1, from the Epic and its references (catalog):",
+		"* Billing keeps the categories of catalog.", "Open questions", "# Which countries get the categories", "move the Epic back to To Do"} {
+		if !strings.Contains(comments[0], want) {
+			t.Errorf("the comment lacks %q:\n%s", want, comments[0])
+		}
+	}
+	env.jira.mu.Lock()
+	created := len(env.jira.created)
+	env.jira.mu.Unlock()
+	if created != 0 {
+		t.Errorf("%d children were created, want none", created)
+	}
+	if e := env.state().Tickets["PAY-1"]; e.Phase != "finished" || e.Outcome != "blocked" || e.Attempts != 0 {
+		t.Errorf("PAY-1 state = %+v, want blocked, no attempt counted", e)
+	}
+	for _, target := range []string{"billing", "shipping"} {
+		if _, err := os.Stat(filepath.Join(env.wd, target)); err == nil {
+			t.Errorf("the plan checked out the target %s", target)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(env.wd, "catalog")); err != nil {
+		t.Errorf("the reference was not checked out: %v", err)
+	}
+
+	// A person answers and moves the Epic back to the queue; the plan now understands the Epic.
+	env.jira.person("PAY-1", "Only Germany and France.")
+	env.jira.setStatus("PAY-1", "To Do")
+	writeResponse(t, responses, "requirements", epicRequirementsResponse)
+	stderr = mustListen(t, env)
+
+	prompt, err := os.ReadFile(filepath.Join(prompts, "requirements.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Which countries get the categories", "--- comment, ", "Only Germany and France."} {
+		if !strings.Contains(string(prompt), want) {
+			t.Errorf("the second requirements prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	want := []string{"select", "survey", "requirements", "select", "survey", "requirements", "specify"}
+	if got := invocations(t, env.invocationsLog); !slices.Equal(got, want) {
+		t.Errorf("calls = %v, want %v\nstderr:\n%s", got, want, stderr)
+	}
+	env.jira.mu.Lock()
+	created = len(env.jira.created)
+	env.jira.mu.Unlock()
+	if created != 3 {
+		t.Errorf("%d children were created, want 3\nstderr:\n%s", created, stderr)
+	}
+	comments = env.jira.botComments("PAY-1")
+	if len(comments) != 3 || !strings.Contains(comments[1], "Requirements of PAY-1") || strings.Contains(comments[1], "Open questions") ||
+		!strings.Contains(comments[2], "Planned: 3 child tickets created under PAY-1.") {
+		t.Errorf("PAY-1 comments = %q, want the questions, the requirements, then the plan's", comments)
+	}
+	if e := env.state().Tickets["PAY-1"]; e.Outcome != "planned" || e.Attempts != 1 {
+		t.Errorf("PAY-1 state = %+v, want planned after one attempt", e)
 	}
 }

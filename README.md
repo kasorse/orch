@@ -1295,14 +1295,21 @@ in `done_statuses` waits, unclaimed, and is picked by a later poll once its bloc
 `specs/listener-story/`). Label the Epic `ai-run`; name the services with `gitlab:<group>/<path>`
 labels, or let a model choose them from the allowed groups' projects (a read-only API token in
 `gitlab.api_token_env`); add `ref:<group>/<path>` for a repository the work reads from but does not
-change. The listener moves the Epic to `start`, surveys each repository, specifies the tasks,
-creates one child per task (`jira.create`) in the queue's status with the labels the poll picks,
+change. The listener moves the Epic to `start`, surveys each reference (a target service is not
+surveyed: its child's run studies it), states the requirements it understood and writes them as a
+comment on the Epic (`specs/listener-requirements/`). If anything is unclear it stops: the Epic
+goes to `blocked` with the numbered questions and no child is created; answer in a comment and move
+the Epic back to the queue, and the next plan reads the answer. Otherwise it specifies the tasks from
+the requirements and creates one child per task (`jira.create`) in the queue's status with the labels the poll picks,
 links the tasks of one service so that each waits for the previous one (`listener.blockers`), and
 comments on the Epic, which stays at `start`: moving it to done is yours. The children then run as
 any ticket, those of different services in parallel. The listener's own account must be in
 `listener.query.reporters`, or it would never pick the children it made. An Epic that already has
 children the listener made is `blocked`; `ai-restart` plans it again with new children. Without
-`listener.story` an Epic is refused as before.
+`listener.story` an Epic is refused as before. The children's contracts between services are written
+from the requirements, not from the services' code, so a front-end child running in parallel with
+its back-end child may guess another shape: with `listener.story.queue_children: false` you queue
+the second child once the first is merged.
 
 In Docker:
 

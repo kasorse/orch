@@ -495,7 +495,9 @@ fallback: stacked on the same-repository task it
   `listener.story` an Epic is planned, exclusively (no run in progress, none starts meanwhile):
   **Go plans, the model only proposes** - Go fixes the catalog (the allowed groups' projects), the
   services (`gitlab:` labels, else a tool-less `select` call validated against the catalog), the
-  references (`ref:` labels, read-only, never a task), the chain of each service's tasks, the
+  references (`ref:` labels, read-only, never a task; only they are checked out and surveyed, a
+  target is its child's run's), the requirements (a tool-less call whose comment on the Epic ends
+  the plan `blocked` when it asks a question), the chain of each service's tasks, the
   labels and the order of the writes; the children are created and then linked with an intent
   before each write, never repeated, never deleted, and the Epic stays at `start` (§51.13). The
   children are ordinary tickets; nothing in their runs knows the Epic.
@@ -580,6 +582,7 @@ live permission suite is separate and spends real calls:
 `go test -tags security ./test/security/...`. Golden files:
 `go test ./internal/decision/jev -update`, `go test ./internal/logging -update`,
 `go test ./internal/jira -update`, and the stage prompts with a story's survey and specify prompts
+and the listener's requirements prompt
 `go test ./internal/action -update` (`internal/action/testdata/prompts/`; the test fixes
 `action.nonce`, so read the diff of a rewritten file before committing it). Never commit a token-shaped literal (an `AKIA…` key, a
 `ghp_…` token): secret scanners and push protection would flag the repository itself;
@@ -652,7 +655,7 @@ listener writes it, validates it as the run will, and passes the validated task 
 value, in its own process; the file stays as the record, which `readListenerTask` reads back; the run's `run.json` has
 `task.source.listener: true`); `logs/<KEY>.<attempt>.log` (a run's progress when
 `listener.max_parallel` is above 1); `plans/<KEY>.<attempt>/` (an Epic's plan: `ticket.json`, the
-select, survey and specify calls' artifacts and logs, `plan.json`; the Epic's state entry has `kind:
+select, survey (references only), requirements and specify calls' artifacts and logs, `plan.json`; the Epic's state entry has `kind:
 plan`, `plan_dir`, `children` and `links`); the clones, references included, live in
 `listener.services_dir` (`.clone-*` is a clone in progress).
 
