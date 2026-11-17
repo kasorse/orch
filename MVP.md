@@ -6384,6 +6384,7 @@ listener:
     max_services: 5               # 1..20: the services the selection may choose
     max_refs: 3                   # 0..10: ref: labels on one Epic
     max_tasks: 12                 # 1..30
+    max_tasks_per_service: 3      # 1..30: over it, specify is asked once more to merge, then the plan fails
     max_catalog: 500              # 1..2000: projects listed for the selection
     max_cost_usd: 5               # optional: every planning call of one Epic (the requirements call too)
     queue_children: true          # false: the children lack listener.query.label
@@ -6713,7 +6714,10 @@ child's run studies it, as for any ticket.
   tested alone. A task is written compactly: `goal` a numbered list, one item per entity or rule,
   mappings as arrows, keys and codes exactly, no rationale; 3 to 5 acceptance items; `notes` empty
   unless needed; every requirement of a service, assumed ones included, in one of its tasks. With the
-  briefs fenced after the requirements. `story.Validate`
+  briefs fenced after the requirements. The prompt states `listener.story.max_tasks_per_service`
+  (default 3); an answer with more tasks in a service is specified once more (planning kind
+  `specify-again`), told which services are over and to merge, and fails the plan, nothing created,
+  when it is still over. `story.Validate`
   as for a story; one task is a plan too. `story plan`'s specify keeps its target surveys and its
   prompt unchanged.
 * **The chain**: Go chains each service's tasks in the story's order (Kahn's order of `depends_on`,

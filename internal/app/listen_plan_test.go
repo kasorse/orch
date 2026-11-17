@@ -990,6 +990,35 @@ func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
 	}
 }
 
+// A service with more tasks than listener.story.max_tasks_per_service is specified once more, told which
+// to merge; still over, the plan fails and nothing is created.
+func TestPlan_TooManyTasksInAServiceAreSpecifiedAgainThenFail(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.r.lc.Story.MaxTasksPerService = 1 // the fixture has two tasks in sku-master
+	env.plan()
+
+	specs := env.prov.callsOf("specify")
+	if len(specs) != 2 || !strings.Contains(specs[0].prompt, "At most 1 tasks per repository.") ||
+		!strings.Contains(specs[1].prompt, "Your previous answer had 2 tasks in sku-master, more than listener.story.max_tasks_per_service (1).") {
+		t.Fatalf("specify calls = %d\n%s", len(specs), env.out.String())
+	}
+	e := env.r.entryOf("PMC-1")
+	if e.Outcome != listener.ResultFailed || !strings.Contains(e.Reason, "still has 2 tasks in sku-master") || len(env.jira.createdIssues()) != 0 {
+		t.Errorf("entry = %+v, children %d", e, len(env.jira.createdIssues()))
+	}
+	if a := env.artifact("specify-again"); a["answer"] == nil {
+		t.Errorf("the second specify's artifact = %v", a)
+	}
+
+	// Within the bound, one specify call.
+	env2 := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env2.r.lc.Story.MaxTasksPerService = 2
+	env2.plan()
+	if n := len(env2.prov.callsOf("specify")); n != 1 || env2.r.entryOf("PMC-1").Outcome != listener.ResultPlanned {
+		t.Errorf("specify calls = %d, entry = %+v", n, env2.r.entryOf("PMC-1"))
+	}
+}
+
 func TestPlan_AnInvalidRequirementsAnswerFailsWithTheAnswerKept(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "gitlab:g/pim/sku-master")
 	env.prov.outputs["requirements"] = `{"summary":"s","requirements":[],"questions":[]}`

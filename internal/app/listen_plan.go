@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -674,31 +675,66 @@ func targetNotes(targets []planTarget) map[string]string {
 // (specs/listener-requirements/SPEC.md §4).
 func (p *planRun) specify(text string, targets []planTarget, refSurveys []action.SurveyInput, briefs []action.TargetBrief, req story.RequirementsAnswer) (story.SpecifyAnswer, []story.Task, *planEnd) {
 	r, sc := p.r, p.r.lc.Story
-	if r.stopping() {
-		return story.SpecifyAnswer{}, nil, quietEnd()
-	}
-	if end := p.budget(); end != nil {
-		return story.SpecifyAnswer{}, nil, end
-	}
 	names := make([]string, len(targets))
 	for i, t := range targets {
 		names[i] = t.Name
 	}
-	r.logf("%s: specifying", p.key)
-	inv := r.cfg.Actions.Investigate
-	res, err := action.Specify(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.SpecifyInput{
+	in := action.SpecifyInput{
 		Request: text, Repos: names, MaxTasks: sc.MaxTasks, References: refSurveys, Parallel: true,
-		Requirements: &req, Notes: targetNotes(targets), Briefs: briefs,
-	})
-	p.calls["specify"] = res.Usage
-	if err := saveCall(p.plan, "specify", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
-		return story.SpecifyAnswer{}, nil, p.callEnd(err)
+		Requirements: &req, Notes: targetNotes(targets), Briefs: briefs, MaxPerRepo: sc.MaxTasksPerService,
 	}
-	tasks := res.Answer.Tasks()
-	if err := story.Validate(tasks, names, sc.MaxTasks); err != nil {
-		return story.SpecifyAnswer{}, nil, failedBy((&apperr.InvalidResponseError{Call: "specify", Field: "tasks", Msg: err.Error(), Err: err}).Error())
+	// A plan with too many tasks in a service is specified once more, told which to merge.
+	for _, name := range []string{"specify", "specify-again"} {
+		if r.stopping() {
+			return story.SpecifyAnswer{}, nil, quietEnd()
+		}
+		if end := p.budget(); end != nil {
+			return story.SpecifyAnswer{}, nil, end
+		}
+		r.logf("%s: specifying", p.key)
+		inv := r.cfg.Actions.Investigate
+		res, err := action.Specify(r.ctx, p.call(inv.ProviderModel, inv.Timeout), in)
+		p.calls[name] = res.Usage
+		if err := saveCall(p.plan, name, res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
+			return story.SpecifyAnswer{}, nil, p.callEnd(err)
+		}
+		tasks := res.Answer.Tasks()
+		if err := story.Validate(tasks, names, sc.MaxTasks); err != nil {
+			return story.SpecifyAnswer{}, nil, failedBy((&apperr.InvalidResponseError{Call: "specify", Field: "tasks", Msg: err.Error(), Err: err}).Error())
+		}
+		over := overPerService(tasks, sc.MaxTasksPerService)
+		if over == "" {
+			return res.Answer, tasks, nil
+		}
+		r.logf("%s: %s", p.key, over)
+		if name == "specify-again" {
+			return story.SpecifyAnswer{}, nil, failedBy("The plan still has " + over + " after it was asked to merge them; nothing was created.")
+		}
+		in.Merge = "Your previous answer had " + over + ". Merge the tasks of each repository that change the same places, " +
+			"fold the small ones into the tasks they relate to, and answer again with the whole plan."
 	}
-	return res.Answer, tasks, nil
+	return story.SpecifyAnswer{}, nil, nil // unreachable: the second pass returns
+}
+
+// overPerService names the services with more than limit tasks, "" when there is none.
+func overPerService(tasks []story.Task, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	count := map[string]int{}
+	for _, t := range tasks {
+		count[t.Repo]++
+	}
+	var over []string
+	for _, repo := range slices.Sorted(maps.Keys(count)) {
+		if count[repo] > limit {
+			over = append(over, fmt.Sprintf("%d tasks in %s", count[repo], repo))
+		}
+	}
+	if len(over) == 0 {
+		return ""
+	}
+	return strings.Join(over, " and ") + fmt.Sprintf(", more than listener.story.max_tasks_per_service (%d)", limit)
 }
 
 // surveyRepo is the survey of one reference's checkout: its directory and the listener's own deny list

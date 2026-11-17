@@ -22,7 +22,7 @@ func validListener() ListenerConfig {
 }
 
 func validListenerStory() ListenerStory {
-	return ListenerStory{MaxServices: 5, MaxRefs: 3, MaxTasks: 12, MaxCatalog: 500}
+	return ListenerStory{MaxServices: 5, MaxRefs: 3, MaxTasks: 12, MaxTasksPerService: 3, MaxCatalog: 500}
 }
 
 // withStory sets a valid listener.story changed by mutate.
@@ -202,8 +202,13 @@ func TestValidateListener(t *testing.T) {
 		{"blockers done missing", withBlockers("Blocks"), "listener.blockers.done_statuses is required"},
 		{"blockers done empty item", withBlockers("Blocks", " "), "listener.blockers.done_statuses[0]"},
 		{"story valid", withStory(func(*ListenerStory) {}), ""},
-		{"story bounds low", withStory(func(s *ListenerStory) { *s = ListenerStory{MaxServices: 1, MaxTasks: 1, MaxCatalog: 1} }), ""},
-		{"story bounds high", withStory(func(s *ListenerStory) { *s = ListenerStory{20, 10, 30, 2000, nil, false} }), ""},
+		{"story bounds low", withStory(func(s *ListenerStory) {
+			*s = ListenerStory{MaxServices: 1, MaxTasks: 1, MaxTasksPerService: 1, MaxCatalog: 1}
+		}), ""},
+		{"story bounds high", withStory(func(s *ListenerStory) {
+			*s = ListenerStory{MaxServices: 20, MaxRefs: 10, MaxTasks: 30, MaxTasksPerService: 30, MaxCatalog: 2000}
+		}), ""},
+		{"story per service zero", withStory(func(s *ListenerStory) { s.MaxTasksPerService = 0 }), "listener.story.max_tasks_per_service must be between 1 and 30, got 0"},
 		{"story services zero", withStory(func(s *ListenerStory) { s.MaxServices = 0 }), "listener.story.max_services must be between 1 and 20, got 0"},
 		{"story services 21", withStory(func(s *ListenerStory) { s.MaxServices = 21 }), "listener.story.max_services must be between 1 and 20, got 21"},
 		{"story refs negative", withStory(func(s *ListenerStory) { s.MaxRefs = -1 }), "listener.story.max_refs must be between 0 and 10, got -1"},

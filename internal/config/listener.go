@@ -30,10 +30,11 @@ const (
 	defaultGitLabUsername        = "oauth2"
 
 	// The defaults of listener.story (specs/listener-story/SPEC.md §2).
-	defaultListenerStoryMaxServices = 5
-	defaultListenerStoryMaxRefs     = 3
-	defaultListenerStoryMaxTasks    = 12
-	defaultListenerStoryMaxCatalog  = 500
+	defaultListenerStoryMaxServices   = 5
+	defaultListenerStoryMaxRefs       = 3
+	defaultListenerStoryMaxTasks      = 12
+	defaultListenerStoryMaxPerService = 3
+	defaultListenerStoryMaxCatalog    = 500
 )
 
 // Bounds on the listener's durations and counts.
@@ -47,14 +48,16 @@ const (
 	minListenerMaxParallel  = 1
 	maxListenerMaxParallel  = 8
 
-	minListenerStoryMaxServices = 1
-	maxListenerStoryMaxServices = 20
-	minListenerStoryMaxRefs     = 0
-	maxListenerStoryMaxRefs     = 10
-	minListenerStoryMaxTasks    = 1
-	maxListenerStoryMaxTasks    = 30
-	minListenerStoryMaxCatalog  = 1
-	maxListenerStoryMaxCatalog  = 2000
+	minListenerStoryMaxServices   = 1
+	maxListenerStoryMaxServices   = 20
+	minListenerStoryMaxRefs       = 0
+	maxListenerStoryMaxRefs       = 10
+	minListenerStoryMaxTasks      = 1
+	maxListenerStoryMaxTasks      = 30
+	minListenerStoryMaxPerService = 1
+	maxListenerStoryMaxPerService = 30
+	minListenerStoryMaxCatalog    = 1
+	maxListenerStoryMaxCatalog    = 2000
 )
 
 // gitlabPathPattern is a project path or a group prefix of one: slash-separated segments of
@@ -100,7 +103,10 @@ type ListenerStory struct {
 	MaxServices int
 	MaxRefs     int
 	MaxTasks    int
-	MaxCatalog  int
+	// MaxTasksPerService bounds the tasks of one service: a plan over it is specified once more, told
+	// to merge, and fails when it is still over.
+	MaxTasksPerService int
+	MaxCatalog         int
 	// MaxCostUSD bounds every planning call of one Epic; nil means no budget.
 	MaxCostUSD *float64
 	// QueueChildren gives the children the queue's label, so the listener runs them; false leaves
@@ -114,6 +120,7 @@ func (s *ListenerStory) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		MaxServices   *int     `yaml:"max_services"`
 		MaxRefs       *int     `yaml:"max_refs"`
 		MaxTasks      *int     `yaml:"max_tasks"`
+		MaxPerService *int     `yaml:"max_tasks_per_service"`
 		MaxCatalog    *int     `yaml:"max_catalog"`
 		MaxCostUSD    *float64 `yaml:"max_cost_usd"`
 		QueueChildren *bool    `yaml:"queue_children"`
@@ -128,12 +135,13 @@ func (s *ListenerStory) UnmarshalYAML(unmarshal func(interface{}) error) error {
 		return *p
 	}
 	*s = ListenerStory{
-		MaxServices:   orInt(raw.MaxServices, defaultListenerStoryMaxServices),
-		MaxRefs:       orInt(raw.MaxRefs, defaultListenerStoryMaxRefs),
-		MaxTasks:      orInt(raw.MaxTasks, defaultListenerStoryMaxTasks),
-		MaxCatalog:    orInt(raw.MaxCatalog, defaultListenerStoryMaxCatalog),
-		MaxCostUSD:    raw.MaxCostUSD,
-		QueueChildren: raw.QueueChildren == nil || *raw.QueueChildren,
+		MaxServices:        orInt(raw.MaxServices, defaultListenerStoryMaxServices),
+		MaxRefs:            orInt(raw.MaxRefs, defaultListenerStoryMaxRefs),
+		MaxTasks:           orInt(raw.MaxTasks, defaultListenerStoryMaxTasks),
+		MaxTasksPerService: orInt(raw.MaxPerService, defaultListenerStoryMaxPerService),
+		MaxCatalog:         orInt(raw.MaxCatalog, defaultListenerStoryMaxCatalog),
+		MaxCostUSD:         raw.MaxCostUSD,
+		QueueChildren:      raw.QueueChildren == nil || *raw.QueueChildren,
 	}
 	return nil
 }
@@ -375,6 +383,7 @@ func validateListenerStory(s ListenerStory) []string {
 		{"listener.story.max_services", s.MaxServices, minListenerStoryMaxServices, maxListenerStoryMaxServices},
 		{"listener.story.max_refs", s.MaxRefs, minListenerStoryMaxRefs, maxListenerStoryMaxRefs},
 		{"listener.story.max_tasks", s.MaxTasks, minListenerStoryMaxTasks, maxListenerStoryMaxTasks},
+		{"listener.story.max_tasks_per_service", s.MaxTasksPerService, minListenerStoryMaxPerService, maxListenerStoryMaxPerService},
 		{"listener.story.max_catalog", s.MaxCatalog, minListenerStoryMaxCatalog, maxListenerStoryMaxCatalog},
 	} {
 		if b.value < b.lo || b.value > b.hi {

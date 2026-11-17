@@ -33,7 +33,7 @@ const StoryPlanPrefix = ".plan-"
 // storyCallRE is the name of one of a story's planning calls: survey-<service> or specify, and the
 // listener's select, requirements, lookup and brief-<target>. It names the call's artifact and logs, so it is checked
 // wherever it becomes part of a path.
-var storyCallRE = regexp.MustCompile(`^((survey|brief)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}|specify|select|requirements|lookup)$`)
+var storyCallRE = regexp.MustCompile(`^((survey|brief)-[A-Za-z0-9][A-Za-z0-9._-]{0,63}|specify|specify-again|select|requirements|lookup)$`)
 
 // listenerPlanRE is the name of a listener's plan directory: <KEY>.<n>
 // (specs/listener-story/SPEC.md §7.3).
