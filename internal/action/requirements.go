@@ -36,14 +36,16 @@ type RequirementsResult struct {
 // requirementsRules state the bounds story.ParseRequirements enforces.
 var requirementsRules = fmt.Sprintf(`"summary" is what the task asks for, in at most %d bytes. `+
 	`"requirements" lists from 1 to %d requirements, each one statement of at most %d bytes. `+
+	`"assumptions" lists at most %d defaults you took instead of asking, each one statement of at most %d bytes. `+
 	`"questions" lists every question, each of at most %d bytes; leave it empty when nothing is left unclear. `+
-	`The summary and the questions are posted as they are in a comment on the ticket, for the people who own it, and are read by nobody else: `+
+	`The summary, the assumptions and the questions are posted as they are in a comment on the ticket, for the people who own it, and are read by nobody else: `+
 	`write them as a colleague would, short and in plain words. The summary is two to four sentences on what is built and where, `+
 	`with no list, no field or code names and no detail the requirements already hold. Each question asks one decision `+
 	`in one or two sentences, naming the options briefly when there are some. `+
 	`The requirements are the detail: they are not shown on the ticket but go to the developers. `+
 	`The summary, the requirements and the questions are written in the language of the task.`,
-	story.MaxRequirementsSummaryBytes, story.MaxRequirements, story.MaxRequirementBytes, story.MaxQuestionBytes)
+	story.MaxRequirementsSummaryBytes, story.MaxRequirements, story.MaxRequirementBytes,
+	story.MaxAssumptions, story.MaxAssumptionBytes, story.MaxQuestionBytes)
 
 // BuildRequirementsPrompt is the prompt of the requirements call: what to state, the shape of the
 // answer, the task, and the references' surveys, each in its own fence, in the order of the
@@ -58,8 +60,13 @@ func BuildRequirementsPrompt(in RequirementsInput) string {
 		"to reproduce: name it as such. " +
 		"Ask a question only about what neither the task nor the references settle and that changes what is built; " +
 		"ask nothing about code layout, naming or tests, which the runs that implement the task decide. " +
+		"When a choice is left open but one option is the reasonable default - what the references do, what the rest of the task " +
+		"and its discussion imply, the least surprising behaviour - take it and write it in \"assumptions\" instead of asking; " +
+		"ask only what has no reasonable default or what would be costly to undo if guessed wrong (data lost or rewritten, " +
+		"a migration, a change other teams depend on). A question about how existing code behaves may be asked: " +
+		"before anyone sees it, a later step looks for its answer in the code of the repositories. " +
 		"Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
-	b.WriteString("{\n  \"summary\": \"...\",\n  \"requirements\": [\"...\"],\n  \"questions\": [\"...\"]\n}\n\n")
+	b.WriteString("{\n  \"summary\": \"...\",\n  \"requirements\": [\"...\"],\n  \"assumptions\": [\"...\"],\n  \"questions\": [\"...\"]\n}\n\n")
 	b.WriteString(requirementsRules + "\n\n")
 	b.WriteString("Task:\n" + taskBlock(in.Request))
 	writeReferenceSurveys(&b, in.References)

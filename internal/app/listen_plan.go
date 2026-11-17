@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -210,7 +211,7 @@ func (r *listenRunner) plan(key string) error {
 	if end != nil {
 		return p.finish(end)
 	}
-	req, end := p.requirements(text, refs, refSurveys)
+	req, end := p.requirements(text, refs, targets, dirs, refSurveys)
 	if end != nil {
 		return p.finish(end)
 	}
@@ -428,7 +429,7 @@ func (p *planRun) surveys(text string, refs []planTarget, dirs map[string]string
 // §3): what the Epic asks for, from its text and its references' surveys, recorded in plan.json and,
 // once secret-scanned, written on the Epic. With a question the plan ends blocked, and the comment is
 // the outcome's (planBody); without one it is written here, and a failure to write it is logged.
-func (p *planRun) requirements(text string, refs []planTarget, refSurveys []action.SurveyInput) (story.RequirementsAnswer, *planEnd) {
+func (p *planRun) requirements(text string, refs, targets []planTarget, dirs map[string]string, refSurveys []action.SurveyInput) (story.RequirementsAnswer, *planEnd) {
 	r := p.r
 	if r.stopping() {
 		return story.RequirementsAnswer{}, quietEnd()
@@ -445,10 +446,15 @@ func (p *planRun) requirements(text string, refs []planTarget, refSurveys []acti
 	}
 	a := res.Answer
 	r.logf("%s: requirements: %d, questions: %d", p.key, len(a.Requirements), len(a.Questions))
+	if len(a.Questions) > 0 {
+		if end := p.lookup(text, refs, targets, dirs, &a); end != nil {
+			return story.RequirementsAnswer{}, end
+		}
+	}
 
 	// The model's text reaches Jira here: scanned as it wrote it and as it is sent (SPEC §3, B5).
 	comment := listener.ComposeFor(jira.Escape, r.requirementsBody(p.key, refs, a), "")
-	raw := strings.Join(slices.Concat([]string{a.Summary}, a.Requirements, a.Questions), "\n")
+	raw := strings.Join(slices.Concat([]string{a.Summary}, a.Requirements, a.Assumptions, a.Questions), "\n")
 	for _, s := range []string{raw, comment} {
 		if findings, _ := secretscan.Scan("comment", []byte(s)); len(findings) > 0 {
 			return story.RequirementsAnswer{}, failedBy("The requirements look like they hold a secret, so nothing was written on the Epic.")
@@ -471,8 +477,84 @@ func (p *planRun) requirements(text string, refs []planTarget, refSurveys []acti
 		r.isAuth(err)
 		r.logf("%s: cannot write the requirements comment, the plan goes on: %s", p.key, firstLineOf(err.Error()))
 	}
-	return a, nil
+	// What was decided without asking is a requirement for specify and the children like any other.
+	out := a
+	out.Requirements = slices.Clone(a.Requirements)
+	for _, s := range a.Assumptions {
+		out.Requirements = append(out.Requirements, "Assumed: "+s)
+	}
+	return out, nil
 }
+
+// lookup looks for the answers of a's questions in the code of the Epic's repositories before they are
+// put to people: the targets are checked out for it, read only, next to the references. What the code
+// settles moves from the questions to the assumptions, with where it shows. A lookup that cannot run or
+// fails leaves every question to people; only a stop or the budget ends the plan.
+func (p *planRun) lookup(text string, refs, targets []planTarget, dirs map[string]string, a *story.RequirementsAnswer) *planEnd {
+	r := p.r
+	if r.stopping() {
+		return quietEnd()
+	}
+	if end := p.budget(); end != nil {
+		return end
+	}
+	skip := func(why string) *planEnd {
+		r.logf("%s: no lookup, the questions go to the Epic: %s", p.key, why)
+		return nil
+	}
+	parent := ""
+	var repos []action.LookupRepo
+	for _, t := range slices.Concat(refs, targets) {
+		dir, isRef := dirs[t.Name], true
+		if dir == "" {
+			isRef = false
+			res, err := r.checkout.prepare(r.ctx, t.Name, t.Path)
+			if err != nil {
+				if r.stopping() {
+					return quietEnd()
+				}
+				return skip("the checkout of " + t.Name + " failed: " + firstLineOf(err.Error()))
+			}
+			dir = res.Dir
+		}
+		if parent == "" {
+			parent = filepath.Dir(dir)
+		} else if filepath.Dir(dir) != parent {
+			return skip("the checkouts are not in one directory")
+		}
+		repos = append(repos, action.LookupRepo{Name: filepath.Base(dir), Reference: isRef})
+	}
+	r.logf("%s: looking up %d questions in the code", p.key, len(a.Questions))
+	inv := r.cfg.Actions.Investigate
+	res, err := action.Lookup(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.LookupInput{
+		Request: text, Summary: a.Summary, Questions: a.Questions, Repos: repos,
+		Dir: parent, ExtraDeny: r.cfg.Context.ExtraDeny, RunsDir: runsBaseDir,
+	})
+	p.calls["lookup"] = res.Usage
+	if err := saveCall(p.plan, "lookup", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
+		if r.stopping() {
+			return quietEnd()
+		}
+		return skip(firstLineOf(err.Error()))
+	}
+	settled := map[int]bool{}
+	for _, it := range res.Answer.Answers {
+		settled[it.Question] = true
+		a.Assumptions = append(a.Assumptions, flat(a.Questions[it.Question-1])+" "+flat(it.Answer)+" (found in "+flat(it.Evidence)+")")
+	}
+	var open []string
+	for i, q := range a.Questions {
+		if !settled[i+1] {
+			open = append(open, q)
+		}
+	}
+	r.logf("%s: the code answered %d of %d questions", p.key, len(settled), len(a.Questions))
+	a.Questions = open
+	return nil
+}
+
+// flat is s on one line, its runs of whitespace one space.
+func flat(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 // requirementsBody is the requirements comment's body (SPEC §3) of an Epic with these references.
 func (r *listenRunner) requirementsBody(key string, refs []planTarget, a story.RequirementsAnswer) []string {
@@ -481,7 +563,7 @@ func (r *listenRunner) requirementsBody(key string, refs []planTarget, a story.R
 		names[i] = ref.Name
 	}
 	return listener.RequirementsComment(jira.Escape, key, names, listener.Requirements{
-		Summary: a.Summary, Questions: a.Questions, BackTo: r.queueStatus(),
+		Summary: a.Summary, Decided: a.Assumptions, Questions: a.Questions, BackTo: r.queueStatus(),
 	})
 }
 

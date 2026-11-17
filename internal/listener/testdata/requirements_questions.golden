@@ -1,6 +1,10 @@
 How the plan understood PMC-1 (references: product-master, pim-dictionaries):
 Add a \{categories\} dictionary to sku-master and show it in the editor.
 
+Decided without asking — if one is wrong, say so in a comment:
+* The import runs once.
+* Core publishes on save (found in sku-master/publish.go).
+
 Open questions — answer them in a comment and move the Epic back to To Do:
 # Which countries come first?
 # Is \[the old list\] kept?

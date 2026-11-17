@@ -811,9 +811,10 @@ func TestPlan_TheBudgetStopsBeforeTheRequirements(t *testing.T) {
 func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.prov.outputs["requirements"] = epicQuestionsAnswer
+	env.prov.outputs["lookup"] = `{"answers":[]}`
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v: no specify\n%s", got, want, env.out.String())
 	}
 	if got := env.jira.writes(); len(got) != 0 {
@@ -865,6 +866,77 @@ func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
 	}
 }
 
+// Before the questions are put to people the lookup reads the references and the targets, checked out
+// for it: what the code settles is written on the Epic as decided, with where it shows, and only the
+// rest is asked.
+func TestPlan_TheLookupAnswersAQuestionFromTheCode(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.prov.outputs["requirements"] = epicQuestionsAnswer
+	env.prov.outputs["lookup"] = `{"answers":[{"question":2,"answer":"No: the import replaces it.","evidence":"product-master/import.go"}]}`
+	env.plan()
+
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
+	}
+	look := env.prov.callsOf("lookup")[0]
+	if look.authority != domain.AuthorityRead || look.dir != env.r.checkout.servicesDir {
+		t.Errorf("lookup: authority %q, dir %q; want read in %s", look.authority, look.dir, env.r.checkout.servicesDir)
+	}
+	for _, want := range []string{"- product-master (reference", "- sku-master (the task changes it)", "- sku-master-fe (the task changes it)",
+		"1. Which countries come first?", "2. Is the old [category] list kept?"} {
+		if !strings.Contains(look.prompt, want) {
+			t.Errorf("the lookup prompt lacks %q", want)
+		}
+	}
+	for _, name := range []string{"sku-master", "sku-master-fe"} {
+		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name)); err != nil {
+			t.Errorf("the target %s was not checked out for the lookup: %v", name, err)
+		}
+	}
+	c := env.jira.commentBodies()
+	if len(c) != 1 || !strings.Contains(c[0], "Decided without asking") ||
+		!strings.Contains(c[0], `* Is the old \[category\] list kept\? No: the import replaces it. (found in product\-master/import.go)`) ||
+		!strings.Contains(c[0], `# Which countries come first\?`) || strings.Contains(c[0], `# Is the old`) {
+		t.Errorf("comments = %q, want the answer decided and one question left", c)
+	}
+	if rec := env.record(); !slices.Equal(rec.Questions, []string{"Which countries come first?"}) {
+		t.Errorf("plan.json questions = %q", rec.Questions)
+	}
+	if !strings.Contains(env.out.String(), "PMC-1: the code answered 1 of 2 questions") || !strings.Contains(env.out.String(), "blocked by 1 open question") {
+		t.Errorf("log:\n%s", env.out.String())
+	}
+}
+
+// When the code answers every question, and the model took a default of its own, nothing is asked:
+// the plan goes on, and what was decided reaches the children as requirements.
+func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.prov.outputs["requirements"] = `{"summary":"A categories dictionary in sku-master, shown by sku-master-fe.",` +
+		`"requirements":["sku-master keeps the categories of product-master, by country."],` +
+		`"assumptions":["The names are kept in en, nl and fr."],"questions":["Is the old list kept?"]}`
+	env.prov.outputs["lookup"] = `{"answers":[{"question":1,"answer":"No.","evidence":"product-master/import.go"}]}`
+	env.plan()
+
+	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup", "specify"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
+	}
+	if e := env.r.entryOf("PMC-1"); e.Outcome != listener.ResultPlanned {
+		t.Fatalf("entry = %+v, want planned\n%s", e, env.out.String())
+	}
+	c := env.jira.commentBodies()
+	if len(c) != 2 || !strings.Contains(c[0], "* The names are kept in en, nl and fr.") ||
+		!strings.Contains(c[0], "* Is the old list kept\\? No. (found in product\\-master/import.go)") || strings.Contains(c[0], "Open questions") {
+		t.Errorf("comments = %q", c)
+	}
+	if spec := env.prov.callsOf("specify")[0].prompt; !strings.Contains(spec, "Assumed: The names are kept in en, nl and fr.") ||
+		!strings.Contains(spec, "Assumed: Is the old list kept? No. (found in product-master/import.go)") {
+		t.Errorf("the specify prompt lacks what was decided:\n%s", spec)
+	}
+	if d := env.jira.createdIssues()[0].Fields.Description; !strings.Contains(d, "Assumed: The names are kept in en, nl and fr.") {
+		t.Errorf("a child's description lacks what was decided:\n%s", d)
+	}
+}
+
 func TestPlan_AnInvalidRequirementsAnswerFailsWithTheAnswerKept(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "gitlab:g/pim/sku-master")
 	env.prov.outputs["requirements"] = `{"summary":"s","requirements":[],"questions":[]}`
@@ -892,7 +964,7 @@ func TestPlan_ASecretInTheRequirementsFailsAndWritesNoRequirements(t *testing.T)
 	env.prov.outputs["requirements"] = `{"summary":"s","requirements":["use ` + secret + `"],"questions":["q?"]}`
 	env.plan()
 
-	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements"}) {
+	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements", "lookup"}) {
 		t.Fatalf("calls = %v, want no specify", got)
 	}
 	e := env.r.entryOf("PMC-1")

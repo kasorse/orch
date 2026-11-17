@@ -8,6 +8,7 @@ import (
 func TestRequirementsCommentWithQuestionsGolden(t *testing.T) {
 	golden(t, "requirements_questions.golden", RequirementsComment(testEscape, "PMC-1", []string{"product-master", "pim-dictionaries"}, Requirements{
 		Summary:   "Add a {categories} dictionary\n to sku-master and show it in the editor.",
+		Decided:   []string{"The import runs once.", "Core publishes on save (found in sku-master/publish.go)."},
 		Questions: []string{"Which countries come first?", "Is [the old list] kept?"},
 		BackTo:    "To Do",
 	}))

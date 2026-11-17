@@ -225,6 +225,13 @@ func TestPrompts_Golden(t *testing.T) {
 		{"requirements_references", func() string {
 			return BuildRequirementsPrompt(RequirementsInput{Request: goldenStoryRequest, References: goldenReferences()})
 		}},
+		{"lookup", func() string {
+			return BuildLookupPrompt(LookupInput{
+				Request: goldenStoryRequest, Summary: "Refunds may be partial.\n",
+				Questions: []string{"Does billing publish a refund\nat once?", "Which currency is used?"},
+				Repos:     []LookupRepo{{Name: "billing"}, {Name: "ledger", Reference: true}},
+			})
+		}},
 		{"specify_requirements", func() string {
 			return buildSpecifyPrompt(SpecifyInput{
 				Request: goldenStoryRequest, Repos: []string{"gateway", "billing"}, MaxTasks: 12,
