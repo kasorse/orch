@@ -157,13 +157,13 @@ func ParseSurvey(obj []byte) (SurveyAnswer, error) {
 }
 
 // Bounds of the requirements answer (specs/listener-requirements/SPEC.md §2). The prompt states the
-// same numbers.
+// same numbers. The summary and the questions are the Epic's comment, read by people only: they are
+// kept short; the requirements are the detail specify and the children's descriptions get.
 const (
-	MaxRequirementsSummaryBytes = 4000
+	MaxRequirementsSummaryBytes = 1200
 	MaxRequirements             = 30
 	MaxRequirementBytes         = 600
-	MaxQuestions                = 10
-	MaxQuestionBytes            = 600
+	MaxQuestionBytes            = 400
 )
 
 // RequirementsAnswer is the answer of the requirements call: what the Epic asks for, understood
@@ -175,8 +175,8 @@ type RequirementsAnswer struct {
 }
 
 // ParseRequirements decodes a requirements answer strictly: no other key, a summary of 1 to
-// MaxRequirementsSummaryBytes, 1 to MaxRequirements requirements and at most MaxQuestions
-// questions, each one of 1 to 600 bytes. Any violation is an *AnswerError naming the field.
+// MaxRequirementsSummaryBytes, 1 to MaxRequirements requirements of 1 to MaxRequirementBytes and any
+// number of questions of 1 to MaxQuestionBytes. Any violation is an *AnswerError naming the field.
 func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	var a RequirementsAnswer
 	if err := decodeStrict(obj, &a); err != nil {
@@ -197,7 +197,7 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 		bytes int
 	}{
 		{"requirements", a.Requirements, MaxRequirements, MaxRequirementBytes},
-		{"questions", a.Questions, MaxQuestions, MaxQuestionBytes},
+		{"questions", a.Questions, 0, MaxQuestionBytes}, // as many as there are
 	} {
 		if err := checkCount(list.name, len(list.items), list.limit); err != nil {
 			return RequirementsAnswer{}, err
@@ -215,8 +215,9 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	return a, nil
 }
 
+// checkCount refuses more than limit entries; a limit of 0 is none.
 func checkCount(field string, n, limit int) error {
-	if n > limit {
+	if limit > 0 && n > limit {
 		return answerErr(field, "has %d entries, more than %d", n, limit)
 	}
 	return nil

@@ -77,19 +77,30 @@ type RenderOptions struct {
 	// Bot is the account the credentials belong to (Client.Myself); the comments it wrote
 	// carry BotMarker on their first line. Without it there is no discussion.
 	Bot string
+	// FromFirst starts the discussion at the bot's first marked comment instead of its last: an
+	// Epic's plan asks in rounds and must read every round's answers, since its comments are short
+	// and do not carry the earlier answers forward.
+	FromFirst bool
 }
 
-// discussion is the section's body: the bot's last comment that starts with BotMarker and every
-// comment after it, each under a "--- who, when" line. Authors are not named. With no such
+// discussion is the section's body: the bot's last (FromFirst: first) comment that starts with
+// BotMarker and every comment after it, each under a "--- who, when" line. Authors are not named; a
+// comment of the bot's account without BotMarker is a person's, written with the same account. With no such
 // comment it is empty, and the section is left out.
 func (o RenderOptions) discussion() string {
 	if o.Bot == "" {
 		return ""
 	}
+	marked := func(c domain.TicketComment) bool {
+		return c.Author == o.Bot && strings.HasPrefix(clean(c.Body), BotMarker)
+	}
 	last := -1
 	for i, c := range o.Comments {
-		if c.Author == o.Bot && strings.HasPrefix(clean(c.Body), BotMarker) {
+		if marked(c) {
 			last = i
+			if o.FromFirst {
+				break
+			}
 		}
 	}
 	if last < 0 {
@@ -102,7 +113,7 @@ func (o RenderOptions) discussion() string {
 			continue
 		}
 		who := "comment"
-		if c.Author == o.Bot {
+		if marked(c) {
 			who = "orchestrator"
 		}
 		parts = append(parts, fmt.Sprintf("--- %s, %s\n%s", who, c.Created.UTC().Format("2006-01-02 15:04"), body))

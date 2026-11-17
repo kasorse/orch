@@ -625,8 +625,8 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 		t.Errorf("entry = %+v", e)
 	}
 	comments := env.jira.commentBodies()
-	if len(comments) != 2 || !strings.HasPrefix(comments[0], "[orchestrator]\nRequirements of PMC-1, from the Epic and its references (product\\-master):\n") ||
-		!strings.Contains(comments[0], "* sku\\-master keeps the categories of product\\-master, by country.") || strings.Contains(comments[0], "Open questions") ||
+	if len(comments) != 2 || !strings.HasPrefix(comments[0], "[orchestrator]\nHow the plan understood PMC-1 (references: product\\-master):\n") ||
+		strings.Contains(comments[0], "keeps the categories") || strings.Contains(comments[0], "Open questions") ||
 		!strings.Contains(comments[1], "Planned: 3 child tickets created under PMC-1.") {
 		t.Errorf("comments = %q, want the requirements, then the plan's", comments)
 	}
@@ -681,7 +681,7 @@ func TestPlan_GitlabLabelsAreTheServicesAndSkipTheSelection(t *testing.T) {
 	if p := env.prov.callsOf("requirements")[0].prompt; strings.Contains(p, "Reference surveys") {
 		t.Errorf("the requirements of an Epic without references hold a survey:\n%s", p)
 	}
-	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "Requirements of PMC-1, from the Epic:") {
+	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "How the plan understood PMC-1:") {
 		t.Errorf("comments = %q", c)
 	}
 	if got := env.cat.asked(); len(got) != 0 {
@@ -784,7 +784,7 @@ func TestPlan_TheBudgetStopsBeforeSpecify(t *testing.T) {
 		t.Errorf("plan.json = %+v, want the cost of the survey and the requirements", rec)
 	}
 	// The requirements comment, then the failure's.
-	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "Requirements of PMC-1") || !strings.Contains(c[1], `max\_cost\_usd`) ||
+	if c := env.jira.commentBodies(); len(c) != 2 || !strings.Contains(c[0], "How the plan understood PMC-1") || !strings.Contains(c[1], `max\_cost\_usd`) ||
 		env.jira.statusNow() != "Failed" {
 		t.Errorf("comments = %q, status = %q", c, env.jira.statusNow())
 	}
@@ -801,7 +801,7 @@ func TestPlan_TheBudgetStopsBeforeTheRequirements(t *testing.T) {
 	if got, want := env.prov.actions(), []string{"select", "survey"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
-	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "Requirements of") {
+	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "How the plan understood") {
 		t.Errorf("comments = %q, want the failure's only", c)
 	}
 }
@@ -831,8 +831,8 @@ func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
 		t.Fatalf("comments = %q, want one", c)
 	}
 	for _, want := range []string{
-		"[orchestrator]\nRequirements of PMC-1, from the Epic and its references (product\\-master):",
-		"* sku\\-master keeps the categories of product\\-master, by country.",
+		"[orchestrator]\nHow the plan understood PMC-1 (references: product\\-master):",
+		"A categories dictionary in sku\\-master, shown by sku\\-master\\-fe.",
 		"Open questions — answer them in a comment and move the Epic back to To Do:",
 		`# Which countries come first\?`, `# Is the old \[category\] list kept\?`,
 	} {
@@ -881,7 +881,7 @@ func TestPlan_AnInvalidRequirementsAnswerFailsWithTheAnswerKept(t *testing.T) {
 	if a["output"] != env.prov.outputs["requirements"] || a["answer"] != nil || !strings.Contains(fmt.Sprint(a["error"]), "requirements") {
 		t.Errorf("requirements artifact = %v, want the raw answer and the error", a)
 	}
-	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "Requirements of") || env.jira.statusNow() != "Failed" {
+	if c := env.jira.commentBodies(); len(c) != 1 || strings.Contains(c[0], "How the plan understood") || env.jira.statusNow() != "Failed" {
 		t.Errorf("comments = %q, status = %q", c, env.jira.statusNow())
 	}
 }
@@ -900,7 +900,7 @@ func TestPlan_ASecretInTheRequirementsFailsAndWritesNoRequirements(t *testing.T)
 		t.Errorf("entry = %+v", e)
 	}
 	c := env.jira.commentBodies()
-	if len(c) != 1 || strings.Contains(c[0], "PRIVATE KEY") || strings.Contains(c[0], "Requirements of") {
+	if len(c) != 1 || strings.Contains(c[0], "PRIVATE KEY") || strings.Contains(c[0], "How the plan understood") {
 		t.Errorf("comments = %q, want the failure only, without the text", c)
 	}
 	if rec := env.record(); rec.Requirements != nil || len(rec.Questions) != 0 {

@@ -1,4 +1,2 @@
-Requirements of PMC-1, from the Epic:
+How the plan understood PMC-1:
 Add a categories dictionary to sku-master.
-* The dictionary holds the categories of product-master, by country.
-* The editor shows the category of each SKU.

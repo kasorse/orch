@@ -33,7 +33,7 @@ func (j *epicJira) writes() []string {
 func (e *epicEnv) afterRequirements() []string {
 	e.t.Helper()
 	c := e.jira.commentBodies()
-	if len(c) == 0 || !strings.HasPrefix(c[0], "[orchestrator]\nRequirements of PMC-1, from the Epic") || strings.Contains(c[0], "Open questions") {
+	if len(c) == 0 || !strings.HasPrefix(c[0], "[orchestrator]\nHow the plan understood PMC-1") || strings.Contains(c[0], "Open questions") {
 		e.t.Fatalf("the first comment is not the requirements without questions: %q", c)
 	}
 	return c[1:]
