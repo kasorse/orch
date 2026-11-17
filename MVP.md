@@ -6662,15 +6662,17 @@ child's run studies it, as for any ticket.
   what the Epic and its discussion imply) is taken and written in `assumptions` instead of asked; a
   question is kept for what has no default or would be costly to undo if guessed wrong. The answer
   `{"summary", "requirements", "assumptions", "questions"}` is strict
-  (`story.ParseRequirements`: summary 1..1200 bytes, 1..30 requirements of 1..600 bytes, any number of
-  questions of 1..400 bytes, 0..15 assumptions of 1..400 bytes, unknown keys refused; the prompt asks for a short, plain summary and
+  (`story.ParseRequirements`: a summary, 1..30 requirements, any number of questions and assumptions,
+  none empty, unknown keys refused; a text over its bound — summary 1200 bytes, a requirement 600, a
+  question or an assumption 400 — is cut and marked "…", not refused; the prompt asks for a short, plain summary and
   questions, which people read on the Epic, and puts the detail in the requirements); a violation fails the plan with the answer kept. It counts in
   `listener.story.max_cost_usd`.
 * **Lookup**, only when the requirements ask something: the targets are checked out next to the
   references, and one `read` call (`action.Lookup`, planning kind `lookup`, on `actions.investigate`
   with `context.extra_deny`) works in the checkouts' directory and answers what the code settles (how
   existing code behaves, where data comes from, a choice the code makes moot), each with where it
-  shows (`story.ParseLookup`: `{"answers": [{"question", "answer", "evidence"}]}`). An answered
+  shows (`story.ParseLookup`: `{"answers": [{"question", "answer", "evidence"}]}`, a question named at
+  most once; an answer over 600 bytes or evidence over 300 is cut, not refused). An answered
   question becomes an assumption, "<question> <answer> (found in <evidence>)"; the rest stays a
   question. A lookup that cannot run (a checkout fails) or fails leaves every question to people and
   is logged; it counts in `listener.story.max_cost_usd`. The assumptions reach specify and the

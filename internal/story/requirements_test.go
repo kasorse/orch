@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func goodRequirements() map[string]any {
@@ -53,7 +54,7 @@ func TestParseRequirements_Bounds(t *testing.T) {
 		{"summary missing", func(m map[string]any) { delete(m, "summary") }, "summary"},
 		{"summary blank", func(m map[string]any) { m["summary"] = " \n" }, "summary"},
 		{"summary at the limit", func(m map[string]any) { m["summary"] = strings.Repeat("s", MaxRequirementsSummaryBytes) }, ""},
-		{"summary over the limit", func(m map[string]any) { m["summary"] = strings.Repeat("s", MaxRequirementsSummaryBytes+1) }, "summary"},
+		{"summary over the limit, cut", func(m map[string]any) { m["summary"] = strings.Repeat("s", MaxRequirementsSummaryBytes+1) }, ""},
 		{"summary of the wrong type", func(m map[string]any) { m["summary"] = 3 }, "summary"},
 		{"requirements missing", func(m map[string]any) { delete(m, "requirements") }, "requirements"},
 		{"requirements empty", func(m map[string]any) { m["requirements"] = []any{} }, "requirements"},
@@ -62,15 +63,14 @@ func TestParseRequirements_Bounds(t *testing.T) {
 		{"too many requirements", func(m map[string]any) { m["requirements"] = many(MaxRequirements+1, "r") }, "requirements"},
 		{"a blank requirement", func(m map[string]any) { m["requirements"] = []any{"r", "  "} }, "requirements[1]"},
 		{"a requirement at the limit", func(m map[string]any) { m["requirements"] = []any{strings.Repeat("r", MaxRequirementBytes)} }, ""},
-		{"a requirement over the limit", func(m map[string]any) { m["requirements"] = []any{"r", strings.Repeat("r", MaxRequirementBytes+1)} }, "requirements[1]"},
+		{"a requirement over the limit, cut", func(m map[string]any) { m["requirements"] = []any{"r", strings.Repeat("r", MaxRequirementBytes+1)} }, ""},
 		{"many questions", func(m map[string]any) { m["questions"] = many(50, "q") }, ""},
 		{"a blank question", func(m map[string]any) { m["questions"] = []any{""} }, "questions[0]"},
 		{"a question at the limit", func(m map[string]any) { m["questions"] = []any{strings.Repeat("q", MaxQuestionBytes)} }, ""},
-		{"a question over the limit", func(m map[string]any) { m["questions"] = []any{strings.Repeat("q", MaxQuestionBytes+1)} }, "questions[0]"},
+		{"a question over the limit, cut", func(m map[string]any) { m["questions"] = []any{strings.Repeat("q", MaxQuestionBytes+1)} }, ""},
 		{"questions of the wrong type", func(m map[string]any) { m["questions"] = "which?" }, "questions"},
-		{"assumptions at the limit", func(m map[string]any) { m["assumptions"] = many(MaxAssumptions, "a") }, ""},
-		{"too many assumptions", func(m map[string]any) { m["assumptions"] = many(MaxAssumptions+1, "a") }, "assumptions"},
-		{"an assumption over the limit", func(m map[string]any) { m["assumptions"] = []any{strings.Repeat("a", MaxAssumptionBytes+1)} }, "assumptions[0]"},
+		{"many assumptions", func(m map[string]any) { m["assumptions"] = many(50, "a") }, ""},
+		{"a blank assumption", func(m map[string]any) { m["assumptions"] = []any{" "} }, "assumptions[0]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,14 +120,40 @@ func TestParseLookup(t *testing.T) {
 		"question too high": {`{"answers":[` + item(3, "a", "e") + `]}`, "answers[0].question"},
 		"question twice":    {`{"answers":[` + item(1, "a", "e") + `,` + item(1, "b", "e") + `]}`, "answers[1].question"},
 		"blank answer":      {`{"answers":[` + item(1, " ", "e") + `]}`, "answers[0].answer"},
-		"long answer":       {`{"answers":[` + item(1, strings.Repeat("a", MaxLookupAnswerBytes+1), "e") + `]}`, "answers[0].answer"},
 		"no evidence":       {`{"answers":[` + item(1, "a", "") + `]}`, "answers[0].evidence"},
-		"long evidence":     {`{"answers":[` + item(1, "a", strings.Repeat("e", MaxLookupEvidenceBytes+1)) + `]}`, "answers[0].evidence"},
 	} {
 		_, err := ParseLookup([]byte(tc.obj), 2)
 		var aerr *AnswerError
 		if !errors.As(err, &aerr) || aerr.Field != tc.field {
 			t.Errorf("%s: err = %v, want a field error on %s", name, err, tc.field)
 		}
+	}
+}
+
+// A text over its bound is cut at a character, marked, and kept within the bound; the call is not refused.
+func TestParse_OverlongTextsAreCut(t *testing.T) {
+	long := strings.Repeat("ж", 400) // 800 bytes
+	a, err := ParseRequirements(marshal(t, map[string]any{"summary": long, "requirements": []any{long}, "questions": []any{long}, "assumptions": []any{long}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string]struct {
+		s     string
+		bound int
+	}{
+		"summary": {a.Summary, 800}, "requirement": {a.Requirements[0], MaxRequirementBytes},
+		"question": {a.Questions[0], MaxQuestionBytes}, "assumption": {a.Assumptions[0], MaxAssumptionBytes},
+	} {
+		if got.bound >= len(long) {
+			continue
+		}
+		if len(got.s) > got.bound || !strings.HasSuffix(got.s, "…") || !utf8.ValidString(got.s) {
+			t.Errorf("%s: %d bytes (bound %d), %q…", name, len(got.s), got.bound, got.s[len(got.s)-6:])
+		}
+	}
+	l, err := ParseLookup([]byte(`{"answers":[{"question":1,"answer":"`+strings.Repeat("a", 700)+`","evidence":"`+strings.Repeat("e", 400)+`"}]}`), 1)
+	if err != nil || len(l.Answers[0].Answer) > MaxLookupAnswerBytes || len(l.Answers[0].Evidence) > MaxLookupEvidenceBytes ||
+		!strings.HasSuffix(l.Answers[0].Answer, "…") {
+		t.Errorf("lookup = %+v, %v", l, err)
 	}
 }
