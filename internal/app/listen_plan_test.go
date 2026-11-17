@@ -414,6 +414,19 @@ type epicEnv struct {
 	prov *planProvider
 	cat  *fakeCatalog
 	out  *bytes.Buffer
+	// remotes holds the bare repositories the checkouts clone.
+	remotes string
+}
+
+// pushFile commits name with content to the main branch of project's remote.
+func (e *epicEnv) pushFile(project, name, content string) {
+	e.t.Helper()
+	work := filepath.Join(e.t.TempDir(), "work")
+	ckGit(e.t, e.remotes, "clone", "-q", filepath.Join(e.remotes, filepath.FromSlash(project)+".git"), work)
+	ckWrite(e.t, filepath.Join(work, name), content)
+	ckGit(e.t, work, "add", "-A")
+	ckGit(e.t, work, "commit", "-qm", "add "+name)
+	ckGit(e.t, work, "push", "-q", "origin", "main")
 }
 
 var epicCatalog = []domain.Project{
@@ -458,7 +471,7 @@ func newEpicEnv(t *testing.T, status string, labels ...string) *epicEnv {
 	r.registry.Register(provider.Claude, prov)
 	cat := &fakeCatalog{projects: map[string][]domain.Project{"g": epicCatalog}}
 	r.catalog = cat
-	return &epicEnv{t: t, r: r, jira: j, prov: prov, cat: cat, out: out}
+	return &epicEnv{t: t, r: r, jira: j, prov: prov, cat: cat, out: out, remotes: root}
 }
 
 func (e *epicEnv) head() domain.TicketHead {
@@ -642,14 +655,54 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	if st := env.stateIsValid(); st.Tickets["PMC-1"].PlanDir != "plans/PMC-1.1" {
 		t.Errorf("saved entry = %+v", st.Tickets["PMC-1"])
 	}
-	// The reference is checked out; no target is: its child's run does it.
-	if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, "product-master", "a.txt")); err != nil {
-		t.Errorf("checkout of the reference: %v", err)
-	}
-	for _, name := range []string{"sku-master", "sku-master-fe"} {
-		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name)); err == nil {
-			t.Errorf("the target %s was checked out by the plan", name)
+	// The reference and the targets are checked out; the targets to read their instructions, which they
+	// have none of here: no brief call.
+	for _, name := range []string{"product-master", "sku-master", "sku-master-fe"} {
+		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name, "a.txt")); err != nil {
+			t.Errorf("checkout of %s: %v", name, err)
 		}
+	}
+	if !strings.Contains(env.out.String(), "PMC-1: no brief of sku-master: it has no CLAUDE.md, AGENTS.md, README.md") {
+		t.Errorf("a target without instructions is not logged:\n%s", env.out.String())
+	}
+}
+
+// A target's instruction files make its brief, tool-less, once each (a file that repeats another is left
+// out); the brief reaches the requirements and specify prompts. A failed brief is logged and the plan goes on.
+func TestPlan_TheTargetsInstructionsMakeTheirBriefs(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.pushFile("g/pim/sku-master", "CLAUDE.md", "# sku-master\nProducts are per country; there are no sites.\n")
+	env.pushFile("g/pim/sku-master", "AGENTS.md", "# sku-master\nProducts are per country; there are no sites.\n")
+	env.pushFile("g/pim/sku-master-fe", "README.md", "The editor.\n")
+	env.prov.outputs["brief"] = `{"architecture":"Countries, not sites.","rules":["A product attribute is per country."]}`
+	env.plan()
+
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "specify"}; !slices.Equal(got, want) {
+		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
+	}
+	briefs := env.prov.callsOf("brief")
+	if b := briefs[0]; b.authority != domain.AuthorityNone || b.dir != "" || !strings.Contains(b.prompt, "=== CLAUDE.md ===") ||
+		strings.Contains(b.prompt, "=== AGENTS.md ===") || !strings.Contains(b.prompt, "there are no sites") {
+		t.Errorf("the brief of sku-master: authority %q, dir %q, prompt:\n%s", b.authority, b.dir, b.prompt)
+	}
+	for _, action := range []string{"requirements", "specify"} {
+		p := env.prov.callsOf(action)[0].prompt
+		if !strings.Contains(p, "the brief of the target repository sku-master") || !strings.Contains(p, "Countries, not sites.") ||
+			!strings.Contains(p, "sites where the target has countries") {
+			t.Errorf("the %s prompt lacks the briefs:\n%s", action, p)
+		}
+	}
+	if a := env.artifact("brief-sku-master"); a["answer"] == nil {
+		t.Errorf("the brief's artifact = %v", a)
+	}
+
+	// A brief that fails leaves the target without one, and the plan goes on.
+	env2 := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env2.pushFile("g/pim/sku-master", "CLAUDE.md", "x\n")
+	env2.prov.outputs["brief"] = "no json"
+	env2.plan()
+	if e := env2.r.entryOf("PMC-1"); e.Outcome != listener.ResultPlanned || !strings.Contains(env2.out.String(), "PMC-1: no brief of sku-master: brief") {
+		t.Errorf("entry = %+v\n%s", e, env2.out.String())
 	}
 }
 
@@ -934,9 +987,6 @@ func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
 	if spec := env.prov.callsOf("specify")[0].prompt; !strings.Contains(spec, "Assumed: The names are kept in en, nl and fr.") ||
 		!strings.Contains(spec, "Assumed: Is the old list kept? No. (found in product-master/import.go)") {
 		t.Errorf("the specify prompt lacks what was decided:\n%s", spec)
-	}
-	if d := env.jira.createdIssues()[0].Fields.Description; !strings.Contains(d, "Assumed: The names are kept in en, nl and fr.") {
-		t.Errorf("a child's description lacks what was decided:\n%s", d)
 	}
 }
 

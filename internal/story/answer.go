@@ -228,6 +228,41 @@ func cutMarked(s string, n int) string {
 }
 
 // checkCount refuses more than limit entries; a limit of 0 is none.
+// Bounds of the brief answer: a target's architecture and business rules from its instructions. Texts
+// over them are cut, not refused; rules past the count are dropped.
+const (
+	MaxBriefArchitectureBytes = 2000
+	MaxBriefRules             = 25
+	MaxBriefRuleBytes         = 300
+)
+
+// BriefAnswer is the brief of a target repository.
+type BriefAnswer struct {
+	Architecture string   `json:"architecture"`
+	Rules        []string `json:"rules"`
+}
+
+// ParseBrief decodes a brief strictly (no other key, an architecture that is not empty), cutting what
+// is over its bounds.
+func ParseBrief(obj []byte) (BriefAnswer, error) {
+	var a BriefAnswer
+	if err := decodeStrict(obj, &a); err != nil {
+		return BriefAnswer{}, err
+	}
+	if strings.TrimSpace(a.Architecture) == "" {
+		return BriefAnswer{}, answerErr("architecture", "is empty")
+	}
+	a.Architecture = cutMarked(a.Architecture, MaxBriefArchitectureBytes)
+	a.Rules = slices.DeleteFunc(a.Rules, func(r string) bool { return strings.TrimSpace(r) == "" })
+	if len(a.Rules) > MaxBriefRules {
+		a.Rules = a.Rules[:MaxBriefRules]
+	}
+	for i, r := range a.Rules {
+		a.Rules[i] = cutMarked(r, MaxBriefRuleBytes)
+	}
+	return a, nil
+}
+
 // Bounds of the lookup answer: what the code settles of the requirements' questions.
 const (
 	MaxLookupAnswerBytes   = 600

@@ -1,7 +1,6 @@
 package jira
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -114,33 +113,30 @@ func TestWiki_EmptyBody(t *testing.T) {
 // listenerTask is the description of a child of an Epic's plan (specs/listener-story/SPEC.md §8.2).
 func listenerTask() WikiTask {
 	return WikiTask{
-		Body:        "## Goal\n\nDo it.",
+		Body:        "## Goal\n\nDo it.\n\n## Notes\n\nMind the cache.",
 		Epic:        "PMC-1",
 		EpicSummary: "Big [thing]",
 		Service:     "sku-master",
 		ServicePath: "g/pim/sku-master",
 		References:  []string{"https://gitlab.example/g/pim/product-master"},
 		Needs:       []WikiNeed{{Key: "PMC-3", Service: "sku-fe"}},
-		Approach:    "Use the dictionary.",
-		Contracts:   "GET /x",
 	}
 }
 
+// The story's lines come first and the task's own text last: nothing follows its Notes.
 func TestWiki_ListenerChild(t *testing.T) {
-	want := "h2. Goal\n\nDo it.\n\n----\n" +
-		`Story: PMC-1 — Big \[thing\]` + "\n" +
-		`Service: sku\-master (g/pim/sku\-master)` + "\n\n" +
-		"References:\n* [https://gitlab.example/g/pim/product-master]\n\n" +
-		`Needs:` + "\n" + `* PMC-3 (sku\-fe), not linked` + "\n\n" +
-		"h3. From the plan\nh4. Approach\n\nUse the dictionary.\n\nh4. Contracts\n\nGET /x\n"
+	want := `Story: PMC-1 — Big \[thing\] · Service: sku\-master (g/pim/sku\-master)` + "\n" +
+		"References (read only): [https://gitlab.example/g/pim/product-master]\n" +
+		`Needs, not linked: PMC-3 (sku\-fe)` + "\n" +
+		"----\nh2. Goal\n\nDo it.\n\nh2. Notes\n\nMind the cache.\n"
 	if got := Wiki(listenerTask()); got != want {
 		t.Errorf("Wiki =\n%q\nwant\n%q", got, want)
 	}
 }
 
-func TestWiki_ListenerChildWithoutReferencesNeedsOrPlan(t *testing.T) {
+func TestWiki_ListenerChildWithoutReferencesOrNeeds(t *testing.T) {
 	got := Wiki(WikiTask{Body: "## Goal\n\nx", Epic: "PMC-1", Service: "svc"})
-	want := "h2. Goal\n\nx\n\n----\nStory: PMC-1\nService: svc\n"
+	want := "Story: PMC-1 · Service: svc\n----\nh2. Goal\n\nx\n"
 	if got != want {
 		t.Errorf("Wiki =\n%q\nwant\n%q", got, want)
 	}
@@ -150,96 +146,8 @@ func TestWiki_ListenerChildEscapesAReferenceThatIsNotASafeURL(t *testing.T) {
 	task := listenerTask()
 	task.References = []string{"https://x.example/a|b]{c}"}
 	got := Wiki(task)
-	if strings.Contains(got, "[https://x.example/a|b]") || !strings.Contains(got, `* https://x.example/a\|b\]\{c\}`) {
+	if strings.Contains(got, "[https://x.example/a|b]") || !strings.Contains(got, `References (read only): https://x.example/a\|b\]\{c\}`) {
 		t.Errorf("an unsafe URL is a live link:\n%s", got)
-	}
-}
-
-// The story's requirements stand between the child's lines and the plan, escaped (listener-requirements §5).
-func TestWiki_ListenerChildListsTheRequirementsBeforeThePlan(t *testing.T) {
-	task := listenerTask()
-	task.Requirements = []string{"The dictionary is [per country].", "  The editor\n shows it.  "}
-	want := "h2. Goal\n\nDo it.\n\n----\n" +
-		`Story: PMC-1 — Big \[thing\]` + "\n" +
-		`Service: sku\-master (g/pim/sku\-master)` + "\n\n" +
-		"References:\n* [https://gitlab.example/g/pim/product-master]\n\n" +
-		`Needs:` + "\n" + `* PMC-3 (sku\-fe), not linked` + "\n\n" +
-		"h3. Requirements of the story\n" + `* The dictionary is \[per country\].` + "\n* The editor shows it.\n\n" +
-		"h3. From the plan\nh4. Approach\n\nUse the dictionary.\n\nh4. Contracts\n\nGET /x\n"
-	if got := Wiki(task); got != want {
-		t.Errorf("Wiki =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// A description too long loses its requirements first, from the end, and the plan only after them.
-func TestWiki_ListenerChildCutsTheRequirementsFirst(t *testing.T) {
-	task := listenerTask()
-	for i := 0; i < 10; i++ {
-		task.Requirements = append(task.Requirements, fmt.Sprintf("Requirement %d, which goes on for a while to take some room.", i))
-	}
-	whole := Wiki(task)
-	task.MaxBytes = len(whole) - 1
-	got := Wiki(task)
-	if len(got) > task.MaxBytes || !strings.Contains(got, "Requirement 8,") || strings.Contains(got, "Requirement 9,") ||
-		!strings.Contains(got, "\n* …\n\nh3. From the plan\n") || !strings.HasSuffix(got, "GET /x\n") {
-		t.Errorf("one byte too many does not cut the last requirement only:\n%s", got)
-	}
-
-	// Room for the heading of the requirements and its cut, and for the plan's cut, but not for the plan.
-	task.Requirements, task.MaxBytes = nil, 0
-	task.MaxBytes = len(Wiki(task)) + 30
-	task.Requirements = []string{"Requirement 0, which goes on for a while to take some room."}
-	got = Wiki(task)
-	if len(got) > task.MaxBytes || strings.Contains(got, "Requirement 0") || !strings.Contains(got, "h3. Requirements of the story\n* …\n") ||
-		!strings.HasSuffix(got, "… (cut; the whole plan is in PMC-1 comment)\n") {
-		t.Errorf("a description with no room left keeps a requirement or does not cut the plan:\n%s", got)
-	}
-}
-
-func TestWiki_ListenerChildIsCutToMaxBytesAndNeverLeavesACodeBlockOpen(t *testing.T) {
-	var approach strings.Builder
-	for i := 0; i < 40; i++ {
-		approach.WriteString("A line of the approach that goes on for a while.\n\n")
-	}
-	approach.WriteString("```go\n")
-	for i := 0; i < 40; i++ {
-		approach.WriteString("code line of the contract\n")
-	}
-	approach.WriteString("```\n")
-	task := listenerTask()
-	task.Approach = approach.String()
-
-	whole := Wiki(task)
-	if strings.Contains(whole, "(cut;") {
-		t.Fatal("a description without a limit is cut")
-	}
-	cut := false
-	for limit := 400; limit < len(whole); limit += 13 {
-		task.MaxBytes = limit
-		got := Wiki(task)
-		if len(got) > limit {
-			t.Fatalf("MaxBytes %d: the description is %d bytes", limit, len(got))
-		}
-		if !strings.HasSuffix(got, "… (cut; the whole plan is in PMC-1 comment)\n") {
-			t.Fatalf("MaxBytes %d: a cut description does not say so:\n%s", limit, got)
-		}
-		cut = true
-		opens := 0
-		for _, l := range strings.Split(got, "\n") {
-			if strings.HasPrefix(l, "{code") {
-				opens++
-			}
-		}
-		if opens%2 != 0 {
-			t.Fatalf("MaxBytes %d: a code block is left open:\n%s", limit, got)
-		}
-	}
-	if !cut {
-		t.Fatal("no description was cut")
-	}
-	task.MaxBytes = len(whole)
-	if got := Wiki(task); got != whole {
-		t.Errorf("a description that fits is changed:\n%s", got)
 	}
 }
 

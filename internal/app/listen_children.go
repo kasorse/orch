@@ -168,12 +168,6 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 			ServicePath: pathOf[t.Repo],
 			References:  refURLs,
 			Needs:       needs,
-			// Every child gets all the story's requirements: it does not know which are its own
-			// (specs/listener-requirements/SPEC.md §5, B6).
-			Requirements: req.Requirements,
-			Approach:     answer.Spec.Approach,
-			Contracts:    answer.Spec.Contracts,
-			MaxBytes:     r.cfg.Jira.MaxBytes / 2,
 		})
 		queue := r.lc.Query.Label
 		if !r.lc.Story.QueueChildren {

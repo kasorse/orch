@@ -106,26 +106,21 @@ func TestChildren_ThreeChildrenWithTheirLabelsAndParentAndTheLinkTheRightWayRoun
 	if len(issues[1].Fields.Components) != 0 {
 		t.Errorf("components of a service without one = %v", issues[1].Fields.Components)
 	}
-	for _, want := range []string{
-		"h2. Goal",
-		`Story: PMC-1 — Digital categories migration`,
-		`Service: sku\-master (g/pim/sku\-master)`,
-		"References:\n* [https://gitlab.example/g/pim/product-master]",
-		"h3. From the plan", "h4. Approach", "h4. Contracts",
-	} {
-		if !strings.Contains(issues[0].Fields.Description, want) {
-			t.Errorf("the first child's description lacks %q:\n%s", want, issues[0].Fields.Description)
-		}
-	}
-	// Every child holds all the story's requirements, before the plan (listener-requirements §5).
-	reqs := "h3. Requirements of the story\n* sku\\-master keeps the categories of product\\-master, by country.\n" +
-		"* sku\\-master\\-fe shows the category of each SKU.\n\nh3. From the plan"
+	// The story's line first, then the task's own text and nothing after it: no requirements, no plan.
+	want := "Story: PMC-1 — Digital categories migration · Service: sku\\-master (g/pim/sku\\-master)\n" +
+		"References (read only): [https://gitlab.example/g/pim/product-master]\n----\nh2. Goal"
 	for i, is := range issues {
-		if !strings.Contains(is.Fields.Description, reqs) {
-			t.Errorf("child %d's description lacks the requirements:\n%s", i, is.Fields.Description)
+		d := is.Fields.Description
+		if i == 0 && !strings.HasPrefix(d, want) {
+			t.Errorf("the first child's description:\n%s\nwant it to start with\n%s", d, want)
+		}
+		for _, gone := range []string{"Requirements of the story", "From the plan", "Approach", "Contracts"} {
+			if strings.Contains(d, gone) {
+				t.Errorf("child %d's description holds %q:\n%s", i, gone, d)
+			}
 		}
 	}
-	if strings.Contains(issues[0].Fields.Description, "Needs:") {
+	if strings.Contains(issues[0].Fields.Description, "Needs") {
 		t.Errorf("a task that needs nothing of another service has a Needs line:\n%s", issues[0].Fields.Description)
 	}
 
@@ -236,7 +231,7 @@ func TestChildren_ATaskThatNeedsAnotherServiceNamesItAndIsNotLinked(t *testing.T
 		t.Errorf("links = %q, want the one of sku-master's chain only", got)
 	}
 	d := env.jira.createdIssues()[1].Fields.Description
-	if !strings.Contains(d, "Needs:\n* PMC-2 (sku\\-master), not linked") {
+	if !strings.Contains(d, "Needs, not linked: PMC-2 (sku\\-master)") {
 		t.Errorf("the editor's description does not name what it needs:\n%s", d)
 	}
 }

@@ -1,6 +1,7 @@
 package story
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -155,5 +156,27 @@ func TestParse_OverlongTextsAreCut(t *testing.T) {
 	if err != nil || len(l.Answers[0].Answer) > MaxLookupAnswerBytes || len(l.Answers[0].Evidence) > MaxLookupEvidenceBytes ||
 		!strings.HasSuffix(l.Answers[0].Answer, "…") {
 		t.Errorf("lookup = %+v, %v", l, err)
+	}
+}
+
+func TestParseBrief(t *testing.T) {
+	rules := make([]string, MaxBriefRules+3)
+	for i := range rules {
+		rules[i] = "rule"
+	}
+	rules[1] = " "
+	rules[0] = strings.Repeat("r", MaxBriefRuleBytes+50)
+	obj, _ := json.Marshal(map[string]any{"architecture": strings.Repeat("a", MaxBriefArchitectureBytes+10), "rules": rules})
+	a, err := ParseBrief(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(a.Architecture) > MaxBriefArchitectureBytes || len(a.Rules) != MaxBriefRules || len(a.Rules[0]) > MaxBriefRuleBytes {
+		t.Errorf("brief = %d bytes, %d rules, first %d bytes", len(a.Architecture), len(a.Rules), len(a.Rules[0]))
+	}
+	for name, obj := range map[string]string{"no architecture": `{"architecture":" ","rules":[]}`, "unknown key": `{"architecture":"a","commands":[]}`} {
+		if _, err := ParseBrief([]byte(obj)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }
