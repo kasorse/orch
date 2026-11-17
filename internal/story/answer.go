@@ -164,7 +164,6 @@ const (
 	MaxRequirements             = 30
 	MaxRequirementBytes         = 600
 	MaxQuestionBytes            = 400
-	MaxAssumptions              = 15
 	MaxAssumptionBytes          = 400
 )
 
@@ -179,10 +178,11 @@ type RequirementsAnswer struct {
 	Questions   []string `json:"questions"`
 }
 
-// ParseRequirements decodes a requirements answer strictly: no other key, a summary of 1 to
-// MaxRequirementsSummaryBytes, 1 to MaxRequirements requirements of 1 to MaxRequirementBytes and any
-// number of questions of 1 to MaxQuestionBytes, and at most MaxAssumptions assumptions of 1 to
-// MaxAssumptionBytes (the key may be left out). Any violation is an *AnswerError naming the field.
+// ParseRequirements decodes a requirements answer strictly: no other key, a summary, 1 to
+// MaxRequirements requirements, and any number of questions and assumptions (the key may be left out),
+// none of them empty. A text over its bound (MaxRequirementsSummaryBytes, MaxRequirementBytes,
+// MaxQuestionBytes, MaxAssumptionBytes) is cut, not refused. Any violation is an *AnswerError naming
+// the field.
 func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	var a RequirementsAnswer
 	if err := decodeStrict(obj, &a); err != nil {
@@ -191,11 +191,10 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 	switch {
 	case strings.TrimSpace(a.Summary) == "":
 		return RequirementsAnswer{}, answerErr("summary", "is empty")
-	case len(a.Summary) > MaxRequirementsSummaryBytes:
-		return RequirementsAnswer{}, answerErr("summary", "is %d bytes, over the %d-byte limit", len(a.Summary), MaxRequirementsSummaryBytes)
 	case len(a.Requirements) == 0:
 		return RequirementsAnswer{}, answerErr("requirements", "is empty")
 	}
+	a.Summary = cutMarked(a.Summary, MaxRequirementsSummaryBytes)
 	for _, list := range []struct {
 		name  string
 		items []string
@@ -203,29 +202,35 @@ func ParseRequirements(obj []byte) (RequirementsAnswer, error) {
 		bytes int
 	}{
 		{"requirements", a.Requirements, MaxRequirements, MaxRequirementBytes},
-		{"questions", a.Questions, 0, MaxQuestionBytes}, // as many as there are
-		{"assumptions", a.Assumptions, MaxAssumptions, MaxAssumptionBytes},
+		{"questions", a.Questions, 0, MaxQuestionBytes},       // as many as there are
+		{"assumptions", a.Assumptions, 0, MaxAssumptionBytes}, // as many as there are
 	} {
 		if err := checkCount(list.name, len(list.items), list.limit); err != nil {
 			return RequirementsAnswer{}, err
 		}
 		for i, item := range list.items {
-			field := fmt.Sprintf("%s[%d]", list.name, i)
-			switch {
-			case strings.TrimSpace(item) == "":
-				return RequirementsAnswer{}, answerErr(field, "is empty")
-			case len(item) > list.bytes:
-				return RequirementsAnswer{}, answerErr(field, "is %d bytes, over the %d-byte limit", len(item), list.bytes)
+			if strings.TrimSpace(item) == "" {
+				return RequirementsAnswer{}, answerErr(fmt.Sprintf("%s[%d]", list.name, i), "is empty")
 			}
+			list.items[i] = cutMarked(item, list.bytes)
 		}
 	}
 	return a, nil
 }
 
+// cutMarked is s cut to at most n bytes, ending in "…" when something was left out: a model that
+// writes a little over a bound loses its tail, not the whole call.
+func cutMarked(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return cutText(s, n-len("…")) + "…"
+}
+
 // checkCount refuses more than limit entries; a limit of 0 is none.
 // Bounds of the lookup answer: what the code settles of the requirements' questions.
 const (
-	MaxLookupAnswerBytes   = 400
+	MaxLookupAnswerBytes   = 600
 	MaxLookupEvidenceBytes = 300
 )
 
@@ -243,7 +248,7 @@ type LookupAnswer struct {
 }
 
 // ParseLookup decodes a lookup answer strictly: each item names one of the n questions, at most once,
-// with an answer of 1 to MaxLookupAnswerBytes and evidence of 1 to MaxLookupEvidenceBytes.
+// with an answer and evidence that are not empty, cut to MaxLookupAnswerBytes and MaxLookupEvidenceBytes.
 func ParseLookup(obj []byte, n int) (LookupAnswer, error) {
 	var a LookupAnswer
 	if err := decodeStrict(obj, &a); err != nil {
@@ -259,14 +264,12 @@ func ParseLookup(obj []byte, n int) (LookupAnswer, error) {
 			return LookupAnswer{}, answerErr(field+".question", "answers question %d again", it.Question)
 		case strings.TrimSpace(it.Answer) == "":
 			return LookupAnswer{}, answerErr(field+".answer", "is empty")
-		case len(it.Answer) > MaxLookupAnswerBytes:
-			return LookupAnswer{}, answerErr(field+".answer", "is %d bytes, over the %d-byte limit", len(it.Answer), MaxLookupAnswerBytes)
 		case strings.TrimSpace(it.Evidence) == "":
 			return LookupAnswer{}, answerErr(field+".evidence", "is empty")
-		case len(it.Evidence) > MaxLookupEvidenceBytes:
-			return LookupAnswer{}, answerErr(field+".evidence", "is %d bytes, over the %d-byte limit", len(it.Evidence), MaxLookupEvidenceBytes)
 		}
 		seen[it.Question] = true
+		a.Answers[i].Answer = cutMarked(it.Answer, MaxLookupAnswerBytes)
+		a.Answers[i].Evidence = cutMarked(it.Evidence, MaxLookupEvidenceBytes)
 	}
 	return a, nil
 }

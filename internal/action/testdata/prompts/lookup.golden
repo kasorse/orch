@@ -10,7 +10,7 @@ Answer a question when the code settles it: how an existing service or flow beha
   "answers": [{"question": 1, "answer": "...", "evidence": "..."}]
 }
 
-"question" is the number of the question answered. "answer" is the answer in plain words, at most 400 bytes, written for the people who own the ticket. "evidence" is where the code shows it (repository/path, a function or a table), at most 300 bytes. Leave a question out rather than guess; "answers" may be empty. Write in the language of the task.
+"question" is the number of the question answered. "answer" is the answer in plain words, at most 600 bytes, written for the people who own the ticket. "evidence" is where the code shows it (repository/path, a function or a table), at most 300 bytes. Leave a question out rather than guess; "answers" may be empty. Write in the language of the task.
 
 Questions:
 1. Does billing publish a refund at once?
