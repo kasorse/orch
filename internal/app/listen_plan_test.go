@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -55,9 +56,11 @@ type epicJira struct {
 	existing    []string
 	jqls        []string
 	childStatus string
-	createMode  func(n int) string
-	linkMode    func(n int) string
-	timeout     time.Duration
+	// issueType is the planned ticket's type, Epic unless a test sets it.
+	issueType  string
+	createMode func(n int) string
+	linkMode   func(n int) string
+	timeout    time.Duration
 }
 
 // nameKey is a Jira reference by key or by name.
@@ -198,8 +201,8 @@ func (j *epicJira) handle(w http.ResponseWriter, req *http.Request) {
 	case req.Method == http.MethodGet:
 		labels, _ := json.Marshal(j.labels)
 		fmt.Fprintf(w, `{"id":"10001","self":"https://ignored","key":"PMC-1","fields":{"summary":"Digital categories migration",`+
-			`"issuetype":{"name":"Epic"},"status":{"name":%q},"labels":%s,"components":[],"reporter":{"accountId":"rep-1"},`+
-			`"description":"Add a categories dictionary to sku-master and show it in sku-master-fe, as product-master does."}}`, j.status, labels)
+			`"issuetype":{"name":%q},"status":{"name":%q},"labels":%s,"components":[],"reporter":{"accountId":"rep-1"},`+
+			`"description":"Add a categories dictionary to sku-master and show it in sku-master-fe, as product-master does."}}`, cmp.Or(j.issueType, "Epic"), j.status, labels)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

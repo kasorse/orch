@@ -29,7 +29,10 @@ type Issue struct {
 	// the standard parent field; otherwise in the custom field LinkField names (Epic Link).
 	Parent    string
 	LinkField string
-	Labels    []string
+	// ParentByLink leaves the parent off the issue: the caller links it afterwards by an issue link
+	// (a Story, which cannot be a parent in Jira's hierarchy). Parent still names it in errors.
+	ParentByLink bool
+	Labels       []string
 	// Components are component names; none when empty.
 	Components []string
 }
@@ -43,9 +46,11 @@ func (i Issue) body() ([]byte, error) {
 		"summary":     i.Summary,
 		"description": i.Description,
 	}
-	if i.LinkField == "" {
+	switch {
+	case i.ParentByLink:
+	case i.LinkField == "":
 		fields["parent"] = map[string]string{"key": i.Parent}
-	} else {
+	default:
 		fields[i.LinkField] = i.Parent
 	}
 	if len(i.Labels) > 0 {

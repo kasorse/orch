@@ -51,7 +51,10 @@ func (p *planRun) existing(ticket domain.Ticket) (end *planEnd, restart bool) {
 		return nil, true
 	}
 	field := ""
-	if c := r.cfg.Jira.Create; c != nil && c.Link == config.JiraLinkField {
+	switch c := r.cfg.Jira.Create; {
+	case c.ChildLinkType(ticket.Type) != "":
+		field = jira.ByLink
+	case c != nil && c.Link == config.JiraLinkField:
 		field = c.Field
 	}
 	found, err := r.jira.Children(r.ctx, p.key, field, r.bot)
@@ -138,6 +141,8 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 		refURLs[i] = base + "/" + ref.Path
 	}
 	project := key[:strings.LastIndex(key, "-")]
+	// A ticket that cannot be a parent in Jira's hierarchy (a Story) gets its children by an issue link.
+	childLink := create.ChildLinkType(ticket.Type)
 
 	// build is the child of task id. keys holds the issues made so far: a task of another service that
 	// this one needs is named by its key when it has one, else by its ID (the first pass, which scans).
@@ -183,7 +188,9 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 			Parent:      key,
 			Labels:      labels,
 		}
-		if create.Link == config.JiraLinkField {
+		if childLink != "" {
+			issue.ParentByLink = true
+		} else if create.Link == config.JiraLinkField {
 			issue.LinkField = create.Field
 		}
 		if name := create.Components[t.Repo]; name != "" {
@@ -264,6 +271,16 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 		}
 		p.save()
 		r.logf("%s: created %s for %s (%s)", key, issueKey, id, t.Repo)
+		if childLink != "" {
+			// The child is the outward issue: "<child> is a child of <story>" for migration_parent.
+			if err := r.jira.Link(r.ctx, childLink, key, issueKey); err != nil {
+				end, serr := p.writeEnd(err, fmt.Sprintf("The %s link of %s (task %s) to %s", childLink, issueKey, id, key), func() error { return nil })
+				if serr != nil {
+					return serr
+				}
+				return p.finish(end)
+			}
+		}
 	}
 
 	// The links, one POST each: the later task is the inward side, the one that is blocked.

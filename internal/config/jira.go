@@ -77,6 +77,24 @@ type JiraCreateConfig struct {
 	Labels []string `yaml:"labels"`
 	// Components maps a service name to the Jira component its children get.
 	Components map[string]string `yaml:"components"`
+	// LinkByType maps the issue type of a planned ticket to the issue link type its children are
+	// linked to it with, instead of link: a Story cannot be a Task's parent in Jira. The child is the
+	// link's outward issue, e.g. migration_parent: "<child> is a child of <story>".
+	LinkByType map[string]string `yaml:"link_by_type"`
+}
+
+// ChildLinkType is the issue link type the children of a ticket of type issueType are linked with,
+// "" when they take link (parent or field). The type's name is matched without regard to case.
+func (c *JiraCreateConfig) ChildLinkType(issueType string) string {
+	if c == nil {
+		return ""
+	}
+	for t, link := range c.LinkByType {
+		if strings.EqualFold(t, strings.TrimSpace(issueType)) {
+			return link
+		}
+	}
+	return ""
 }
 
 // UnmarshalYAML defaults link to parent.
@@ -311,6 +329,11 @@ func jiraCreateProblems(c JiraCreateConfig) []string {
 	for i, l := range c.Labels {
 		if strings.TrimSpace(l) == "" || strings.ContainsAny(l, " \t\r\n") {
 			problems = append(problems, fmt.Sprintf("jira.create.labels[%d] %q must be a non-empty label without whitespace", i, l))
+		}
+	}
+	for t, link := range c.LinkByType {
+		if strings.TrimSpace(t) == "" || strings.TrimSpace(link) == "" || strings.ContainsAny(link, "\r\n") {
+			problems = append(problems, fmt.Sprintf("jira.create.link_by_type.%s must name an issue link type on one line", t))
 		}
 	}
 	for name, comp := range c.Components {

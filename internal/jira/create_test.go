@@ -134,6 +134,22 @@ func TestCreate_RequestWithFieldLink(t *testing.T) {
 	}
 }
 
+// A parent linked afterwards is not on the issue at all.
+func TestCreate_RequestWithParentByLink(t *testing.T) {
+	var log bodyLog
+	srv := newServer(t, created(&log, "PAY-125"))
+	c, _ := testClient(testOptions(srv.URL), basicCreds())
+
+	issue := testIssue()
+	issue.ParentByLink = true
+	if _, err := c.Create(context.Background(), issue); err != nil {
+		t.Fatal(err)
+	}
+	if fields := decodeFields(t, log.all()[0]); fields["parent"] != nil {
+		t.Errorf("fields.parent = %v, want none", fields["parent"])
+	}
+}
+
 func TestCreate_OmitsEmptyLabelsAndComponents(t *testing.T) {
 	var log bodyLog
 	srv := newServer(t, created(&log, "PAY-124"))

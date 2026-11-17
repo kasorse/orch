@@ -1249,7 +1249,8 @@ story:
    rules (`worktree.branch`), `story/<slug>/<ID>` only the fallback. Merge in order, rebasing the
    stack yourself after a review; `story status` shows each merge request.
 
-With `jira.create` (`issue_type`, `link: parent|field`, `labels`, `components`) and a story
+With `jira.create` (`issue_type`, `link: parent|field`, `labels`, `components`; for the listener,
+`link_by_type` links the children of, say, a planned Story by an issue link instead of a parent) and a story
 planned from a Jira issue, `story run` creates one child issue per task after you approve,
 once: a request that may have reached Jira is never repeated, and an interrupted creation
 stops the next start until you set `jira: <KEY>` (or `none`) in the task file. Details:
