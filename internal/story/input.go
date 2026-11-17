@@ -98,6 +98,9 @@ const (
 	minCutRoom = 200
 )
 
+// CutText is s cut to at most n bytes, at a character boundary, unmarked.
+func CutText(s string, n int) string { return cutText(s, n) }
+
 // cutText returns at most n bytes of s, cut before a character and not inside one.
 func cutText(s string, n int) string {
 	if len(s) <= n {

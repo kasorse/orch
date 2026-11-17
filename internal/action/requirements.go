@@ -22,6 +22,8 @@ type RequirementsInput struct {
 	Request string
 	// References are the surveys of the reference repositories; none is allowed.
 	References []SurveyInput
+	// Briefs are the target repositories' architecture and business rules, from their instructions.
+	Briefs []TargetBrief
 }
 
 // RequirementsResult is what the call gave, as far as it got: the prompt, the raw answer (also
@@ -68,7 +70,11 @@ func BuildRequirementsPrompt(in RequirementsInput) string {
 		"Respond with a single JSON object, no markdown fences, no prose before or after it, matching exactly this shape:\n\n")
 	b.WriteString("{\n  \"summary\": \"...\",\n  \"requirements\": [\"...\"],\n  \"assumptions\": [\"...\"],\n  \"questions\": [\"...\"]\n}\n\n")
 	b.WriteString(requirementsRules + "\n\n")
+	if len(in.Briefs) > 0 {
+		b.WriteString(briefRule + "\n\n")
+	}
 	b.WriteString("Task:\n" + taskBlock(in.Request))
+	writeBriefs(&b, in.Briefs)
 	writeReferenceSurveys(&b, in.References)
 	return b.String()
 }

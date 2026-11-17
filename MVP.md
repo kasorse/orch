@@ -6647,13 +6647,21 @@ child's run studies it, as for any ticket.
   checked out under `services_dir` like services and only read: never a task's repository, never
   written to. A reference named like a target, a bad label, or a project outside the allowed groups
   is `blocked`.
-* **Checkouts** of the references only, through the listener's own (§51.6); a network failure is
-  `retry`, any other problem `failed`. The targets are not checked out, except for the lookup below
-  when the requirements ask something: a child's run does it.
+* **Checkouts** of the references, through the listener's own (§51.6); a network failure is
+  `retry`, any other problem `failed`. The targets are checked out too, after the surveys, to read
+  their instructions (below) and for the lookup; their code is not surveyed: a child's run does it.
   **Survey**: one call per reference (§48.2, step 3), `read`, in the checkout, on the listener's own
   `actions.investigate` and `context.extra_deny`: planning only reads, so no service's
   configuration is needed until its child ticket runs (§51.6). A reference's survey is told it is
   one; no target is surveyed.
+* **Briefs**: for each target, `CLAUDE.md`, `AGENTS.md` and `README.md` of its checkout (a file that
+  repeats one before is left out; 24 KiB a file, 48 KiB in all) go to one tool-less call
+  (`action.Brief`, planning kind `brief-<target>`) that keeps only the target's architecture and
+  business rules (`story.ParseBrief`: `{"architecture", "rules"}`, 2000 bytes and 25 rules of 300
+  bytes, cut, not refused). The briefs are fenced in the requirements and specify prompts, which are
+  told to write in the targets' terms: a concept of the references the target does not have (sites
+  where it has countries) is mapped to the target's and the mapping stated, or asked. A target whose
+  checkout fails, without instruction files, or whose brief fails, has none (a log line).
 * **Requirements**: one tool-less call (`none`, `action.Requirements`, planning kind `requirements`)
   on the listener's `actions.investigate` route, also for an Epic with no reference: the Epic's text
   (with its discussion) and the references' surveys (fenced as untrusted data) in; what must be
@@ -6697,7 +6705,15 @@ child's run studies it, as for any ticket.
   reference surveys (fenced, "reference: not changed, never a task's repo") and the targets by name
   and note (the catalog's description or the selection's `why`), told that the target repositories
   were not studied, so a task describes behaviour and contracts, never files or packages, and that
-  the tasks of different services run in parallel from their default branches; `story.Validate`
+  the tasks of different services run in parallel from their default branches. The tasks are grouped
+  by service: one per service by default, of any size; the changes that touch the same places go in
+  one task (an attribute or a dictionary with its migration and its import), a small change is folded
+  into the task it relates to, and a service's work is split only when more than four of the places
+  it changes (schema, write path, read path and API, a one-off job, a screen) can each ship and be
+  tested alone. A task is written compactly: `goal` a numbered list, one item per entity or rule,
+  mappings as arrows, keys and codes exactly, no rationale; 3 to 5 acceptance items; `notes` empty
+  unless needed; every requirement of a service, assumed ones included, in one of its tasks. With the
+  briefs fenced after the requirements. `story.Validate`
   as for a story; one task is a plan too. `story plan`'s specify keeps its target surveys and its
   prompt unchanged.
 * **The chain**: Go chains each service's tasks in the story's order (Kahn's order of `depends_on`,
@@ -6711,12 +6727,11 @@ child's run studies it, as for any ticket.
   <story>"); the children check then searches `issue in linkedIssues(KEY)`; the task's title as summary (no task ID, 255 runes), the labels
   `listener.query.label` (unless `listener.story.queue_children: false`: then the operator adds it
   to a child to run it, and the Epic's comment says so), `<service_prefix><name>`, `<project_prefix><path>` and
-  `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description
-  `jira.Wiki` of the task, then `Story:` and `Service:`, `References:` (each project's URL, for the
-  child's `fetch_repository`), `Needs:`, the Epic's requirements (all of them, under the heading
-  `h3. Requirements of the story`: a child does not know which are its own) and the spec's approach and
-  contracts under `From the plan`, cut to `jira.max_bytes / 2` (the requirements are cut first, from
-  the end, with `…`). The contracts between services are written from the requirements, not from the
+  `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description one
+  line `Story: <Epic> — <summary> · Service: <name> (<path>)`, `References (read only): <URLs>` (for
+  the child's `fetch_repository`), `Needs, not linked: <keys>`, then `----` and `jira.Wiki` of the
+  task (Goal, Acceptance, Notes): nothing follows the task's Notes — not the Epic's requirements nor
+  the spec's approach and contracts, which the task's own text covers. The contracts between services are written from the requirements, not from the
   targets' code: intentions, not endpoints. Every description is secret-scanned before the first creation: a
   finding fails the plan naming the task, not the text. Then the links (§39.11). Each write has its
   intent in the Epic's entry first and is never repeated once it may have reached Jira; a write in

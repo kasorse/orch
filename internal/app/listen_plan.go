@@ -211,11 +211,17 @@ func (r *listenRunner) plan(key string) error {
 	if end != nil {
 		return p.finish(end)
 	}
-	req, end := p.requirements(text, refs, targets, dirs, refSurveys)
+	// The targets are checked out to read their instructions, not their code: the brief of each is its
+	// architecture and business rules, for the requirements and the tasks to be written in its terms.
+	tdirs, briefs, end := p.briefs(targets)
 	if end != nil {
 		return p.finish(end)
 	}
-	answer, tasks, end := p.specify(text, targets, refSurveys, req)
+	req, end := p.requirements(text, refs, targets, dirs, tdirs, refSurveys, briefs)
+	if end != nil {
+		return p.finish(end)
+	}
+	answer, tasks, end := p.specify(text, targets, refSurveys, briefs, req)
 	if end != nil {
 		return p.finish(end)
 	}
@@ -429,7 +435,7 @@ func (p *planRun) surveys(text string, refs []planTarget, dirs map[string]string
 // §3): what the Epic asks for, from its text and its references' surveys, recorded in plan.json and,
 // once secret-scanned, written on the Epic. With a question the plan ends blocked, and the comment is
 // the outcome's (planBody); without one it is written here, and a failure to write it is logged.
-func (p *planRun) requirements(text string, refs, targets []planTarget, dirs map[string]string, refSurveys []action.SurveyInput) (story.RequirementsAnswer, *planEnd) {
+func (p *planRun) requirements(text string, refs, targets []planTarget, dirs, tdirs map[string]string, refSurveys []action.SurveyInput, briefs []action.TargetBrief) (story.RequirementsAnswer, *planEnd) {
 	r := p.r
 	if r.stopping() {
 		return story.RequirementsAnswer{}, quietEnd()
@@ -439,7 +445,7 @@ func (p *planRun) requirements(text string, refs, targets []planTarget, dirs map
 	}
 	r.logf("%s: stating the requirements", p.key)
 	inv := r.cfg.Actions.Investigate
-	res, err := action.Requirements(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.RequirementsInput{Request: text, References: refSurveys})
+	res, err := action.Requirements(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.RequirementsInput{Request: text, References: refSurveys, Briefs: briefs})
 	p.calls["requirements"] = res.Usage
 	if err := saveCall(p.plan, "requirements", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {
 		return story.RequirementsAnswer{}, p.callEnd(err)
@@ -447,7 +453,7 @@ func (p *planRun) requirements(text string, refs, targets []planTarget, dirs map
 	a := res.Answer
 	r.logf("%s: requirements: %d, questions: %d", p.key, len(a.Requirements), len(a.Questions))
 	if len(a.Questions) > 0 {
-		if end := p.lookup(text, refs, targets, dirs, &a); end != nil {
+		if end := p.lookup(text, refs, targets, dirs, tdirs, &a); end != nil {
 			return story.RequirementsAnswer{}, end
 		}
 	}
@@ -486,11 +492,87 @@ func (p *planRun) requirements(text string, refs, targets []planTarget, dirs map
 	return out, nil
 }
 
+// instructionFiles are the files a target's brief is made from, in this order.
+var instructionFiles = []string{"CLAUDE.md", "AGENTS.md", "README.md"}
+
+// maxInstructionBytes bounds what of one file, and maxInstructionsBytes of all of a target's, goes to its brief.
+const (
+	maxInstructionBytes  = 24 << 10
+	maxInstructionsBytes = 48 << 10
+)
+
+// instructions is the text of the instruction files in dir, each under its name; a file that is
+// missing, empty or the same as one before is left out. "" when there is none.
+func instructions(dir string) string {
+	var parts, seen []string
+	total := 0
+	for _, name := range instructionFiles {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		text := strings.TrimSpace(string(data))
+		if err != nil || text == "" || slices.Contains(seen, text) {
+			continue
+		}
+		seen = append(seen, text)
+		text = story.CutText(text, min(maxInstructionBytes, maxInstructionsBytes-total))
+		if text == "" {
+			break
+		}
+		total += len(text)
+		parts = append(parts, "=== "+name+" ===\n"+text)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// briefs checks out every target and makes the brief of its instructions: its architecture and business
+// rules. A target whose checkout fails, that has no instruction file, or whose brief call fails has no
+// brief, which is logged; only a stop or the budget ends the plan. It returns the checkouts by name.
+func (p *planRun) briefs(targets []planTarget) (map[string]string, []action.TargetBrief, *planEnd) {
+	r := p.r
+	tdirs := map[string]string{}
+	var briefs []action.TargetBrief
+	for _, t := range targets {
+		if r.stopping() {
+			return nil, nil, quietEnd()
+		}
+		res, err := r.checkout.prepare(r.ctx, t.Name, t.Path)
+		if err != nil {
+			if r.stopping() {
+				return nil, nil, quietEnd()
+			}
+			r.logf("%s: no brief of %s: the checkout failed: %s", p.key, t.Name, firstLineOf(err.Error()))
+			continue
+		}
+		tdirs[t.Name] = res.Dir
+		text := instructions(res.Dir)
+		if text == "" {
+			r.logf("%s: no brief of %s: it has no %s", p.key, t.Name, strings.Join(instructionFiles, ", "))
+			continue
+		}
+		if end := p.budget(); end != nil {
+			return nil, nil, end
+		}
+		r.logf("%s: reading the instructions of %s", p.key, t.Name)
+		inv := r.cfg.Actions.Investigate
+		b, err := action.Brief(r.ctx, p.call(inv.ProviderModel, inv.Timeout), t.Name, text)
+		name := "brief-" + t.Name
+		p.calls[name] = b.Usage
+		if err := saveCall(p.plan, name, b.Answer, b.Output, b.Prompt, b.Usage, err); err != nil {
+			if r.stopping() {
+				return nil, nil, quietEnd()
+			}
+			r.logf("%s: no brief of %s: %s", p.key, t.Name, firstLineOf(err.Error()))
+			continue
+		}
+		briefs = append(briefs, action.TargetBrief{Repo: t.Name, Answer: b.Answer})
+	}
+	return tdirs, briefs, nil
+}
+
 // lookup looks for the answers of a's questions in the code of the Epic's repositories before they are
 // put to people: the targets are checked out for it, read only, next to the references. What the code
 // settles moves from the questions to the assumptions, with where it shows. A lookup that cannot run or
 // fails leaves every question to people; only a stop or the budget ends the plan.
-func (p *planRun) lookup(text string, refs, targets []planTarget, dirs map[string]string, a *story.RequirementsAnswer) *planEnd {
+func (p *planRun) lookup(text string, refs, targets []planTarget, dirs, tdirs map[string]string, a *story.RequirementsAnswer) *planEnd {
 	r := p.r
 	if r.stopping() {
 		return quietEnd()
@@ -507,7 +589,9 @@ func (p *planRun) lookup(text string, refs, targets []planTarget, dirs map[strin
 	for _, t := range slices.Concat(refs, targets) {
 		dir, isRef := dirs[t.Name], true
 		if dir == "" {
-			isRef = false
+			isRef, dir = false, tdirs[t.Name]
+		}
+		if dir == "" {
 			res, err := r.checkout.prepare(r.ctx, t.Name, t.Path)
 			if err != nil {
 				if r.stopping() {
@@ -588,7 +672,7 @@ func targetNotes(targets []planTarget) map[string]string {
 // specify is the specification call (SPEC §7.1) and the validation of its tasks as a story's: from the
 // Epic's text, its requirements, the references' surveys and the targets by name and note
 // (specs/listener-requirements/SPEC.md §4).
-func (p *planRun) specify(text string, targets []planTarget, refSurveys []action.SurveyInput, req story.RequirementsAnswer) (story.SpecifyAnswer, []story.Task, *planEnd) {
+func (p *planRun) specify(text string, targets []planTarget, refSurveys []action.SurveyInput, briefs []action.TargetBrief, req story.RequirementsAnswer) (story.SpecifyAnswer, []story.Task, *planEnd) {
 	r, sc := p.r, p.r.lc.Story
 	if r.stopping() {
 		return story.SpecifyAnswer{}, nil, quietEnd()
@@ -604,7 +688,7 @@ func (p *planRun) specify(text string, targets []planTarget, refSurveys []action
 	inv := r.cfg.Actions.Investigate
 	res, err := action.Specify(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.SpecifyInput{
 		Request: text, Repos: names, MaxTasks: sc.MaxTasks, References: refSurveys, Parallel: true,
-		Requirements: &req, Notes: targetNotes(targets),
+		Requirements: &req, Notes: targetNotes(targets), Briefs: briefs,
 	})
 	p.calls["specify"] = res.Usage
 	if err := saveCall(p.plan, "specify", res.Answer, res.Output, res.Prompt, res.Usage, err); err != nil {

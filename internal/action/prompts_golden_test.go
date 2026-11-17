@@ -225,6 +225,9 @@ func TestPrompts_Golden(t *testing.T) {
 		{"requirements_references", func() string {
 			return BuildRequirementsPrompt(RequirementsInput{Request: goldenStoryRequest, References: goldenReferences()})
 		}},
+		{"brief", func() string {
+			return BuildBriefPrompt("billing", "=== CLAUDE.md ===\nBilling keeps payments per country.")
+		}},
 		{"lookup", func() string {
 			return BuildLookupPrompt(LookupInput{
 				Request: goldenStoryRequest, Summary: "Refunds may be partial.\n",
@@ -241,7 +244,8 @@ func TestPrompts_Golden(t *testing.T) {
 					Requirements: []string{"A refund takes an amount up to the payment's\nremaining amount.", "The public API accepts the amount."},
 					Questions:    []string{"never shown to specify"},
 				},
-				Notes: map[string]string{"billing": "Payments and refunds.", "gateway": "The public API.\n"},
+				Notes:  map[string]string{"billing": "Payments and refunds.", "gateway": "The public API.\n"},
+				Briefs: []TargetBrief{{Repo: "billing", Answer: story.BriefAnswer{Architecture: "Payments per country.", Rules: []string{"A refund never exceeds the payment."}}}},
 			})
 		}},
 	}
