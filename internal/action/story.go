@@ -133,6 +133,12 @@ func buildSpecifyPrompt(in SpecifyInput) string {
 	}
 	if in.Requirements != nil {
 		b.WriteString(notStudiedRule + "\n\n" + groupingRule + "\n\n" + compactTaskRule + "\n\n")
+		if in.MaxPerRepo > 0 {
+			fmt.Fprintf(&b, "At most %d tasks per repository.\n\n", in.MaxPerRepo)
+		}
+		if in.Merge != "" {
+			b.WriteString(in.Merge + "\n\n")
+		}
 		if len(in.Briefs) > 0 {
 			b.WriteString(briefRule + "\n\n")
 		}
@@ -334,6 +340,10 @@ type SpecifyInput struct {
 	// Briefs are the target repositories' architecture and business rules, from their instructions.
 	// Only used with Requirements.
 	Briefs []TargetBrief
+	// MaxPerRepo, when not 0, is the most tasks one repository may have (listener.story.max_tasks_per_service);
+	// Merge is what a second pass is told of the first answer's. Both only with Requirements.
+	MaxPerRepo int
+	Merge      string
 	// SpecDirExists reports whether <spec_dir>/<slug> exists in the story home; nil does not ask.
 	SpecDirExists func(slug string) bool
 }

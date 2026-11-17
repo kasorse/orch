@@ -410,6 +410,7 @@ security:
 #   #   max_services: 5            # 1..20 services one Epic may target
 #   #   max_refs: 3                # 0..10 ref: labels on one Epic
 #   #   max_tasks: 12              # 1..30
+#   #   max_tasks_per_service: 3   # 1..30; over it, specify is asked once more to merge, then the plan fails
 #   #   max_catalog: 500           # 1..2000 projects listed for the choice
 #   #   max_cost_usd: 5            # optional; every planning call of one Epic
 #   #   queue_children: true       # false: the children lack the queue's label, the operator adds it
