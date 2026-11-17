@@ -6381,6 +6381,7 @@ listener:
     max_tasks: 12                 # 1..30
     max_catalog: 500              # 1..2000: projects listed for the selection
     max_cost_usd: 5               # optional: every planning call of one Epic
+    queue_children: true          # false: the children lack listener.query.label
 gitlab:
   api_token_env: GITLAB_READ_TOKEN  # the read-only API token (§54.3); required with listener.story
 ```
@@ -6649,7 +6650,8 @@ claim (start) → children already there? → the services (labels, else the cat
   child's text (`Needs PMC-21 (sku-master), not linked`).
 * **The children**, in the story's order: the Epic's project, `jira.create.issue_type`, the Epic as
   parent (`jira.create.link`), the task's title as summary (no task ID, 255 runes), the labels
-  `listener.query.label`, `<service_prefix><name>`, `<project_prefix><path>` and
+  `listener.query.label` (unless `listener.story.queue_children: false`: then the operator adds it
+  to a child to run it, and the Epic's comment says so), `<service_prefix><name>`, `<project_prefix><path>` and
   `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description
   `jira.Wiki` of the task, then `Story:` and `Service:`, `References:` (each project's URL, for the
   child's `fetch_repository`), `Needs:`, and the spec's approach and contracts under `From the plan`,

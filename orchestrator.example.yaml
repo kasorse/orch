@@ -411,6 +411,7 @@ security:
 #   #   max_tasks: 12              # 1..30
 #   #   max_catalog: 500           # 1..2000 projects listed for the choice
 #   #   max_cost_usd: 5            # optional; every planning call of one Epic
+#   #   queue_children: true       # false: the children lack the queue's label, the operator adds it
 # gitlab:
 #   base_url: https://gitlab.corp  # https, no userinfo
 #   token_env: GITLAB_TOKEN        # env only, reaches git through a credential helper; a literal token is refused

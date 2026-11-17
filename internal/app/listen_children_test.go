@@ -149,6 +149,32 @@ func TestChildren_ThreeChildrenWithTheirLabelsAndParentAndTheLinkTheRightWayRoun
 	}
 }
 
+// With queue_children: false the children lack the queue's label, the poll does not pick them, and the
+// Epic's comment says how to queue one.
+func TestChildren_NotQueuedChildrenLackTheQueueLabel(t *testing.T) {
+	env := newEpicEnv(t, "To Do")
+	env.r.lc.Story.QueueChildren = false
+	env.plan()
+
+	issues := env.jira.createdIssues()
+	if len(issues) != 3 {
+		t.Fatalf("created %d children, want 3\n%s", len(issues), env.out.String())
+	}
+	for i, is := range issues {
+		if slices.Contains(is.Fields.Labels, "ai-run") || !slices.Contains(is.Fields.Labels, "pim") {
+			t.Errorf("child %d labels = %v, want no ai-run and the create labels", i, is.Fields.Labels)
+		}
+		h := domain.TicketHead{Key: childKey(i), Type: "Task", Status: "To Do", Reporter: "bot-1", Labels: is.Fields.Labels}
+		if env.r.eligible(h) {
+			t.Errorf("child %s is picked by the poll without the queue's label", h.Key)
+		}
+	}
+	comments := env.jira.commentBodies()
+	if len(comments) != 1 || !strings.Contains(comments[0], "not labelled ai") {
+		t.Errorf("the Epic's comment does not say how to queue a child:\n%q", comments)
+	}
+}
+
 func TestChildren_ATaskThatNeedsAnotherServiceNamesItAndIsNotLinked(t *testing.T) {
 	out := strings.Replace(epicSpecifyAnswer, `"title":"The editor","size":"M","depends_on":[]`, `"title":"The editor","size":"M","depends_on":["PM01"]`, 1)
 	if out == epicSpecifyAnswer {

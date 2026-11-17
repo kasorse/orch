@@ -203,7 +203,7 @@ func TestValidateListener(t *testing.T) {
 		{"blockers done empty item", withBlockers("Blocks", " "), "listener.blockers.done_statuses[0]"},
 		{"story valid", withStory(func(*ListenerStory) {}), ""},
 		{"story bounds low", withStory(func(s *ListenerStory) { *s = ListenerStory{MaxServices: 1, MaxTasks: 1, MaxCatalog: 1} }), ""},
-		{"story bounds high", withStory(func(s *ListenerStory) { *s = ListenerStory{20, 10, 30, 2000, nil} }), ""},
+		{"story bounds high", withStory(func(s *ListenerStory) { *s = ListenerStory{20, 10, 30, 2000, nil, false} }), ""},
 		{"story services zero", withStory(func(s *ListenerStory) { s.MaxServices = 0 }), "listener.story.max_services must be between 1 and 20, got 0"},
 		{"story services 21", withStory(func(s *ListenerStory) { s.MaxServices = 21 }), "listener.story.max_services must be between 1 and 20, got 21"},
 		{"story refs negative", withStory(func(s *ListenerStory) { s.MaxRefs = -1 }), "listener.story.max_refs must be between 0 and 10, got -1"},
@@ -332,11 +332,15 @@ func TestLoad_ListenerStoryKeys(t *testing.T) {
 	}
 	s := l.Story
 	if s == nil || s.MaxServices != 5 || s.MaxRefs != 0 || s.MaxTasks != 12 || s.MaxCatalog != 500 ||
-		s.MaxCostUSD == nil || *s.MaxCostUSD != 5 {
+		s.MaxCostUSD == nil || *s.MaxCostUSD != 5 || !s.QueueChildren {
 		t.Errorf("story = %+v", s)
 	}
 	if p := validateListener(*l); len(p) != 0 {
 		t.Errorf("listener problems: %v", p)
+	}
+	off, err := Load(writeTempConfig(t, strings.Replace(src, "    max_cost_usd: 5\n", "    max_cost_usd: 5\n    queue_children: false\n", 1)))
+	if err != nil || off.Listener.Story.QueueChildren {
+		t.Errorf("queue_children: false = %+v, %v", off.Listener.Story, err)
 	}
 }
 

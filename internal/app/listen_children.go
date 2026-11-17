@@ -167,7 +167,11 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 			Contracts:   answer.Spec.Contracts,
 			MaxBytes:    r.cfg.Jira.MaxBytes / 2,
 		})
-		labels := listener.ChildLabels(r.lc.Query.Label, r.lc.Labels.ServicePrefix, t.Repo, r.lc.Labels.ProjectPrefix, pathOf[t.Repo], create.Labels)
+		queue := r.lc.Query.Label
+		if !r.lc.Story.QueueChildren {
+			queue = ""
+		}
+		labels := listener.ChildLabels(queue, r.lc.Labels.ServicePrefix, t.Repo, r.lc.Labels.ProjectPrefix, pathOf[t.Repo], create.Labels)
 		issue := jira.Issue{
 			Project:     project,
 			IssueType:   create.IssueType,
@@ -314,10 +318,16 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 }
 
 // childStatus reads one child's status back, once, after every creation (SPEC §8.1, A16): when it is not
-// one of query.statuses the Epic's comment says the poll will not pick the children.
+// one of query.statuses the Epic's comment says the poll will not pick the children. Children left out
+// of the queue (listener.story.queue_children: false) are not read: the comment says how to queue one.
 func (p *planRun) childStatus(order []string, keys map[string]string) {
 	r := p.r
 	if len(order) == 0 || r.stopping() {
+		return
+	}
+	if !r.lc.Story.QueueChildren {
+		p.rec.StatusWarning = fmt.Sprintf("The children are not labelled %s: add it to a child, in %s, for the listener to run it.",
+			r.lc.Query.Label, strings.Join(r.lc.Query.Statuses, " or "))
 		return
 	}
 	first := keys[order[0]]
