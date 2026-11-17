@@ -360,6 +360,7 @@ security:
 #     # field: customfield_10014   # with link: field (Epic Link on Server/Data Center)
 #     labels: [orchestrator]
 #     components: {billing: Billing}   # optional, service name -> Jira component
+#     # link_by_type: {Story: migration_parent}   # the listener: children of a planned Story are linked by this issue link type (the child outward), not by parent
 #   write:                         # after a worktree run's push opened a merge request, on the task's own issue (specs/delivery/SPEC.md §10); absent: nothing
 #     comment: true                # comment with the merge request link and what the run found
 #     transition: In Review        # move the issue by the transition of this name, or leading to this status; case does not matter

@@ -55,9 +55,14 @@ func (c *Client) Link(ctx context.Context, linkType, inward, outward string) err
 	return err
 }
 
+// ByLink is the field of Children for a parent its children are linked to by an issue link
+// (jira.create.link_by_type): every issue linked to it, whatever the link.
+const ByLink = "issuelinks"
+
 // Children returns the keys of the issues under parent that reporter reported, over the search
 // (specs/listener-story/SPEC.md §9): with field empty the standard parent link (parent = KEY),
-// else the custom field of jira.create.link: field (cf[<id>] = KEY). reporter is the accountId
+// with ByLink the issues linked to it (issue in linkedIssues(KEY)), else the custom field of
+// jira.create.link: field (cf[<id>] = KEY). reporter is the accountId
 // on Jira Cloud and the username on Data Center. Nothing but the keys is kept.
 func (c *Client) Children(ctx context.Context, parent, field, reporter string) ([]string, error) {
 	fail := func(detail string) error {
@@ -72,7 +77,10 @@ func (c *Client) Children(ctx context.Context, parent, field, reporter string) (
 		return nil, fail("the reporter is empty or holds a quote, a backslash or a control character")
 	}
 	clause := "parent = " + parent
-	if field != "" {
+	switch {
+	case field == ByLink:
+		clause = "issue in linkedIssues(" + parent + ")"
+	case field != "":
 		m := customFieldPattern.FindStringSubmatch(field)
 		if m == nil {
 			return nil, fail(fmt.Sprintf("the link field %s is not a custom field id (customfield_<n>)", truncate(field, 40)))

@@ -3623,8 +3623,8 @@ page, the same retries and redaction): the JQL search (`GET /rest/api/2/search/j
 `BlockedBy` (`{key, status, link_type}`), the issues of its links on the **inward** side ("is
 blocked by") with the status Jira gives in the link, on Cloud and Data Center alike; a link without
 a status counts as unfinished (§51.3). With `listener.story` it also searches an Epic's children
-(`parent = KEY AND reporter = "<account>"`, or `cf[<id>] = KEY` with `jira.create.link: field`,
-§51.13). `run --jira` makes none of them.
+(`parent = KEY AND reporter = "<account>"`, or `cf[<id>] = KEY` with `jira.create.link: field`, or
+`issue in linkedIssues(KEY)` for a type of `jira.create.link_by_type`, §51.13). `run --jira` makes none of them.
 
 ## 39.4 Response validation
 
@@ -5285,6 +5285,8 @@ jira:
     # field: customfield_10014    # required with link: field
     labels: [orchestrator]
     components: {billing: Billing}  # optional, by service name
+    # link_by_type: {Story: migration_parent}  # the listener: a planned ticket of this type gets its
+    #                                          # children by this issue link, the child outward
 ```
 
 Every key is in the strict schema; `jira.create` without `jira`, and `link: field` without
@@ -6703,7 +6705,10 @@ child's run studies it, as for any ticket.
   model's `depends_on` says. A `depends_on` across services gives no link, only a line in the
   child's text (`Needs PMC-21 (sku-master), not linked`).
 * **The children**, in the story's order: the Epic's project, `jira.create.issue_type`, the Epic as
-  parent (`jira.create.link`), the task's title as summary (no task ID, 255 runes), the labels
+  parent (`jira.create.link`) — or, for a planned ticket whose type `jira.create.link_by_type` names
+  (a Story cannot be a Task's parent in Jira), no parent and, right after the creation, an issue link
+  of that type with the child as its outward issue (`migration_parent`: "<child> is a child of
+  <story>"); the children check then searches `issue in linkedIssues(KEY)`; the task's title as summary (no task ID, 255 runes), the labels
   `listener.query.label` (unless `listener.story.queue_children: false`: then the operator adds it
   to a child to run it, and the Epic's comment says so), `<service_prefix><name>`, `<project_prefix><path>` and
   `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description

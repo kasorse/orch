@@ -222,6 +222,17 @@ func TestChildren_CustomFieldLink(t *testing.T) {
 	}
 }
 
+func TestChildren_ByLink(t *testing.T) {
+	srv := newServer(t, answer(http.StatusOK, `{"isLast":true,"issues":[]}`))
+	c, _ := testClient(testOptions(srv.URL), basicCreds())
+	if _, err := c.Children(context.Background(), "PAY-1", ByLink, "acc-1"); err != nil {
+		t.Fatal(err)
+	}
+	if jql, want := srv.requests()[0].URL.Query().Get("jql"), `issue in linkedIssues(PAY-1) AND reporter = "acc-1"`; jql != want {
+		t.Errorf("jql = %q, want %q", jql, want)
+	}
+}
+
 func TestChildren_RefusesWhatItWouldNotAsk(t *testing.T) {
 	srv := newServer(t, func(http.ResponseWriter, *http.Request, int) { t.Error("a request was sent") })
 	c, _ := testClient(testOptions(srv.URL), basicCreds())

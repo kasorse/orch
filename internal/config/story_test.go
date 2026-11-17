@@ -308,6 +308,7 @@ func TestJiraCreate(t *testing.T) {
 		{"    link: sideways\n    issue_type: Story\n", "jira.create.link"},
 		{"    issue_type: Story\n    field: customfield_1\n", "jira.create.field applies only"},
 		{"    link: parent\n", "jira.create.issue_type is required"},
+		{"    issue_type: Task\n    link_by_type: {Story: \"\"}\n", "jira.create.link_by_type.Story"},
 	} {
 		cfg, err := loadStoryConfig(t, base+tc.yaml)
 		if err != nil {
@@ -318,6 +319,14 @@ func TestJiraCreate(t *testing.T) {
 		if err := Validate(c); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%q: err = %v, want %q", tc.yaml, err, tc.want)
 		}
+	}
+
+	cfg, err = loadStoryConfig(t, base+"    issue_type: Task\n    link_by_type: {Story: migration_parent}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Jira.Create.ChildLinkType("story"); got != "migration_parent" || cfg.Jira.Create.ChildLinkType("Epic") != "" {
+		t.Errorf("ChildLinkType = %q for a Story, %q for an Epic", got, cfg.Jira.Create.ChildLinkType("Epic"))
 	}
 
 	cfg, err = loadStoryConfig(t, base+"    issue_type: Story\n    link: field\n    field: customfield_10014\n")

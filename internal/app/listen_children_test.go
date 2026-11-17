@@ -48,6 +48,37 @@ func planWithSpecify(t *testing.T, out string, labels ...string) *epicEnv {
 	return env
 }
 
+// A Story cannot be a Task's parent in Jira: with jira.create.link_by_type its children are created
+// without a parent and each is linked to it right after its creation, the child as the outward issue;
+// the children check looks for the issues linked to it.
+func TestChildren_TheChildrenOfAStoryAreLinkedToIt(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.jira.issueType = "Story"
+	env.r.cfg.Jira.Create.LinkByType = map[string]string{"story": "migration_parent"}
+	env.plan()
+
+	if got, want := env.jira.writes(), []string{"issue", "issueLink", "issue", "issueLink", "issue", "issueLink", "issueLink"}; !slices.Equal(got, want) {
+		t.Fatalf("writes = %v, want %v\n%s", got, want, env.out.String())
+	}
+	for i, is := range env.jira.createdIssues() {
+		if is.Fields.Parent.Key != "" {
+			t.Errorf("child %d has the parent %s, want none", i, is.Fields.Parent.Key)
+		}
+	}
+	for i, child := range []string{"PMC-2", "PMC-3", "PMC-4"} {
+		want := `{"inwardIssue":{"key":"PMC-1"},"outwardIssue":{"key":"` + child + `"},"type":{"name":"migration_parent"}}`
+		if got := env.jira.links[i]; got != want {
+			t.Errorf("link %d = %s, want %s", i, got, want)
+		}
+	}
+	if e := env.r.entryOf("PMC-1"); e.Outcome != listener.ResultPlanned {
+		t.Errorf("entry = %+v, want planned", e)
+	}
+	if jql := env.jira.jqls[0]; !strings.HasPrefix(jql, "issue in linkedIssues(PMC-1) AND reporter = ") {
+		t.Errorf("the children check = %q, want the issues linked to the Story", jql)
+	}
+}
+
 func TestChildren_ThreeChildrenWithTheirLabelsAndParentAndTheLinkTheRightWayRound(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.plan()
