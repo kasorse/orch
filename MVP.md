@@ -6655,14 +6655,17 @@ child's run studies it, as for any ticket.
   `actions.investigate` and `context.extra_deny`: planning only reads, so no service's
   configuration is needed until its child ticket runs (§51.6). A reference's survey is told it is
   one; no target is surveyed.
-* **Briefs**: for each target, `CLAUDE.md`, `AGENTS.md` and `README.md` of its checkout (a file that
-  repeats one before is left out; 24 KiB a file, 48 KiB in all) go to one tool-less call
-  (`action.Brief`, planning kind `brief-<target>`) that keeps only the target's architecture and
-  business rules (`story.ParseBrief`: `{"architecture", "rules"}`, 2000 bytes and 25 rules of 300
-  bytes, cut, not refused). The briefs are fenced in the requirements and specify prompts, which are
-  told to write in the targets' terms: a concept of the references the target does not have (sites
-  where it has countries) is mapped to the target's and the mapping stated, or asked. A target whose
-  checkout fails, without instruction files, or whose brief fails, has none (a log line).
+* **Briefs**: for each target, one read-only call in its checkout (`read`, the deny list of a
+  survey; `action.Brief`, planning kind `brief-<target>`) given the task and its `CLAUDE.md`,
+  `AGENTS.md` and `README.md` (a file that repeats one before is left out; 24 KiB a file, 48 KiB in
+  all). It reads the code only where the instructions do not say what the task needs (the data
+  model, the concepts and the flows it touches), all of it for a target without instruction files,
+  and keeps the target's architecture, where the task's data and flows live, and the business rules
+  that bear on the task (`story.ParseBrief`: `{"architecture", "rules"}`, 3000 bytes and 25 rules of
+  300 bytes, cut, not refused). The briefs are fenced in the requirements and specify prompts, which
+  are told to write in the targets' terms: a concept of the references the target does not have
+  (sites where it has countries) is mapped to the target's and the mapping stated, or asked. A target
+  whose checkout or brief fails has none (a log line).
 * **Requirements**: one tool-less call (`none`, `action.Requirements`, planning kind `requirements`)
   on the listener's `actions.investigate` route, also for an Epic with no reference: the Epic's text
   (with its discussion) and the references' surveys (fenced as untrusted data) in; what must be

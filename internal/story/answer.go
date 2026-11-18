@@ -228,10 +228,10 @@ func cutMarked(s string, n int) string {
 }
 
 // checkCount refuses more than limit entries; a limit of 0 is none.
-// Bounds of the brief answer: a target's architecture and business rules from its instructions. Texts
+// Bounds of the brief answer: a target's architecture and business rules, from its instructions and code. Texts
 // over them are cut, not refused; rules past the count are dropped.
 const (
-	MaxBriefArchitectureBytes = 2000
+	MaxBriefArchitectureBytes = 3000
 	MaxBriefRules             = 25
 	MaxBriefRuleBytes         = 300
 )

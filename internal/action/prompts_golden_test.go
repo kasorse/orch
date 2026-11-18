@@ -226,7 +226,10 @@ func TestPrompts_Golden(t *testing.T) {
 			return BuildRequirementsPrompt(RequirementsInput{Request: goldenStoryRequest, References: goldenReferences()})
 		}},
 		{"brief", func() string {
-			return BuildBriefPrompt("billing", "=== CLAUDE.md ===\nBilling keeps payments per country.")
+			return BuildBriefPrompt(BriefInput{Repo: "billing", Instructions: "=== CLAUDE.md ===\nBilling keeps payments per country.", Request: goldenStoryRequest})
+		}},
+		{"brief_no_instructions", func() string {
+			return BuildBriefPrompt(BriefInput{Repo: "billing", Request: goldenStoryRequest})
 		}},
 		{"lookup", func() string {
 			return BuildLookupPrompt(LookupInput{

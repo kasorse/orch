@@ -212,9 +212,9 @@ func (r *listenRunner) plan(key string) error {
 	if end != nil {
 		return p.finish(end)
 	}
-	// The targets are checked out to read their instructions, not their code: the brief of each is its
-	// architecture and business rules, for the requirements and the tasks to be written in its terms.
-	tdirs, briefs, end := p.briefs(targets)
+	// The targets are checked out for their briefs: each one's architecture and business rules as far as
+	// the task needs them, from its instructions and, where they fall short, its code.
+	tdirs, briefs, end := p.briefs(text, targets)
 	if end != nil {
 		return p.finish(end)
 	}
@@ -524,10 +524,11 @@ func instructions(dir string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// briefs checks out every target and makes the brief of its instructions: its architecture and business
-// rules. A target whose checkout fails, that has no instruction file, or whose brief call fails has no
-// brief, which is logged; only a stop or the budget ends the plan. It returns the checkouts by name.
-func (p *planRun) briefs(targets []planTarget) (map[string]string, []action.TargetBrief, *planEnd) {
+// briefs checks out every target and makes its brief: its architecture and business rules as far as the
+// task needs them, from its instructions and its code. A target whose checkout fails or whose brief call
+// fails has no brief, which is logged; only a stop or the budget ends the plan. It returns the checkouts
+// by name.
+func (p *planRun) briefs(text string, targets []planTarget) (map[string]string, []action.TargetBrief, *planEnd) {
 	r := p.r
 	tdirs := map[string]string{}
 	var briefs []action.TargetBrief
@@ -544,17 +545,15 @@ func (p *planRun) briefs(targets []planTarget) (map[string]string, []action.Targ
 			continue
 		}
 		tdirs[t.Name] = res.Dir
-		text := instructions(res.Dir)
-		if text == "" {
-			r.logf("%s: no brief of %s: it has no %s", p.key, t.Name, strings.Join(instructionFiles, ", "))
-			continue
-		}
 		if end := p.budget(); end != nil {
 			return nil, nil, end
 		}
-		r.logf("%s: reading the instructions of %s", p.key, t.Name)
+		r.logf("%s: reading %s", p.key, t.Name)
 		inv := r.cfg.Actions.Investigate
-		b, err := action.Brief(r.ctx, p.call(inv.ProviderModel, inv.Timeout), t.Name, text)
+		b, err := action.Brief(r.ctx, p.call(inv.ProviderModel, inv.Timeout), action.BriefInput{
+			Repo: t.Name, Instructions: instructions(res.Dir), Request: text,
+			Dir: res.Dir, ExtraDeny: r.cfg.Context.ExtraDeny, RunsDir: runsBaseDir,
+		})
 		name := "brief-" + t.Name
 		p.calls[name] = b.Usage
 		if err := saveCall(p.plan, name, b.Answer, b.Output, b.Prompt, b.Usage, err); err != nil {
