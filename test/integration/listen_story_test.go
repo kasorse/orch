@@ -263,7 +263,7 @@ func TestListen_AnEpicBecomesChildrenThatRunInParallelAndInTheirOrder(t *testing
 	// The plan: the catalog read once, the selection, a survey of the reference only, the requirements,
 	// specify (specs/listener-requirements: no target is surveyed or checked out by the plan).
 	calls := invocations(t, env.invocationsLog)
-	if want := []string{"select", "survey", "requirements", "specify"}; len(calls) < len(want) || !slices.Equal(calls[:len(want)], want) {
+	if want := []string{"select", "survey", "brief", "brief", "requirements", "specify"}; len(calls) < len(want) || !slices.Equal(calls[:len(want)], want) {
 		t.Errorf("calls = %v, want the plan's first: %v", calls, want)
 	}
 	if got := gl.asked(); !slices.Equal(got, []string{"/api/v4/groups/group/projects"}) {
@@ -375,7 +375,7 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 	}
 	// The references are surveyed, the requirements asked for, their question looked up in the code, and
 	// nothing is specified.
-	if got, want := invocations(t, env.invocationsLog), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
+	if got, want := invocations(t, env.invocationsLog), []string{"select", "survey", "brief", "brief", "requirements", "lookup"}; !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v", got, want)
 	}
 	comments := env.jira.botComments("PAY-1")
@@ -429,7 +429,7 @@ func TestListen_AnEpicWithAQuestionIsBlockedAndPlannedOnceAnswered(t *testing.T)
 			t.Errorf("the third requirements prompt lacks %q:\n%s", want, prompt)
 		}
 	}
-	want := []string{"select", "survey", "requirements", "lookup", "select", "survey", "requirements", "lookup", "select", "survey", "requirements", "specify"}
+	want := []string{"select", "survey", "brief", "brief", "requirements", "lookup", "select", "survey", "brief", "brief", "requirements", "lookup", "select", "survey", "brief", "brief", "requirements", "specify"}
 	if got := invocations(t, env.invocationsLog); !slices.Equal(got, want) {
 		t.Errorf("calls = %v, want %v\nstderr:\n%s", got, want, stderr)
 	}

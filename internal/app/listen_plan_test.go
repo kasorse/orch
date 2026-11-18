@@ -542,7 +542,7 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "specify"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "specify"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
 	if got := env.cat.asked(); !slices.Equal(got, []string{"g"}) {
@@ -655,20 +655,19 @@ func TestPlan_SelectsFromTheCatalogSurveysAndSpecifies(t *testing.T) {
 	if st := env.stateIsValid(); st.Tickets["PMC-1"].PlanDir != "plans/PMC-1.1" {
 		t.Errorf("saved entry = %+v", st.Tickets["PMC-1"])
 	}
-	// The reference and the targets are checked out; the targets to read their instructions, which they
-	// have none of here: no brief call.
+	// The reference and the targets are checked out; a target without instructions is briefed from its code.
 	for _, name := range []string{"product-master", "sku-master", "sku-master-fe"} {
 		if _, err := os.Stat(filepath.Join(env.r.checkout.servicesDir, name, "a.txt")); err != nil {
 			t.Errorf("checkout of %s: %v", name, err)
 		}
 	}
-	if !strings.Contains(env.out.String(), "PMC-1: no brief of sku-master: it has no CLAUDE.md, AGENTS.md, README.md") {
-		t.Errorf("a target without instructions is not logged:\n%s", env.out.String())
+	if b := env.prov.callsOf("brief")[0]; !strings.Contains(b.prompt, "It has no instruction file") {
+		t.Errorf("the brief of a target without instructions:\n%s", b.prompt)
 	}
 }
 
-// A target's instruction files make its brief, tool-less, once each (a file that repeats another is left
-// out); the brief reaches the requirements and specify prompts. A failed brief is logged and the plan goes on.
+// A target's brief is made in its checkout, read only, from its instruction files (once each: a file that
+// repeats another is left out), the task and its code; the brief reaches the requirements and specify prompts. A failed brief is logged and the plan goes on.
 func TestPlan_TheTargetsInstructionsMakeTheirBriefs(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.pushFile("g/pim/sku-master", "CLAUDE.md", "# sku-master\nProducts are per country; there are no sites.\n")
@@ -681,7 +680,8 @@ func TestPlan_TheTargetsInstructionsMakeTheirBriefs(t *testing.T) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
 	briefs := env.prov.callsOf("brief")
-	if b := briefs[0]; b.authority != domain.AuthorityNone || b.dir != "" || !strings.Contains(b.prompt, "=== CLAUDE.md ===") ||
+	if b := briefs[0]; b.authority != domain.AuthorityRead || filepath.Base(b.dir) != "sku-master" || !strings.Contains(b.prompt, "=== CLAUDE.md ===") ||
+		!strings.Contains(b.prompt, "Add a categories dictionary") ||
 		strings.Contains(b.prompt, "=== AGENTS.md ===") || !strings.Contains(b.prompt, "there are no sites") {
 		t.Errorf("the brief of sku-master: authority %q, dir %q, prompt:\n%s", b.authority, b.dir, b.prompt)
 	}
@@ -731,7 +731,7 @@ func TestPlan_GitlabLabelsAreTheServicesAndSkipTheSelection(t *testing.T) {
 	env.plan()
 
 	// No reference: the requirements come from the Epic's text alone (B1), and no target is surveyed.
-	if got, want := env.prov.actions(), []string{"requirements", "specify"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"brief", "brief", "requirements", "specify"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v (no select, no survey)\n%s", got, want, env.out.String())
 	}
 	if p := env.prov.callsOf("requirements")[0].prompt; strings.Contains(p, "Reference surveys") {
@@ -826,7 +826,7 @@ func TestPlan_TheBudgetStopsBeforeSpecify(t *testing.T) {
 	env.prov.costs["requirements"] = 0.3
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v: the survey and the requirements cost $0.60, which reaches the budget before specify\n%s", got, want, env.out.String())
 	}
 	e := env.r.entryOf("PMC-1")
@@ -870,7 +870,7 @@ func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
 	env.prov.outputs["lookup"] = `{"answers":[]}`
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "lookup"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v: no specify\n%s", got, want, env.out.String())
 	}
 	if got := env.jira.writes(); len(got) != 0 {
@@ -931,7 +931,7 @@ func TestPlan_TheLookupAnswersAQuestionFromTheCode(t *testing.T) {
 	env.prov.outputs["lookup"] = `{"answers":[{"question":2,"answer":"No: the import replaces it.","evidence":"product-master/import.go"}]}`
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "lookup"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
 	look := env.prov.callsOf("lookup")[0]
@@ -973,7 +973,7 @@ func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
 	env.prov.outputs["lookup"] = `{"answers":[{"question":1,"answer":"No.","evidence":"product-master/import.go"}]}`
 	env.plan()
 
-	if got, want := env.prov.actions(), []string{"select", "survey", "requirements", "lookup", "specify"}; !slices.Equal(got, want) {
+	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "lookup", "specify"}; !slices.Equal(got, want) {
 		t.Fatalf("calls = %v, want %v\n%s", got, want, env.out.String())
 	}
 	if e := env.r.entryOf("PMC-1"); e.Outcome != listener.ResultPlanned {
@@ -1024,7 +1024,7 @@ func TestPlan_AnInvalidRequirementsAnswerFailsWithTheAnswerKept(t *testing.T) {
 	env.prov.outputs["requirements"] = `{"summary":"s","requirements":[],"questions":[]}`
 	env.plan()
 
-	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements"}) {
+	if got := env.prov.actions(); !slices.Equal(got, []string{"brief", "requirements"}) {
 		t.Fatalf("calls = %v, want the requirements only", got)
 	}
 	e := env.r.entryOf("PMC-1")
@@ -1046,7 +1046,7 @@ func TestPlan_ASecretInTheRequirementsFailsAndWritesNoRequirements(t *testing.T)
 	env.prov.outputs["requirements"] = `{"summary":"s","requirements":["use ` + secret + `"],"questions":["q?"]}`
 	env.plan()
 
-	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements", "lookup"}) {
+	if got := env.prov.actions(); !slices.Equal(got, []string{"brief", "requirements", "lookup"}) {
 		t.Fatalf("calls = %v, want no specify", got)
 	}
 	e := env.r.entryOf("PMC-1")
@@ -1160,7 +1160,7 @@ func TestPlan_ACutOffPlanIsMadeAgainOnRestart(t *testing.T) {
 	if e.Phase != listener.PhaseFinished || e.Outcome != listener.ResultPlanned || e.PlanDir != "plans/PMC-1.1" {
 		t.Errorf("entry = %+v, want the plan made again to its end", e)
 	}
-	if got := env.prov.actions(); !slices.Equal(got, []string{"requirements", "specify"}) {
+	if got := env.prov.actions(); !slices.Equal(got, []string{"brief", "brief", "requirements", "specify"}) {
 		t.Errorf("calls = %v", got)
 	}
 }
