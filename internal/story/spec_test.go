@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -116,5 +117,18 @@ func TestTaskFileName_RoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("%s: parsed back\n%#v\nwant\n%#v", want.ID, got, want)
 		}
+	}
+}
+
+// A task gets the contracts it names, whole and in the spec's order; C1 is not C12, and a Contracts
+// text without numbers gives none.
+func TestCitedContracts(t *testing.T) {
+	contracts := "C1 Dictionary: codes.\n- uppercase\n\nC2 Attributes: flags.\n\nC12 API: endpoints."
+	got := CitedContracts(contracts, "## Goal\n\nThe API exactly as C12; flags as in C1.")
+	if want := []string{"C1 Dictionary: codes.\n- uppercase", "C12 API: endpoints."}; !slices.Equal(got, want) {
+		t.Errorf("CitedContracts = %q, want %q", got, want)
+	}
+	if got := CitedContracts("The API serves JSON.", "as C1"); got != nil {
+		t.Errorf("unnumbered contracts = %q, want none", got)
 	}
 }
