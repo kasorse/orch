@@ -45,8 +45,9 @@ type LookupResult struct {
 	Usage  *domain.Usage
 }
 
-var lookupRules = fmt.Sprintf(`"question" is the number of the question answered. "answer" is the answer in plain words, at most %d bytes, `+
-	`written for the people who own the ticket. "evidence" is where the code shows it (repository/path, a function or a table), at most %d bytes. `+
+var lookupRules = fmt.Sprintf(`"question" is the number of the question answered. "answer" is what was found, as one or two plain sentences that read `+
+	`without the question (not "Yes" or "Only the old service", but "The list is read from the old service's `+
+	`list endpoint"), at most %d bytes, written for the people who own the ticket, with no file path in it. "evidence" is where the code shows it (repository/path, a function or a table), at most %d bytes. `+
 	`Leave a question out rather than guess; "answers" may be empty. Write in the language of the task.`,
 	story.MaxLookupAnswerBytes, story.MaxLookupEvidenceBytes)
 

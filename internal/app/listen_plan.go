@@ -624,7 +624,8 @@ func (p *planRun) lookup(text string, refs, targets []planTarget, dirs, tdirs ma
 	settled := map[int]bool{}
 	for _, it := range res.Answer.Answers {
 		settled[it.Question] = true
-		a.Assumptions = append(a.Assumptions, flat(a.Questions[it.Question-1])+" "+flat(it.Answer)+" (found in "+flat(it.Evidence)+")")
+		// The answer is a statement that reads without its question (the lookup prompt says so).
+		a.Assumptions = append(a.Assumptions, flat(it.Answer)+" (found in "+flat(it.Evidence)+")")
 	}
 	var open []string
 	for i, q := range a.Questions {

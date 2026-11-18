@@ -6686,8 +6686,9 @@ child's run studies it, as for any ticket.
   with `context.extra_deny`) works in the checkouts' directory and answers what the code settles (how
   existing code behaves, where data comes from, a choice the code makes moot), each with where it
   shows (`story.ParseLookup`: `{"answers": [{"question", "answer", "evidence"}]}`, a question named at
-  most once; an answer over 600 bytes or evidence over 300 is cut, not refused). An answered
-  question becomes an assumption, "<question> <answer> (found in <evidence>)"; the rest stays a
+  most once; the answer is a statement that reads without its question; an answer over 300 bytes or
+  evidence over 150 is cut, not refused). An answered question becomes an assumption, "<answer>
+  (found in <evidence>)"; the rest stays a
   question. A lookup that cannot run (a checkout fails) or fails leaves every question to people and
   is logged; it counts in `listener.story.max_cost_usd`. The assumptions reach specify and the
   children as requirements, each "Assumed: …".
@@ -6737,8 +6738,10 @@ child's run studies it, as for any ticket.
   `jira.create.labels`, the component of `jira.create.components[<name>]`, and as description one
   line `Story: <Epic> — <summary> · Service: <name> (<path>)`, `References (read only): <URLs>` (for
   the child's `fetch_repository`), `Needs, not linked: <keys>`, then `----` and `jira.Wiki` of the
-  task (Goal, Acceptance, Notes): nothing follows the task's Notes — not the Epic's requirements nor
-  the spec's approach and contracts, which the task's own text covers. The contracts between services are written from the requirements, not from the
+  task (Goal, Acceptance, Contracts, Notes): the Contracts section holds only the spec's contracts
+  the task names ("C<n>" at the start of a line of `spec.contracts`, cited as `C<n>` in the task's
+  title or text; `story.CitedContracts`), and there is none when it names none. Nothing follows the
+  task's Notes — not the Epic's requirements nor the spec's approach. The contracts between services are written from the requirements, not from the
   targets' code: intentions, not endpoints. Every description is secret-scanned before the first creation: a
   finding fails the plan naming the task, not the text. Then the links (§39.11). Each write has its
   intent in the Epic's entry first and is never repeated once it may have reached Jira; a write in

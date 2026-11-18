@@ -168,6 +168,7 @@ func (p *planRun) createChildren(ticket domain.Ticket, answer story.SpecifyAnswe
 			ServicePath: pathOf[t.Repo],
 			References:  refURLs,
 			Needs:       needs,
+			Contracts:   story.CitedContracts(answer.Spec.Contracts, t.Title+"\n"+t.Body),
 		})
 		queue := r.lc.Query.Label
 		if !r.lc.Story.QueueChildren {

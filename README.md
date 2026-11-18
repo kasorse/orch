@@ -1306,7 +1306,7 @@ questions and no child is created; answer in a comment and move the Epic back to
 next plan reads every round of answers. Otherwise it specifies the tasks from
 the requirements, written in the targets' terms (a brief of each target from its `CLAUDE.md`, `AGENTS.md`
 and `README.md`, and its code where they fall short: its architecture and business rules), one task per service unless its work is large,
-and creates one child per task (`jira.create`), its description the task's own compact text only, in the queue's status with the labels the poll picks,
+and creates one child per task (`jira.create`), its description the task's own compact text and the plan's contracts it names, in the queue's status with the labels the poll picks,
 links the tasks of one service so that each waits for the previous one (`listener.blockers`), and
 comments on the Epic, which stays at `start`: moving it to done is yours. The children then run as
 any ticket, those of different services in parallel. The listener's own account must be in

@@ -157,3 +157,17 @@ func TestWiki_IsDeterministic(t *testing.T) {
 		t.Error("two renderings differ")
 	}
 }
+
+// The contracts the task names come before its Notes, so that nothing follows them; without Notes, last.
+func TestWiki_ListenerChildContracts(t *testing.T) {
+	task := listenerTask()
+	task.Contracts = []string{"C1 API: GET /v1/x.\n- 404 on an unknown code"}
+	got := Wiki(task)
+	if want := "h2. Goal\n\nDo it.\n\nh2. Contracts\n\nC1 API: GET /v1/x.\n* 404 on an unknown code\n\nh2. Notes\n\nMind the cache.\n"; !strings.HasSuffix(got, want) {
+		t.Errorf("Wiki =\n%s\nwant it to end with\n%s", got, want)
+	}
+	task.Body = "## Goal\n\nDo it.\n"
+	if got := Wiki(task); !strings.HasSuffix(got, "h2. Goal\n\nDo it.\n\nh2. Contracts\n\nC1 API: GET /v1/x.\n* 404 on an unknown code\n") {
+		t.Errorf("Wiki without Notes =\n%s", got)
+	}
+}

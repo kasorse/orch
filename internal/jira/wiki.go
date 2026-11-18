@@ -49,6 +49,9 @@ type WikiTask struct {
 	References []string
 	// Needs are the tasks of other services this one needs, which no link chains.
 	Needs []WikiNeed
+	// Contracts are the plan's contracts the task names (story.CitedContracts), Markdown, written in a
+	// Contracts section before the task's Notes.
+	Contracts []string
 }
 
 // WikiNeed is a task of another service that a task needs: its Jira key and its service.
@@ -61,6 +64,9 @@ type WikiNeed struct{ Key, Service string }
 // carried verbatim. It ends with a line naming the repository, the spec file and the
 // dependencies (specs/story/SPEC.md §12.2). The same input always gives the same bytes.
 func Wiki(t WikiTask) string {
+	if t.Epic != "" && len(t.Contracts) > 0 {
+		t.Body = withContracts(t.Body, t.Contracts)
+	}
 	out := markdown(t.Body)
 	if t.Epic != "" {
 		return listenerWiki(t, out)
@@ -223,6 +229,18 @@ func listenerWiki(t WikiTask, body []string) string {
 		lines = append(append(lines, "----"), body...)
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// withContracts is body with a "## Contracts" section of contracts before its "## Notes", or at its end.
+func withContracts(body string, contracts []string) string {
+	section := "## Contracts\n\n" + strings.Join(contracts, "\n\n") + "\n"
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "## Notes" {
+			return strings.Join(lines[:i], "\n") + "\n" + section + "\n" + strings.Join(lines[i:], "\n")
+		}
+	}
+	return strings.TrimRight(body, "\n") + "\n\n" + section
 }
 
 // blankLineIfText separates a block from the text above it.

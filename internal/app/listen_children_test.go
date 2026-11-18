@@ -470,3 +470,24 @@ func TestChildren_TheListenersAccountMustBeAReporterWithListenerStory(t *testing
 		t.Errorf("an account that is not a reporter = %v, want a configuration error naming it", err)
 	}
 }
+
+// A child's description holds the plan's contracts its task names, before its Notes, and no other.
+func TestChildren_AChildGetsTheContractsItsTaskNames(t *testing.T) {
+	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
+	env.prov.outputs["specify"] = strings.NewReplacer(
+		`"contracts":"c"`, `"contracts":"C1 Dictionary: codes are uppercase.\n\nC2 Editor API: GET /v1/x."`,
+		`"title":"The editor","size":"M","depends_on":[],"goal":"g"`, `"title":"The editor","size":"M","depends_on":[],"goal":"Read it as C2."`,
+	).Replace(epicSpecifyAnswer)
+	env.plan()
+
+	issues := env.jira.createdIssues()
+	if len(issues) != 3 {
+		t.Fatalf("children = %d, want 3\n%s", len(issues), env.out.String())
+	}
+	if d := issues[1].Fields.Description; !strings.Contains(d, "h2. Contracts\n\nC2 Editor API: GET /v1/x.") || strings.Contains(d, "C1 Dictionary") {
+		t.Errorf("the editor's description:\n%s\nwant C2 only", d)
+	}
+	if d := issues[0].Fields.Description; strings.Contains(d, "Contracts") {
+		t.Errorf("a task that names no contract has some:\n%s", d)
+	}
+}

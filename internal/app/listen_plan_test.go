@@ -928,7 +928,7 @@ func TestPlan_AQuestionBlocksTheEpicWithOneComment(t *testing.T) {
 func TestPlan_TheLookupAnswersAQuestionFromTheCode(t *testing.T) {
 	env := newEpicEnv(t, "To Do", "ref:g/pim/product-master")
 	env.prov.outputs["requirements"] = epicQuestionsAnswer
-	env.prov.outputs["lookup"] = `{"answers":[{"question":2,"answer":"No: the import replaces it.","evidence":"product-master/import.go"}]}`
+	env.prov.outputs["lookup"] = `{"answers":[{"question":2,"answer":"The import replaces the old [category] list.","evidence":"product-master/import.go"}]}`
 	env.plan()
 
 	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "lookup"}; !slices.Equal(got, want) {
@@ -951,7 +951,7 @@ func TestPlan_TheLookupAnswersAQuestionFromTheCode(t *testing.T) {
 	}
 	c := env.jira.commentBodies()
 	if len(c) != 1 || !strings.Contains(c[0], "Decided without asking") ||
-		!strings.Contains(c[0], `* Is the old \[category\] list kept\? No: the import replaces it. (found in product\-master/import.go)`) ||
+		!strings.Contains(c[0], `* The import replaces the old \[category\] list. (found in product\-master/import.go)`) ||
 		!strings.Contains(c[0], `# Which countries come first\?`) || strings.Contains(c[0], `# Is the old`) {
 		t.Errorf("comments = %q, want the answer decided and one question left", c)
 	}
@@ -970,7 +970,7 @@ func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
 	env.prov.outputs["requirements"] = `{"summary":"A categories dictionary in sku-master, shown by sku-master-fe.",` +
 		`"requirements":["sku-master keeps the categories of product-master, by country."],` +
 		`"assumptions":["The names are kept in en, nl and fr."],"questions":["Is the old list kept?"]}`
-	env.prov.outputs["lookup"] = `{"answers":[{"question":1,"answer":"No.","evidence":"product-master/import.go"}]}`
+	env.prov.outputs["lookup"] = `{"answers":[{"question":1,"answer":"The old list is not kept.","evidence":"product-master/import.go"}]}`
 	env.plan()
 
 	if got, want := env.prov.actions(), []string{"select", "survey", "brief", "brief", "requirements", "lookup", "specify"}; !slices.Equal(got, want) {
@@ -981,11 +981,11 @@ func TestPlan_EveryQuestionAnsweredFromTheCodeLetsThePlanGoOn(t *testing.T) {
 	}
 	c := env.jira.commentBodies()
 	if len(c) != 2 || !strings.Contains(c[0], "* The names are kept in en, nl and fr.") ||
-		!strings.Contains(c[0], "* Is the old list kept\\? No. (found in product\\-master/import.go)") || strings.Contains(c[0], "Open questions") {
+		!strings.Contains(c[0], "* The old list is not kept. (found in product\\-master/import.go)") || strings.Contains(c[0], "Open questions") {
 		t.Errorf("comments = %q", c)
 	}
 	if spec := env.prov.callsOf("specify")[0].prompt; !strings.Contains(spec, "Assumed: The names are kept in en, nl and fr.") ||
-		!strings.Contains(spec, "Assumed: Is the old list kept? No. (found in product-master/import.go)") {
+		!strings.Contains(spec, "Assumed: The old list is not kept. (found in product-master/import.go)") {
 		t.Errorf("the specify prompt lacks what was decided:\n%s", spec)
 	}
 }

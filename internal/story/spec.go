@@ -1,6 +1,9 @@
 package story
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // maxFileSlugLen bounds the title part of a task file's name.
 const maxFileSlugLen = 40
@@ -105,4 +108,26 @@ func TaskFileName(id, title string) string {
 		slug = "task"
 	}
 	return "TASK-" + id + "-" + slug + ".md"
+}
+
+// contractRE is the start of a contract in a spec's Contracts text: "C<n>" at the start of a line.
+var contractRE = regexp.MustCompile(`(?m)^C(\d+)\b`)
+
+// CitedContracts are the contracts of the spec's Contracts text that text names ("C3", "as C2"), in
+// the spec's order, each the lines from its "C<n>" up to the next one. A Contracts text that numbers
+// none has none.
+func CitedContracts(contracts, text string) []string {
+	starts := contractRE.FindAllStringSubmatchIndex(contracts, -1)
+	var out []string
+	for i, m := range starts {
+		end := len(contracts)
+		if i+1 < len(starts) {
+			end = starts[i+1][0]
+		}
+		id := contracts[m[2]:m[3]]
+		if regexp.MustCompile(`\bC` + id + `\b`).MatchString(text) {
+			out = append(out, strings.TrimSpace(contracts[m[0]:end]))
+		}
+	}
+	return out
 }
