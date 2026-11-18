@@ -265,8 +265,8 @@ func ParseBrief(obj []byte) (BriefAnswer, error) {
 
 // Bounds of the lookup answer: what the code settles of the requirements' questions.
 const (
-	MaxLookupAnswerBytes   = 600
-	MaxLookupEvidenceBytes = 300
+	MaxLookupAnswerBytes   = 300
+	MaxLookupEvidenceBytes = 150
 )
 
 // LookupItem is one question the code settles: its 1-based number in the questions asked, the

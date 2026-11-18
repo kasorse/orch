@@ -6686,8 +6686,9 @@ child's run studies it, as for any ticket.
   with `context.extra_deny`) works in the checkouts' directory and answers what the code settles (how
   existing code behaves, where data comes from, a choice the code makes moot), each with where it
   shows (`story.ParseLookup`: `{"answers": [{"question", "answer", "evidence"}]}`, a question named at
-  most once; an answer over 600 bytes or evidence over 300 is cut, not refused). An answered
-  question becomes an assumption, "<question> <answer> (found in <evidence>)"; the rest stays a
+  most once; the answer is a statement that reads without its question; an answer over 300 bytes or
+  evidence over 150 is cut, not refused). An answered question becomes an assumption, "<answer>
+  (found in <evidence>)"; the rest stays a
   question. A lookup that cannot run (a checkout fails) or fails leaves every question to people and
   is logged; it counts in `listener.story.max_cost_usd`. The assumptions reach specify and the
   children as requirements, each "Assumed: …".
